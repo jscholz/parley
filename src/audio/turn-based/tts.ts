@@ -108,9 +108,51 @@ function setState(next: TtsState): void {
  *    - speechSynthesis (local engine): `utterance` is the live
  *      SpeechSynthesisUtterance. `audio`/`abort` are absent. */
 let active:
-  | { kind: 'server'; audio: HTMLAudioElement; abort: AbortController }
+  | { kind: 'server'; audio: HTMLAudioElement; abort?: AbortController }
   | { kind: 'local'; utterance: SpeechSynthesisUtterance }
   | null = null;
+
+// When the Listen autoplay streams a reply (stream:true), JS never sees
+// the bytes (the <audio> element owns the request), so the in-memory
+// replyCache stays empty and a later per-bubble replay would re-synthesize.
+// This records the streamed reply's (text, voice, url) so that on 'ended'
+// we can OPPORTUNISTICALLY backfill the blob cache — see
+// backfillStreamToCache(). Cleared on cancel/supersede so a torn-down
+// stream doesn't backfill.
+let pendingStreamBackfill:
+  | { replyId: string | null; text: string; voice: string; url: string }
+  | null = null;
+
+/** Opportunistically populate the in-memory replyCache from a reply we
+ *  just STREAMED (stream:true autoplay), so a later per-bubble replay is
+ *  instant instead of re-synthesizing.
+ *
+ *  The streamed GET response is browser-HTTP-cacheable (Cache-Control on
+ *  GET /tts). We re-`fetch()` the SAME url with `cache: 'only-if-cached'`
+ *  — which returns the cached body WITHOUT touching the network, or fails
+ *  if it isn't cached. So this is strictly opportunistic: a cache hit
+ *  gives us a Blob to memoize for free; a miss (evicted, or the browser
+ *  stashed the media response somewhere a fetch can't reach) just no-ops
+ *  — we NEVER trigger a second Deepgram synthesis. `only-if-cached`
+ *  requires same-origin mode and isn't supported everywhere (Safari may
+ *  throw); the catch swallows that and replay falls back to its usual
+ *  lazy synth-on-tap. Fires on 'ended', when the full response is cached. */
+function backfillStreamToCache(endedReplyId: string | null): void {
+  const pending = pendingStreamBackfill;
+  pendingStreamBackfill = null;
+  if (!pending || pending.replyId !== endedReplyId) return;
+  void fetch(pending.url, { cache: 'only-if-cached', mode: 'same-origin' })
+    .then((r) => {
+      if (!r.ok) return;
+      return r.blob().then((b) => {
+        if (b && b.size > 0) {
+          replyCache.set(pending.text, pending.voice, b);
+          diag(`[reply-tts] backfilled cache from stream (${b.size}b)`);
+        }
+      });
+    })
+    .catch(() => { /* only-if-cached unsupported or miss — best-effort */ });
+}
 
 /** Player-element listeners are attached ONCE for the lifetime of the
  *  page. Each event re-emits as a typed event with the active replyId
@@ -174,6 +216,9 @@ function ensurePlayerListenersAttached(player: HTMLAudioElement): void {
     }
     emit('ended', { replyId: id });
     setState('idle');
+    // If this was a streamed autoplay, grab the now-cached audio into the
+    // blob cache so per-bubble replay is instant. No-op for the blob path.
+    backfillStreamToCache(id);
   });
   player.addEventListener('timeupdate', () => {
     if (!activeReplyId) return;
@@ -181,6 +226,29 @@ function ensurePlayerListenersAttached(player: HTMLAudioElement): void {
     const pos = player.currentTime;
     if (!Number.isFinite(dur) || dur <= 0) return;
     emit('progress', { replyId: activeReplyId, position: pos, duration: dur });
+  });
+  // Async load/decode failure on the streaming <audio src> — e.g. /tts
+  // 5xx, network drop mid-stream, or a decode error. play() may have
+  // already resolved (it resolves when playback STARTS), so this is the
+  // only signal for failures that surface after that. Reset state +
+  // emit 'stopped' so the UI doesn't wedge in 'loading' (same wedge the
+  // blob path's !res.ok branch guarded against). Ignore spurious errors
+  // when we have no active server session (e.g. src cleared on cancel).
+  player.addEventListener('error', () => {
+    if (!activeReplyId || active?.kind !== 'server' || active.audio !== player) return;
+    const err = player.error;
+    // Ignore (a) aborts we caused by clearing src on cancel
+    // (MEDIA_ERR_ABORTED), and (b) stale errors from a superseded load —
+    // assigning a new src resets player.error to null, so a late event
+    // from the prior source reads null here. Only real network/decode
+    // failures reset state + emit 'stopped'.
+    if (!err || err.code === MediaError.MEDIA_ERR_ABORTED) return;
+    diag(`[text-tts] <audio> error code=${err.code}`);
+    const id = activeReplyId;
+    active = null;
+    activeReplyId = null;
+    setState('idle');
+    emit('stopped', { replyId: id, reason: 'audio-error' });
   });
 }
 
@@ -287,7 +355,9 @@ export function cancelReplyTts(reason: string = 'cancel'): void {
   const id = activeReplyId;
   diag(`[reply-tts] cancel reason=${reason} prevReplyId=${id} prevState=${state} kind=${active.kind}`);
   if (active.kind === 'server') {
-    try { active.abort.abort(); } catch { /* noop */ }
+    // Streaming playback has no fetch to abort (the <audio> element owns
+    // the load); the blob-fallback path used to. Guard for both.
+    try { active.abort?.abort(); } catch { /* noop */ }
     try {
       active.audio.pause();
       if (active.audio.src) {
@@ -305,6 +375,9 @@ export function cancelReplyTts(reason: string = 'cancel'): void {
   }
   active = null;
   activeReplyId = null;
+  // A cancelled/superseded stream never reaches 'ended' — drop its
+  // pending backfill so it can't fire against a future reply.
+  pendingStreamBackfill = null;
   setState('idle');
   if (id) emit('stopped', { replyId: id, reason });
 }
@@ -312,17 +385,37 @@ export function cancelReplyTts(reason: string = 'cancel'): void {
 /** Synthesize + play `text` through the page's `#player` element.
  *  Best-effort: returns a resolved Promise on success or after a
  *  cancellation; rejects only on hard errors the caller may want to
- *  log. */
+ *  log.
+ *
+ *  Two server-engine playback strategies (opts.stream):
+ *    - stream=true  — point the <audio> element at the GET /tts URL so
+ *      the browser progressively plays the mp3 as it arrives (first
+ *      audio at TTFB ~0.3s). Used by the Listen turn-based autoplay,
+ *      where time-to-first-word is what matters. Does NOT populate the
+ *      in-memory blob cache (the GET response is browser-HTTP-cacheable
+ *      instead). Native progressive <audio> works on Android (Chromium
+ *      WebView) and iOS Safari alike — neither needs MSE for forward
+ *      playback.
+ *    - stream=false (default) — POST /tts, buffer the full mp3 blob, and
+ *      memoize it in the LRU replyCache. Used by on-demand per-bubble
+ *      replay, where the same (text, voice) is often replayed and the
+ *      blob cache makes repeats instant (and drives the bubble's
+ *      "cached" play-button cue). */
 export async function playReplyTts(
   rawText: string,
   voice: string,
   replyId?: string,
+  opts?: { stream?: boolean },
 ): Promise<void> {
   const engine = settings.get().ttsEngine || 'server';
   const text = cleanForTts(rawText || '');
-  diag(`[reply-tts] enter replyId=${replyId} rawLen=${(rawText || '').length} cleanLen=${text.length} voice=${voice} engine=${engine}`);
+  diag(`[reply-tts] enter replyId=${replyId} rawLen=${(rawText || '').length} cleanLen=${text.length} voice=${voice} engine=${engine} stream=${!!opts?.stream}`);
   if (!text) {
     diag('[reply-tts] skip (clean text empty)');
+    // Emit a terminal event even though nothing plays, so listeners that
+    // gate on reply playback (Listen's turn-based re-arm) don't wait out
+    // a timeout for a reply that produced no speakable audio.
+    if (replyId) emit('stopped', { replyId, reason: 'empty' });
     return;
   }
 
@@ -343,13 +436,39 @@ export async function playReplyTts(
   }
   ensurePlayerListenersAttached(player);
 
-  const abort = new AbortController();
-  active = { kind: 'server', audio: player, abort };
   activeReplyId = replyId || null;
   setState('loading');
-
   if (activeReplyId) emit('synth-start', { replyId: activeReplyId });
 
+  // ── Streaming path (Listen autoplay) ──────────────────────────────
+  if (opts?.stream) {
+    active = { kind: 'server', audio: player };
+    try {
+      const url = `/tts?text=${encodeURIComponent(text)}&model=${encodeURIComponent(voice)}`;
+      // Record for the on-'ended' opportunistic blob-cache backfill so a
+      // later per-bubble replay doesn't re-synthesize. See
+      // backfillStreamToCache().
+      pendingStreamBackfill = { replyId: activeReplyId, text, voice, url };
+      // Drop any prior peer-track binding so the URL src takes over.
+      player.srcObject = null;
+      player.src = url;
+      await player.play();
+      log(`[text-tts] streaming ${text.length} chars`);
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      diag(`[text-tts] stream failed: ${e?.message || e}`);
+      // Reset state so a retry works — leaving state='loading' + active
+      // set wedges replyPlayer.ts's loading-guard. The player 'error'
+      // listener handles async load failures (network drop mid-stream)
+      // that surface after play() resolves.
+      cancelReplyTts('play-error');
+    }
+    return;
+  }
+
+  // ── Blob path (per-bubble replay) ─────────────────────────────────
+  const abort = new AbortController();
+  active = { kind: 'server', audio: player, abort };
   let blobUrl: string | null = null;
   try {
     let blob = replyCache.get(text, voice);

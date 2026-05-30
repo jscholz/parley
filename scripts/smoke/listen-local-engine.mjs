@@ -46,8 +46,8 @@ export default async function run({ page, log, fail, url }) {
       body: JSON.stringify({ ok: true, transcript: 'should not appear' }),
     });
   });
-  await page.route('**/tts', async (route) => {
-    if (route.request().method() !== 'POST') return route.fallback();
+  await page.route('**/tts*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
     const wav = Buffer.from([
       0x52, 0x49, 0x46, 0x46, 0x24, 0, 0, 0, 0x57, 0x41, 0x56, 0x45,
       0x66, 0x6d, 0x74, 0x20, 0x10, 0, 0, 0, 0x01, 0, 0x01, 0,

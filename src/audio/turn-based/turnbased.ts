@@ -16,8 +16,12 @@
  *     the mic. On commit, caller's `onCommitText(text, reason)` fires.
  *
  * Reply renders + plays through the existing playReplyTts path
- * (caller-owned). After audio.ended + a small grace window, re-arms for
- * the next turn.
+ * (caller-owned). The loop is truly turn-based: after a turn commits the
+ * mic stays OFF (detectors stopped) while we wait for the agent's reply,
+ * then re-arms only once the reply has been spoken (or the caller signals
+ * the reply finalized with nothing to speak). A long safety timer
+ * (REPLY_WAIT_MS) re-arms anyway if no reply ever lands, so a dropped
+ * reply can't strand the session.
  *
  * Listen is wiring on top of existing primitives, NOT a new pipeline.
  * WebRTC (talk + stream) stays untouched — Listen lives alongside.
@@ -26,9 +30,13 @@
  *   idle       — start() not yet called or stop() returned.
  *   armed      — recording (server) or live-transcribing (local),
  *                watching for silence + sendword.
- *   committing — silence/sendword fired; awaiting onCommit/onCommitText.
+ *   committing — silence/sendword fired; turn shipped + submitted, now
+ *                holding the mic off while awaiting the agent's reply
+ *                (bounded by REPLY_WAIT_MS).
  *   playing    — caller invoked notifyReplyPlayback(true); waiting
  *                for notifyReplyPlayback(false) → grace → re-arm.
+ *   cooldown   — reply done (spoken, or notifyReplyFinalized); short
+ *                grace before re-arming for the next turn.
  *
  * Disarm: mic-button tap or menu-toggle off, both wired through stop().
  *
@@ -107,6 +115,16 @@ export type ListenOpts = {
 };
 
 const REARM_GRACE_MS = 500;
+// Max time a committed turn is held open waiting for the agent's reply
+// before giving up and re-arming, so a dropped/errored reply can't
+// strand the session with a dead-open mic. Real replies land well
+// inside this — the caller cancels the wait early via
+// notifyReplyPlayback (reply spoken) or notifyReplyFinalized (reply
+// done, nothing to speak). Replaces the old fixed 500ms post-commit
+// re-arm, which raced ahead of any real backend reply (the reply lands
+// seconds after submit, by which point the mic had already gone hot and
+// the autoplay gate no longer matched). See main.ts:handleReplyFinal.
+const REPLY_WAIT_MS = 120_000;
 const SILENCE_WARMUP_MS = 500;
 const SILENCE_FRAME_MS = 50;
 
@@ -122,6 +140,9 @@ let armedAt = 0;
 let silenceWindow: SilenceWindow | null = null;
 let mockFrames: { type: 'silence' | 'speech'; remainingMs: number } | null = null;
 let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+// Safety net for the post-commit reply wait (see REPLY_WAIT_MS). Held
+// in 'committing' until the caller signals the reply outcome.
+let replyWaitTimer: ReturnType<typeof setTimeout> | null = null;
 // Visual recorder bar (waveform + trash button). Mounted on start(),
 // destroyed on teardown. Analyser is attached only while state==='armed'
 // — frozen waveform during commit/playing/cooldown so the user never
@@ -178,6 +199,7 @@ export function notifyReplyPlayback(playing: boolean): void {
       // is actually playing now, the cooldown→armed timer fires the
       // ended-path handler below.
       if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null; }
+      if (replyWaitTimer) { clearTimeout(replyWaitTimer); replyWaitTimer = null; }
       transition('playing');
       // Pause the sendword detector during TTS — the user's mic would
       // otherwise pick up the agent's voice and trip a false match.
@@ -632,19 +654,44 @@ async function commitNow(reason: 'silence' | 'sendword'): Promise<void> {
       return;
     }
   }
-  // If the caller never moved us to 'playing' (e.g. the reply was
-  // empty so playReplyTts skipped), re-arm directly after a grace.
-  // Read via getState() so TS doesn't narrow on the literal we set above.
+  // The turn's audio has been shipped + submitted. Stay in 'committing'
+  // and WAIT for the agent's reply rather than re-arming on a fixed
+  // timer — truly turn-based: the mic stays off (detectors stopped
+  // above) until the agent has answered. The caller drives the next
+  // transition:
+  //   - notifyReplyPlayback(true) → reply is being spoken → 'playing'
+  //   - notifyReplyFinalized()    → reply done, not spoken → re-arm
+  // The safety timer below only fires if NEITHER ever arrives (a dropped
+  // or errored reply), so the session can't get stuck waiting forever.
+  // Read via getState() so TS doesn't narrow on the literal set above.
   if (getState() === 'committing') {
-    transition('cooldown');
-    if (cooldownTimer) clearTimeout(cooldownTimer);
-    cooldownTimer = setTimeout(() => {
-      cooldownTimer = null;
-      if (getState() === 'cooldown') {
+    if (replyWaitTimer) clearTimeout(replyWaitTimer);
+    replyWaitTimer = setTimeout(() => {
+      replyWaitTimer = null;
+      if (getState() === 'committing') {
+        log('listen: reply-wait expired — re-arming without a reply');
         armRecorder().catch(() => teardown());
       }
-    }, REARM_GRACE_MS);
+    }, REPLY_WAIT_MS);
   }
+}
+
+/** Caller signals the agent's reply finalized but produced no spoken
+ *  audio — Speak-replies is off, or the cleaned reply was empty. Cancels
+ *  the post-commit reply wait and re-arms after the standard grace so
+ *  the turn-based loop advances without waiting out the safety timeout.
+ *  No-op unless we're holding a committed turn open for the reply. */
+export function notifyReplyFinalized(): void {
+  if (state !== 'committing') return;
+  if (replyWaitTimer) { clearTimeout(replyWaitTimer); replyWaitTimer = null; }
+  transition('cooldown');
+  if (cooldownTimer) clearTimeout(cooldownTimer);
+  cooldownTimer = setTimeout(() => {
+    cooldownTimer = null;
+    if (getState() === 'cooldown') {
+      armRecorder().catch(() => teardown());
+    }
+  }, REARM_GRACE_MS);
 }
 
 async function stopRecorder(): Promise<Blob | null> {
@@ -685,6 +732,7 @@ export function stop(): void {
 function teardown(): void {
   stopSilenceLoop();
   if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null; }
+  if (replyWaitTimer) { clearTimeout(replyWaitTimer); replyWaitTimer = null; }
   try {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
   } catch { /* noop */ }

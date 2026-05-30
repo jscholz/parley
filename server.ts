@@ -178,6 +178,70 @@ async function serveStatic(req, res) {
   }
 }
 
+// Synthesize `text` via Deepgram Aura and STREAM the mp3 straight to the
+// client as chunks arrive. Both the GET and POST entry points funnel
+// here. `cacheable` controls Cache-Control: the GET path is a pure
+// function of (text, model) in the URL, so it's safe for the browser to
+// cache and replay without re-hitting Deepgram; POST stays no-cache.
+async function streamTts(res, text, model, cacheable) {
+  const dgUrl = `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3`;
+  try {
+    const dgRes = await fetch(dgUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${DEEPGRAM_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ text }),
+    });
+    if (!dgRes.ok) {
+      const err = await dgRes.text();
+      console.error(`Deepgram TTS error ${dgRes.status}: ${err.slice(0, 200)}`);
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'tts_failed', status: dgRes.status, message: err.slice(0, 300) }));
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'audio/mpeg',
+      // GET URLs are stable per (text, model) → let the browser cache the
+      // audio so per-bubble replay is instant and free. POST isn't
+      // cacheable; keep it no-cache.
+      'Cache-Control': cacheable ? 'public, max-age=86400, immutable' : 'no-cache',
+      'Transfer-Encoding': 'chunked',
+    });
+    // Stream the body through chunk-by-chunk so the client's <audio>
+    // element can start playing on the first frames (TTFB ~0.3s) instead
+    // of waiting for the whole file. This is the whole point of the GET
+    // path — do NOT buffer the full body here.
+    const reader = dgRes.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(Buffer.from(value));
+    }
+    res.end();
+  } catch (e) {
+    console.error('TTS proxy error:', e);
+    if (!res.headersSent) res.writeHead(500);
+    res.end('tts proxy error');
+  }
+}
+
+// GET /tts?text=…&model=… — streaming entry point used by the client's
+// <audio src> so playback starts on first frames. Same Deepgram synthesis
+// as POST, but the URL is the cache key.
+async function handleTtsGet(req, res) {
+  let text = '', model = DEFAULT_TTS_MODEL;
+  try {
+    const u = new URL(req.url, 'http://localhost');
+    text = (u.searchParams.get('text') || '').toString().trim();
+    model = (u.searchParams.get('model') || DEFAULT_TTS_MODEL).toString();
+  } catch { res.writeHead(400); res.end('bad url'); return; }
+  if (!text) { res.writeHead(400); res.end('text required'); return; }
+  if (text.length > 2000) { res.writeHead(400); res.end('text too long (>2000 chars)'); return; }
+  await streamTts(res, text, model, true);
+}
+
 async function handleTts(req, res) {
   let body = '';
   req.on('data', chunk => { body += chunk; if (body.length > 1e6) req.destroy(); });
@@ -188,42 +252,7 @@ async function handleTts(req, res) {
     const model = (payload.model || DEFAULT_TTS_MODEL).toString();
     if (!text) { res.writeHead(400); res.end('text required'); return; }
     if (text.length > 2000) { res.writeHead(400); res.end('text too long (>2000 chars)'); return; }
-
-    const dgUrl = `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(model)}&encoding=mp3`;
-    try {
-      const dgRes = await fetch(dgUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Token ${DEEPGRAM_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text }),
-      });
-      if (!dgRes.ok) {
-        const err = await dgRes.text();
-        console.error(`Deepgram TTS error ${dgRes.status}: ${err.slice(0, 200)}`);
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'tts_failed', status: dgRes.status, message: err.slice(0, 300) }));
-        return;
-      }
-      res.writeHead(200, {
-        'Content-Type': 'audio/mpeg',
-        'Cache-Control': 'no-cache',
-        'Transfer-Encoding': 'chunked',
-      });
-      // Stream the body through
-      const reader = dgRes.body.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(Buffer.from(value));
-      }
-      res.end();
-    } catch (e) {
-      console.error('TTS proxy error:', e);
-      if (!res.headersSent) res.writeHead(500);
-      res.end('tts proxy error');
-    }
+    await streamTts(res, text, model, false);
   });
   req.on('error', () => { if (!res.headersSent) res.writeHead(500); res.end('upstream error'); });
 }
@@ -1183,6 +1212,7 @@ const server = createHttpServer(async (req, res) => {
   }
   if (req.method === 'GET' && req.url === '/config') return handleConfig(req, res);
   if (req.method === 'GET' && req.url === '/api/keyterms') return handleKeytermsGet(req, res);
+  if (req.method === 'GET' && req.url.startsWith('/tts')) return handleTtsGet(req, res);
   if (req.method === 'POST' && req.url.startsWith('/tts')) return handleTts(req, res);
   if (req.method === 'POST' && req.url.startsWith('/gen-image')) return handleGenImage(req, res);
   if (req.method === 'POST' && (req.url === '/transcribe' || req.url.startsWith('/transcribe?'))) return handleTranscribe(req, res);

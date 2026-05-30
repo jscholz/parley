@@ -15,7 +15,7 @@
 // Asserts:
 //   1. /transcribe POSTed once.
 //   2. Reply bubble rendered with "hello world".
-//   3. /tts POSTed once.
+//   3. GET /tts requested once (streaming playback).
 //   4. After audio.ended, listen state is "armed" again (re-arm).
 
 export const NAME = 'listen-silence-commit';
@@ -41,8 +41,10 @@ export default async function run({ page, log, fail, url, mock }) {
     });
   });
 
-  await page.route('**/tts', async (route) => {
-    if (route.request().method() !== 'POST') return route.fallback();
+  // Reply TTS now streams via GET /tts?text=…&model=… (was POST). Match
+  // the query string with a trailing glob and key on GET.
+  await page.route('**/tts*', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
     ttsPosts.push({ ts: Date.now() });
     // Tiny WAV header + 0 samples — enough for HTMLAudio to "play" + fire ended.
     const wav = Buffer.from([
@@ -94,7 +96,7 @@ export default async function run({ page, log, fail, url, mock }) {
   while (ttsPosts.length === 0 && Date.now() - t1 < 5_000) {
     await page.waitForTimeout(50);
   }
-  if (ttsPosts.length === 0) fail('/tts never posted');
+  if (ttsPosts.length === 0) fail('/tts never requested');
   log('/tts fired');
 
   // Wait for re-arm after reply.
