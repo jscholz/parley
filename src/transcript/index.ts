@@ -16,26 +16,33 @@ import { getState, subscribe } from './store.ts';
 import { scheduleSnapshotPersist, runWithScrollSaveSuppressed, autoScroll } from '../chat.ts';
 
 let getTranscriptEl: () => HTMLElement | null = () => document.getElementById('transcript');
-let getViewedChatId: () => string | null = () => null;
+let getFocusedChatId: () => string | null = () => null;
 
 export interface BindOpts {
   transcriptEl: () => HTMLElement | null;
-  getViewedChatId: () => string | null;
+  getFocusedChatId: () => string | null;
 }
 
 /** Wire the store to the DOM. Returns an unsubscribe fn (mainly for
  *  tests; production never unbinds). */
 export function bindTranscriptPipeline(opts: BindOpts): () => void {
   getTranscriptEl = opts.transcriptEl;
-  getViewedChatId = opts.getViewedChatId;
+  getFocusedChatId = opts.getFocusedChatId;
   return subscribe((chatId) => {
-    // Match the legacy "viewed gate" semantics from main.ts:
-    // skip ONLY when viewed is set AND explicitly differs. A null
-    // viewed (boot before setViewed fires, fresh-PWA-first-send
-    // before any drawer click) renders the change — there's no
-    // other chat on screen to protect.
-    const viewed = getViewedChatId();
-    if (viewed && chatId !== viewed) return;
+    // Gate on the FOCUSED chat (optimistic ?? viewed) — the same pointer
+    // that drives the drawer highlight — so the transcript always agrees
+    // with the highlight. Skip ONLY when focus is set AND explicitly
+    // differs; a null focus (boot before any switch, fresh-PWA-first-send
+    // before any drawer click) renders the change — there's no other chat
+    // on screen to protect.
+    //
+    // #255: gating on the COMMITTED `viewed` pointer instead leaked the
+    // outgoing chat's live reply during a cold/slow switch — viewed lags
+    // for the whole load (it only commits when the incoming transcript
+    // renders) while the highlight already shows the target, so a busy
+    // chat's reply_delta painted into the on-screen transcript.
+    const focused = getFocusedChatId();
+    if (focused && chatId !== focused) return;
     rerenderInto(chatId);
   });
 }
@@ -73,7 +80,7 @@ export function showTranscriptLoading(): void {
  *  finishes (the store mutations may have run while a different chat
  *  was viewed, so the subscriber skipped them). */
 export function rerenderActive(): void {
-  const chatId = getViewedChatId();
+  const chatId = getFocusedChatId();
   if (!chatId) return;
   rerenderInto(chatId);
 }

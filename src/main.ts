@@ -1212,7 +1212,7 @@ async function boot() {
   // below (or events would land on a no-op subscriber).
   bindTranscriptPipeline({
     transcriptEl: () => document.getElementById('transcript'),
-    getViewedChatId: () => switchCtl.viewedId(),
+    getFocusedChatId: () => switchCtl.focusedId(),
   });
 
   // Session-resume rendering — drives the transcript on chat switch /
