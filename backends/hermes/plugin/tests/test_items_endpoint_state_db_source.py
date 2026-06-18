@@ -534,3 +534,20 @@ def test_after_reaching_tail_closes_boundary(db, state_db):
     assert contents[-1] == "m49"          # reached the tail
     assert result["has_more_newer"] is False
     assert result["last_id"] == msg_ids[49]
+
+
+def test_after_result_carries_has_more_key(db, state_db):
+    """Regression: the items route reads result["has_more"] unconditionally
+    for EVERY branch (older-direction scroll-up affordance). The load-newer
+    (after) result used to omit it → KeyError → 500 on every load-newer,
+    which the tail-refresh path turned into a full transcript/turn outage.
+    The key must be present (False here — older side is the around-window's
+    job, not this page's)."""
+    _add_session(state_db, "s1")
+    msg_ids = [_add_msg(state_db, "s1", "user", f"m{i}", ts=1000.0 + i)
+               for i in range(60)]
+    result = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=msg_ids[40], limit=20
+    )
+    assert "has_more" in result, "after-result must carry has_more (route reads it)"
+    assert result["has_more"] is False

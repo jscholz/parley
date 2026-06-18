@@ -681,7 +681,12 @@ def list_messages_after_for_chat_with_state_db_source(
     contiguous with what's already loaded; ``has_more_newer`` is True when
     more remain between this page and the tail.
 
-    Returns ``{items, first_id, last_id, has_more_newer}``.
+    Returns ``{items, first_id, has_more, last_id, has_more_newer}`` —
+    ``has_more`` (older-direction) is always False here: this is a
+    load-NEWER page, so the older side is governed by the around-window
+    response the caller already holds, not by this page. The key must
+    still be present because the items route reads it unconditionally
+    for every branch.
     """
     items = _build_chronological_items(
         sidekick_db, state_db_path, chat_id, source
@@ -695,6 +700,7 @@ def list_messages_after_for_chat_with_state_db_source(
     return {
         "items": items,
         "first_id": items[0]["id"] if items else None,
+        "has_more": False,
         "last_id": items[-1]["id"] if items else None,
         "has_more_newer": has_more_newer,
     }

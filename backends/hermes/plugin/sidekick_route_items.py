@@ -378,7 +378,11 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         )
     items = result["items"]
     first_id = result["first_id"]
-    has_more = result["has_more"]
+    # `has_more` (older-direction) is the only key whose presence varies
+    # across the four query branches — the load-newer (`after`) result
+    # omits it. Read defensively: a missing key must never 500 a
+    # transcript read for the whole app.
+    has_more = result.get("has_more", False)
     _trace("query-end", f"rows={len(items)} target_found={target_found}")
 
     inflight_entry = None
