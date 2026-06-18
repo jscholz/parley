@@ -263,6 +263,38 @@ describe('project: pending sends', () => {
       assert.equal(out[0].failed, true);
     }
   });
+
+  it('inflight reply timestamp never predates the pending user message that started the turn', () => {
+    // Regression: the new-user-message branch set currentTurnTs but did
+    // NOT advance inflightTs past it (unlike the already-durable branch).
+    // When the last durable message is from a PRIOR day, the synthetic
+    // anchor (lastTimestamp+1) stays on that prior day, so the streaming
+    // assistant bubble inherits a prior-day timestamp → the reconciler's
+    // day-boundary calc stamps a stale date on the in-flight bubble that
+    // vanishes once it lands durable with the real (today) timestamp.
+    const DAY = 86_400_000;
+    const TS_PREV = T0;            // last durable message: a prior day
+    const TS_NOW = T0 + 2 * DAY;   // pending send: today
+    const s = state({
+      durable: [u('umsg_old', 'old', TS_PREV), a('msg_old', 'old reply', TS_PREV + 1000)],
+      pendingSends: [{ messageId: 'umsg_new', text: 'today msg', sentAt: TS_NOW, source: 'text' }],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_new', text: 'today msg' },
+        { type: 'reply_delta', chat_id: 'c', message_id: 'msg_new', text: 'streaming reply' },
+      ],
+    });
+    const out = project(s);
+    const user = out.find(x => x.kind === 'user' && x.key === 'umsg_new');
+    const reply = out.find(x => x.kind === 'assistant' && x.key === 'msg_new');
+    assert.ok(user && reply && user.kind === 'user' && reply.kind === 'assistant');
+    assert.ok(
+      reply.timestamp >= user.timestamp,
+      `inflight reply ts (${reply.timestamp}) must not predate user ts (${user.timestamp})`,
+    );
+    const dayKey = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; };
+    assert.equal(dayKey(reply.timestamp), dayKey(user.timestamp),
+      'inflight reply must share the user message\'s calendar day (no stale date sub-line)');
+  });
 });
 
 describe('project: dedup keys', () => {

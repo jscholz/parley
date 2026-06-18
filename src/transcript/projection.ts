@@ -237,6 +237,7 @@ export function project(state: ChatState): BubbleSpec[] {
           const pend = pendingByKey.get(key);
           const ts = pend ? pend.sentAt : inflightTs++;
           currentTurnTs = ts;
+          inflightTs = Math.max(inflightTs, ts + 1);
           specs.push({
             kind: 'user',
             key,
