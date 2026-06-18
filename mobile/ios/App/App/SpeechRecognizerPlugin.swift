@@ -14,13 +14,23 @@ import AVFoundation
 /// (src/native/speechRecognizer.ts) feeds them into the detector's
 /// existing FED path.
 ///
-/// AVAudioSession ownership: AppDelegate configures the shared session
-/// (.playAndRecord/.default, active) and keeps a silent keepalive engine
-/// running for the whole app lifetime. This plugin DELIBERATELY never
-/// calls setCategory / setActive — doing so previously broke TTS playback
-/// (see AppDelegate.swift). It only installs an input tap on its own
-/// AVAudioEngine and reads the shared session's mic input. That makes it
-/// a third concurrent reader of the hardware input alongside the keepalive
+/// AVAudioSession ownership (post-#244): the app launches in `.playback`
+/// (output-only, A2DP-friendly) and the JS capture layer flips to
+/// `.playAndRecord` just-in-time via AudioSessionController/AudioSessionPlugin
+/// (see src/audio/shared/ios-specific.ts). Native send-word only runs inside
+/// a Listen turn, which has already flipped to `.playAndRecord` before this
+/// plugin's `start` fires — so in practice the input tap finds a record-capable
+/// session. `startInternal` still calls `AudioSessionController.shared.beginCapture()`
+/// defensively (idempotent) so the tap can never read an output-only session.
+/// `stopInternal` deliberately does NOT call `endCapture`: native SR is
+/// stopped/restarted MID-TURN (every time the agent's TTS plays — see
+/// stopNativeSendword in turnbased.ts) while the main getUserMedia capture
+/// stays open. Flipping back to `.playback` there would kill the live mic and
+/// drag Bluetooth to A2DP-only. The JS capture layer owns the `.playback`
+/// teardown for the whole Listen turn.
+///
+/// The plugin installs an input tap on its own AVAudioEngine, making it a
+/// third concurrent reader of the hardware input alongside the keepalive
 /// engine and WKWebView's getUserMedia capture; concurrent input taps
 /// across separate AVAudioEngines normally coexist under .playAndRecord,
 /// but this is the behavior to verify on-device.
@@ -83,6 +93,11 @@ public class SpeechRecognizerPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func startInternal() throws {
         if listening { return }
+        // #244: the app rests in `.playback`. Guarantee the shared session is
+        // record-capable before installing the input tap. Idempotent — a no-op
+        // when the Listen capture has already flipped to `.playAndRecord`. We do
+        // NOT pair this with endCapture on stop (see class header).
+        AudioSessionController.shared.beginCapture()
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.removeTap(onBus: 0)
