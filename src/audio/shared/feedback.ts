@@ -310,6 +310,18 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
 const players = new Map<ChimeName, HTMLAudioElement>();
 const renderPromises = new Map<ChimeName, Promise<HTMLAudioElement>>();
 
+/** Every chime that can fire OUTSIDE the originating user gesture and so
+ *  must be unlocked ahead of time on iOS (see primeFeedback). Kept as the
+ *  full catalogue rather than a hand-picked subset — they're tiny, and a
+ *  future async-fired cue then can't silently regress. */
+const PRIME_CHIMES: ChimeName[] = [
+  'send', 'receive', 'error', 'start',
+  'commit', 'connect', 'listening', 'barge',
+  'call-dropped',
+];
+
+let primed = false;
+
 async function renderPlayer(name: ChimeName): Promise<HTMLAudioElement> {
   const dur = chimeDuration(name);
   const Ctx = (window as any).OfflineAudioContext || (window as any).webkitOfflineAudioContext;
@@ -398,6 +410,75 @@ export function playFeedback(name: ChimeName): void {
       });
     }
   })();
+}
+
+/**
+ * Eagerly render every chime's WAV blob + HTMLAudioElement so that
+ * primeFeedback() can play them SYNCHRONOUSLY inside a user gesture.
+ * Offline rendering needs no gesture, so this is safe to call at app
+ * boot — and it doubles as a warm cache so the first real chime never
+ * pays the render cost. Idempotent (getPlayer dedups in-flight renders).
+ */
+export function warmFeedback(): void {
+  for (const name of PRIME_CHIMES) getPlayer(name).catch(() => { /* warm best-effort */ });
+}
+
+/**
+ * iOS chime unlock. Call SYNCHRONOUSLY inside the user gesture that opens
+ * a call / starts dictate (the same gesture that calls primeAudio).
+ *
+ * Why: iOS gates HTMLAudioElement.play() per-element behind user
+ * activation — unlock() (audio-unlock.ts) only unlocks the shared TTS
+ * `player`, never the separately-created chime elements. The call-start
+ * 'listening' cue fires async from the bridge's {type:'listening'}
+ * envelope, which arrives AFTER WebRTC negotiation — often past the ~5s
+ * transient-activation window — so the chime element's first-ever play()
+ * happens outside any gesture and iOS blocks it. (Dictate's 'listening'
+ * fires fast enough to land inside the window, which is why toggling
+ * dictate first "fixes" the call chime — it unlocks the shared element.)
+ *
+ * Playing each cached element muted inside the gesture marks it
+ * user-activated up front, so the later async fire plays normally.
+ * Requires warmFeedback() to have rendered the elements first; any not
+ * yet cached are kicked to render and retried on the next gesture.
+ * Idempotent once the full set is unlocked.
+ */
+export function primeFeedback(): void {
+  if (primed) return;
+  try {
+    const w = (typeof window !== 'undefined') ? window : null;
+    const log = w && (w as any).__TEST_FEEDBACK_LOG__;
+    if (Array.isArray(log)) log.push({ type: 'prime', t: Date.now() });
+  } catch { /* best-effort */ }
+
+  let allReady = true;
+  for (const name of PRIME_CHIMES) {
+    const el = players.get(name);
+    if (!el) { getPlayer(name).catch(() => { /* retried next gesture */ }); allReady = false; continue; }
+    try {
+      el.muted = true;
+      try { el.currentTime = 0; } catch { /* may still be loading */ }
+      const p = el.play();
+      if (p && typeof p.catch === 'function') p.catch(() => { /* unlock only */ });
+      setTimeout(() => {
+        try { el.pause(); el.currentTime = 0; el.muted = false; } catch { /* ignore */ }
+      }, 60);
+    } catch {
+      allReady = false;
+    }
+  }
+  if (allReady) primed = true;
+}
+
+/** Test hooks — inject fake players + reset prime state deterministically
+ *  without OfflineAudioContext/Audio (unavailable under node:test). */
+export function __setPlayerForTests(name: ChimeName, el: HTMLAudioElement): void {
+  players.set(name, el);
+}
+export function __resetFeedbackForTests(): void {
+  players.clear();
+  renderPromises.clear();
+  primed = false;
 }
 
 /**

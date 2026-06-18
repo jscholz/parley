@@ -76,7 +76,7 @@ import { setMicPeakListener } from './audio/shared/micMeter.ts';
 import { attachCard } from './cards/attach.ts';
 import { registerCard } from './cards/registry.ts';
 import * as ambient from './ambient.ts';
-import { playFeedback } from './audio/shared/feedback.ts';
+import { playFeedback, warmFeedback, primeFeedback } from './audio/shared/feedback.ts';
 import * as memo from './audio/shared/memo.ts';
 import * as turnbased from './audio/turn-based/turnbased.ts';
 import * as handsfree from './audio/shared/handsfree.ts';
@@ -1550,7 +1550,20 @@ async function boot() {
   // exports toggleCall / openCall / closeIfOpen for the dispatcher
   // to invoke.
   webrtcControls.init({
-    getSessionId: () => switchCtl.viewedId() || backend.getCurrentSessionId?.() || null,
+    getSessionId: () => {
+      // #2/#3 diag: when this resolves null on a cold-boot-straight-to-call,
+      // the offer ships conv_name=null → bridge mints its own id → reply
+      // lands as a notification, not the transcript. Log which component
+      // is missing so the device log shows whether viewedId() simply hadn't
+      // committed yet. Correlate with [rtc-diag] + [reply-diag].
+      const vid = switchCtl.viewedId();
+      const cur = backend.getCurrentSessionId?.() || null;
+      const resolved = vid || cur || null;
+      diag('[rtc-diag] getSessionId resolved=', resolved ?? '∅',
+        'viewedId=', vid ?? '∅', 'getCurrentSessionId=', cur ?? '∅',
+        'focusedId=', switchCtl.focusedId() ?? '∅');
+      return resolved;
+    },
     onStatus: (msg, kind) => status.setStatus(msg, kind ?? null),
     // Wake-lock follows call lifecycle — connected/closing/failed/idle
     // transitions all need re-evaluation. evaluateWakeLock is idempotent.
@@ -2522,6 +2535,10 @@ async function boot() {
   // webrtcDictate is the live-streaming + cursor-aware injection module.
   // init() binds the textarea + wires its user-input/cursor listeners.
   webrtcDictate.init(composerInput);
+  // Pre-render chime WAVs at boot so primeFeedback() can unlock each
+  // HTMLAudioElement synchronously inside the first call/dictate gesture
+  // (offline render needs no gesture). See feedback.ts primeFeedback.
+  warmFeedback();
   let dictateActive = false;
   webrtcDictate.setStateListener((opening, error) => {
     dictateActive = opening;
@@ -2677,6 +2694,7 @@ async function boot() {
       return;
     }
     primeAudio(player);
+    primeFeedback();
     audioSession.prepareForCapture();
     try {
       // Engine selector — server (default) routes the WebRTC bridge;
@@ -2716,6 +2734,10 @@ async function boot() {
     // arrives but playFeedback('listening') silently no-ops on iOS.
     // Symmetric with startMemo/startDictate which already prime.
     primeAudio(player);
+    // Unlock the chime elements in-gesture too — the call-start
+    // 'listening' cue fires async from the bridge envelope, after the
+    // user-activation window may have closed (see feedback.ts).
+    primeFeedback();
     // Stop any text-mode TTS playback before the WebRTC peer track
     // takes over the speaker — otherwise the two compete on the
     // same audio output.

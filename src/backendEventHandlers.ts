@@ -297,6 +297,13 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
 
   const viewed = switchCtl.focusedId();
   if (viewed && conversation && conversation !== viewed) {
+    // #2/#3 diag: a reply diverting to a notification means its
+    // `conversation` id didn't match the on-screen chat. If this fires for
+    // a chat the user is actively looking at (e.g. right after a cold call),
+    // the bridge tagged the reply with an id ≠ focusedId — correlate with
+    // [rtc-diag] (was conv_name null at offer time?).
+    diag('[reply-diag] reply diverted to notification — conversation=', conversation,
+      'focusedId=', viewed, 'messageId=', messageId ?? '∅', 'isReplay=', isReplay);
     // Skip activity + badge for "⏳ Still working…" heartbeats so a long
     // autonomous turn doesn't spam the Activity tray with N agent_reply
     // rows per turn — AND, critically, doesn't trigger pruneSuperseded-

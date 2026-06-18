@@ -931,6 +931,13 @@ export async function open(
     keyterms,
   };
   if (opts?.chatId) offerPayload.chat_id = opts.chatId;
+  // #2/#3 diag: a null conv_name here means the bridge mints its own
+  // session id → the reply comes back tagged with an id that won't match
+  // the on-screen chat → handleReplyFinal diverts it to a notification
+  // instead of the transcript. Correlate with [reply-diag] below.
+  diag('[rtc-diag] offer conv_name=', offerPayload.conv_name ?? '∅',
+    'chat_id=', offerPayload.chat_id ?? '∅',
+    'sessionId=', opts?.sessionId ?? '∅', 'mode=', mode);
 
   let answer: { peer_id: string; sdp: string; type: string } | null = null;
   try {
