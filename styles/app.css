@@ -20,6 +20,7 @@
     --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', sans-serif;
     --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
     --content-size: 15px;          /* main readable text; slider-adjustable */
+    --transcript-gutter: 12%;      /* per-side empty margin of the chat column; slider-adjustable */
     color-scheme: dark;
   }
   :root[data-theme="light"] {
@@ -3943,9 +3944,19 @@
   .main { flex: 1; display: flex; overflow: hidden; min-height: 0; position: relative; }
   .chat-column {
     flex: 1; display: flex; flex-direction: column; min-width: 0;
-    /* Center the column contents within a readable max-width. */
-    width: 100%; max-width: 760px; margin: 0 auto;
+    /* Center the column within the main area; the per-side gutter is a
+       user-adjustable percentage (Settings → Display → Transcript width).
+       max-width caps the grown flex item; margin auto centers the slack. */
+    width: 100%; max-width: calc(100% - 2 * var(--transcript-gutter)); margin: 0 auto;
     position: relative;  /* anchor for the jump-to-bottom button */
+  }
+  /* Phone: never apply the desktop gutter percentage — the column already
+   * fills a narrow viewport, so a percent gutter would just waste edge
+   * space (edge padding comes from .transcript padding). This override
+   * MUST live after the base .chat-column rule above: media queries add no
+   * specificity, so on equal specificity the later source rule wins. */
+  @media (max-width: 699px) {
+    .chat-column { max-width: none; }
   }
 
   /* Jump-to-bottom button — appears when the user scrolls up during

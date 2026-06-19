@@ -265,6 +265,7 @@ const DEFAULTS = {
   // bargeIn=true. See sensitivityToVadThreshold() / vadThresholdToSensitivity().
   bargeVadThreshold: 0.5,
   contentSize: 15,
+  transcriptGutter: 12,  // per-side empty margin of the chat column, in %; lower = wider transcript
   audioFeedbackVolume: 0.85,  // 2026-05-09: 0.5 → 0.85 for bike/walk audibility (BT-headset wind noise was burying chimes)
   theme: 'dark',
   // Mic-button mode: gesture-driven (tap = live dictation to composer
@@ -342,6 +343,9 @@ const PER_DEVICE_KEYS = new Set<string>([
   // Text size is per-device: desktop needs ~18px, phone needs ~14-16px —
   // sharing one value either bloats desktop or shrinks phone illegible.
   'contentSize',
+  // Transcript gutter is per-device: it only applies on wide (desktop)
+  // viewports — phones override it to zero — so it's form-factor-bound.
+  'transcriptGutter',
 ]);
 
 /** The synced settings — every DEFAULTS key that isn't per-device. These
@@ -672,6 +676,7 @@ export function set(key: string, value: any) {
 /** Apply visual settings that need immediate DOM effects. */
 export function applyVisuals() {
   document.documentElement.style.setProperty('--content-size', current.contentSize + 'px');
+  document.documentElement.style.setProperty('--transcript-gutter', current.transcriptGutter + '%');
 }
 
 /**
@@ -720,6 +725,8 @@ export function hydrate(handlers: {
   const setAudioFeedbackVal = $any('set-audio-feedback-val');
   const setFontSize = $inp('set-fontsize');
   const setFontSizeVal = $any('set-fontsize-val');
+  const setGutter = $inp('set-gutter');
+  const setGutterVal = $any('set-gutter-val');
   const setTheme = $sel('set-theme');
   const setAgentActivity = $sel('set-agent-activity');
   const setPush = $inp('set-push');
@@ -790,6 +797,8 @@ export function hydrate(handlers: {
     if (setBargeSensVal) setBargeSensVal.textContent = `${vadThresholdToSensitivity((current as any).bargeVadThreshold)}%`;
     if (setFontSize) setFontSize.value = String(current.contentSize);
     if (setFontSizeVal) setFontSizeVal.textContent = `${current.contentSize}px`;
+    if (setGutter) setGutter.value = String(current.transcriptGutter);
+    if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
     if (setTheme) setTheme.value = current.theme;
     if (setAgentActivity) setAgentActivity.value = current.agentActivity;
     if (setHotkeyCall) setHotkeyCall.value = (current as any).hotkeyToggleCall;
@@ -1220,6 +1229,11 @@ export function hydrate(handlers: {
   if (setFontSize) setFontSize.oninput = () => {
     set('contentSize', parseInt(setFontSize.value, 10));
     if (setFontSizeVal) setFontSizeVal.textContent = `${current.contentSize}px`;
+    applyVisuals();
+  };
+  if (setGutter) setGutter.oninput = () => {
+    set('transcriptGutter', parseInt(setGutter.value, 10));
+    if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
     applyVisuals();
   };
   // Hotkey inputs — click-to-capture. Focus the field, press a key
