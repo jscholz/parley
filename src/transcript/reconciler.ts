@@ -104,10 +104,6 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
   // the conversation grew). Anchoring to the spec subsequence instead
   // leaves markers pinned to their place in the timeline.
   let cursor: ChildNode | null = transcriptEl.firstChild;
-  // Tracks the calendar day of the last *dated* message we positioned, so
-  // the next message can decide whether to surface its date sub-line (see
-  // the day-boundary block below). null until the first dated message.
-  let lastDayKey: string | null = null;
   for (let i = 0; i < specs.length; i++) {
     const spec = specs[i];
     visited.add(spec.key);
@@ -121,26 +117,16 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
       updateForSpec(el, spec);
     }
 
-    // Date stamping: show the date sub-line on the timestamp ONLY when this
-    // message starts a new calendar day relative to the previous *dated*
-    // message in spec order (a "sticky day header" — cleaner than a
-    // date on every row, which crowds the meta column). The first message
-    // in the list always shows its date so the transcript is never
-    // ambiguous about when the visible run began. Gaps / system markers
-    // carry no timestamp, so they don't reset the day cursor. Computed
-    // here in the reconcile walk because per-kind create/update paths
-    // can't see their neighbours.
+    // Date stamping: show the short date sub-line under the time on EVERY
+    // bubble. chat.addLine's create path stamps `.line-ts` with a plain
+    // HH:MM string; updateTimestamp rebuilds it into the time/date sub-span
+    // stack. The reconcile loop only runs updateForSpec on EXISTING
+    // elements, so re-stamp freshly created bubbles here to guarantee the
+    // date sub-line exists before we make it visible.
     const ts = bubbleTimestamp(spec);
     if (ts != null) {
-      // chat.addLine's create path stamps `.line-ts` with a plain HH:MM
-      // string; updateTimestamp rebuilds it into the time/date sub-span
-      // stack. The reconcile loop only runs updateForSpec on EXISTING
-      // elements, so re-stamp freshly created bubbles here to guarantee
-      // the date sub-line exists before we toggle its visibility.
       updateTimestamp(el, ts);
-      const showDate = lastDayKey === null || dayKey(ts) !== lastDayKey;
-      setTimestampDateVisible(el, showDate);
-      lastDayKey = dayKey(ts);
+      setTimestampDateVisible(el, true);
     }
 
     // Advance the cursor past any marker rows so a message is placed
@@ -471,13 +457,6 @@ function bubbleTimestamp(spec: BubbleSpec): number | null {
   }
 }
 
-/** Local-day identity key (`YYYY-M-D`) for a wall-clock ms timestamp.
- *  Used to detect a day boundary between adjacent messages. */
-function dayKey(timestamp: number): string {
-  const d = new Date(timestamp);
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
 /** Short, human date for the sub-line (e.g. "Mon, Jun 15"). Year is
  *  appended only when the message isn't from the current year, so the
  *  common case stays compact. */
@@ -525,9 +504,9 @@ function updateTimestamp(el: HTMLElement, timestamp: number): void {
   if (tsEl.title !== title) tsEl.title = title;
 }
 
-/** Toggle whether the date sub-line shows for this bubble. Driven by the
- *  reconcile walk's day-boundary detection so the date appears only on the
- *  first message of each calendar day (sticky day-header pattern). */
+/** Toggle whether the date sub-line shows for this bubble. The reconcile
+ *  walk turns it on for every dated row so each bubble carries its short
+ *  date under the time. */
 function setTimestampDateVisible(el: HTMLElement, visible: boolean): void {
   const tsEl = el.querySelector('.line-ts') as HTMLElement | null;
   if (!tsEl) return;

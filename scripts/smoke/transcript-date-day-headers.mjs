@@ -1,13 +1,11 @@
-// Transcript timestamp date sub-line (sticky day-header).
+// Transcript timestamp date sub-line (date on every bubble).
 //
-// Each message's timestamp shows HH:MM; the DATE sub-line below it appears
-// ONLY on the first message of a new calendar day (a "sticky day-header"),
-// computed in src/transcript/reconciler.ts's reconcile walk via the
-// day-boundary check + setTimestampDateVisible. This smoke seeds a chat
-// whose messages straddle THREE calendar days and asserts:
-//   - every message still shows a time (.line-ts-time)
-//   - exactly the day-boundary messages carry .line-ts.has-date
-//   - the date sub-line text is non-empty on those rows
+// Each message's timestamp shows HH:MM with the short DATE sub-line below
+// it on EVERY bubble — set by src/transcript/reconciler.ts's reconcile walk
+// via setTimestampDateVisible(el, true). This smoke seeds a chat whose
+// messages straddle THREE calendar days and asserts:
+//   - every message shows a time (.line-ts-time)
+//   - every message carries .line-ts.has-date with a non-empty date
 // Also drops a screenshot for manual layout review (date should sit below
 // the time without crowding the action buttons / message text).
 
@@ -15,7 +13,7 @@ import { waitForReady, openSidebar, clickRow, assert, dumpLines } from './lib.mj
 
 export const NAME = 'transcript-date-day-headers';
 export const DESCRIPTION =
-  'timestamp date sub-line appears only on the first message of each calendar day';
+  'short date sub-line shows under the time on every bubble';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -90,23 +88,16 @@ export default async function run({ page, log }) {
     assert(/^\d{2}:\d{2}$/.test(p.timeText), `expected HH:MM time, got ${JSON.stringify(p.timeText)} on ${JSON.stringify(p.text)}`);
   }
 
-  // 6 messages across 3 days → exactly 3 day-boundary rows carry .has-date,
-  // and each visible date sub-line is non-empty.
-  const dated = probe.filter((p) => p.hasDateClass);
+  // Date on EVERY bubble: all 6 dated rows carry .has-date with a visible,
+  // non-empty date sub-line.
   assert(
-    dated.length === 3,
-    `expected exactly 3 day-header rows, got ${dated.length}. ` +
-    `Day-boundary detection in reconcile() is off. rows=${JSON.stringify(probe, null, 2)}`,
+    probe.length === 6,
+    `expected 6 dated rows, got ${probe.length}. rows=${JSON.stringify(probe, null, 2)}`,
   );
-  for (const p of dated) {
-    assert(p.dateVisible, `day-header row should render its date (display!=none): ${JSON.stringify(p)}`);
-    assert(p.dateText.length > 0, `day-header date text empty: ${JSON.stringify(p)}`);
-  }
-  // The non-boundary rows must NOT show a date.
-  const undated = probe.filter((p) => !p.hasDateClass);
-  assert(undated.length === 3, `expected 3 non-header rows, got ${undated.length}`);
-  for (const p of undated) {
-    assert(!p.dateVisible, `non-header row should hide its date: ${JSON.stringify(p)}`);
+  for (const p of probe) {
+    assert(p.hasDateClass, `every bubble should carry .has-date: ${JSON.stringify(p)}`);
+    assert(p.dateVisible, `every bubble should render its date (display!=none): ${JSON.stringify(p)}`);
+    assert(p.dateText.length > 0, `date text empty: ${JSON.stringify(p)}`);
   }
 
   // Geometry guard: the date sub-line must not overflow its bubble's
@@ -156,5 +147,5 @@ export default async function run({ page, log }) {
     log(`screenshot skipped: ${e.message}`);
   }
 
-  log('OK: 3 day-header rows show date below time; other rows show time only');
+  log('OK: every bubble shows its short date below the time');
 }

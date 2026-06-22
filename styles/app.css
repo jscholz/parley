@@ -2900,11 +2900,10 @@
     line-height: 1.25; text-align: right;
     pointer-events: none;  /* hover-through to the bubble; it's a label */
   }
-  /* Date sub-line — only present in DOM-flow when the message starts a new
-     calendar day (.has-date toggled by the reconciler's day-boundary
-     pass). Hidden otherwise so most rows show just the time and the meta
-     column stays uncrowded. Smaller + dimmer than the time so it reads as
-     a secondary "day header" rather than competing with the clock. */
+  /* Date sub-line — shown on every bubble (.has-date toggled true by the
+     reconciler for each dated row). Smaller + dimmer than the time so it
+     reads as a secondary date label rather than competing with the clock.
+     The default-hidden rule covers any row not yet stamped. */
   .line .line-ts .line-ts-date { display: none; }
   .line .line-ts.has-date .line-ts-date {
     display: block;
@@ -2916,9 +2915,9 @@
   }
   /* Short bubbles (a one-line user message, an agent row at top:28px) can be
      shorter than the stacked time+date timestamp, so the date would spill
-     below the bubble. Reserve a little extra bottom room on any bubble whose
-     timestamp is showing a date so the two-line stamp always sits INSIDE the
-     bubble — no overlap with the message text or the action buttons. */
+     below the bubble. Reserve a little extra bottom room on every bubble
+     showing the date (now all of them) so the two-line stamp always sits
+     INSIDE the bubble — no overlap with the message text or action buttons. */
   .line.s0:has(.line-ts.has-date),
   .line.agent:has(.line-ts.has-date) { padding-bottom: 26px; }
   .line.interim { opacity: 0.45; font-style: italic; }
