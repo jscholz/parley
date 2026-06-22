@@ -124,9 +124,17 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(1500);
 
   const deltaReqs = aMessagesReqs.filter(u => u.includes('after='));
+  // Cursor is the cached tail id. That tail is 1005 when the switch
+  // wins the race against TFC-B's background tail-refresh sweep, or
+  // 1007 when the sweep has already merged the 2 new rows into cache
+  // first (it now writes a non-partial cache for a complete small
+  // chat, so delta resume legitimately pages from the newer tail).
+  // Both are correct delta fetches — the invariant #191 guards is the
+  // ABSENCE of a bare full-page fetch (asserted next), not the exact
+  // cursor value.
   assert(
-    deltaReqs.some(u => u.includes('after=1005')),
-    `switch-back should fetch ?after=1005 (cached tail id). ` +
+    deltaReqs.some(u => /after=100[57]\b/.test(u)),
+    `switch-back should fetch ?after=<cached tail id> (1005 or 1007). ` +
     `Requests: ${JSON.stringify(aMessagesReqs)}`,
   );
   // A bare request (no query) is the full-page fetch the delta path
@@ -137,7 +145,7 @@ export default async function run({ page, log, mock }) {
     `switch-back must NOT re-download the full newest page. ` +
     `Full-page requests: ${JSON.stringify(fullPageReqs)}`,
   );
-  log(`delta fetch used ?after=1005, no full-page fetch ✓`);
+  log(`delta fetch used ?after=<tail> (${JSON.stringify(deltaReqs)}), no full-page fetch ✓`);
 
   const after = await transcriptText(page);
   assert(

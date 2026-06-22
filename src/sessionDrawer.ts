@@ -656,12 +656,15 @@ async function fetchAndMergeNewestPage(
   const overlaps = page.some((row: any) => row?.id != null && cachedIds.has(String(row.id)));
   const cacheFuller = !!existing && existing.messages.length > page.length && overlaps;
   const merged = cacheFuller ? sessionCache.mergeNewestPage(existing!.messages, page) : page;
-  // `partial: true` — this is a tiny prefetch window, not a full
-  // newest page. Delta resume (#191) must not use it as a tail
-  // cursor or a 12-row cache would render as the whole transcript.
+  // This is a tiny prefetch window, not a full newest page. Mark it
+  // partial ONLY when older rows exist beyond the window (hasMore) —
+  // otherwise the window reached the transcript start and IS the
+  // complete history, safe for delta resume (#191) to use as a tail
+  // cursor. Marking a complete small chat partial needlessly forces a
+  // full-page refetch on switch-back.
   const pagination = cacheFuller
     ? existing!.pagination
-    : { firstId: r.firstId ?? null, hasMore: !!r.hasMore, partial: true };
+    : { firstId: r.firstId ?? null, hasMore: !!r.hasMore, partial: !!r.hasMore };
   const capped = sessionCache.capTranscript(merged, pagination);
   await sessionCache.putMessagesCache(id, capped.messages, capped.pagination);
 }
