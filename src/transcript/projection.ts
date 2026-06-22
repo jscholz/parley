@@ -399,6 +399,24 @@ export function project(state: ChatState): BubbleSpec[] {
     });
   }
 
+  // ── 3.5. Drop blank assistant bubbles. A turn whose agent output was
+  // purely tool calls still closes with a `reply_final` — and that final
+  // carries empty (or whitespace-only) text. Without this sweep the
+  // projection emits a blank `.line.agent` bubble for it (the "sloppy"
+  // empty tool-only bubble: the turn's real content is the activity row,
+  // the assistant bubble adds nothing). This is NOT an interleaving bug —
+  // it's the natural shape of an all-tools-no-prose turn; the terminal
+  // reply_final just has no text to show. Suppress any FINALIZED assistant
+  // spec with no visible text. A still-streaming spec is kept: it's the
+  // thinking-dots placeholder for a reply that's mid-flight. Durable
+  // whitespace-only assistant rows are caught here too.
+  for (let i = specs.length - 1; i >= 0; i--) {
+    const s = specs[i];
+    if (s.kind === 'assistant' && !s.streaming && (s.text == null || s.text.trim() === '')) {
+      specs.splice(i, 1);
+    }
+  }
+
   // ── 4. Stable sort: timestamp asc, then kind tiebreak.
   // Tiebreak: user (0) < activityRow (1) < assistant (2) < notification (3)
   // — so within a single ms, the turn renders user prompt → tool row →
