@@ -323,6 +323,57 @@ def test_drops_compaction_seed_block(db, state_db):
     assert contents == ["real prompt", "real reply", "next real prompt"]
 
 
+def test_bounded_tail_skips_old_compaction_seed(db, state_db):
+    """Bounded tail read of a compacted child session whose seed block is
+    far older than the fetched window. The head-end aggregate runs (the
+    window holds compaction-child rows) but must not mis-elide live
+    continuation rows whose ids are above the marker, and the old seed
+    block stays dropped."""
+    parent_prompt = "x" * 250
+    _add_session(state_db, "parent_s", system_prompt=parent_prompt)
+    _add_session(state_db, "child_s", chat_id=None,
+                 system_prompt=parent_prompt[:200] + "...",
+                 parent_session_id="parent_s")
+    _add_msg(state_db, "child_s", "user", "seed prompt", ts=1500.0)
+    _add_msg(state_db, "child_s", "user",
+             "[CONTEXT COMPACTION — REFERENCE ONLY]", ts=1500.0)
+    for i in range(80):
+        _add_msg(state_db, "child_s", "user", f"real-{i}", ts=2000.0 + i)
+
+    result = state.list_messages_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", limit=10
+    )
+    contents = [i["content"] for i in result["items"]]
+    assert contents == [f"real-{n}" for n in range(70, 80)]
+    assert "seed prompt" not in contents
+    assert "[CONTEXT COMPACTION — REFERENCE ONLY]" not in contents
+    assert result["has_more"] is True
+
+
+def test_bounded_before_elides_seed_across_boundary(db, state_db):
+    """Paging backward (before_id) into the compaction boundary still
+    drops the seed block via the head-end aggregate — the oldest
+    surviving row is the first real continuation, never the seed/marker."""
+    parent_prompt = "x" * 250
+    _add_session(state_db, "parent_s", system_prompt=parent_prompt)
+    _add_session(state_db, "child_s", chat_id=None,
+                 system_prompt=parent_prompt[:200] + "...",
+                 parent_session_id="parent_s")
+    _add_msg(state_db, "child_s", "user", "seed prompt", ts=1500.0)
+    _add_msg(state_db, "child_s", "user",
+             "[CONTEXT COMPACTION — REFERENCE ONLY]", ts=1500.0)
+    cont = [_add_msg(state_db, "child_s", "user", f"real-{i}", ts=2000.0 + i)
+            for i in range(10)]
+
+    result = state.list_messages_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", limit=20, before_id=cont[5]
+    )
+    contents = [i["content"] for i in result["items"]]
+    assert contents == [f"real-{n}" for n in range(5)]
+    assert "seed prompt" not in contents
+    assert result["has_more"] is False
+
+
 # ── 404-ish empty case ──────────────────────────────────────────────
 
 

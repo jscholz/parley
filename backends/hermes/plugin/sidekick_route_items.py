@@ -36,6 +36,54 @@ except ImportError:  # pragma: no cover
 from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
 
 
+# Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
+# recursive-CTE pass over state.db plus an O(N) sidekick.db scan; before
+# this it ran on EVERY /items enter, and on long sessions that O(history)
+# work (GIL-bound) saturated a core and starved the event loop (30-90s
+# read/reply latency). Reads themselves come from state.db directly, so
+# reconcile only maintains msg_links linkage + orphan drops — those
+# tolerate a few seconds of staleness. We skip reconcile when it ran for
+# this chat within the window. Kept in the route (not the function) so the
+# unit tests that call reconcile_from_state_db directly are unaffected.
+_RECONCILE_THROTTLE_S = float(os.environ.get("SIDEKICK_RECONCILE_THROTTLE_S", "20") or 20)
+_last_reconcile_at: Dict[str, float] = {}
+# Background reconcile is fire-and-forget: the /items read is correct from
+# state.db alone (reconcile only maintains sidekick.db msg_links linkage +
+# orphan drops, which tolerate a few seconds of staleness). Running its
+# O(history) recursive-CTE pass INLINE on the read path cost ~8s per cold
+# chat and — under a resume burst that touches many distinct chats — those
+# 8s passes piled up and dragged even trivial reads to 10-45s. So we spawn
+# it detached and let the read return immediately. This set is the
+# single-flight guard so a chat never has two background passes at once;
+# the detached-task references are held so they aren't GC'd mid-flight.
+_reconcile_inflight: set = set()
+_reconcile_tasks: set = set()
+
+
+def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
+    """Fire reconcile_from_state_db off the read path (see notes above).
+    No-ops if a pass for this chat is already running."""
+    if chat_id in _reconcile_inflight:
+        return
+    from . import sidekick_state as _sstate
+
+    async def _run() -> None:
+        try:
+            await asyncio.to_thread(
+                _sstate.reconcile_from_state_db,
+                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+            )
+        except Exception:
+            pass
+        finally:
+            _reconcile_inflight.discard(chat_id)
+
+    _reconcile_inflight.add(chat_id)
+    task = asyncio.ensure_future(_run())
+    _reconcile_tasks.add(task)
+    task.add_done_callback(_reconcile_tasks.discard)
+
+
 def _resolve_source_for_chat_id(adapter, chat_id: str) -> Optional[str]:
     """Pick a ``sessions.source`` for this chat_id.
 
@@ -319,16 +367,20 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
 
     from . import sidekick_state as _sstate
 
-    # Opportunistic reconciliation: pull any state.db rows missing
-    # from sidekick.db. No-op when state.db has no rows for this
-    # chat. Cheap on second + subsequent reads (linked_ids set
-    # covers everything).
-    inserted = await asyncio.to_thread(
-        _sstate.reconcile_from_state_db,
-        adapter._sidekick_db, adapter._state_db_path, chat_id, source,
-    )
-    if inserted:
-        _trace("reconcile", f"inserted={inserted}")
+    # Opportunistic reconciliation: pull any state.db rows missing from
+    # sidekick.db. The read below is correct from state.db ALONE, so this
+    # runs DETACHED (fire-and-forget) and never blocks the response — see
+    # _spawn_background_reconcile. Throttled per-chat (see
+    # _RECONCILE_THROTTLE_S) so a busy poll/multi-device read pattern
+    # doesn't re-spawn the full-history pass on every enter.
+    _now = _time.monotonic()
+    _prev = _last_reconcile_at.get(chat_id)
+    if _prev is not None and (_now - _prev) < _RECONCILE_THROTTLE_S:
+        _trace("reconcile-skip", f"age={_now - _prev:.1f}s")
+    else:
+        _last_reconcile_at[chat_id] = _now
+        _spawn_background_reconcile(adapter, chat_id, source)
+        _trace("reconcile-bg", "spawned")
 
     # B2 / v2 read path: state.db is the canonical body store;
     # sidekick.db.msg_links surfaces sidekick_id + kind as annotations.

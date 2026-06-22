@@ -25,6 +25,13 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 DEFAULT_ACTIVITY_MAX_ITEMS = 200
 
+# Steady-state /items reads fetch only a bounded window of state.db rows
+# (page size + this margin + 1) instead of the whole transcript, so reads
+# are O(page) not O(history). The margin absorbs compaction-seed rows that
+# are elided after the fetch, so a page still fills to `limit` survivors
+# even when it straddles a compaction boundary.
+ITEMS_FETCH_ELISION_MARGIN = 64
+
 
 def activity_retention_limit() -> int:
     try:
@@ -563,8 +570,15 @@ def list_messages_for_chat_with_state_db_source(
     on its 404 logic. (The legacy v1 returned an empty list in the
     same shape, so callers tolerate this.)
     """
+    # Bounded fetch: pull only the newest `limit` (+ elision margin) state
+    # rows at/below the cursor instead of the whole transcript. The Python
+    # filter + slice below still runs over the merged set so envelope-only
+    # rows (millis-keyed ids, never SQL-filtered) keep their existing
+    # pagination semantics.
     items = _build_chronological_items(
-        sidekick_db, state_db_path, chat_id, source
+        sidekick_db, state_db_path, chat_id, source,
+        direction="older", cursor_id=before_id,
+        fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
     )
 
     # Pagination semantics:
@@ -689,7 +703,9 @@ def list_messages_after_for_chat_with_state_db_source(
     for every branch.
     """
     items = _build_chronological_items(
-        sidekick_db, state_db_path, chat_id, source
+        sidekick_db, state_db_path, chat_id, source,
+        direction="newer", cursor_id=after_id,
+        fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
     )
     items = [it for it in items if it["id"] > after_id]
     if len(items) > limit:
@@ -711,11 +727,28 @@ def _build_chronological_items(
     state_db_path,
     chat_id: str,
     source: str,
+    *,
+    direction: Optional[str] = None,
+    cursor_id: Optional[int] = None,
+    fetch_limit: Optional[int] = None,
 ) -> list:
-    """Build the FULL chronological item list for a chat from state.db
-    (canonical bodies) merged with sidekick.db.msg_links (sidekick_id +
-    kind annotations + envelope-only rows). Shared by the paginated read
-    and the around-target read so both see the exact same transcript.
+    """Build a chronological item list for a chat from state.db (canonical
+    bodies) merged with sidekick.db.msg_links (sidekick_id + kind
+    annotations + envelope-only rows).
+
+    When ``fetch_limit`` is None (the around-target reader) the WHOLE
+    transcript is returned, sorted ascending — callers slice it in Python.
+
+    When ``fetch_limit`` is set, only a BOUNDED window of state.db rows is
+    fetched so steady-state reads are O(page) not O(history):
+      * ``direction='older'`` — the newest ``fetch_limit`` rows whose id is
+        ``< cursor_id`` (or the live tail when ``cursor_id`` is None),
+        fetched descending. Used by the tail / before-cursor read.
+      * ``direction='newer'`` — the oldest ``fetch_limit`` rows whose id is
+        ``> cursor_id``, fetched ascending. Used by the after-cursor read.
+    The envelope-only union (small, link-lag-bounded set) and the merged
+    re-sort are unchanged, so the bounded window interleaves with live-edge
+    envelope rows exactly as the full build did.
 
     Returns ``[]`` when state.db is unreachable (callers fall back to
     their 404 logic). Does NOT paginate — that's the caller's job."""
@@ -730,7 +763,7 @@ def _build_chronological_items(
     # (user_id=NULL but parent's system_prompt matches) under the
     # requested chat_id. Without this, compacted-out turns are
     # invisible.
-    sql = """
+    cte = """
         WITH RECURSIVE session_root(id, root_system_prompt, is_compaction_child) AS (
             SELECT id, system_prompt, 0 FROM sessions
              WHERE user_id = ? AND source = ?
@@ -743,24 +776,63 @@ def _build_chronological_items(
                AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
                    = SUBSTR(sr.root_system_prompt, 1, 200)
         )
-        SELECT m.id, m.session_id, sr.is_compaction_child, m.role, m.content, m.tool_name,
-               m.tool_call_id, m.tool_calls, m.timestamp
-        FROM messages m
-        JOIN session_root sr ON m.session_id = sr.id
     """
-    # No before-cursor filtering here: the helper returns the WHOLE
-    # transcript; the paginated + around callers slice it in Python so
-    # they share one identical chronological view.
+    select_cols = (
+        "SELECT m.id, m.session_id, sr.is_compaction_child, m.role, "
+        "m.content, m.tool_name, m.tool_call_id, m.tool_calls, m.timestamp "
+        "FROM messages m JOIN session_root sr ON m.session_id = sr.id"
+    )
     params: list = [chat_id, source]
-    sql += " ORDER BY m.timestamp ASC, m.id ASC"
+    if fetch_limit is None:
+        # Full transcript (around-target reader). Callers slice in Python
+        # so they share one identical chronological view.
+        sql = cte + select_cols + " ORDER BY m.timestamp ASC, m.id ASC"
+    elif direction == "newer":
+        sql = cte + select_cols
+        if cursor_id is not None:
+            sql += " WHERE m.id > ?"
+            params.append(cursor_id)
+        sql += " ORDER BY m.timestamp ASC, m.id ASC LIMIT ?"
+        params.append(fetch_limit)
+    else:  # 'older' (tail / before-cursor)
+        sql = cte + select_cols
+        if cursor_id is not None:
+            sql += " WHERE m.id < ?"
+            params.append(cursor_id)
+        # Newest-first so LIMIT keeps the rows nearest the cursor; the
+        # final merged re-sort restores ascending order.
+        sql += " ORDER BY m.timestamp DESC, m.id DESC LIMIT ?"
+        params.append(fetch_limit)
 
     uri = f"file:{state_db_path}?mode=ro"
+    compaction_head_end_per_session: Dict[str, int] = {}
     try:
         with contextlib.closing(
             sqlite3.connect(uri, uri=True, timeout=2.0)
         ) as conn:
             conn.row_factory = sqlite3.Row
             rows = list(conn.execute(sql, params).fetchall())
+            # Per-session compaction head-end. In the FULL fetch every
+            # marker row is present, so derive the map from `rows` below.
+            # In a BOUNDED fetch the marker can sit OUTSIDE the window, so
+            # when the window holds any compaction-child rows run a cheap
+            # aggregate (runs entirely in C / GIL-released, returns one
+            # row per child session) to recover each session's max marker
+            # id. Guarded by child-row presence so non-compacted tail
+            # reads skip the scan entirely.
+            if fetch_limit is not None and any(r["is_compaction_child"] for r in rows):
+                agg = conn.execute(
+                    cte
+                    + "SELECT m.session_id AS sid, MAX(m.id) AS head_end "
+                    "FROM messages m JOIN session_root sr ON m.session_id = sr.id "
+                    "WHERE sr.is_compaction_child = 1 "
+                    "AND m.content LIKE '[CONTEXT COMPACTION%' "
+                    "GROUP BY m.session_id",
+                    [chat_id, source],
+                ).fetchall()
+                for a in agg:
+                    if a["head_end"] is not None:
+                        compaction_head_end_per_session[a["sid"]] = a["head_end"]
     except Exception:
         return []
 
@@ -768,12 +840,12 @@ def _build_chronological_items(
     # ``_items_by_user_id`` in sidekick_route_items.py for the full
     # explanation of the [CONTEXT COMPACTION] marker + per-session
     # head-block elision).
-    compaction_head_end_per_session: Dict[str, int] = {}
-    for r in rows:
-        if r["is_compaction_child"] and (r["content"] or "").startswith("[CONTEXT COMPACTION"):
-            cur = compaction_head_end_per_session.get(r["session_id"], 0)
-            if r["id"] > cur:
-                compaction_head_end_per_session[r["session_id"]] = r["id"]
+    if fetch_limit is None:
+        for r in rows:
+            if r["is_compaction_child"] and (r["content"] or "").startswith("[CONTEXT COMPACTION"):
+                cur = compaction_head_end_per_session.get(r["session_id"], 0)
+                if r["id"] > cur:
+                    compaction_head_end_per_session[r["session_id"]] = r["id"]
     surviving = [
         r for r in rows
         if not (r["content"] or "").startswith("[CONTEXT COMPACTION")
