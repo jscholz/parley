@@ -399,6 +399,11 @@ class SidekickAdapter(BasePlatformAdapter):
         # spawned in connect() and cancelled in disconnect().
         self._session_state_cache: Dict[str, Tuple[str, str]] = {}
         self._session_poll_task: Optional[asyncio.Task] = None
+        # Perf-investigation tasks. Both gated behind SIDEKICK_PERF_TRACE
+        # at the function level — when the env is off these tasks return
+        # immediately, so the cost of always-instantiating them is nil.
+        self._perf_loop_lag_task: Optional[asyncio.Task] = None
+        self._perf_db_stats_task: Optional[asyncio.Task] = None
         # state.db path resolution. Hermes' own config picks this up from
         # HERMES_STATE_DB or the default ~/.hermes/state.db; we mirror that
         # so the adapter doesn't need a separate env var.
@@ -493,7 +498,16 @@ class SidekickAdapter(BasePlatformAdapter):
         # which needs ~100 MB headroom — so the app-wide limit is sized
         # for the upload route (the JSON path stays well under it because
         # the PWA routes anything over ~5 MB through the upload endpoint).
-        self._app = web.Application(client_max_size=110 * 1024 * 1024)
+        # Perf-investigation arrival-time middleware. No-op unless
+        # SIDEKICK_PERF_TRACE engages downstream handlers that read the
+        # `t_perf_arrived` request attribute. Adding it unconditionally
+        # keeps the import + composition path simple; the cost is a
+        # single ``request['key'] = monotonic()`` per request.
+        from . import sidekick_perf_trace as _perf  # noqa: WPS433
+        self._app = web.Application(
+            client_max_size=110 * 1024 * 1024,
+            middlewares=[_perf.perf_arrival_middleware],
+        )
         # ── Sidekick supplemental store + plugin-owned push/unread/pins ──
         # See backends/hermes/plugin/sidekick_db.py + sidekick_routes.py.
         # When SIDEKICK_PUSH_OWNED_BY_PLUGIN=true, the proxy forwards
@@ -672,6 +686,20 @@ class SidekickAdapter(BasePlatformAdapter):
         # (CREATE INDEX IF NOT EXISTS), best-effort.
         await asyncio.to_thread(self._ensure_state_db_indexes)
 
+        # Perf-investigation watchers (no-op unless SIDEKICK_PERF_TRACE=1).
+        # Loop-lag samples event-loop responsiveness; db-stats logs
+        # sidekick.db size + key row counts at start + hourly.
+        from . import sidekick_perf_trace as _perf
+        _perf.log_db_stats(self._sidekick_db, label="startup")
+        self._perf_loop_lag_task = asyncio.create_task(
+            _perf.loop_lag_watcher(),
+            name="sidekick-perf-loop-lag",
+        )
+        self._perf_db_stats_task = asyncio.create_task(
+            _perf.db_stats_periodic_loop(self._sidekick_db),
+            name="sidekick-perf-db-stats",
+        )
+
         # Spawn the state.db poller for session_changed emission. Logs
         # once at startup so an operator can confirm it's wired.
         if self._state_db_path is not None:
@@ -709,6 +737,16 @@ class SidekickAdapter(BasePlatformAdapter):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._session_poll_task
             self._session_poll_task = None
+
+        # Tear down perf watchers symmetrically — they're regular asyncio
+        # tasks that need explicit cancellation on a clean shutdown.
+        for attr in ("_perf_loop_lag_task", "_perf_db_stats_task"):
+            t = getattr(self, attr, None)
+            if t is not None:
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await t
+                setattr(self, attr, None)
 
         if self._site is not None:
             with contextlib.suppress(Exception):

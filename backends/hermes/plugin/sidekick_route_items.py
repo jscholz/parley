@@ -307,9 +307,21 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     """
     _trace_id = secrets.token_hex(3)
     _t0 = _time.monotonic()
+    # Gap between aiohttp accepting the request and the handler actually
+    # entering. Set by the perf_arrival_middleware; if absent (middleware
+    # disabled / different code path) we fall back to "0ms" and lose
+    # visibility into asyncio dispatch lag, which is the whole reason
+    # this trace exists. See sidekick_perf_trace.perf_arrival_middleware.
+    _t_arrived = request.get("t_perf_arrived")
+    _dispatch_gap_ms = int((_t0 - _t_arrived) * 1000) if _t_arrived is not None else None
     def _trace(event: str, extra: str = "") -> None:
         ms = int((_time.monotonic() - _t0) * 1000)
         print(f"[items-trace {_trace_id}] +{ms}ms {event}{' ' + extra if extra else ''}", flush=True, file=_sys.stderr)
+    if _dispatch_gap_ms is not None and _dispatch_gap_ms >= 5:
+        # Only log when the gap is non-trivial — 5ms threshold filters
+        # the steady-state noise but catches anything that looks like
+        # event-loop starvation.
+        _trace("dispatch-gap", f"queue_ms={_dispatch_gap_ms}")
     _trace("enter")
     if not adapter._check_http_auth(request):
         return web.Response(status=401, text="invalid token")

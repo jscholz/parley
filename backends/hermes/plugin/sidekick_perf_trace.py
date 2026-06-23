@@ -1,0 +1,229 @@
+"""Perf-investigation instrumentation for the sidekick plugin.
+
+All helpers in this module are gated behind ``SIDEKICK_PERF_TRACE`` so
+the production cost is zero by default; flip the env to ``1`` to engage
+the watchers. Logs go to the standard plugin logger so they show up in
+journalctl --user-unit hermes-gateway under the `sidekick.perf_trace`
+namespace.
+
+Created 2026-06-23 to chase the "gateway gets slower the longer it
+runs" smell that survived 30f5664's reconcile-off-read-path fix. The
+instrumentation answers three questions:
+
+1. **Is the asyncio event loop starved?** ``loop_lag_watcher`` samples
+   ``loop.time()`` drift every 100ms and logs WARN when actual-vs-
+   scheduled exceeds 50ms. Cheap when healthy; loud only when the loop
+   can't dispatch on its scheduled cadence.
+
+2. **Where does the request time go on the gateway side?** The
+   ``perf_arrival_middleware`` stamps ``request['t_arrived']`` so the
+   route handler can log the gap between TCP-accept and handler-entry.
+   That gap is the asyncio dispatch latency the items-trace `+0ms enter`
+   can't see (its t0 is set INSIDE the handler).
+
+3. **Is ``reconcile_from_state_db`` cheap on no-drift chats?** The
+   ``trace_reconcile_run`` context manager logs per-call wall time, sql
+   op counts, and time spent waiting for the sidekick.db lock vs holding
+   it. A no-op reconcile should be ms-scale; a heavy one is the smoking
+   gun.
+
+Off-switch: unset ``SIDEKICK_PERF_TRACE`` or set it to anything truthy-
+negative. The module functions still exist but become near-no-ops.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import time
+from contextlib import contextmanager
+from typing import Any, Callable, Optional
+
+try:
+    from aiohttp import web  # type: ignore[assignment]
+except ImportError:  # pragma: no cover
+    web = None  # type: ignore[assignment]
+
+
+logger = logging.getLogger("sidekick.perf_trace")
+
+
+def _is_enabled() -> bool:
+    """Module-level toggle. Read each call rather than cache so toggling
+    via systemctl set-environment + reload works without a code change.
+    Cost of the env read is negligible compared to anything we'd log."""
+    return os.environ.get("SIDEKICK_PERF_TRACE", "").lower() in ("1", "true", "yes")
+
+
+# ── 1. Event-loop lag watcher ────────────────────────────────────────
+
+async def loop_lag_watcher(
+    *,
+    interval_s: float = 0.1,
+    warn_threshold_ms: float = 50.0,
+    err_threshold_ms: float = 250.0,
+) -> None:
+    """Sample event-loop responsiveness. The task wakes itself every
+    ``interval_s``; if the wakeup actually happens >warn_threshold_ms
+    after scheduled, the loop was busy doing something else.
+
+    Low cost when the loop is healthy (one sleep + one comparison per
+    interval, ~10/s). Logs only when the lag exceeds threshold so a
+    healthy loop is silent.
+
+    Cancellation: standard asyncio cancellation. The caller is expected
+    to stash the Task and cancel it on shutdown.
+    """
+    if not _is_enabled():
+        return
+    logger.info("[perf-trace] loop_lag_watcher armed: interval=%.0fms warn>%.0fms err>%.0fms",
+                interval_s * 1000, warn_threshold_ms, err_threshold_ms)
+    loop = asyncio.get_running_loop()
+    last_warn_at = 0.0
+    while True:
+        t_scheduled = loop.time()
+        await asyncio.sleep(interval_s)
+        t_actual = loop.time()
+        lag_ms = (t_actual - t_scheduled - interval_s) * 1000.0
+        if lag_ms < warn_threshold_ms:
+            continue
+        # Rate-limit warns so a sustained stall doesn't drown the log.
+        # One line per second is enough to characterize the pattern.
+        now = loop.time()
+        if now - last_warn_at < 1.0:
+            continue
+        last_warn_at = now
+        if lag_ms >= err_threshold_ms:
+            logger.error("[perf-trace] LOOP LAG %.0fms (>=%.0fms)", lag_ms, err_threshold_ms)
+        else:
+            logger.warning("[perf-trace] loop lag %.0fms (>=%.0fms)", lag_ms, warn_threshold_ms)
+
+
+# ── 2. aiohttp arrival-stamp middleware ──────────────────────────────
+
+# aiohttp's ``web.middleware`` decorator only exists in the runtime
+# install. Unit tests stub aiohttp out (``web = None``); guard the
+# decoration so importing this module under pytest doesn't blow up at
+# module-load time.
+if web is not None and hasattr(web, "middleware"):
+    _middleware_decorator = web.middleware
+else:
+    def _middleware_decorator(fn):  # pragma: no cover — test-only fallback
+        return fn
+
+
+@_middleware_decorator
+async def perf_arrival_middleware(request, handler):
+    """Stamp ``request['t_perf_arrived']`` with the monotonic clock at
+    handler-entry. The handler can subtract its own ``time.monotonic()``
+    at the top of its body to measure the dispatch-queue gap — but in
+    practice for our debugging the gap is observable directly by
+    diffing this timestamp against the request's arrival in the access
+    log / journalctl.
+    """
+    request["t_perf_arrived"] = time.monotonic()
+    return await handler(request)
+
+
+# ── 3. Reconcile timing wrapper ──────────────────────────────────────
+
+# Module-level counters so a one-off reconcile run can be characterized
+# without threading objects through. Reset on each context-enter.
+_reconcile_ctx: dict = {}
+
+
+@contextmanager
+def trace_reconcile_run(chat_id: str, source: str):
+    """Wrap a reconcile_from_state_db invocation. Logs total wall time,
+    number of sidekick.db SELECT/UPDATE/INSERT/DELETE calls observed,
+    and (best-effort) the wall time spent inside those calls.
+
+    Use as:
+        with trace_reconcile_run(chat_id, source) as t:
+            ... reconcile body ...
+            t.add_op('SELECT', dt_ms)
+            ...
+
+    When SIDEKICK_PERF_TRACE is off, this is a no-op context that yields
+    a dummy recorder.
+    """
+    class _Recorder:
+        __slots__ = ("op_counts", "op_total_ms", "started_at")
+        def __init__(self) -> None:
+            self.op_counts: dict = {}
+            self.op_total_ms: float = 0.0
+            self.started_at: float = time.monotonic()
+        def add_op(self, kind: str, dt_ms: float) -> None:
+            self.op_counts[kind] = self.op_counts.get(kind, 0) + 1
+            self.op_total_ms += dt_ms
+
+    if not _is_enabled():
+        # Yield a no-op recorder. Callers still call .add_op but nothing
+        # is logged at exit.
+        class _Noop:
+            def add_op(self, *_a, **_kw) -> None: pass
+        yield _Noop()
+        return
+
+    rec = _Recorder()
+    try:
+        yield rec
+    finally:
+        wall_ms = (time.monotonic() - rec.started_at) * 1000.0
+        ops_str = " ".join(f"{k}={v}" for k, v in sorted(rec.op_counts.items()))
+        logger.info(
+            "[perf-trace] reconcile chat=%s source=%s wall=%.1fms ops_in_sql=%.1fms "
+            "(%s)",
+            chat_id[:24], source, wall_ms, rec.op_total_ms, ops_str or "no-ops",
+        )
+
+
+# ── 4. sidekick.db growth snapshot ───────────────────────────────────
+
+def log_db_stats(sidekick_db, label: str = "snapshot") -> None:
+    """One-shot snapshot of sidekick.db size + key table row counts.
+    Cheap (one COUNT per table, ms-scale) but still gated so it doesn't
+    fire on every gateway start when nobody's investigating.
+    """
+    if not _is_enabled():
+        return
+    try:
+        # sidekick.db path lives on the SidekickDB instance as ._path.
+        # Fall back gracefully if the attribute name differs.
+        db_path = getattr(sidekick_db, "_path", None) or getattr(sidekick_db, "path", None)
+        size_bytes = None
+        if db_path is not None:
+            try:
+                size_bytes = os.path.getsize(str(db_path))
+            except OSError:
+                pass
+        counts: dict = {}
+        for table in ("msg_links", "activity_items", "pins", "push_subscriptions",
+                      "push_mutes", "user_settings"):
+            try:
+                row = sidekick_db.fetchone(f"SELECT COUNT(*) AS n FROM {table}")
+                counts[table] = int(row["n"]) if row else None
+            except Exception:
+                pass  # Table may not exist on older installs.
+        size_mb = f"{size_bytes / 1_048_576:.1f}MB" if size_bytes is not None else "?"
+        counts_str = " ".join(f"{k}={v}" for k, v in counts.items())
+        logger.info("[perf-trace] db-stats %s size=%s %s", label, size_mb, counts_str)
+    except Exception as e:  # pragma: no cover
+        logger.warning("[perf-trace] db-stats failed: %s", e)
+
+
+async def db_stats_periodic_loop(
+    sidekick_db,
+    *,
+    interval_s: float = 3600.0,
+) -> None:
+    """Periodic background snapshot of sidekick.db. Hourly by default
+    so the size/row-count growth over a long uptime is visible in the
+    journal without manual prodding.
+    """
+    if not _is_enabled():
+        return
+    while True:
+        log_db_stats(sidekick_db, label=f"hourly t+{int(time.time())}")
+        await asyncio.sleep(interval_s)

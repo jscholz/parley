@@ -999,6 +999,8 @@ def reconcile_from_state_db(
     """
     import contextlib
     import sqlite3
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    _t_recon_start = time.monotonic()
     if state_db_path is None:
         return 0
     # Reachability gate: only proceed with pass 3 (orphan drops) when
@@ -1219,6 +1221,19 @@ def reconcile_from_state_db(
         _logging.getLogger(__name__).warning(
             "[sidekick] heal chat=%s links=%d inserted=%d dropped=%d tc_healed=%d",
             chat_id, links, inserted, dropped, healed_tc,
+        )
+    # Perf-investigation breadcrumb. Logs at INFO when reconcile takes
+    # longer than 50ms; helps distinguish no-op reconciles (should be
+    # ms-scale on chats with no drift) from heavy ones, and lets us
+    # quantify how much cumulative time the route's fire-and-forget
+    # background reconciles burn over a long gateway uptime.
+    _recon_wall_ms = (time.monotonic() - _t_recon_start) * 1000.0
+    if _perf._is_enabled() and _recon_wall_ms >= 50.0:
+        _perf.logger.info(
+            "[perf-trace] reconcile chat=%s source=%s wall=%.0fms "
+            "state_rows=%d links=%d inserted=%d dropped=%d tc_healed=%d",
+            chat_id[:24], source, _recon_wall_ms,
+            len(state_rows), links, inserted, dropped, healed_tc,
         )
     return links + inserted + dropped + healed_tc
 
