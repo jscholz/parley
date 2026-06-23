@@ -1036,17 +1036,23 @@ def reconcile_from_state_db(
                 (chat_id,),
             )
             max_linked = (max_linked_row and max_linked_row["m"]) or 0
-            # 2) Any unlinked envelope rows pending a state.db link?
-            unlinked_row = db.fetchone(
-                "SELECT 1 FROM msg_links WHERE chat_id = ? "
-                "AND agent_row_id IS NULL LIMIT 1",
-                (chat_id,),
-            )
-            has_unlinked = bool(unlinked_row)
-            # 3) state.db rows newer than the watermark? Guard on
+            # 2) state.db rows newer than the watermark? Guard on
             # max_linked>0 so a chat-with-no-linked-rows-yet falls through
             # to the full reconcile (to migrate / link initial rows).
-            if max_linked > 0 and not has_unlinked:
+            #
+            # Note: we deliberately DON'T gate on `has_unlinked` (the
+            # presence of envelope rows with NULL agent_row_id). Many
+            # production chats carry persistently-unlinked legacy
+            # envelopes that the linker has tried and failed to match
+            # across many prior reconciles — gating on has_unlinked
+            # means the fast-path NEVER engages for those chats, even
+            # when state.db has no new work to do. The semantic is
+            # safe: if state.db hasn't gained rows since our watermark,
+            # the linker has no new candidates regardless of how many
+            # unlinked envelopes exist. The next state.db growth event
+            # (state_has_newer=True) trips the full pass and the
+            # linker gets its chance.
+            if max_linked > 0:
                 uri = f"file:{state_db_path}?mode=ro"
                 state_has_newer = True  # conservative default on error
                 watermark_orphaned = True  # conservative default on error
