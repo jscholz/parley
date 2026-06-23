@@ -114,6 +114,30 @@ async def loop_lag_watcher(
         last_warn_at = now
         if lag_ms >= err_threshold_ms:
             logger.error("[perf-trace] LOOP LAG %.0fms (>=%.0fms)", lag_ms, err_threshold_ms)
+            # When the lag is severe, dump a snapshot of running tasks so
+            # we can attribute the stall. asyncio.all_tasks() is cheap;
+            # the loop is by definition unstuck at this point (the
+            # watcher just woke). Limit to first N tasks so a runaway
+            # leak doesn't drown the log.
+            try:
+                tasks = list(asyncio.all_tasks(loop=loop))
+                tasks_by_state = {"pending": 0, "running": 0}
+                interesting: list = []
+                for t in tasks:
+                    # asyncio.Task has _state ('PENDING', 'FINISHED', 'CANCELLED')
+                    # and current_task() gives the running one. _state PENDING
+                    # covers both pending-on-IO and running.
+                    name = t.get_name() or "anon"
+                    coro = t.get_coro()
+                    coro_name = getattr(coro, "__qualname__", str(coro))[:80]
+                    if t.done():
+                        continue
+                    interesting.append(f"{name}:{coro_name}")
+                interesting.sort()
+                logger.error("[perf-trace] LOOP LAG tasks total=%d: %s",
+                             len(interesting), " | ".join(interesting[:20]))
+            except Exception as e:
+                logger.error("[perf-trace] LOOP LAG task-snapshot failed: %s", e)
         else:
             logger.warning("[perf-trace] loop lag %.0fms (>=%.0fms)", lag_ms, warn_threshold_ms)
 

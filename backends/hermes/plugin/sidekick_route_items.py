@@ -314,9 +314,22 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # this trace exists. See sidekick_perf_trace.perf_arrival_middleware.
     _t_arrived = request.get("t_perf_arrived")
     _dispatch_gap_ms = int((_t0 - _t_arrived) * 1000) if _t_arrived is not None else None
-    def _trace(event: str, extra: str = "") -> None:
-        ms = int((_time.monotonic() - _t0) * 1000)
-        print(f"[items-trace {_trace_id}] +{ms}ms {event}{' ' + extra if extra else ''}", flush=True, file=_sys.stderr)
+    # Items-trace prints to stderr (and through journald). Each print
+    # with flush=True is a blocking syscall on the loop thread — under
+    # a burst of parallel /items requests (drawer prefetch fan-out) the
+    # cumulative back-pressure from journald is a primary suspect for
+    # event-loop stalls. Gated behind SIDEKICK_ITEMS_TRACE so we can
+    # toggle without a code change; default OFF to keep the loop clear.
+    # When investigating, set SIDEKICK_ITEMS_TRACE=1 in the systemd
+    # drop-in to re-enable the legacy verbose breadcrumbs.
+    _items_trace_on = os.environ.get("SIDEKICK_ITEMS_TRACE", "").lower() in ("1", "true", "yes")
+    if _items_trace_on:
+        def _trace(event: str, extra: str = "") -> None:
+            ms = int((_time.monotonic() - _t0) * 1000)
+            print(f"[items-trace {_trace_id}] +{ms}ms {event}{' ' + extra if extra else ''}", flush=True, file=_sys.stderr)
+    else:
+        def _trace(event: str, extra: str = "") -> None:
+            return None
     if _dispatch_gap_ms is not None and _dispatch_gap_ms >= 5:
         # Only log when the gap is non-trivial — 5ms threshold filters
         # the steady-state noise but catches anything that looks like
