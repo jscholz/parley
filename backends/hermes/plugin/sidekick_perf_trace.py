@@ -34,8 +34,8 @@ negative. The module functions still exist but become near-no-ops.
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
+import sys
 import time
 from contextlib import contextmanager
 from typing import Any, Callable, Optional
@@ -46,7 +46,25 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 
-logger = logging.getLogger("sidekick.perf_trace")
+# Sidekick's existing items-trace writes to stderr via plain `print` so
+# the lines land in journalctl regardless of the gateway's stdlib
+# logging level config. Match that pattern here for consistency and to
+# avoid INFO logs being dropped by the gateway's default WARN-and-up
+# log handler.
+def _log(level: str, msg: str) -> None:
+    print(f"[perf-trace {level}] {msg}", flush=True, file=sys.stderr)
+
+
+class _LoggerShim:
+    """Adapts the stdlib-logger surface we use elsewhere (info/warning/
+    error) onto the stderr print sink. Lets the rest of the code feel
+    natural without committing to a logger config we don't own."""
+    def info(self, fmt: str, *args: Any) -> None: _log("INFO", fmt % args if args else fmt)
+    def warning(self, fmt: str, *args: Any) -> None: _log("WARN", fmt % args if args else fmt)
+    def error(self, fmt: str, *args: Any) -> None: _log("ERROR", fmt % args if args else fmt)
+
+
+logger = _LoggerShim()
 
 
 def _is_enabled() -> bool:
