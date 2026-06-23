@@ -34,11 +34,12 @@ negative. The module functions still exist but become near-no-ops.
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import sys
 import time
 from contextlib import contextmanager
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 try:
     from aiohttp import web  # type: ignore[assignment]
@@ -281,3 +282,51 @@ async def db_stats_periodic_loop(
     while True:
         log_db_stats(sidekick_db, label=f"hourly t+{int(time.time())}")
         await asyncio.sleep(interval_s)
+
+
+# ── 5. Bounded concurrency for sidekick worker threads ──────────────
+#
+# Sidekick's hot-path /items + drawer-list routes all use
+# ``asyncio.to_thread`` to push SQL+Python work to the default executor
+# (size ~16 on a 12-core box). A PWA drawer-prefetch burst can spawn
+# 30+ concurrent to_thread submissions; with each holding the GIL for
+# stretches of Python list-comp / dict-build / set-membership work,
+# the asyncio loop thread starves (caught 2026-06-23 — loop lag 8s
+# during traffic, 0ms at idle, no single slow callback). Capping
+# sidekick concurrency to a small number of in-flight workers gives
+# the loop thread fair GIL share back.
+#
+# Implemented as an asyncio.Semaphore (not a separate executor) so
+# the existing to_thread call sites stay simple — just wrap them in
+# ``run_in_sidekick_worker``. The default executor is still used; we
+# just bound how many sidekick tasks compete for it at any moment.
+#
+# Tunable via env (SIDEKICK_WORKER_CONCURRENCY); default 3 is enough
+# for the steady-state PWA load + a couple of background tasks
+# without giving back enough GIL share to actually move the needle.
+
+_SIDEKICK_WORKER_CONCURRENCY = int(
+    os.environ.get("SIDEKICK_WORKER_CONCURRENCY", "3") or 3
+)
+_sidekick_sem: Optional[asyncio.Semaphore] = None
+
+
+def _get_sidekick_sem() -> asyncio.Semaphore:
+    """Lazily create the semaphore. Avoids touching asyncio primitives
+    at import time so unit tests don't bind to the wrong loop."""
+    global _sidekick_sem
+    if _sidekick_sem is None:
+        _sidekick_sem = asyncio.Semaphore(_SIDEKICK_WORKER_CONCURRENCY)
+    return _sidekick_sem
+
+
+async def run_in_sidekick_worker(func: Callable, *args, **kwargs):
+    """Drop-in replacement for ``asyncio.to_thread`` that bounds the
+    number of concurrent sidekick worker calls. Excess calls await
+    the semaphore (cheap async wait — no thread is held). Once the
+    semaphore is acquired, the func runs in the default executor
+    just like ``asyncio.to_thread`` would have."""
+    if kwargs:
+        func = functools.partial(func, **kwargs)
+    async with _get_sidekick_sem():
+        return await asyncio.to_thread(func, *args)

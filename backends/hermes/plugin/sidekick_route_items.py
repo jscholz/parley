@@ -67,9 +67,11 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
         return
     from . import sidekick_state as _sstate
 
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+
     async def _run() -> None:
         try:
-            await asyncio.to_thread(
+            await _perf.run_in_sidekick_worker(
                 _sstate.reconcile_from_state_db,
                 adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             )
@@ -391,6 +393,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
             source = "sidekick"  # assume sidekick for the reconcile/query below
 
     from . import sidekick_state as _sstate
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433 (worker semaphore)
 
     # Opportunistic reconciliation: pull any state.db rows missing from
     # sidekick.db. The read below is correct from state.db ALONE, so this
@@ -424,7 +427,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         # cleanly to an "around" window; the PWA falls back to its serial
         # load-earlier drill when target_found is False / the field is
         # absent).
-        result = await asyncio.to_thread(
+        result = await _perf.run_in_sidekick_worker(
             _sstate.list_messages_around_for_chat_with_state_db_source,
             adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             target=around, limit=limit,
@@ -434,7 +437,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         has_more_newer = bool(result.get("has_more_newer"))
     elif after_id is not None and _b2_enabled:
         # Load-newer page (symmetric counterpart of before paging).
-        result = await asyncio.to_thread(
+        result = await _perf.run_in_sidekick_worker(
             _sstate.list_messages_after_for_chat_with_state_db_source,
             adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             after_id=after_id, limit=limit,
@@ -442,13 +445,13 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         last_id = result.get("last_id")
         has_more_newer = bool(result.get("has_more_newer"))
     elif _b2_enabled:
-        result = await asyncio.to_thread(
+        result = await _perf.run_in_sidekick_worker(
             _sstate.list_messages_for_chat_with_state_db_source,
             adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             limit=limit, before_id=before_id,
         )
     else:
-        result = await asyncio.to_thread(
+        result = await _perf.run_in_sidekick_worker(
             _sstate.list_messages_for_chat,
             adapter._sidekick_db, chat_id,
             limit=limit, before_rowid=before_id,

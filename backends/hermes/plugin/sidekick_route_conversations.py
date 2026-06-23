@@ -230,7 +230,8 @@ async def handle_list(adapter, request: "web.Request") -> "web.Response":
     except ValueError:
         return web.Response(status=400, text="invalid limit")
 
-    rows = await asyncio.to_thread(
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    rows = await _perf.run_in_sidekick_worker(
         _summaries_by_user_id, adapter, (SIDEKICK_SOURCE,), limit,
     )
     data = [
@@ -284,7 +285,8 @@ async def handle_list_gateway(adapter, request: "web.Request") -> "web.Response"
     except ValueError:
         return web.Response(status=400, text="invalid limit")
 
-    rows = await asyncio.to_thread(
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    rows = await _perf.run_in_sidekick_worker(
         _summaries_by_user_id, adapter, GATEWAY_DRAWER_SOURCES, limit,
     )
     data = [
