@@ -2385,15 +2385,46 @@ async function boot() {
     btnNewChat.onclick = async () => {
       if (!backend.isConnected()) { status.setStatus('Gateway offline', 'err'); return; }
       // No-op if there's already an active chat AND it's empty (no
-      // real bubbles rendered). Without this guard, rapid new-chat
-      // clicks accumulate empty 'New chat / 0 msgs' rows in the drawer
-      // for every press. Skip the guard on first-ever click (no
-      // active chat yet) so a fresh install still mints one.
-      const transcriptEl = document.getElementById('transcript');
-      const hasContent = transcriptEl
-        ? transcriptEl.querySelectorAll('.line.s0, .line.agent').length > 0
+      // real content in the transcript). Without this guard, rapid
+      // new-chat clicks accumulate empty 'New chat / 0 msgs' rows in
+      // the drawer for every press. Skip the guard on first-ever
+      // click (no active chat yet) so a fresh install still mints one.
+      //
+      // Source of truth: transcriptStore.durable for the currently-
+      // viewed chat. The DOM-row count check the prior version used
+      // (`.line.s0, .line.agent`) missed several non-empty shapes:
+      //
+      //   • tool-call-only chats (agent did a search but the final
+      //     reply was deleted, retried, or never finalized) — DOM has
+      //     only `.line.tool` rows, no `.line.s0/.agent`, but the
+      //     chat IS populated and the user expects New chat to mint
+      //     a fresh one.
+      //   • a chat whose user/agent rows are mid-render (in-flight
+      //     reconciler pass) — DOM transient, store already durable.
+      //   • a chat the projection re-classified — e.g. notification
+      //     rows from a cron delivery.
+      //
+      // Each of those would FALSELY trigger the no-op, leaving the
+      // user on the existing (populated) chat and making the click
+      // look like "New chat opened an existing chat" (Jonathan field
+      // bug 2026-06-23). The store check is shape-agnostic — any
+      // row in ANY of the three buckets (durable, inflight, pendingSends)
+      // counts as content. Durable alone is not enough — between
+      // user-send and reply_final the user message lives only in
+      // inflight/pendingSends, but the DOM shows a `.line.s0` bubble;
+      // a guard that ignores inflight would no-op the click in that
+      // window (regression caught by `sidebar-immediate-title`).
+      const viewedForGuard = switchCtl.viewedId();
+      const hasContent = viewedForGuard
+        ? (() => {
+            const s = transcriptStore.getState(viewedForGuard);
+            return s.durable.length + s.inflight.length + s.pendingSends.length > 0;
+          })()
         : false;
       const hasActiveChat = !!backend.getCurrentSessionId?.();
+      // Keep the DOM ref around — sweep paths further down still
+      // operate against it.
+      const transcriptEl = document.getElementById('transcript');
       // A session switch that hasn't committed/cleared yet has blanked the
       // transcript behind a loading spinner — that's a LOADING state, not
       // an empty active chat, so the no-op guard must not swallow the click
