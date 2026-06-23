@@ -709,6 +709,17 @@ async function boot() {
   cmdkPalette.init({
     onResume: replaySessionMessages,
     onBeforeSwitch: cleanupAbandonedChat,
+    // Wrapped so the const drillToChatMessage (declared further down)
+    // is resolved at call time, not at init time — avoids TDZ. cmd+K
+    // message hits ROUTE through drillToChatMessage so they get the
+    // around-window fetch when the target is below the initial tail.
+    // Without this wiring the cmd+K bug 2026-06-23 surfaces: search
+    // matches an old message ("pareto" months ago); clicking the hit
+    // calls resumeSession (tail only); target isn't in the loaded
+    // page; scrollIntoView silently no-ops and the user sees "click
+    // did nothing." Routed through drillToChatMessage, the same path
+    // pin clicks + activity opens use, click-jump is reliable.
+    onDrillToMessage: (chatId, msgId) => drillToChatMessage(chatId, msgId),
   });
   // Cmd+/ (mac) / Ctrl+/ (other) → keyboard-shortcut reference modal.
   // Pure UI; binds a document-level keydown listener and renders a

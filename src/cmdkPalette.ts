@@ -52,11 +52,27 @@ let activeIdx = 0;
 let messagesDebounceTimer: number | null = null;
 let messagesAbortCtl: AbortController | null = null;
 
-/** Resume callback supplied by main.ts. Both session + message hits
- *  funnel through it so we don't have to re-implement replaySessionMessages
- *  here. (Backend.resumeSession returns the messages payload.) */
+/** Resume callback supplied by main.ts. Session-hit activations (no
+ *  specific message target) funnel through this so we don't have to
+ *  re-implement replaySessionMessages here. Message-hit activations
+ *  go through ``onDrillToMessage`` instead (see below). */
 let onResumeCb: ((id: string, messages: any[], pagination?: any, targetMessageId?: string) => void) | null = null;
 let onBeforeSwitchCb: ((leavingId: string | null) => void) | null = null;
+/** Drill-to-message callback for message hits. Routes through the
+ *  same path pin clicks + activity opens use (main.ts drillToChatMessage),
+ *  which guarantees the ``around=<sidekick_id>`` window fetch lands so
+ *  the target row exists in the DOM before scrollIntoView runs.
+ *
+ *  History: 2026-06-23 — cmd+K used to call onResumeCb for message hits
+ *  too, which performs only the TAIL load. If the matched message was
+ *  older than the initial replay window (typical for FTS hits like
+ *  "pareto" from months ago in a long chat), the target row never
+ *  rendered, scroll silently no-op'd, and the user saw "click did
+ *  nothing" with intermittent success when the random-luck of the
+ *  cached IDB happened to have the row. drillToChatMessage covers
+ *  both: in-DOM scroll + flash if present, around-window fetch
+ *  otherwise. */
+let onDrillToMessageCb: ((chatId: string, msgId: string) => Promise<boolean>) | null = null;
 
 export function init(opts: {
   onResume: (id: string, messages: any[], pagination?: any, targetMessageId?: string) => void;
@@ -64,9 +80,12 @@ export function init(opts: {
    *  chat being navigated AWAY from at the moment a palette hit
    *  activates. Lets the shell drop empty/abandoned chats. */
   onBeforeSwitch?: (leavingId: string | null) => void;
+  /** Required for message hits — see ``onDrillToMessageCb`` above. */
+  onDrillToMessage?: (chatId: string, msgId: string) => Promise<boolean>;
 }) {
   onResumeCb = opts.onResume;
   onBeforeSwitchCb = opts.onBeforeSwitch || null;
+  onDrillToMessageCb = opts.onDrillToMessage || null;
   // Modal-open shortcut. Listen at document level so it works no matter
   // what's focused (including inside the composer textarea — cmd+K is
   // explicit enough that it should always win).
@@ -440,31 +459,43 @@ function setActiveByElement(el: HTMLLIElement) {
 }
 
 async function activate(hit: Hit) {
-  // Both kinds resume the session via backend.resumeSession + the
-  // standard onResume callback (which is replaySessionMessages in
-  // main.ts). For message hits the message_id is forwarded so the
-  // resume path can scrollIntoView + flash the matching bubble.
-  // Best-effort: if the hit predates the initial replay window the
-  // bubble won't exist in the DOM and we silently land at top of
-  // chat. Drill-to-message via load-earlier is a separate backlog
-  // item.
+  // Session-hit activations resume via backend.resumeSession + the
+  // standard onResume callback (replaySessionMessages in main.ts).
+  // Message-hit activations route through onDrillToMessageCb so they
+  // get the around-window fetch when the target is below the initial
+  // tail — see the onDrillToMessageCb docstring for the 2026-06-23
+  // history of why this distinction matters.
   const id = hit.kind === 'session' ? hit.id : hit.session_id;
   if (!id) return;
-  const targetMessageId = hit.kind === 'message' ? String(hit.message_id) : undefined;
   close();
   // Fire onBeforeSwitch with the chat we're navigating AWAY from
-  // BEFORE backend.resumeSession flips the active pointer. Lets the
-  // shell clean up empty/abandoned chats so they don't pollute the
-  // drawer.
+  // BEFORE the activation flips the active pointer. Lets the shell
+  // clean up empty/abandoned chats so they don't pollute the drawer.
   const leaving = backend.getCurrentSessionId?.() ?? null;
   if (leaving !== id) {
     try { onBeforeSwitchCb?.(leaving); }
     catch (e: any) { diag(`cmdk: onBeforeSwitch threw: ${e?.message || e}`); }
   }
+  if (hit.kind === 'message' && hit.message_id && onDrillToMessageCb) {
+    // drillToChatMessage handles the cross-session switch + around-
+    // window fetch + scroll-to-bubble atomically (see main.ts). It
+    // returns true on success, false on stale / not-found; either way
+    // the modal is already closed and any further UI is the drill's
+    // concern (status banner, etc.).
+    try {
+      await onDrillToMessageCb(id, String(hit.message_id));
+    } catch (e: any) {
+      diag(`cmdk: drill ${id} msg=${hit.message_id} failed: ${e?.message || e}`);
+    }
+    return;
+  }
+  // Session-hit path (or message-hit when no drill callback wired —
+  // legacy/test rigs).
   try {
     const result: any = await backend.resumeSession(id);
     const messages = result.messages || [];
     const pagination = { firstId: result.firstId ?? null, hasMore: !!result.hasMore };
+    const targetMessageId = hit.kind === 'message' ? String(hit.message_id) : undefined;
     onResumeCb?.(id, messages, pagination, targetMessageId);
   } catch (e: any) {
     diag(`cmdk: resume ${id} failed: ${e?.message || e}`);
