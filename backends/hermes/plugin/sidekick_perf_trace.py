@@ -92,12 +92,24 @@ async def loop_lag_watcher(
 
     Cancellation: standard asyncio cancellation. The caller is expected
     to stash the Task and cancel it on shutdown.
+
+    Also enables asyncio's built-in ``slow_callback_duration`` so the
+    loop logs a WARN when ANY single callback runs synchronously for
+    longer than the warn threshold. That's a much more precise signal
+    than the lag watcher — it names the exact coroutine that hogged
+    the loop, instead of "the loop was busy" with no attribution.
     """
     if not _is_enabled():
         return
     logger.info("[perf-trace] loop_lag_watcher armed: interval=%.0fms warn>%.0fms err>%.0fms",
                 interval_s * 1000, warn_threshold_ms, err_threshold_ms)
     loop = asyncio.get_running_loop()
+    # asyncio's own "this callback ran sync for too long" trigger. When
+    # set, the loop logs a WARN with the callback repr + duration any
+    # time a single ready-queue callback exceeds this. Catches blocking
+    # I/O or CPU-bound work on the loop thread that the lag watcher
+    # can only see indirectly.
+    loop.slow_callback_duration = warn_threshold_ms / 1000.0
     last_warn_at = 0.0
     while True:
         t_scheduled = loop.time()
