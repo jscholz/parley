@@ -247,6 +247,47 @@ def test_compute_unread_ttl_cache_collapses_repeat_calls(db, state_db):
     )
 
 
+def test_compute_unread_batches_state_queries(db, state_db):
+    """Perf-regression guard. compute_unread MUST scale sub-linearly
+    in chat count — the 2026-06-23 rewrite batches all per-chat
+    queries into one ``VALUES``-driven CTE join, so adding 50 chats
+    doesn't multiply the call cost. Pre-rewrite, the same workload
+    took ~9 seconds on the live data (one recursive-CTE COUNT per
+    chat in a Python loop, ~150ms each × 60+ chats).
+
+    Seed 50 separate chats, then assert one uncached call returns
+    correct counts AND completes in well under a generous wall-time
+    bound. Catches a future refactor that accidentally re-introduces
+    the per-chat loop.
+    """
+    # Seed 50 chats, each with one assistant row that should count
+    # as unread (no last_read_at pointer set).
+    for i in range(50):
+        sid = f"s_{i}"
+        chat_i = f"chat-{i:03d}"
+        _add_session(state_db, sid, chat_id=chat_i)
+        _add_msg(state_db, sid, "assistant", f"reply-{i}", ts=1000.0 + i)
+    import time as _t
+    t0 = _t.monotonic()
+    result = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    dt = _t.monotonic() - t0
+    # Correctness: each chat has 1 unread assistant row → total 50.
+    assert result["total"] == 50, (
+        f"expected total=50, got {result['total']} "
+        f"(chats={len(result['chats'])})"
+    )
+    # Perf: 50 chats × 1 row each should run in <500ms even on a
+    # slow CI worker. The pre-rewrite per-chat-loop was ~150ms per
+    # chat = ~7.5s; we cap at 500ms to catch a regression even in
+    # a noisy environment. Production data (170 chats × thousands
+    # of rows) runs the rewritten path in ~2s.
+    assert dt < 0.5, (
+        f"compute_unread on 50 small chats took {dt*1000:.0f}ms — "
+        f"expected <500ms with the batch-query rewrite. A regression "
+        f"to the per-chat loop would cost ~7-9s on this seed."
+    )
+
+
 def test_compute_unread_cache_invalidation_after_mark_seen(db, state_db):
     """Mutation paths (mark_seen, set_marked) MUST invalidate the
     cache, otherwise the post-mutation /unread poll would serve stale

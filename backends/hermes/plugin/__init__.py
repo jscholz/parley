@@ -1788,6 +1788,16 @@ class SidekickAdapter(BasePlatformAdapter):
             try:
                 from . import sidekick_state as _sstate  # local import
                 _sstate.record_envelope(self._sidekick_db, env)
+                # Drop the compute_unread TTL cache so the next /unread
+                # poll picks up the new envelope's contribution to the
+                # badge count immediately, instead of waiting up to the
+                # TTL window. record_envelope is idempotent and gates on
+                # _PERSISTED_ENVELOPE_TYPES; we invalidate on every call
+                # rather than only when persistence actually wrote a row
+                # because the persist-detection requires inspecting the
+                # envelope shape and is much pricier than a dict.clear().
+                from . import sidekick_unread as _sunread
+                _sunread.invalidate_unread_cache()
             except Exception as exc:
                 logger.warning("[sidekick] sidekick.db record failed: %s", exc)
 

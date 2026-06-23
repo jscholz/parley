@@ -80,7 +80,7 @@ SESSION_KEY_PREFIX = "agent:main:sidekick:dm:"
 # in the drawer 2s later is invisible compared to a 13s spinner.
 import threading as _threading  # noqa: WPS433
 _SUMMARIES_CACHE_TTL_S = float(
-    os.environ.get("SIDEKICK_SUMMARIES_CACHE_TTL_MS", "2000") or 2000
+    os.environ.get("SIDEKICK_SUMMARIES_CACHE_TTL_MS", "5000") or 5000
 ) / 1000.0
 _summaries_cache: dict = {}  # (sources_tuple, limit) → (cached_at, result)
 _summaries_cache_lock = _threading.Lock()

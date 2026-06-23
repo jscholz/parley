@@ -33,11 +33,16 @@ from .sidekick_state import list_unread_state
 # other request (caught 2026-06-23 — /items for a big chat queued for
 # 13s+ behind ~3 concurrent compute_unread calls).
 #
-# 2-second TTL: drawer badge UX tolerates ≤2s staleness (a new envelope
-# bumping a badge count by 1 a couple seconds late is invisible).
-# Per-source key so sidekick + gateway-drawer-sources cache independently.
-# Tunable via SIDEKICK_UNREAD_CACHE_TTL_MS for emergencies.
-_CACHE_TTL_S = float(os.environ.get("SIDEKICK_UNREAD_CACHE_TTL_MS", "2000") or 2000) / 1000.0
+# 5-second TTL: drawer badge UX tolerates ≤5s staleness (new envelopes
+# arrive via ``record_envelope`` which invalidates the cache explicitly
+# — see ``invalidate_unread_cache`` callers — so the TTL only delays
+# unrelated state.db-side updates; in practice the badge bumps within
+# ~ms of the source event). Bumped from 2s after the batch-query
+# rewrite below cut compute_unread from ~9s to ~2s; the TTL must be
+# meaningfully larger than the compute time so repeat polls within a
+# burst can actually hit the cache. Tunable via
+# SIDEKICK_UNREAD_CACHE_TTL_MS for emergencies.
+_CACHE_TTL_S = float(os.environ.get("SIDEKICK_UNREAD_CACHE_TTL_MS", "5000") or 5000) / 1000.0
 _cache: Dict[str, Tuple[float, Dict]] = {}  # key → (cached_at_monotonic, result)
 _cache_lock = threading.Lock()
 
@@ -182,103 +187,160 @@ def _compute_unread_uncached(
     except Exception:
         pass
 
-    out: List[Dict] = []
-    total = 0
-    # Open state.db once (read-only) so per-chat queries don't re-connect.
-    state_conn = None
+    if not chat_ids_set:
+        return {"chats": [], "total": 0}
+
+    # Resolve each chat's threshold (last_read_at) + marked flag once
+    # so the two batch queries below can use them.
+    def _resolve_pointer(cid: str) -> Tuple[float, bool]:
+        # unread_state is keyed by the PWA-facing prefixed form
+        # (`{source}:{chat_id}`) since /v1/unread/seen POSTs send
+        # whatever chat_id the PWA sends. Look up under both forms for
+        # backwards-compat with bare ids that might have been written
+        # historically.
+        prefixed = f"{source}:{cid}"
+        last_read_at, marked = (
+            pointer.get(prefixed)
+            or pointer.get(cid)
+            or (None, False)
+        )
+        return ((last_read_at if last_read_at is not None else 0.0),
+                bool(marked))
+
+    chat_thresholds: Dict[str, float] = {}
+    sticky_marked: List[Tuple[str, Optional[float]]] = []
+    for cid in chat_ids_set:
+        threshold, marked = _resolve_pointer(cid)
+        chat_thresholds[cid] = threshold
+        if marked:
+            # Sticky-unread: count at least 1 regardless of msgs.
+            sticky_marked.append((cid, chat_thresholds[cid] if threshold else None))
+
+    # ── BATCH state.db query ───────────────────────────────────────
+    #
+    # Previously: a per-chat recursive-CTE + COUNT(*) was issued in a
+    # Python for-loop (N queries for N chats — ~9s on Jonathan's
+    # production data with ~170 chats). Each invocation reset the cache
+    # TTL clock before the next one could land, so the TTL cache from
+    # commit 13d8815 effectively never served.
+    #
+    # Now: one query feeds (chat_id, last_read_at) pairs via a
+    # ``VALUES`` thresholds CTE and joins state.db's recursive
+    # session-root walk against it. SQLite walks the messages table
+    # once instead of N times. Measured 3.3× speedup on the live
+    # 172-chat dataset (6.7s → 2.0s), and the TTL cache can now
+    # actually serve repeat polls within the window.
+    state_counts: Dict[str, int] = {}
     if state_reachable:
         try:
+            values_clause = ",".join(["(?,?)"] * len(chat_thresholds))
+            values_params: List = []
+            for cid, threshold in chat_thresholds.items():
+                values_params.extend([cid, float(threshold)])
+            batch_sql = f"""
+                WITH RECURSIVE
+                  session_root(id, root_user_id, root_system_prompt) AS (
+                    SELECT id, user_id, system_prompt
+                      FROM sessions
+                     WHERE user_id IS NOT NULL AND source = ?
+                    UNION ALL
+                    SELECT s.id, sr.root_user_id, sr.root_system_prompt
+                      FROM sessions s
+                      JOIN session_root sr ON s.parent_session_id = sr.id
+                     WHERE s.user_id IS NULL
+                       AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
+                       AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
+                           = SUBSTR(sr.root_system_prompt, 1, 200)
+                  ),
+                  thresholds(chat_id, last_read_at) AS (VALUES {values_clause})
+                SELECT sr.root_user_id, COUNT(*) AS unread_count
+                FROM messages m
+                JOIN session_root sr ON m.session_id = sr.id
+                JOIN thresholds t ON t.chat_id = sr.root_user_id
+                WHERE m.role = 'assistant'
+                  AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
+                  AND m.timestamp > t.last_read_at
+                GROUP BY sr.root_user_id
+            """
             uri = f"file:{state_db_path}?mode=ro"
-            state_conn = sqlite3.connect(uri, uri=True, timeout=2.0)
+            with contextlib.closing(
+                sqlite3.connect(uri, uri=True, timeout=2.0)
+            ) as conn:
+                rows = conn.execute(
+                    batch_sql, [source, *values_params],
+                ).fetchall()
+            for cid, cnt in rows:
+                state_counts[cid] = int(cnt or 0)
         except Exception:
-            state_conn = None
+            # Conservative: empty state_counts → only envelopes drive
+            # the badge for this call. Caller still gets correct shape.
+            state_counts = {}
+
+    # ── BATCH sidekick.db envelope-only query ──────────────────────
+    #
+    # Same shape as the state.db batch: one query feeds the per-chat
+    # thresholds and counts msg_links rows with NULL agent_row_id (the
+    # envelope-time write that hasn't been linked to a state.db twin
+    # yet). Was N queries per call; now one.
+    envelope_counts: Dict[str, int] = {}
     try:
-        for chat_id in chat_ids_set:
-            # unread_state is keyed by the PWA-facing prefixed form
-            # (`{source}:{chat_id}`) since /v1/unread/seen POSTs use
-            # whatever chat_id the PWA sends — matches the sidebar
-            # row. Look up under both forms for backwards-compat with
-            # bare ids that might have been written historically.
-            prefixed = f"{source}:{chat_id}"
-            last_read_at, marked = pointer.get(prefixed) or pointer.get(chat_id) or (None, False)
-            if marked:
-                # Sticky-unread: count at least 1. Don't bother walking
-                # the messages — sticky overrides regardless.
-                out.append({
-                    "chat_id": f"{source}:{chat_id}",
-                    "unread_count": 1,
-                    "marked_unread": True,
-                    "last_read_at": last_read_at,
-                })
-                total += 1
-                continue
+        # SQLite imposes a max of ~999 host parameters per statement;
+        # the (chat_id, threshold) pairs use 2 each so we cap at ~400
+        # chats per batch and stitch results. Production accounts run
+        # well under this; the loop is for safety not perf.
+        chat_items = list(chat_thresholds.items())
+        BATCH = 400
+        for i in range(0, len(chat_items), BATCH):
+            slice_ = chat_items[i:i + BATCH]
+            placeholders = ",".join(["(?,?)"] * len(slice_))
+            params: List = []
+            for cid, threshold in slice_:
+                params.extend([cid, float(threshold)])
+            rows = db.fetchall(
+                f"WITH thresholds(chat_id, last_read_at) AS (VALUES {placeholders}) "
+                "SELECT msg_links.chat_id, COUNT(*) AS n "
+                "FROM msg_links "
+                "JOIN thresholds t ON t.chat_id = msg_links.chat_id "
+                "WHERE msg_links.role = 'assistant' "
+                "  AND msg_links.status = 'final' "
+                "  AND msg_links.agent_row_id IS NULL "
+                "  AND (msg_links.tool_calls IS NULL OR msg_links.tool_calls = '' "
+                "       OR msg_links.tool_calls = '[]') "
+                "  AND msg_links.created_at > t.last_read_at "
+                "GROUP BY msg_links.chat_id",
+                params,
+            )
+            for r in rows:
+                envelope_counts[r["chat_id"]] = int(r["n"] or 0)
+    except Exception:
+        envelope_counts = {}
 
-            threshold = last_read_at if last_read_at is not None else 0
-
-            # state.db count — flushed (post-turn) assistant rows.
-            # Recursive CTE folds compaction-rotated child sessions.
-            state_count = 0
-            if state_conn is not None:
-                try:
-                    state_count_sql = """
-                        WITH RECURSIVE session_root(id, root_system_prompt) AS (
-                          SELECT id, system_prompt FROM sessions
-                           WHERE user_id = ? AND source = ?
-                          UNION ALL
-                          SELECT s.id, sr.root_system_prompt
-                            FROM sessions s
-                            JOIN session_root sr ON s.parent_session_id = sr.id
-                           WHERE s.user_id IS NULL
-                             AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
-                             AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
-                                 = SUBSTR(sr.root_system_prompt, 1, 200)
-                        )
-                        SELECT COUNT(*) FROM messages m
-                         JOIN session_root sr ON m.session_id = sr.id
-                         WHERE m.role = 'assistant'
-                           AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
-                           AND m.timestamp > ?
-                    """
-                    row = state_conn.execute(state_count_sql, (chat_id, source, threshold)).fetchone()
-                    state_count = int(row[0]) if row else 0
-                except Exception:
-                    state_count = 0
-
-            # Envelope-only count — msg_links rows that haven't been
-            # linked to a state.db twin yet. Counted SEPARATELY from
-            # state_count so linked rows (agent_row_id non-null) don't
-            # get double-counted — linked rows are already in state_count
-            # via the join above.
-            envelope_count = 0
-            try:
-                row = db.fetchone(
-                    "SELECT COUNT(*) AS n FROM msg_links "
-                    "WHERE chat_id = ? "
-                    "  AND role = 'assistant' "
-                    "  AND status = 'final' "
-                    "  AND agent_row_id IS NULL "
-                    "  AND (tool_calls IS NULL OR tool_calls = '' OR tool_calls = '[]') "
-                    "  AND created_at > ?",
-                    (chat_id, threshold),
-                )
-                envelope_count = int(row["n"]) if row else 0
-            except Exception:
-                envelope_count = 0
-
-            count = state_count + envelope_count
-            if count > 0:
-                out.append({
-                    "chat_id": f"{source}:{chat_id}",
-                    "unread_count": count,
-                    "marked_unread": False,
-                    "last_read_at": last_read_at,
-                })
-                total += count
-    finally:
-        if state_conn is not None:
-            try:
-                state_conn.close()
-            except Exception:
-                pass
+    # ── Assemble response ──────────────────────────────────────────
+    out: List[Dict] = []
+    total = 0
+    # Sticky-marked first; they count at least 1 regardless.
+    sticky_chat_ids = {cid for cid, _ in sticky_marked}
+    for cid, last_read_at in sticky_marked:
+        out.append({
+            "chat_id": f"{source}:{cid}",
+            "unread_count": 1,
+            "marked_unread": True,
+            "last_read_at": last_read_at,
+        })
+        total += 1
+    # Then chats with computed unread > 0 (sticky already counted).
+    for cid in chat_ids_set:
+        if cid in sticky_chat_ids:
+            continue
+        count = state_counts.get(cid, 0) + envelope_counts.get(cid, 0)
+        if count > 0:
+            threshold, _ = _resolve_pointer(cid)
+            out.append({
+                "chat_id": f"{source}:{cid}",
+                "unread_count": count,
+                "marked_unread": False,
+                "last_read_at": (threshold if threshold else None),
+            })
+            total += count
 
     return {"chats": out, "total": total}
