@@ -191,7 +191,18 @@ async def handle_test(ctx, request: web.Request) -> web.Response:
 # ── Unread routes ────────────────────────────────────────────────────
 
 async def handle_unread(ctx, request: web.Request) -> web.Response:
-    data = compute_unread(db=ctx.db, state_db_path=ctx.state_db_path, source="sidekick")
+    # compute_unread loops over every chat running a recursive-CTE state.db
+    # COUNT(*) query per chat — O(history) Python+SQL work per chat. Used
+    # to run synchronously on the asyncio loop thread, which py-spy caught
+    # 2026-06-23 as the dominant cause of the gateway's 8s loop-lag during
+    # PWA bursts (the PWA polls /unread on every drawer-list refresh). Push
+    # it to the sidekick worker pool so the loop stays responsive and the
+    # SIDEKICK_WORKER_CONCURRENCY cap keeps the GIL pressure bounded.
+    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    data = await _perf.run_in_sidekick_worker(
+        compute_unread,
+        db=ctx.db, state_db_path=ctx.state_db_path, source="sidekick",
+    )
     return _json(data)
 
 
