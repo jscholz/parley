@@ -63,6 +63,14 @@ _reconcile_tasks: set = set()
 def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
     """Fire reconcile_from_state_db off the read path (see notes above).
     No-ops if a pass for this chat is already running."""
+    # Diagnostic kill switch — set SIDEKICK_RECONCILE_BG_DISABLED=1 to
+    # short-circuit the spawn entirely. Used during perf investigation
+    # to attribute loop-lag causes. Reads are correct from state.db
+    # alone (msg_links provides annotations only); skipping reconcile
+    # only delays msg_links linkage updates, which the periodic sweep
+    # picks up.
+    if os.environ.get("SIDEKICK_RECONCILE_BG_DISABLED", "").lower() in ("1", "true", "yes"):
+        return
     if chat_id in _reconcile_inflight:
         return
     from . import sidekick_state as _sstate
