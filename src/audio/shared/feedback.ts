@@ -41,6 +41,18 @@
  *                user reads it as "the call died" not "a
  *                message failed". Pairs with haptic() for
  *                the suspended-AudioContext case.
+ *   reconnect-tick gentle recurring cue fired every ~3s     (soft mid-pitch
+ *                while the call is in 'reconnecting'         sine ping)
+ *                state (yellow indicator). Signals "we're
+ *                still trying — keep talking, your buffer
+ *                is being preserved". Distinct from
+ *                'listening' (lower pitch, single tone) and
+ *                'call-dropped' (the recurring tick stops
+ *                when the call actually gives up). Jonathan
+ *                field bug 2026-06-23: bike-ride reconnect
+ *                gaps were silently wiping the dictation
+ *                buffer; chime + buffer preservation
+ *                together make the recovery transparent.
  *
  * ── iOS-PWA constraints ─────────────────────────────────────────────────
  *  - The AudioContext suspends on `visibilitychange=hidden` and resumes on
@@ -67,7 +79,7 @@ import { diag } from '../../util/log.ts';
 export type ChimeName =
   | 'send' | 'receive' | 'error' | 'start'
   | 'commit' | 'connect' | 'listening' | 'barge'
-  | 'call-dropped';
+  | 'call-dropped' | 'reconnect-tick';
 
 // Pre-render at scale=4 so el.volume=userVolume reproduces the legacy
 // oscillator path's amplitude curve.
@@ -93,6 +105,7 @@ function chimeDuration(name: ChimeName): number {
     case 'barge':     return 0.14;
     case 'error':     return 0.36;
     case 'call-dropped': return 0.46;
+    case 'reconnect-tick': return 0.16;
   }
 }
 
@@ -243,6 +256,21 @@ function scheduleChime(name: ChimeName, ctx: BaseAudioContext, t0: number): void
     gain2.gain.exponentialRampToValueAtTime(0.001, t2 + 0.14);
     osc2.start(t2);
     osc2.stop(t2 + 0.14);
+  } else if (name === 'reconnect-tick') {
+    // Recurring ~3s cue while the call is in 'reconnecting' state.
+    // Single soft sine ping at 700Hz (between 'listening' 440/523 and
+    // 'barge' 600) for ~140ms — distinctly NOT either of those, gentle
+    // enough to fire every 3s without being annoying. Low baked gain
+    // (0.05) so it doesn't bury whatever the user is still saying — the
+    // mic captures locally even though the bridge is dead, and we don't
+    // want the chime audible-back into their own dictation flow.
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(700, t0);
+    gain.gain.setValueAtTime(0.001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.05 * scale, t0 + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.14);
+    osc.start(t0);
+    osc.stop(t0 + 0.14);
   } else if (name === 'call-dropped') {
     // Two slow descending notes (G4→D4, then D4→G3), lower/longer than
     // `error`. Reads as a "call ended" disconnect tone, not a
@@ -317,7 +345,7 @@ const renderPromises = new Map<ChimeName, Promise<HTMLAudioElement>>();
 const PRIME_CHIMES: ChimeName[] = [
   'send', 'receive', 'error', 'start',
   'commit', 'connect', 'listening', 'barge',
-  'call-dropped',
+  'call-dropped', 'reconnect-tick',
 ];
 
 let primed = false;

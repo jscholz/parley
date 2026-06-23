@@ -21,7 +21,34 @@ import * as suppress from './suppress.ts';
 import * as realtimeBarge from './realtimeBarge.ts';
 import * as settings from '../../settings.ts';
 import * as backend from '../../backend.ts';
+import { playFeedback } from '../shared/feedback.ts';
 import { log, diag } from '../../util/log.ts';
+
+/** Cadence (ms) for the recurring 'reconnect-tick' chime while the
+ *  peer is in 'reconnecting' state. ~3s feels recurring enough to read
+ *  as "we're still trying" without being a nuisance during a wobbly
+ *  network gap (which the give-up timer caps at ~10s). No settings
+ *  knob — Jonathan can ask for one if it needs tuning. */
+const RECONNECT_TICK_MS = 3000;
+let reconnectTickTimer: ReturnType<typeof setInterval> | null = null;
+
+function startReconnectTickLoop(): void {
+  if (reconnectTickTimer !== null) return;  // idempotent
+  // Fire one immediately so the user gets the first cue right when the
+  // state flips to 'reconnecting' — otherwise they'd wait the full
+  // RECONNECT_TICK_MS before hearing anything (the give-up timer might
+  // even fire first). Subsequent ticks happen on the interval.
+  try { playFeedback('reconnect-tick'); } catch { /* feedback best-effort */ }
+  reconnectTickTimer = setInterval(() => {
+    try { playFeedback('reconnect-tick'); } catch { /* best-effort */ }
+  }, RECONNECT_TICK_MS);
+}
+
+function stopReconnectTickLoop(): void {
+  if (reconnectTickTimer === null) return;
+  clearInterval(reconnectTickTimer);
+  reconnectTickTimer = null;
+}
 
 /** Resolve the (sessionId, chatId) pair to ship in the offer payload.
  *  hermes-gateway uses chat_ids; everything else uses the legacy
@@ -124,16 +151,42 @@ export function init(o: ControlsOpts) {
     // pending utterance buffer or silence timer doesn't leak across
     // calls. requesting-mic / connecting on a fresh open is also a
     // safe place to clear (idempotent).
-    // 'reconnecting' is included: when a call drops we release the dead
-    // mic stream, so the barge loop (which holds an AnalyserNode on that
-    // stream) must stop — a fresh one starts when reconnect lands back on
-    // 'connected'. Resetting dictation/suppress also gives the recovered
-    // call a clean slate.
     if (state === 'idle' || state === 'closing' || state === 'failed'
-        || state === 'requesting-mic' || state === 'reconnecting') {
+        || state === 'requesting-mic') {
       dictation.reset();
       suppress.reset();
       realtimeBarge.stop();
+    }
+    // 'reconnecting' is INTENTIONALLY split out from the reset branch
+    // above — Jonathan field bug 2026-06-23. Pre-fix the dictation
+    // buffer was wiped every time the network wobbled green→yellow,
+    // forcing the user to start the message over (twice on the same
+    // bike ride). The mid-utterance buffer must survive the reconnect
+    // window so the recovered call resumes the same logical sentence
+    // the user was speaking; from the user's POV it's a single
+    // continuous utterance.
+    // realtimeBarge.stop() still fires here though: when the call
+    // drops we release the dead mic stream, so the barge loop's
+    // AnalyserNode would error on the freed stream. A fresh loop
+    // starts when reconnect lands back on 'connected' below.
+    // Silence-timer pause: see dictation.pauseSilenceTimer() — without
+    // it the silenceSec countdown armed on the last segment would
+    // elapse during the yellow gap and dispatch the half-utterance.
+    if (state === 'reconnecting') {
+      realtimeBarge.stop();
+      dictation.pauseSilenceTimer();
+      startReconnectTickLoop();
+    } else {
+      // Any other state ends the recurring tick. The give-up
+      // ('call-dropped') path naturally lands here too because state
+      // transitions out of 'reconnecting' into 'idle'/'failed'.
+      stopReconnectTickLoop();
+    }
+    // Reconnect succeeded — resume the silence countdown so the
+    // accumulated buffer can dispatch normally on the next silence
+    // window or commit phrase.
+    if (state === 'connected') {
+      dictation.resumeSilenceTimer();
     }
     // Barge loop runs only while a call is connected. Started here
     // (not in realtime.ts itself) because it depends on suppress's

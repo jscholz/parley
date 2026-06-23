@@ -35,6 +35,13 @@ let silenceTimer: ReturnType<typeof setTimeout> | null = null;
 let onUserBubble: ((text: string) => void) | null = null;
 let onReset: (() => void) | null = null;
 let userMessageIdProvider: (() => string) | null = null;
+// When true, the silence countdown is held — armSilenceTimer becomes a
+// no-op and any in-flight timer is cleared. Set during a 'reconnecting'
+// gap so the silenceSec window doesn't elapse while the bridge is dead
+// and prematurely dispatch a half-utterance. See Jonathan field bug
+// 2026-06-23: mid-utterance buffer must survive the reconnect window
+// so the recovered call resumes the same logical sentence.
+let silencePaused = false;
 
 /** Caller registers a handler that renders the user bubble (and any
  *  other "utterance committed" UI) at dispatch time. */
@@ -65,9 +72,35 @@ export function reset(): void {
     clearTimeout(silenceTimer);
     silenceTimer = null;
   }
+  // Drop any pause flag too — a 'reconnecting'-paused buffer that's
+  // being torn down (call ended, fresh open) should not start the next
+  // call already-paused. Pause is strictly a within-call hold.
+  silencePaused = false;
   if (onReset) {
     try { onReset(); } catch { /* swallow — out-of-tree listener */ }
   }
+}
+
+/** Pause the silence countdown without touching the buffer. Called by
+ *  controls.ts when the WebRTC peer transitions into 'reconnecting' —
+ *  the mic is dead during the gap so no new is_final events arrive,
+ *  but the silenceSec timer (armed on the last segment) would still
+ *  fire mid-gap and dispatch the half-utterance the user is actively
+ *  building. Idempotent. */
+export function pauseSilenceTimer(): void {
+  silencePaused = true;
+  if (silenceTimer !== null) {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+}
+
+/** Resume the silence countdown. Called by controls.ts when the peer
+ *  is back to 'connected'. Re-arms the timer ONLY if the buffer has
+ *  content — an empty buffer doesn't need a silence window. Idempotent. */
+export function resumeSilenceTimer(): void {
+  silencePaused = false;
+  if (buffer.length > 0) armSilenceTimer();
 }
 
 function dispatchNow(): void {
@@ -108,6 +141,11 @@ function armSilenceTimer(): void {
     clearTimeout(silenceTimer);
     silenceTimer = null;
   }
+  // Held during 'reconnecting' — see pauseSilenceTimer(). A late
+  // is_final landing during the gap (shouldn't normally happen, bridge
+  // is dead — but be defensive) still appends to the buffer; the timer
+  // just doesn't re-arm until resumeSilenceTimer() runs.
+  if (silencePaused) return;
   const { silenceSec } = getHandsfreeConfig();
   if (silenceSec <= 0) return;  // 0 = disabled (sendword-only mode).
   silenceTimer = setTimeout(() => {
@@ -127,6 +165,22 @@ function armSilenceTimer(): void {
  * Interim transcripts should NOT be passed here — they're for live
  * caption rendering and don't move the state machine.
  */
+/** Test-only introspection — returns a shallow copy of the current
+ *  utterance buffer. Production code never reads the buffer directly;
+ *  this exists so unit tests can assert the pause/resume preserves
+ *  content across a 'reconnecting' window (Jonathan field bug
+ *  2026-06-23). */
+export function __getBufferForTests(): string[] {
+  return buffer.slice();
+}
+
+/** Test-only introspection — true iff a silence timer is currently
+ *  armed. Used by the pause/resume tests so they can verify a
+ *  reconnecting-paused buffer is NOT counting down. */
+export function __hasSilenceTimerForTests(): boolean {
+  return silenceTimer !== null;
+}
+
 export function handleUserFinal(text: string): void {
   const trimmed = (text || '').trim();
   if (!trimmed) return;

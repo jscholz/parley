@@ -25,7 +25,7 @@ import {
 const ALL_CHIMES = [
   'send', 'receive', 'error', 'start',
   'commit', 'connect', 'listening', 'barge',
-  'call-dropped',
+  'call-dropped', 'reconnect-tick',
 ] as const;
 
 function fakeEl() {
