@@ -966,6 +966,31 @@ def reconcile_from_state_db(
     """Bidirectional reconciliation between state.db and sidekick.db
     for one chat. Runs at items-endpoint enter and on session_changed.
 
+    ⚠️  WARNING — DO NOT CALL FROM THE ASYNCIO LOOP THREAD.  ⚠️
+
+    The full path is **O(state_rows + linked_rows)** per call: a full
+    recursive-CTE walk of state.db.messages for the chat plus a Python
+    set build over sidekick.db.msg_links plus multi-pass scans. For a
+    5000-row chat the full pass takes ~700ms of GIL-held Python work.
+
+    History: this function is one of TWO sidekick O(history)-per-chat
+    callers (the other is sidekick_unread.compute_unread). Both used to
+    leak onto the loop thread under load. The 2026-06-23 incident
+    report:
+      - compute_unread blocked the loop directly via handle_unread
+        (fix: commit d10f62c — routed through run_in_sidekick_worker)
+      - reconcile_from_state_db piled up via _spawn_background_reconcile
+        firing N concurrent to_threads under the PWA drawer fan-out
+        (fix: commits bbfd784 worker-pool cap + b62bd3d no-drift
+        fast-path so the per-call cost on no-drift chats is O(few-ms)
+        instead of O(history))
+
+    The fast-path (see "Fast-path: skip the O(history) full-sync..."
+    block below) keeps no-drift calls cheap. The full path remains
+    O(history) — callers MUST wrap it in ``asyncio.to_thread`` /
+    ``run_in_sidekick_worker`` if they're calling from a coroutine.
+    Inline-await from an async def re-introduces the loop block.
+
     Three-pass operation:
       1. **Link pass (Phase 3)**: each unlinked sidekick.db row
          (agent_row_id IS NULL) finds a state.db row with matching

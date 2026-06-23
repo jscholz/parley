@@ -40,8 +40,31 @@ def compute_unread(
     ``{chats: [{chat_id, unread_count, marked_unread, last_read_at}],
        total: N}``.
 
-    ``total`` is the SUM of per-chat counts (higher-fidelity than a
-    chat-count aggregate).
+    ⚠️  WARNING — DO NOT CALL FROM THE ASYNCIO LOOP THREAD.  ⚠️
+
+    This function is structurally **O(history) per chat** — it loops
+    over every chat_id and runs a recursive-CTE ``COUNT(*)`` against
+    state.db (which can carry thousands of rows per chat) PLUS a
+    sidekick.db scan per chat, all in synchronous Python. With ~30
+    chats and a 5000-row chat in the mix, one call took ~8 seconds.
+
+    On 2026-06-23 this function was the dominant cause of a gateway
+    "loop-lag 8s" pattern — `handle_unread` (sidekick_routes.py) was
+    awaiting it inline, which on an async def is identical to calling
+    it synchronously on the loop thread. The PWA polls /unread on
+    every drawer-list refresh, so the loop blocked for 8s on every
+    poll and every other handler stalled into 8-25s tail latency.
+
+    Fix (commit d10f62c): `handle_unread` now routes through
+    ``sidekick_perf_trace.run_in_sidekick_worker`` (asyncio.Semaphore
+    + asyncio.to_thread) so the work runs in a bounded worker thread.
+    The regression test
+    ``test_handle_unread_routes_compute_off_the_loop_thread`` in
+    test_sidekick_unread.py asserts this stays true.
+
+    If you add a new caller, route it through ``to_thread`` (or
+    ``run_in_sidekick_worker`` to inherit the concurrency cap). Inline
+    invocation from a coroutine WILL re-introduce the loop block.
 
     Counts assistant rows (tool-call orchestrators excluded) with
     timestamp > last_read_at, from TWO sources:

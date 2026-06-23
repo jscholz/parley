@@ -134,3 +134,76 @@ def test_unread_counts_final_replies_not_tool_call_activity(db, state_db):
         }],
         "total": 1,
     }
+
+
+# ── Off-loop regression guard ────────────────────────────────────────
+#
+# `compute_unread` is structurally O(history) per chat — recursive-CTE
+# state.db COUNT(*) per chat in a Python for-loop. It MUST NOT run on
+# the asyncio loop thread. handle_unread (sidekick_routes.py) routes
+# through ``run_in_sidekick_worker`` so the work lands in a bounded
+# worker thread.
+#
+# History: 2026-06-23 — py-spy on the live gateway caught the main
+# thread blocked inside compute_unread on EVERY sample during a PWA
+# burst. The PWA polls /unread on every drawer-list refresh; with ~30
+# chats including big ones (5000+ msgs), each poll stalled the loop
+# for ~8s, which serialized every other handler into 8-25s tail
+# latency. Fix landed in commit d10f62c.
+#
+# This test asserts handle_unread's bottleneck CALL into compute_unread
+# happens off MainThread. Any future change that reverts to calling
+# compute_unread directly from the coroutine will fail this test.
+
+
+def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypatch):
+    """The asyncio loop MUST NOT execute compute_unread inline — it does
+    O(history)-per-chat SQL+Python work and blocks every other handler.
+
+    Patch compute_unread to record threading.current_thread() and call
+    handle_unread via the route handler. Assert the spy saw a worker
+    thread (not MainThread). The semaphore wrapper in
+    sidekick_perf_trace.run_in_sidekick_worker is the seam that
+    guarantees this — the test fails if a future refactor inlines the
+    call or otherwise bypasses the to_thread hop.
+    """
+    import asyncio
+    import threading
+    from unittest.mock import MagicMock
+
+    from .. import sidekick_unread
+    from .. import sidekick_routes
+
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "assistant", "hello", ts=1000.0)
+
+    captured_threads: list = []
+    real_compute = sidekick_unread.compute_unread
+
+    def spy(*args, **kwargs):
+        captured_threads.append(threading.current_thread())
+        return real_compute(*args, **kwargs)
+
+    # The route imports compute_unread by name; patch the binding the
+    # route actually resolves at call time.
+    monkeypatch.setattr(sidekick_routes, "compute_unread", spy)
+
+    # Minimal ctx + request stubs — handle_unread reads ctx.db +
+    # ctx.state_db_path, ignores the request body, returns json.
+    ctx = MagicMock()
+    ctx.db = db
+    ctx.state_db_path = state_db
+    request = MagicMock()
+
+    asyncio.run(sidekick_routes.handle_unread(ctx, request))
+
+    assert len(captured_threads) == 1, (
+        f"expected exactly one compute_unread call, got {len(captured_threads)}"
+    )
+    t = captured_threads[0]
+    assert t.name != "MainThread", (
+        "compute_unread ran on the asyncio loop's MainThread — this is "
+        "the 2026-06-23 loop-block bug. handle_unread must route the "
+        "call through run_in_sidekick_worker (or asyncio.to_thread) "
+        f"so it lands in a worker thread. Got thread={t.name!r}."
+    )
