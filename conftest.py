@@ -119,3 +119,50 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
         aiohttp.web = web
         sys.modules["aiohttp"] = aiohttp
         sys.modules["aiohttp.web"] = web
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _flush_plugin_caches():
+    """Autouse fixture: drop process-wide TTL caches between every
+    test. Without this, the compute_unread + _summaries_by_user_id
+    caches added 2026-06-23 leak across tests in the same pytest run
+    — e.g. test A inserts state.db rows, test B inserts conflicting
+    state.db rows but reads back A's cached summary instead of running
+    a fresh query. Both caches expose explicit invalidation hooks
+    designed for exactly this kind of cross-test isolation.
+
+    Some tests (notably test_user_id_queries.py) load the plugin via
+    ``importlib.import_module("plugin")`` rather than the
+    ``backends.hermes.plugin`` package path. That gives Python two
+    distinct module objects for the same source file, each with its
+    own module-level cache dict. We flush BOTH on every test so the
+    isolation is bulletproof regardless of which loader path the
+    test exercises.
+    """
+    import sys as _sys
+    candidate_paths = (
+        "backends.hermes.plugin.sidekick_unread",
+        "plugin.sidekick_unread",
+    )
+    for path in candidate_paths:
+        mod = _sys.modules.get(path)
+        if mod is not None and hasattr(mod, "invalidate_unread_cache"):
+            try:
+                mod.invalidate_unread_cache()
+            except Exception:
+                pass
+    candidate_paths = (
+        "backends.hermes.plugin.sidekick_route_conversations",
+        "plugin.sidekick_route_conversations",
+    )
+    for path in candidate_paths:
+        mod = _sys.modules.get(path)
+        if mod is not None and hasattr(mod, "invalidate_summaries_cache"):
+            try:
+                mod.invalidate_summaries_cache()
+            except Exception:
+                pass
+    yield

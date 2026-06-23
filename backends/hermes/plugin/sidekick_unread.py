@@ -13,12 +13,48 @@ plugin's ``_state_db_path`` field carries the resolved location.
 from __future__ import annotations
 
 import contextlib
+import os
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from .sidekick_state import list_unread_state
+
+
+# ── Per-process TTL cache for compute_unread results ────────────────
+#
+# compute_unread is O(N_chats × M_msgs) — it loops over every chat and
+# runs a recursive-CTE COUNT(*) per chat against state.db. The PWA
+# polls /unread on every drawer-list refresh (multiple times per second
+# during a burst). Without caching, each poll re-runs the same expensive
+# computation and saturates the bounded worker pool, queueing every
+# other request (caught 2026-06-23 — /items for a big chat queued for
+# 13s+ behind ~3 concurrent compute_unread calls).
+#
+# 2-second TTL: drawer badge UX tolerates ≤2s staleness (a new envelope
+# bumping a badge count by 1 a couple seconds late is invisible).
+# Per-source key so sidekick + gateway-drawer-sources cache independently.
+# Tunable via SIDEKICK_UNREAD_CACHE_TTL_MS for emergencies.
+_CACHE_TTL_S = float(os.environ.get("SIDEKICK_UNREAD_CACHE_TTL_MS", "2000") or 2000) / 1000.0
+_cache: Dict[str, Tuple[float, Dict]] = {}  # key → (cached_at_monotonic, result)
+_cache_lock = threading.Lock()
+
+
+def invalidate_unread_cache(source: Optional[str] = None) -> None:
+    """Drop cached compute_unread results. Called after writes that
+    would change the count (mark_seen, set_marked, envelope arrival).
+    ``source=None`` flushes every key — used on bulk events. Keeping
+    explicit invalidation alongside the TTL means callers that need
+    sub-TTL freshness (a /unread/seen POST → immediate /unread refetch)
+    don't see stale data.
+    """
+    with _cache_lock:
+        if source is None:
+            _cache.clear()
+        else:
+            _cache.pop(source, None)
 
 
 def _read_state_unread_state(db) -> Dict[str, Tuple[Optional[float], bool]]:
@@ -31,6 +67,42 @@ def _read_state_unread_state(db) -> Dict[str, Tuple[Optional[float], bool]]:
 
 
 def compute_unread(
+    *,
+    db,
+    state_db_path: Path,
+    source: str = "sidekick",
+) -> Dict:
+    """Public entry point — TTL-cached wrapper. The heavy lifting lives
+    in ``_compute_unread_uncached``; see its docstring for the SQL
+    structure and history.
+
+    Cache hit returns in microseconds; miss runs the full computation
+    once and caches for ``_CACHE_TTL_S``. The PWA's drawer-refresh
+    poll burst (multiple /unread calls per second) collapses to ~1
+    full computation per TTL window, keeping the worker pool free for
+    /items reads and other handlers.
+
+    Tests and any caller that needs guaranteed fresh data should call
+    ``_compute_unread_uncached`` directly (bypasses cache); production
+    callers go through the cached entry point.
+    """
+    now = time.monotonic()
+    cache_key = source
+    with _cache_lock:
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            cached_at, value = cached
+            if now - cached_at < _CACHE_TTL_S:
+                return value
+    # Miss (or expired) — compute outside the lock so concurrent misses
+    # don't serialize; the last writer wins.
+    result = _compute_unread_uncached(db=db, state_db_path=state_db_path, source=source)
+    with _cache_lock:
+        _cache[cache_key] = (now, result)
+    return result
+
+
+def _compute_unread_uncached(
     *,
     db,
     state_db_path: Path,

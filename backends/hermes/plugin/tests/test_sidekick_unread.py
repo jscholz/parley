@@ -207,3 +207,66 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
         "call through run_in_sidekick_worker (or asyncio.to_thread) "
         f"so it lands in a worker thread. Got thread={t.name!r}."
     )
+
+
+def test_compute_unread_ttl_cache_collapses_repeat_calls(db, state_db):
+    """The PWA polls /unread on every drawer refresh — multiple calls
+    per second under burst load. compute_unread is O(N×M) so without
+    a cache the worker pool saturates and other handlers queue.
+
+    A second call within the TTL window must hit the cache and return
+    near-instantly. This test seeds enough data to make a non-cached
+    call meaningfully slower than a noise floor, then asserts the
+    second call is dramatically faster (ratio > 10x). Catches future
+    refactors that accidentally bypass the cache layer.
+    """
+    import time as _t
+    _add_session(state_db, "s1")
+    # Seed 200 messages — enough that a fresh CTE+scan is well above
+    # the noise floor (typically 5-20ms in tests) but small enough to
+    # keep the test fast.
+    for i in range(200):
+        _add_msg(state_db, "s1", "user" if i % 2 == 0 else "assistant",
+                 f"m{i}", ts=1000.0 + i)
+    # First call — uncached, runs the full CTE+scan.
+    t0 = _t.monotonic()
+    first = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    dt_uncached = _t.monotonic() - t0
+    # Second call — should hit the TTL cache.
+    t0 = _t.monotonic()
+    second = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    dt_cached = _t.monotonic() - t0
+    # Same result either way.
+    assert first == second
+    # The cached path must be dramatically faster. We pick a 10x ratio
+    # to leave headroom for CI noise; an actual cache hit is 1000x+
+    # faster in practice.
+    assert dt_cached * 10 < dt_uncached, (
+        f"compute_unread cache didn't engage: uncached={dt_uncached*1000:.2f}ms "
+        f"cached={dt_cached*1000:.2f}ms (expected cached < uncached/10)"
+    )
+
+
+def test_compute_unread_cache_invalidation_after_mark_seen(db, state_db):
+    """Mutation paths (mark_seen, set_marked) MUST invalidate the
+    cache, otherwise the post-mutation /unread poll would serve stale
+    counts for up to the TTL — visible to the user as a sidebar badge
+    that doesn't clear when they click into a chat.
+    """
+    from ..sidekick_unread import invalidate_unread_cache
+    chat_id_prefixed = f"sidekick:{CHAT_ID}"
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "assistant", "unread reply", ts=1000.0)
+    # Prime the cache with an "unread > 0" snapshot.
+    first = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    assert first["total"] >= 1
+    # Mark seen + invalidate (mirrors what handle_unread_seen does).
+    state.mark_seen(db, chat_id_prefixed, now=2000.0)
+    invalidate_unread_cache()
+    # Next compute_unread must reflect the mark_seen (not return the
+    # stale "unread > 0" snapshot from the cache).
+    second = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    assert second["total"] == 0, (
+        f"cache wasn't invalidated after mark_seen — still seeing "
+        f"stale unread total={second['total']}"
+    )

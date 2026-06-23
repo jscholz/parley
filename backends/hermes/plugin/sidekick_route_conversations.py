@@ -63,6 +63,39 @@ SESSION_TITLE_MAX_LEN = 200
 SESSION_KEY_PREFIX = "agent:main:sidekick:dm:"
 
 
+# ── TTL cache for _summaries_by_user_id ─────────────────────────────
+#
+# Drawer aggregation runs a recursive-CTE SQL with SIX correlated
+# subqueries per session row — each subquery is a full pass over
+# messages WHERE session_id = X. For a user with many sessions
+# (compaction children stack high on long chats), that's
+# O(sessions × messages_per_session) work per call, all in synchronous
+# Python+SQL. PWA polls the drawer-list endpoint on every session
+# switch + many drawer refresh paths. Under burst load this saturated
+# the bounded worker pool and queued /items reads for 13s+ (caught
+# 2026-06-23 via py-spy).
+#
+# 2-second TTL collapses a poll burst to ~1 full computation per
+# window. Drawer UX tolerates ≤2s staleness fine — new chats appearing
+# in the drawer 2s later is invisible compared to a 13s spinner.
+import threading as _threading  # noqa: WPS433
+_SUMMARIES_CACHE_TTL_S = float(
+    os.environ.get("SIDEKICK_SUMMARIES_CACHE_TTL_MS", "2000") or 2000
+) / 1000.0
+_summaries_cache: dict = {}  # (sources_tuple, limit) → (cached_at, result)
+_summaries_cache_lock = _threading.Lock()
+
+
+def invalidate_summaries_cache() -> None:
+    """Drop cached drawer-summaries. Called on delete / rename and on
+    explicit cache-flush signals so the next list reflects mutations
+    immediately. Bulk-flushes; granular per-source flush isn't worth
+    the complexity given the tiny number of source tuples in play.
+    """
+    with _summaries_cache_lock:
+        _summaries_cache.clear()
+
+
 def _summaries_by_user_id(
     adapter, sources: Tuple[str, ...], limit: int,
 ) -> list:
@@ -90,6 +123,9 @@ def _summaries_by_user_id(
     full set (sidekick, telegram, slack, whatsapp, …) for the
     cross-platform gateway drawer.
 
+    Results are TTL-cached (``_SUMMARIES_CACHE_TTL_S``); mutation
+    paths (delete, rename) flush via ``invalidate_summaries_cache``.
+
     chat_type is fixed to "dm" because state.db doesn't carry it
     explicitly. The plugin's existing surface only exposed DM
     chats; group/channel inference would need an out-of-band
@@ -114,6 +150,15 @@ def _summaries_by_user_id(
         return []
     if not sources:
         return []
+    # ── TTL cache check ─────────────────────────────────────────────
+    cache_key = (tuple(sorted(sources)), int(limit))
+    now = time.monotonic()
+    with _summaries_cache_lock:
+        cached = _summaries_cache.get(cache_key)
+        if cached is not None:
+            cached_at, value = cached
+            if now - cached_at < _SUMMARIES_CACHE_TTL_S:
+                return value
     src_csv = ",".join(["?"] * len(sources))
     # Recursive CTE: session_root maps every session to its
     # effective (root_user_id, root_source) by walking
@@ -212,6 +257,10 @@ def _summaries_by_user_id(
             float(last_active_at or 0), float(created_at or 0),
             first_user_truncated, session_ids or "",
         ))
+    # Populate the TTL cache. Concurrent misses just overwrite — last
+    # writer wins, which is fine for a forward-progressing summary.
+    with _summaries_cache_lock:
+        _summaries_cache[cache_key] = (now, out)
     return out
 
 
@@ -373,6 +422,11 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
     adapter._session_state_cache.pop(chat_id, None)
     for sid in [s for s, c in adapter._sid_to_chat_id_cache.items() if c == chat_id]:
         adapter._sid_to_chat_id_cache.pop(sid, None)
+    # Drop the summaries TTL cache — drawer list must reflect the
+    # delete immediately on the next /v1/conversations poll. Without
+    # this, the deleted chat would linger in the drawer for up to
+    # `_SUMMARIES_CACHE_TTL_S` seconds.
+    invalidate_summaries_cache()
     # Cross-device delete sync: emit conversation_deleted so other
     # connected PWAs drop the row from their sidebar without waiting
     # for a manual refresh. Without an envelope, the other device
@@ -470,6 +524,9 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
     # Update the cache so the next poll tick doesn't immediately
     # re-emit a session_changed for the same (sid, title) pair.
     adapter._session_state_cache[chat_id] = (cached_sid, title)
+    # Drawer summaries cache holds the old title — flush so the next
+    # /v1/conversations poll reflects the new one immediately.
+    invalidate_summaries_cache()
     await adapter._safe_send_envelope({
         "type": "session_changed",
         "chat_id": chat_id,

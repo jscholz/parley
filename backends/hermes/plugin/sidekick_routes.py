@@ -26,7 +26,7 @@ from typing import Any, Dict
 from aiohttp import web
 
 from . import sidekick_state as state
-from .sidekick_unread import compute_unread
+from .sidekick_unread import compute_unread, invalidate_unread_cache
 from .sidekick_state import vapid_public_key_b64url, ensure_vapid_keys
 from .sidekick_ids import _parse_gateway_id
 
@@ -212,6 +212,11 @@ async def handle_unread_seen(ctx, request: web.Request) -> web.Response:
     if not chat_id:
         return _json({"error": "invalid_request", "message": "chat_id required"}, status=400)
     state.mark_seen(ctx.db, chat_id)
+    # The compute_unread TTL cache would otherwise serve stale counts
+    # for up to its TTL — explicit invalidation makes the very next
+    # /unread poll reflect the seen-state immediately (which the PWA
+    # depends on for the post-click badge clear).
+    invalidate_unread_cache()
     ctx.emit_envelope({"type": "unread_changed", "chat_id": chat_id, "cause": "seen"})
     return _json({"ok": True, "chat_id": chat_id})
 
@@ -223,6 +228,9 @@ async def handle_unread_mark(ctx, request: web.Request) -> web.Response:
     if not chat_id:
         return _json({"error": "invalid_request", "message": "chat_id required"}, status=400)
     state.set_marked(ctx.db, chat_id, marked)
+    # See note in handle_unread_seen — drop the cache so the next poll
+    # reflects this mutation immediately.
+    invalidate_unread_cache()
     ctx.emit_envelope({"type": "unread_changed", "chat_id": chat_id, "cause": "mark" if marked else "unmark"})
     return _json({"ok": True, "chat_id": chat_id, "marked": marked})
 
