@@ -125,7 +125,13 @@ def test_reconcile_propagates_tool_calls_from_state_db(db, state_db):
 def test_tool_calls_heal_for_already_reconciled_legacy_rows(db, state_db):
     """Existing deployments have legacy: rows from before the tool_calls
     column was added (NULL there). A subsequent reconcile must heal
-    them by pulling tool_calls from state.db without re-inserting."""
+    them by pulling tool_calls from state.db without re-inserting.
+
+    tool_calls heal is a one-time migration concern — once the column
+    is populated it stays populated. The fast-path's no-drift skip
+    (added 2026-06-23) doesn't run the heal sweep, so the periodic
+    full sweep is the right surface for it. This test forces the
+    full pass explicitly via ``force_full=True`` to exercise the heal."""
     import json as _json
     _add_session(state_db, "s1")
     tcalls = _json.dumps([
@@ -137,7 +143,7 @@ def test_tool_calls_heal_for_already_reconciled_legacy_rows(db, state_db):
         db, id="legacy:1", chat_id=CHAT_ID, role="assistant",
         content="", agent_row_id="1",
     )
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick", force_full=True)
     row = db.fetchone(
         "SELECT tool_calls FROM msg_links WHERE id='legacy:1'"
     )
@@ -553,6 +559,51 @@ def test_linker_skips_state_db_row_already_claimed(db, state_db):
 
 
 # ── bidirectional self-heal (orphan-drop) ─────────────────────────────
+
+
+def test_fast_path_skips_full_scan_on_no_drift(db, state_db):
+    """Perf regression guard: reconcile must NOT do the full state.db
+    fetch when there's no drift. Setup links rows, then calls reconcile
+    a SECOND time — fast-path must hit, bail immediately, no work done.
+    Compares wall-time to a heavy-state.db chat seeded with 500 rows;
+    the no-drift second call must complete in a small fraction of the
+    first-call time.
+    """
+    _add_session(state_db, "s1")
+    # Big enough that a full scan + python list-comp is meaningfully
+    # slower than a LIMIT-1 fast-path check.
+    n_rows = 500
+    for i in range(n_rows):
+        _add_msg(state_db, "s1", "user" if i % 2 == 0 else "assistant",
+                 f"m{i}", ts=1000.0 + i)
+    for i in range(n_rows):
+        state.upsert_msg_link(
+            db, id=f"legacy:{i+1}", chat_id=CHAT_ID,
+            role="user" if i % 2 == 0 else "assistant",
+            content=f"m{i}", agent_row_id=str(i + 1),
+        )
+    # First reconcile: nothing to do (everything already linked) — but
+    # under the OLD code path this still walked all 500 rows. Time it
+    # with the OLD path forced.
+    import time as _t
+    t0 = _t.monotonic()
+    n_forced = state.reconcile_from_state_db(
+        db, state_db, CHAT_ID, "sidekick", force_full=True,
+    )
+    dt_full = _t.monotonic() - t0
+    assert n_forced == 0
+    # Second reconcile: same no-drift state, but with the fast-path.
+    t0 = _t.monotonic()
+    n_fast = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    dt_fast = _t.monotonic() - t0
+    assert n_fast == 0
+    # Fast-path must be DRAMATICALLY faster than the full pass. We
+    # don't pin to an absolute number (CI noise), just to a ratio that
+    # is impossible if the fast-path didn't fire.
+    assert dt_fast < dt_full / 3, (
+        f"fast-path didn't engage: full={dt_full*1000:.1f}ms "
+        f"fast={dt_fast*1000:.1f}ms (expected fast < full/3)"
+    )
 
 
 def test_orphan_drop_when_state_db_session_deleted(db, state_db):

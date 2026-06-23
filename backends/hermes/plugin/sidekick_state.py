@@ -961,6 +961,7 @@ def _build_chronological_items(
 
 def reconcile_from_state_db(
     db, state_db_path, chat_id: str, source: str = "sidekick",
+    *, force_full: bool = False,
 ) -> int:
     """Bidirectional reconciliation between state.db and sidekick.db
     for one chat. Runs at items-endpoint enter and on session_changed.
@@ -1003,6 +1004,113 @@ def reconcile_from_state_db(
     _t_recon_start = time.monotonic()
     if state_db_path is None:
         return 0
+
+    # ── Fast-path: skip the O(history) full-sync on no-drift chats. ──
+    #
+    # Reconcile is structurally O(state_rows + linked_rows) on EVERY
+    # call (full recursive-CTE walk of state.db messages + Python set
+    # build over sidekick.db msg_links + multi-pass scans). For
+    # [pitch deck] with 5389 messages and zero drift, each call burned
+    # ~700ms of GIL-held Python work producing zero updates. Under a
+    # PWA drawer-prefetch burst (N chats fan-out) the cumulative
+    # GIL pressure starved the asyncio loop (caught via
+    # SIDEKICK_PERF_TRACE loop-lag watcher 2026-06-23).
+    #
+    # Fast-path: three cheap indexed checks. If state.db has no rows
+    # newer than the highest agent_row_id we've already linked AND no
+    # envelope rows are pending a link, there's nothing to do — return
+    # immediately. Orphan-drop (Pass 3) is NOT performed on this path
+    # — orphans only originate from /retry, /undo, /compress whole-
+    # session rewrites + the 90-day prune. Callers that need orphan
+    # cleanup (the periodic sweep, the unit-test suite) pass
+    # ``force_full=True`` to bypass the fast-path. The /items route's
+    # opportunistic per-read reconcile spawn does NOT need orphan
+    # cleanup on every call — a separate periodic sweep handles it
+    # at a lower cadence, which is well within v1 self-heal latency.
+    if not force_full:
+        try:
+            # 1) Highest state.db id we've already linked for this chat.
+            max_linked_row = db.fetchone(
+                "SELECT MAX(CAST(agent_row_id AS INTEGER)) AS m FROM msg_links "
+                "WHERE chat_id = ? AND agent_row_id IS NOT NULL",
+                (chat_id,),
+            )
+            max_linked = (max_linked_row and max_linked_row["m"]) or 0
+            # 2) Any unlinked envelope rows pending a state.db link?
+            unlinked_row = db.fetchone(
+                "SELECT 1 FROM msg_links WHERE chat_id = ? "
+                "AND agent_row_id IS NULL LIMIT 1",
+                (chat_id,),
+            )
+            has_unlinked = bool(unlinked_row)
+            # 3) state.db rows newer than the watermark? Guard on
+            # max_linked>0 so a chat-with-no-linked-rows-yet falls through
+            # to the full reconcile (to migrate / link initial rows).
+            if max_linked > 0 and not has_unlinked:
+                uri = f"file:{state_db_path}?mode=ro"
+                state_has_newer = True  # conservative default on error
+                watermark_orphaned = True  # conservative default on error
+                try:
+                    with contextlib.closing(
+                        sqlite3.connect(uri, uri=True, timeout=2.0)
+                    ) as conn:
+                        # Two cheap point queries: (a) anything newer
+                        # than our watermark? (b) does the watermark row
+                        # itself still exist? (b) catches the
+                        # all-rows-deleted / partial-session-mutation
+                        # orphan case where state.db lost rows but no
+                        # new rows arrived to trip (a).
+                        newer_row = conn.execute(
+                            """
+                            WITH RECURSIVE session_root(id, root_system_prompt) AS (
+                                SELECT id, system_prompt FROM sessions
+                                 WHERE user_id = ? AND source = ?
+                                UNION ALL
+                                SELECT s.id, sr.root_system_prompt
+                                  FROM sessions s
+                                  JOIN session_root sr ON s.parent_session_id = sr.id
+                                 WHERE s.user_id IS NULL
+                                   AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
+                                   AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
+                                       = SUBSTR(sr.root_system_prompt, 1, 200)
+                            )
+                            SELECT 1 FROM messages m
+                            JOIN session_root sr ON m.session_id = sr.id
+                            WHERE m.id > ?
+                            LIMIT 1
+                            """,
+                            (chat_id, source, max_linked),
+                        ).fetchone()
+                        state_has_newer = newer_row is not None
+                        # Watermark-row existence check: primary-key
+                        # lookup on messages.id — O(log n). If our
+                        # highest linked row vanished from state.db,
+                        # orphans exist below it and we MUST do the
+                        # full reconcile to drop them.
+                        wm_row = conn.execute(
+                            "SELECT 1 FROM messages WHERE id = ? LIMIT 1",
+                            (max_linked,),
+                        ).fetchone()
+                        watermark_orphaned = wm_row is None
+                except Exception:
+                    # State.db unreachable → conservatively fall through
+                    # to the full path. The full path's early-return on
+                    # state-unreachable handles the failure mode without
+                    # dropping anything.
+                    pass
+                if not state_has_newer and not watermark_orphaned:
+                    _recon_wall_ms = (time.monotonic() - _t_recon_start) * 1000.0
+                    if _perf._is_enabled() and _recon_wall_ms >= 5.0:
+                        _perf.logger.info(
+                            "[perf-trace] reconcile chat=%s source=%s wall=%.0fms "
+                            "FAST-PATH no-drift (max_linked=%d)",
+                            chat_id[:24], source, _recon_wall_ms, max_linked,
+                        )
+                    return 0
+        except Exception:
+            # Any sidekick.db error → fall through to the full reconcile.
+            # Conservative: better to do the work than skip and lose linking.
+            pass
     # Reachability gate: only proceed with pass 3 (orphan drops) when
     # state.db opened cleanly. A locked / missing state.db means
     # `state_reachable=False` and orphan drops are skipped — otherwise
