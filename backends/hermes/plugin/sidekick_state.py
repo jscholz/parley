@@ -537,6 +537,54 @@ def list_messages_for_chat(
     return {"items": items, "first_id": first_id, "has_more": has_more}
 
 
+# State.db rowids stay small (~10^5 after a year); envelope-only rows are
+# keyed by created_at epoch-millis (~1.8e12). Anything at/above this
+# threshold is an envelope-space cursor.
+_ENVELOPE_CURSOR_THRESHOLD = 10**11
+
+
+def _resolve_cursor_sort_key(state_db_path, cursor_id):
+    """Resolve a pagination cursor to its ``(created_at, id)`` sort tuple.
+
+    Items carry ids from TWO spaces: state.db rowids (small ints) and
+    envelope-only rows keyed by ``int(created_at * 1000)`` (epoch
+    millis). A raw ``id >/< cursor`` compare across the spaces is
+    meaningless — an epoch cursor excludes every state.db row forever
+    (field bug 2026-07-04: a delta cursor that landed on an envelope-only
+    tail row made every durable row invisible to the PWA until reconcile
+    healed the link — the agent's long reply "vanished"). Cursors must be
+    compared in the merged sort-key space ``(created_at, id)`` — the
+    exact key ``_build_chronological_items`` sorts by.
+
+    Epoch-shaped cursors are timestamps by construction. State-shaped
+    cursors need a one-row indexed ts lookup. Returns ``None`` when the
+    cursor row is gone (deleted / compacted away) — callers fall back to
+    the legacy raw-id compare, which is correct for pure-durable pages.
+    """
+    import contextlib
+    import sqlite3
+
+    if cursor_id is None:
+        return None
+    cursor_id = int(cursor_id)
+    if cursor_id >= _ENVELOPE_CURSOR_THRESHOLD:
+        return (cursor_id // 1000, cursor_id)
+    if state_db_path is None or not state_db_path.exists():
+        return None
+    try:
+        with contextlib.closing(
+            sqlite3.connect(f"file:{state_db_path}?mode=ro", uri=True, timeout=2.0)
+        ) as conn:
+            row = conn.execute(
+                "SELECT timestamp FROM messages WHERE id = ?", (cursor_id,)
+            ).fetchone()
+    except Exception:
+        return None
+    if not row or row[0] is None:
+        return None
+    return (int(row[0]), cursor_id)
+
+
 def list_messages_for_chat_with_state_db_source(
     sidekick_db,
     state_db_path,
@@ -575,9 +623,11 @@ def list_messages_for_chat_with_state_db_source(
     # filter + slice below still runs over the merged set so envelope-only
     # rows (millis-keyed ids, never SQL-filtered) keep their existing
     # pagination semantics.
+    cursor_key = _resolve_cursor_sort_key(state_db_path, before_id)
     items = _build_chronological_items(
         sidekick_db, state_db_path, chat_id, source,
         direction="older", cursor_id=before_id,
+        cursor_ts=(cursor_key[0] if cursor_key else None),
         fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
     )
 
@@ -591,7 +641,15 @@ def list_messages_for_chat_with_state_db_source(
     #    same earliest page forever" because the cursor's neighborhood
     #    was never reached. v2 fixes by slicing tail-side in both cases.
     if before_id is not None:
-        items = [it for it in items if it["id"] < before_id]
+        if cursor_key is not None:
+            # Sort-key-space compare — see _resolve_cursor_sort_key. A raw
+            # id compare across the two id spaces let every durable row
+            # (including NEWER ones) pass `< epoch-cursor`.
+            items = [
+                it for it in items if (it["created_at"], it["id"]) < cursor_key
+            ]
+        else:
+            items = [it for it in items if it["id"] < before_id]
     if len(items) > limit:
         items = items[-limit:]
         has_more = True
@@ -702,12 +760,21 @@ def list_messages_after_for_chat_with_state_db_source(
     still be present because the items route reads it unconditionally
     for every branch.
     """
+    cursor_key = _resolve_cursor_sort_key(state_db_path, after_id)
     items = _build_chronological_items(
         sidekick_db, state_db_path, chat_id, source,
         direction="newer", cursor_id=after_id,
+        cursor_ts=(cursor_key[0] if cursor_key else None),
         fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
     )
-    items = [it for it in items if it["id"] > after_id]
+    if cursor_key is not None:
+        # Sort-key-space compare — see _resolve_cursor_sort_key. A raw id
+        # compare made an epoch (envelope-row) cursor exclude EVERY durable
+        # row forever: new turns never reached the PWA and its tail-merge
+        # dropped the rows it did have (2026-07-04 vanishing-reply bug).
+        items = [it for it in items if (it["created_at"], it["id"]) > cursor_key]
+    else:
+        items = [it for it in items if it["id"] > after_id]
     if len(items) > limit:
         items = items[:limit]
         has_more_newer = True
@@ -730,6 +797,7 @@ def _build_chronological_items(
     *,
     direction: Optional[str] = None,
     cursor_id: Optional[int] = None,
+    cursor_ts: Optional[int] = None,
     fetch_limit: Optional[int] = None,
 ) -> list:
     """Build a chronological item list for a chat from state.db (canonical
@@ -783,20 +851,35 @@ def _build_chronological_items(
         "FROM messages m JOIN session_root sr ON m.session_id = sr.id"
     )
     params: list = [chat_id, source]
+    # When the caller resolved the cursor's (created_at, id) sort key
+    # (see _resolve_cursor_sort_key), bound the SQL window by TIMESTAMP
+    # with an id tie-break instead of by raw id: raw-id bounds are
+    # meaningless against an envelope-space (epoch-millis) cursor, and
+    # the id tie-break keeps a turn-end batch (many rows sharing one
+    # timestamp) paging forward instead of stalling. The float-second
+    # slack in the ts branch makes the SQL window a small SUPERSET of
+    # the caller's exact (created_at, id) tuple filter — int-truncated
+    # created_at vs float m.timestamp can disagree by <1s.
     if fetch_limit is None:
         # Full transcript (around-target reader). Callers slice in Python
         # so they share one identical chronological view.
         sql = cte + select_cols + " ORDER BY m.timestamp ASC, m.id ASC"
     elif direction == "newer":
         sql = cte + select_cols
-        if cursor_id is not None:
+        if cursor_ts is not None:
+            sql += " WHERE (m.timestamp > ?) OR (m.timestamp > ? - 1.0 AND m.id > ?)"
+            params.extend([cursor_ts, cursor_ts, cursor_id if cursor_id is not None else 0])
+        elif cursor_id is not None:
             sql += " WHERE m.id > ?"
             params.append(cursor_id)
         sql += " ORDER BY m.timestamp ASC, m.id ASC LIMIT ?"
         params.append(fetch_limit)
     else:  # 'older' (tail / before-cursor)
         sql = cte + select_cols
-        if cursor_id is not None:
+        if cursor_ts is not None:
+            sql += " WHERE (m.timestamp < ?) OR (m.timestamp < ? + 1.0 AND m.id < ?)"
+            params.extend([cursor_ts, cursor_ts, cursor_id if cursor_id is not None else 0])
+        elif cursor_id is not None:
             sql += " WHERE m.id < ?"
             params.append(cursor_id)
         # Newest-first so LIMIT keeps the rows nearest the cursor; the

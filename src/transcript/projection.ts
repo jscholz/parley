@@ -654,6 +654,23 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
  *  USER_DEDUP_WINDOW_MS of a sibling is dropped. Far-apart legitimate repeats
  *  land in separate clusters and each survive. Returns identityKey()s to drop. */
 const USER_DEDUP_WINDOW_MS = 30_000;
+// An unlinked state.db user row and its umsg_* envelope-only copy are the
+// SAME send served twice during the envelope→reconcile-link window. state.db
+// stamps rows at turn-END batch-write, so the twins sit a full TURN DURATION
+// apart (91s in the 2026-07-04 field report; minutes for tool-heavy turns) —
+// far beyond the near-simultaneous window above. Bounded so a genuinely old
+// envelope copy can never swallow a fresh identical send.
+const ENVELOPE_SHADOW_WINDOW_MS = 30 * 60_000;
+// Envelope-only rows are keyed by created_at epoch-millis; state.db rowids
+// stay far below. (Mirrors _ENVELOPE_CURSOR_THRESHOLD in sidekick_state.py.)
+const ENVELOPE_ID_MIN = 1e11;
+
+function isEnvelopeOnlyUserCopy(it: ConversationItem): boolean {
+  return typeof it.sidekick_id === 'string'
+    && it.sidekick_id.startsWith('umsg_')
+    && Number(it.id) >= ENVELOPE_ID_MIN;
+}
+
 function pickUserDuplicateLosers(items: ConversationItem[]): Set<string> {
   const byContent = new Map<string, ConversationItem[]>();
   for (const it of items) {
@@ -663,9 +680,36 @@ function pickUserDuplicateLosers(items: ConversationItem[]): Set<string> {
     arr.push(it);
   }
   const losers = new Set<string>();
-  for (const arr of byContent.values()) {
+  for (const group of byContent.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => normalizeTimestamp(a) - normalizeTimestamp(b));
+    // Envelope-shadow pre-pass: pair each unannotated state row with the
+    // nearest earlier unpaired envelope copy (1:1, so legit repeats keep
+    // their own rows) and drop the state twin. The envelope copy wins
+    // because it carries the true send time AND its key stays stable when
+    // the reconcile link heals — the healed row is served WITH
+    // sidekick_id=umsg_*, so userKey converges instead of re-keying.
+    const envelopes = group.filter(isEnvelopeOnlyUserCopy);
+    const pairedEnvelopes = new Set<ConversationItem>();
+    for (const stateCopy of group) {
+      if (stateCopy.sidekick_id) continue;  // annotated → already linked
+      const sTs = normalizeTimestamp(stateCopy);
+      let match: ConversationItem | null = null;
+      for (const env of envelopes) {
+        const eTs = normalizeTimestamp(env);
+        if (eTs > sTs + 5_000) break;  // envelopes sorted ASC with the group
+        if (pairedEnvelopes.has(env)) continue;
+        if (sTs - eTs <= ENVELOPE_SHADOW_WINDOW_MS) match = env;  // latest qualifying wins
+      }
+      if (match) {
+        pairedEnvelopes.add(match);
+        losers.add(identityKey(stateCopy));
+      }
+    }
+    // Near-simultaneous cluster pass (backend double-write defense) over
+    // whatever the shadow pass left standing.
+    const arr = group.filter((it) => !losers.has(identityKey(it)));
     if (arr.length < 2) continue;
-    arr.sort((a, b) => normalizeTimestamp(a) - normalizeTimestamp(b));
     let start = 0;
     const flushCluster = (end: number) => {
       if (end - start < 2) return;  // single row in this time-cluster → keep

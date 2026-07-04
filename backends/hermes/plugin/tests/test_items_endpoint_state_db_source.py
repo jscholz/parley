@@ -602,3 +602,128 @@ def test_after_result_carries_has_more_key(db, state_db):
     )
     assert "has_more" in result, "after-result must carry has_more (route reads it)"
     assert result["has_more"] is False
+
+
+# ── mixed-id-space pagination cursors (field bug 2026-07-04) ──────────
+#
+# Items carry ids from TWO spaces: state.db rowids (small ints) and
+# envelope-only rows keyed by created_at epoch-millis (~1.8e12). The
+# merged sort key is (created_at, id) — but the after/before filters
+# compared RAW ids across the spaces. Once a page's tail item was an
+# envelope-only row, the PWA's delta cursor became an epoch id and
+# `state_row.id > epoch` was False for every durable row FOREVER: new
+# turns never reached the client, and the tail-merge dropped the rows
+# it did have (field report: the agent's long reply vanished; only a
+# full-page fetch flashed it back until the next delta killed it again).
+# Cursors must be resolved to their (created_at, id) sort tuple and
+# compared in sort-key space.
+
+# Realistic wall-clock base: envelope-only ids are int(created_at*1000)
+# and must land in the epoch-millis space (>= _ENVELOPE_CURSOR_THRESHOLD)
+# like production rows do — toy timestamps would dodge the cursor
+# resolver's space detection entirely.
+BASE_TS = 1_783_000_000.0
+
+
+def _add_envelope_row(db, sk_id, role, content, created_at, chat_id=CHAT_ID):
+    """Unlinked envelope-only msg_links row with a controlled created_at
+    (upsert stamps wall-clock now; cursor math needs deterministic times)."""
+    state.upsert_msg_link(db, id=sk_id, chat_id=chat_id, role=role,
+                          content=content)
+    db.exec("UPDATE msg_links SET created_at = ?, updated_at = ? WHERE id = ?",
+            (created_at, created_at, sk_id))
+
+
+def test_after_cursor_on_envelope_row_still_returns_new_durable_rows(db, state_db):
+    """The vanishing-long-reply shape: page tail = unlinked envelope row
+    (epoch-ms id) → client deltas with after=<epoch id> → every NEW
+    durable (state.db) row must still be returned."""
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "user", "q1", ts=BASE_TS + 0.0)
+    _add_msg(state_db, "s1", "assistant", "long reply", ts=BASE_TS + 200.0)
+    _add_envelope_row(db, "tc:call_orphan", "tool", "orphan tool result",
+                      BASE_TS + 300.0)
+
+    page = state.list_messages_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick"
+    )
+    epoch_cursor = int((BASE_TS + 300.0) * 1000)
+    assert page["items"][-1]["id"] == epoch_cursor, \
+        "seed sanity: envelope-only row is the page tail → epoch cursor"
+
+    q2 = _add_msg(state_db, "s1", "user", "q2", ts=BASE_TS + 400.0)
+    a2 = _add_msg(state_db, "s1", "assistant", "a2", ts=BASE_TS + 500.0)
+
+    result = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=epoch_cursor
+    )
+    got = [(it["id"], it["content"]) for it in result["items"]]
+    assert got == [(q2, "q2"), (a2, "a2")], \
+        "epoch after-cursor must return newer durable rows (and only those)"
+
+
+def test_before_cursor_on_envelope_row_pages_older_not_newer(db, state_db):
+    """Mirror bug on the scroll-up path: before=<epoch id> must page rows
+    strictly OLDER in sort order — with a raw id compare every durable
+    row (including NEWER ones) passed `id < epoch`."""
+    _add_session(state_db, "s1")
+    q1 = _add_msg(state_db, "s1", "user", "q1", ts=BASE_TS + 0.0)
+    lr = _add_msg(state_db, "s1", "assistant", "long reply", ts=BASE_TS + 200.0)
+    _add_envelope_row(db, "tc:call_orphan", "tool", "orphan tool result",
+                      BASE_TS + 300.0)
+    _add_msg(state_db, "s1", "user", "q2", ts=BASE_TS + 400.0)
+
+    result = state.list_messages_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", before_id=int((BASE_TS + 300.0) * 1000)
+    )
+    got = [(it["id"], it["content"]) for it in result["items"]]
+    assert got == [(q1, "q1"), (lr, "long reply")], \
+        "before= from an envelope cursor must exclude rows newer than the cursor"
+
+
+def test_after_state_cursor_pages_through_same_second_batch(db, state_db):
+    """Turn-end batch writes stamp MANY rows with the same timestamp; the
+    after-cursor must keep making progress within the second via the id
+    tie-break (the (created_at, id) sort's second component)."""
+    _add_session(state_db, "s1")
+    ids = [_add_msg(state_db, "s1", "assistant", f"m{i}", ts=2000.0)
+           for i in range(6)]
+    first = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=ids[1], limit=2
+    )
+    assert [it["id"] for it in first["items"]] == [ids[2], ids[3]]
+    assert first["has_more_newer"] is True
+    second = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=first["last_id"], limit=2
+    )
+    assert [it["id"] for it in second["items"]] == [ids[4], ids[5]]
+
+
+def test_after_state_cursor_includes_same_second_envelope_rows(db, state_db):
+    """An unlinked envelope row created in the same second as the cursor
+    row sorts after it (epoch id > state id) and must be returned."""
+    _add_session(state_db, "s1")
+    a1 = _add_msg(state_db, "s1", "assistant", "a1", ts=BASE_TS)
+    _add_envelope_row(db, "umsg_live", "user", "live send", BASE_TS + 0.5)
+
+    result = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=a1
+    )
+    assert [it.get("sidekick_id") for it in result["items"]] == ["umsg_live"]
+
+
+def test_after_cursor_row_deleted_falls_back_to_id_compare(db, state_db):
+    """Cursor row gone from state.db (deleted/compacted) and not
+    epoch-shaped → sort key unresolvable → legacy raw-id compare, which
+    is correct for pure-durable pages."""
+    _add_session(state_db, "s1")
+    a = _add_msg(state_db, "s1", "user", "old", ts=1000.0)
+    b = _add_msg(state_db, "s1", "assistant", "kept", ts=1100.0)
+    conn = sqlite3.connect(str(state_db))
+    conn.execute("DELETE FROM messages WHERE id = ?", (a,))
+    conn.commit()
+    conn.close()
+    result = state.list_messages_after_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "sidekick", after_id=a
+    )
+    assert [it["id"] for it in result["items"]] == [b]

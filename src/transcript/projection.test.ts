@@ -531,6 +531,51 @@ describe('project: user double-write dedup (time-windowed)', () => {
   });
 });
 
+describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
+  it('drops the unannotated state.db twin of a umsg_ envelope copy (turn-length skew)', () => {
+    // Field 2026-07-04: user sent at 11:47:54 (envelope-only copy with a
+    // umsg_* sidekick_id + epoch-ms id), state.db row batch-written at
+    // turn END 11:49:25 — 91s apart, far beyond the 30s double-write
+    // window below. Until the background reconcile links them, the items
+    // endpoint serves BOTH → two user bubbles with different timestamps.
+    const sent = T0;
+    const turnEnd = T0 + 91_000;
+    const s = state({ durable: [
+      { id: String(sent), sidekick_id: 'umsg_1783162074267_x', role: 'user', content: 'single hand the boat?', timestamp: sent },
+      { id: '67182', role: 'user', content: 'single hand the boat?', timestamp: turnEnd },
+    ]});
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length}`);
+    assert.equal(userSpecs[0].key, 'umsg_1783162074267_x',
+      'the envelope copy must win — true send time, and its key stays stable once the link heals');
+  });
+
+  it('pairs 1:1 — a legit repeat with only ONE unlinked state twin keeps two bubbles', () => {
+    // Two real sends of the same text; the second turn's state row isn't
+    // reconciled yet (unannotated) while the first is already linked. The
+    // shadow pass must drop only the second send's twin, not fold the
+    // repeat into one bubble.
+    const s = state({ durable: [
+      { id: '67100', sidekick_id: 'umsg_first', role: 'user', content: 'ok', timestamp: T0 },
+      { id: String(T0 + 120_000), sidekick_id: 'umsg_second', role: 'user', content: 'ok', timestamp: T0 + 120_000 },
+      { id: '67200', role: 'user', content: 'ok', timestamp: T0 + 180_000 },
+    ]});
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 2, `expected 2 bubbles (linked + envelope), got ${userSpecs.length}`);
+  });
+
+  it('does NOT shadow when the skew exceeds the turn-length bound', () => {
+    // An ancient envelope copy must never swallow a fresh identical send —
+    // beyond the bound they are independent messages.
+    const s = state({ durable: [
+      { id: String(T0), sidekick_id: 'umsg_old', role: 'user', content: 'hi', timestamp: T0 },
+      { id: '67300', role: 'user', content: 'hi', timestamp: T0 + 45 * 60_000 },
+    ]});
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 2, `45-min-apart rows are independent, got ${userSpecs.length}`);
+  });
+});
+
 describe('notification update path renders markdown (not plaintext)', () => {
   // Regression: updateNotification used to overwrite the bubble's .text with
   // escapeHtml(text).replace(/\n/g,'<br>') on every reconcile pass, flattening
