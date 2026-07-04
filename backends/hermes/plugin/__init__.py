@@ -2743,6 +2743,18 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
     except Exception:
         logger.exception("[sidekick] register_platform failed")
 
+    # Agent-facing display_doc tool (Docs side panel in the PWA).
+    # Registered against hermes' public tools.registry via its own
+    # guarded module — a hermes tree without the registry (or a
+    # registration failure) must never take the plugin down; the PWA's
+    # Docs panel just stays empty. The lambda re-reads _active_adapter
+    # per call so adapter restarts don't strand a stale reference.
+    try:
+        from .sidekick_doc_tool import register_display_doc_tool
+        register_display_doc_tool(lambda: _active_adapter)
+    except Exception:
+        logger.exception("[sidekick] display_doc tool wiring failed")
+
     def _pre(**kwargs: Any) -> None:
         adapter = _active_adapter
         if adapter is None:

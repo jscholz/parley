@@ -9,6 +9,8 @@ import { createRightDrawerHost, type RightDrawerHost } from '../rightDrawer/host
 import { hydrate as hydrateActivity, unresolvedApprovalCount, unreadActivityCount } from '../notifications/activityStore.ts';
 import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHandler } from '../rightDrawer/modules/activity.ts';
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
+import { createDocModule } from '../rightDrawer/modules/doc.ts';
+import { hydrateDoc } from '../rightDrawer/docStore.ts';
 
 let drawerEl: HTMLElement | null = null;
 let pinPanelEl: HTMLElement | null = null;
@@ -20,7 +22,7 @@ let titleEl: HTMLElement | null = null;
 let statusEl: HTMLElement | null = null;
 let statusTimer: number | null = null;
 let drawerHost: RightDrawerHost | null = null;
-let activePanel: 'pins' | 'activity' = 'pins';
+let activePanel: 'pins' | 'activity' | 'doc' = 'pins';
 
 function defaultDrawerWidthPx(): number {
   return Math.max(320, Math.min(Math.round(window.innerWidth * 0.24), 420));
@@ -88,6 +90,9 @@ export function initPinDrawer(opts: {
   activityPanelEl = document.getElementById('activity-drawer-panel');
   const activityListEl = document.getElementById('activity-drawer-list');
   const activityEmptyEl = document.getElementById('activity-drawer-empty');
+  const docPanelEl = document.getElementById('doc-drawer-panel');
+  const docBodyEl = document.getElementById('doc-drawer-body');
+  const docEmptyEl = document.getElementById('doc-drawer-empty');
   const emptyEl = document.getElementById('pin-drawer-empty');
   statusEl = document.getElementById('pin-drawer-status');
   titleEl = document.getElementById('right-drawer-title');
@@ -110,6 +115,9 @@ export function initPinDrawer(opts: {
   // (field bug 2026-06-12, CAP). hydrate() is idempotent; the sync
   // localStorage load runs before any await.
   void hydratePins();
+  // Sync localStorage read — a persisted doc paints on the host's initial
+  // render (autoOpen=false, so boot never yanks the drawer open).
+  hydrateDoc();
 
   drawerHost = createRightDrawerHost({
     drawerId: 'pin-drawer',
@@ -132,6 +140,16 @@ export function initPinDrawer(opts: {
         onPinClick: opts.onPinClick,
         onSelect: () => { activePanel = 'pins'; },
       }),
+      // Docs tab is optional chrome: index.html may predate it (cached
+      // app shell) — register only when its elements exist.
+      ...(docPanelEl && docBodyEl && docEmptyEl
+        ? [createDocModule({
+            panel: docPanelEl,
+            body: docBodyEl,
+            empty: docEmptyEl,
+            onSelect: () => { activePanel = 'doc'; },
+          })]
+        : []),
     ],
     bodyClass: 'pin-drawer-open',
     prefKey: 'sidekick.pin-drawer.expanded',
@@ -153,6 +171,17 @@ export function initPinDrawer(opts: {
   window.addEventListener('sidekick:activity-changed', () => {
     refreshActivityCountBanner();
     if (isOpen() && activePanel === 'activity') drawerHost?.render();
+  });
+  window.addEventListener('sidekick:doc-changed', (ev) => {
+    const autoOpen = !!(ev as CustomEvent<{ autoOpen?: boolean }>).detail?.autoOpen;
+    if (autoOpen) {
+      // Agent push (display_doc): the user asked to SEE this — bring the
+      // Docs tab up on desktop AND mobile. Hydrate/clear (autoOpen=false)
+      // only re-renders in place.
+      drawerHost?.select('doc', { open: true });
+      return;
+    }
+    if (isOpen() && activePanel === 'doc') drawerHost?.render();
   });
   window.addEventListener('sidekick:pin-error', (ev) => {
     const detail = (ev as CustomEvent<{ message?: string }>).detail;

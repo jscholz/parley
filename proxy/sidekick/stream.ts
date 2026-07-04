@@ -100,6 +100,10 @@ const FANOUT_TYPES = new Set<string>([
   'unread_changed',
   'pins_changed',
   'conversation_deleted',
+  // display_doc tool → Docs panel push. Carries the full document body
+  // (plugin caps it at 1MB) — rides the ring like any other envelope so
+  // a tab opened seconds after the push still receives it via replay.
+  'doc_show',
 ]);
 
 // Bumped from 32 → 128: traffic is heavier now (every reply_delta

@@ -28,6 +28,7 @@ import * as ttsModule from './audio/turn-based/tts.ts';
 import { playReplyTts, cancelReplyTts } from './audio/turn-based/tts.ts';
 import { playFeedback } from './audio/shared/feedback.ts';
 import { attachCard } from './cards/attach.ts';
+import { setDoc } from './rightDrawer/docStore.ts';
 import { parseCardsFromText, extractImageBlocks } from './cards/fallback.ts';
 import * as transcriptStore from './transcript/store.ts';
 import * as listenReply from './listenReplyState.ts';
@@ -397,8 +398,20 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
 }
 
 /** Tool-events — cards and similar side-channel data the agent emits.
- *  Currently just canvas.show; grows as backends add more. */
-export function handleToolEvent({ kind, payload, conversation }: any) {
+ *  canvas.show (inline bubble cards) + doc.show (Docs drawer panel). */
+export function handleToolEvent({ kind, payload, conversation, isReplay }: any) {
+  if (kind === 'doc.show' && payload) {
+    // Docs drawer is chat-independent chrome — no viewed-session gate:
+    // the user may have switched chats while the turn ran, and they
+    // still asked to SEE this. Replays (SSE ring on boot/reconnect)
+    // set the content without yanking the drawer open.
+    log('doc.show event from agent');
+    setDoc(
+      { ...payload, chatId: conversation || undefined },
+      { autoOpen: !isReplay },
+    );
+    return;
+  }
   // Drop only for an explicitly DIFFERENT viewed session.
   const viewed = switchCtl.viewedId();
   if (viewed && conversation && conversation !== viewed) return;

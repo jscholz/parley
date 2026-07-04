@@ -390,7 +390,9 @@ function startStreamChannel(): void {
                    // handleEnvelope() are unreachable — caught only
                    // by cross-device-pin-sync.mjs smoke 2026-05-16.
                    'unread_changed', 'pins_changed', 'activity_changed',
-                   'conversation_deleted']) {
+                   'conversation_deleted',
+                   // display_doc tool → Docs panel push.
+                   'doc_show']) {
     streamES.addEventListener(t, onEvent as any);
   }
   // #204: the server emits replay_gap when our cursor predates its
@@ -722,6 +724,27 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
         kind: 'image',
         payload: { url: env.url, caption: env.caption || '' },
         conversation: chatId,
+      });
+      return;
+    }
+
+    case 'doc_show': {
+      // display_doc tool: the agent pushed a document for the Docs
+      // drawer tab. Same onToolEvent shape as 'image' — the handler
+      // (backendEventHandlers.handleToolEvent) routes it to the doc
+      // store. isReplay gates the drawer auto-open: a ring-replayed
+      // push (boot / reconnect without a cursor) must still SET the
+      // doc but never yank the drawer open again.
+      subs?.onToolEvent?.({
+        kind: 'doc.show',
+        payload: {
+          title: typeof env.title === 'string' ? env.title : 'Document',
+          content: typeof env.content === 'string' ? env.content : '',
+          format: typeof env.format === 'string' ? env.format : 'text',
+          path: typeof env.path === 'string' ? env.path : undefined,
+        },
+        conversation: chatId,
+        isReplay: env?._replay === true,
       });
       return;
     }
