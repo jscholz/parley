@@ -41,6 +41,15 @@ export interface ModelCaps {
 
 const capsByModel = new Map<string, ModelCaps>();
 const capsInFlight = new Map<string, Promise<ModelCaps | null>>();
+// Failure entries (fetch error / non-OK) are cached as known:false with
+// an expiry so they retry eventually — but NEVER in a tight loop.
+// Field bug 2026-07-07: fetchModelCaps cached nothing on failure, so
+// updateAttachButtonsState's fetch→then→re-run chain retried a failing
+// endpoint with zero backoff (~500 req/s) until the browser killed the
+// tab (white screen on npx trial installs, whose proxy 502'd this
+// endpoint). Success entries never expire (cleared on setting change).
+const capsNegativeUntil = new Map<string, number>();
+const NEGATIVE_TTL_MS = 60_000;
 let visionFallbackModel: string | null = null;
 let auxiliaryReady: Promise<void> | null = null;
 
@@ -87,7 +96,13 @@ function ensureAuxiliaryFetched(): Promise<void> {
 export async function fetchModelCaps(modelId: string): Promise<ModelCaps | null> {
   if (!modelId) return null;
   const cached = capsByModel.get(modelId);
-  if (cached) return cached;
+  if (cached) {
+    // Expired negative entry → fall through and refetch once.
+    const negUntil = capsNegativeUntil.get(modelId);
+    if (!negUntil || Date.now() < negUntil) return cached;
+    capsByModel.delete(modelId);
+    capsNegativeUntil.delete(modelId);
+  }
   const inflight = capsInFlight.get(modelId);
   if (inflight) return inflight;
   const p = (async () => {
@@ -96,7 +111,7 @@ export async function fetchModelCaps(modelId: string): Promise<ModelCaps | null>
         apiUrl(`/api/sidekick/model-capabilities?model=${encodeURIComponent(modelId)}`),
         { cache: 'no-store' },
       );
-      if (!res.ok) return null;
+      if (!res.ok) return cacheNegative(modelId);
       const body = await res.json() as Partial<ModelCaps> & { known?: boolean };
       const caps: ModelCaps = {
         known: !!body.known,
@@ -109,15 +124,37 @@ export async function fetchModelCaps(modelId: string): Promise<ModelCaps | null>
         model_family: typeof body.model_family === 'string' ? body.model_family : '',
       };
       capsByModel.set(modelId, caps);
+      capsNegativeUntil.delete(modelId);
       return caps;
     } catch {
-      return null;
+      return cacheNegative(modelId);
     } finally {
       capsInFlight.delete(modelId);
     }
   })();
   capsInFlight.set(modelId, p);
   return p;
+}
+
+/** Cache a failure as a known:false verdict with a retry-after expiry —
+ *  the answer callers should act on ("nobody can vouch for this model")
+ *  AND the loop-breaker for updateAttachButtonsState's fetch→re-run
+ *  chain: capsByModel.has() is now true after a failure, so the chain
+ *  terminates instead of retrying instantly. */
+function cacheNegative(modelId: string): ModelCaps {
+  const neg: ModelCaps = {
+    known: false,
+    supports_vision: false,
+    accepts_pdf: false,
+    supports_tools: false,
+    supports_reasoning: false,
+    context_window: 0,
+    max_output_tokens: 0,
+    model_family: '',
+  };
+  capsByModel.set(modelId, neg);
+  capsNegativeUntil.set(modelId, Date.now() + NEGATIVE_TTL_MS);
+  return neg;
 }
 
 function primaryModelHasVision(modelId: string): boolean {
@@ -253,6 +290,7 @@ export function initModelCapabilities(opts: {
     // Model may have changed — clear the cache so we re-fetch fresh
     // caps on the next gate evaluation.
     capsByModel.clear();
+    capsNegativeUntil.clear();
     updateAttachButtonsState();
   });
   // Tab-visibility return: re-fetch the auxiliary model advertisement

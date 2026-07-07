@@ -134,12 +134,23 @@ export async function handleSidekickModelCapabilities(
     value = memo.value;
   } else {
     value = await fetchCapabilitiesLive(provider, model);
-    if (value) capsMemo.set(key, { value, at: Date.now() });
+    // Memoize FAILURES too (as known:false) — an upstream without the
+    // capabilities endpoint (the token-less trial stub, older plugins)
+    // used to produce a 502 per request, and the PWA's attach-gate
+    // retried each failure instantly: a zero-backoff loop hammering
+    // ~500 req/s that pegged the tab until the browser killed it
+    // (field bug 2026-07-07: white screen ~5-10s after load on npx
+    // installs). known:false IS the correct answer for "nobody can
+    // vouch for this model" — serve it as a 200 and cache it under the
+    // same TTL so recovery (plugin upgrade, token added) still lands
+    // within a minute.
+    if (!value) {
+      value = { provider: provider || null, model, known: false };
+    }
+    capsMemo.set(key, { value, at: Date.now() });
   }
-  res.statusCode = value ? 200 : 502;
+  res.statusCode = 200;
   res.setHeader('content-type', 'application/json');
   res.setHeader('cache-control', 'no-store');
-  res.end(JSON.stringify(
-    value ?? { provider: provider || null, model, known: false, error: 'upstream unavailable' },
-  ));
+  res.end(JSON.stringify(value));
 }
