@@ -28,6 +28,7 @@
  * backends/hermes/plugin).
  */
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -150,10 +151,18 @@ function spawnPrefixed(label, cmd, args, opts = {}) {
   return child;
 }
 
+// Prefer the bundled server.mjs (built by scripts/build.mjs; ships in the
+// npm tarball) — Node refuses --experimental-strip-types for files under
+// node_modules, so npm/npx installs CANNOT run server.ts. Dev checkouts
+// without a bundle fall back to strip-types as before.
+const serverBundle = path.join(REPO_ROOT, 'server.mjs');
+const proxyArgs = fs.existsSync(serverBundle)
+  ? [serverBundle]
+  : ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'server.ts'];
 const proxy = spawnPrefixed(
   'proxy',
   process.execPath,
-  ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'server.ts'],
+  proxyArgs,
   { env: { PORT: String(proxyPort), SIDEKICK_PLATFORM_URL: upstreamUrl } },
 );
 

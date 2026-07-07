@@ -22,3 +22,5 @@ config.yaml
 .DS_Store
 __pycache__/
 *.pyc
+# Bundled Node proxy (built by scripts/build.mjs for npm-installed runs).
+/server.mjs

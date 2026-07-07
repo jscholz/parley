@@ -200,10 +200,40 @@ async function build({ watch }) {
     await copyAssets();
     await rewriteImportExtensions(OUT);
     await buildVendorBundles();
+    await buildServerBundle();
     const imports = await hashBuildAssets();
     await writeHashedIndex(imports);
     console.log(`[build] compiled ${entries.length} files → ${relative(ROOT, OUT)}/ (${Object.keys(imports).length} hashed + import map)`);
   }
+}
+
+/**
+ * Bundle the Node proxy (server.ts + proxy/**) into a single plain-JS
+ * server.mjs at the repo root, so an npm-installed package can run it:
+ * Node refuses --experimental-strip-types for files under node_modules
+ * (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), which kills `npx
+ * sidekick-portal` if start-all points at server.ts.
+ *
+ * Root outfile (not dist/) is load-bearing: server.ts derives __dirname
+ * from import.meta.url and serves static assets (index.html, build/,
+ * styles/) relative to it — bundling anywhere else would break every
+ * static path. npm deps (ws, yaml, ...) stay external and resolve from
+ * node_modules at runtime; only the local .ts graph is inlined.
+ * start-all prefers server.mjs when present (published tarball), falls
+ * back to strip-types server.ts (dev checkout).
+ */
+async function buildServerBundle() {
+  await esbuild.build({
+    entryPoints: [join(ROOT, 'server.ts')],
+    outfile: join(ROOT, 'server.mjs'),
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'node22',
+    packages: 'external',
+    sourcemap: false,
+    logLevel: 'info',
+  });
 }
 
 const watch = process.argv.includes('--watch');

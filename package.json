@@ -1,14 +1,41 @@
 {
-  "name": "sidekick",
-  "version": "0.2.0",
+  "name": "sidekick-portal",
+  "version": "0.3.0",
   "type": "module",
-  "private": true,
-  "description": "Voice-first PWA agent portal — bring your own backend. Speaks the OpenAI Responses API.",
+  "description": "Voice-first PWA agent portal \u2014 bring your own backend. Speaks the OpenAI Responses API.",
   "license": "MIT",
   "homepage": "https://github.com/jscholz/sidekick",
   "repository": {
     "type": "git",
     "url": "https://github.com/jscholz/sidekick.git"
+  },
+  "bin": {
+    "sidekick-portal": "bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "build/",
+    "styles/",
+    "assets/",
+    "proxy/",
+    "backends/stub/",
+    "scripts/build.mjs",
+    "scripts/start-all.mjs",
+    "server.ts",
+    "server.mjs",
+    "index.html",
+    "sw.js",
+    "manifest.json",
+    ".env.example",
+    "example.sidekick.config.yaml",
+    "docs/ABSTRACT_AGENT_PROTOCOL.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -21,27 +48,29 @@
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/run-smoke.mjs",
     "smoke:barge": "node scripts/run-smoke-barge.mjs",
-    "smoke:live": "node scripts/smoke-live.mjs"
+    "smoke:live": "node scripts/smoke-live.mjs",
+    "prepack": "node scripts/build.mjs",
+    "prepare": "node -e \"const fs=require('fs');if(!fs.existsSync('build/index.html')&&fs.existsSync('scripts/build.mjs')&&fs.existsSync('src'))require('child_process').execFileSync(process.execPath,['scripts/build.mjs'],{stdio:'inherit'})\""
   },
   "dependencies": {
+    "playwright-core": "^1.59.1",
+    "web-push": "^3.6.7",
+    "ws": "^8.20.0",
+    "yaml": "^2.8.4"
+  },
+  "devDependencies": {
     "@capacitor/android": "^8.3.1",
     "@capacitor/cli": "^8.3.1",
     "@capacitor/core": "^8.3.1",
     "@capacitor/ios": "^8.3.1",
     "@ricky0123/vad-web": "^0.0.30",
     "@types/js-yaml": "^4.0.9",
-    "js-yaml": "^4.1.1",
-    "onnxruntime-web": "^1.25.1",
-    "playwright-core": "^1.59.1",
-    "sortablejs": "^1.15.7",
-    "web-push": "^3.6.7",
-    "ws": "^8.20.0",
-    "yaml": "^2.8.4"
-  },
-  "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/sortablejs": "^1.15.9",
     "esbuild": "^0.28.0",
+    "js-yaml": "^4.1.1",
+    "onnxruntime-web": "^1.25.1",
+    "sortablejs": "^1.15.7",
     "typescript": "^6.0.2"
   }
 }
