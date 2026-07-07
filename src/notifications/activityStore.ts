@@ -1,5 +1,6 @@
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
+import { isProgressHeartbeatText } from '../util/progressHeartbeat.ts';
 import { ServerBackedStore } from '../util/serverBackedStore.ts';
 
 export type ActivityKind = 'approval' | 'cron' | 'agent_reply' | 'notification';
@@ -148,6 +149,19 @@ function pruneSupersededApprovals(items: Map<string, ActivityItem>, post: Activi
   const newestByChat = new Map<string, number>();
   for (const item of items.values()) {
     if (!item.chatId || item.kind === 'approval') continue;
+    // "⏳ Still working…" progress heartbeats are NOT the agent moving on
+    // — they're the pulse of the very turn that's blocked on the approval.
+    // The per-event path already knows this (handleReplyFinal's
+    // isProgressHeartbeatText gate never upserts them locally), but the
+    // hermes plugin persists push-DELIVERED heartbeats as agent_reply
+    // Activity rows server-side (_persist_activity_for_push), so they
+    // arrive here via the snapshot anyway. Field bug 2026-07-07: opening
+    // the tray to ACTION a pending approval fired render →
+    // refreshFromServer → this prune, which saw a newer heartbeat row for
+    // the chat and dismissed the approval out from under the user while
+    // the agent was still blocked. Same predicate as the per-event gate
+    // (shared util) so the two paths can never disagree again.
+    if (isProgressHeartbeatText(item.body)) continue;
     newestByChat.set(item.chatId, Math.max(newestByChat.get(item.chatId) ?? 0, item.createdAt));
   }
   for (const [id, item] of Array.from(items.entries())) {

@@ -134,6 +134,51 @@ describe('reconcileActivity: superseded-approval prune ("agent moved on")', () =
     assert.equal(posts.length, 0);
   });
 
+  it('a newer "⏳ Still working…" heartbeat row does NOT supersede (agent is still ON the approval)', () => {
+    // Field bug 2026-07-07: the hermes plugin persists push-delivered
+    // progress heartbeats as agent_reply Activity rows, so the snapshot
+    // contains "newer non-approval" rows for a chat whose agent is
+    // BLOCKED on the approval. Opening the tray (render →
+    // refreshFromServer → prune) dismissed the pending approval the
+    // moment the user came to action it.
+    const { posts, post } = capture();
+    const approval = item({ id: 'ap1', kind: 'approval', createdAt: 1000 });
+    const beat = item({
+      id: 'hb1', kind: 'agent_reply', createdAt: 2000,
+      body: '⏳ Still working... (15 min elapsed — iteration 38/60, running: terminal)',
+    });
+    const next = toMap(approval, beat);
+    reconcileActivity(next, toMap(), { firstServerHydrate: false }, post);
+    assert.equal(next.get('ap1')!.resolved, undefined, 'heartbeat must not dismiss a pending approval');
+    assert.equal(posts.length, 0);
+  });
+
+  it('emoji-stripped heartbeat body is still recognized (structural fallback matcher)', () => {
+    const { post } = capture();
+    const approval = item({ id: 'ap1', kind: 'approval', createdAt: 1000 });
+    const beat = item({
+      id: 'hb1', kind: 'agent_reply', createdAt: 2000,
+      body: 'Still working... (3 min elapsed — iteration 10/60, running: terminal)',
+    });
+    const next = toMap(approval, beat);
+    reconcileActivity(next, toMap(), { firstServerHydrate: false }, post);
+    assert.equal(next.get('ap1')!.resolved, undefined);
+  });
+
+  it('a newer REAL reply still supersedes even when heartbeats are interleaved', () => {
+    const { posts, post } = capture();
+    const approval = item({ id: 'ap1', kind: 'approval', createdAt: 1000 });
+    const beat = item({
+      id: 'hb1', kind: 'agent_reply', createdAt: 2000,
+      body: '⏳ Still working... (3 min elapsed — iteration 5/60, running: terminal)',
+    });
+    const real = item({ id: 'r1', kind: 'agent_reply', createdAt: 3000, body: 'Done. Built the thing.' });
+    const next = toMap(approval, beat, real);
+    reconcileActivity(next, toMap(), { firstServerHydrate: false }, post);
+    assert.equal(next.get('ap1')!.resolved, 'dismissed', 'real reply = agent moved on, heartbeat presence changes nothing');
+    assert.equal(posts.length, 1);
+  });
+
   it('a CARRIED approval can still be pruned by a newer snapshot row', () => {
     const { posts, post } = capture();
     // Local-only pending approval; the snapshot lacks it but contains a

@@ -13,6 +13,7 @@
  */
 
 import { log, diag } from './util/log.ts';
+import { isProgressHeartbeatText } from './util/progressHeartbeat.ts';
 import { replaySessionMessages, persistGrownTranscript, NO_REPLY_RE } from './sessionResume.ts';
 import * as backend from './backend.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
@@ -200,19 +201,6 @@ function schedulePostFinalDurableRefresh(
 
 /** Complete reply. `content` (if present) is the raw block array used to
  *  pull out image attachments. */
-/** "⏳ Still working… (N min elapsed — iteration X/60, …)" — the canonical
- *  heartbeat shape an autonomous agent emits per-iteration. Mirrors the
- *  push-gate matcher in proxy/sidekick/notifications/dispatch.ts
- *  (isProgressHeartbeat). Every heartbeat reply_final would dismiss pending
- *  approvals for the chat without this guard — skip that branch when the
- *  text matches. KEEP IN SYNC with the server matcher. */
-function isProgressHeartbeatText(raw: string): boolean {
-  const s = (raw || '').trim();
-  if (!s) return false;
-  return /^⏳\s*Still working\b/i.test(s)
-    || /\bStill working\.{0,3}\s*\(\s*\d+\s*min elapsed\b.*\biteration\s*\d+\s*\/\s*\d+/i.test(s);
-}
-
 export function handleReplyFinal({ replyId, text, content = [], conversation, messageId, isReplay = false }: any) {
   sessionDrawer.scheduleRefresh();
   // Auto-resolve any pending approval for this chat — but ONLY when this
