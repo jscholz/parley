@@ -31,6 +31,12 @@ jobs:
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
+      # Node 22 bundles npm 10.x, which does NOT support OIDC trusted
+      # publishing (needs npm >= 11.5) — the publish step fails with an
+      # auth error while everything else passes. First observed on the
+      # v0.3.1 release run; same npm-10 limitation bit the manual
+      # web-auth publish flow earlier the same day.
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm test
       - run: npm run typecheck
