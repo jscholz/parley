@@ -207,6 +207,11 @@ export function initPinDrawer(opts: {
     const detail = (ev as CustomEvent<{ message?: string }>).detail;
     showPinStatus(detail?.message || 'Could not update pinned messages.');
   });
+  // Doc removal is agent-recoverable, not undo-able — say so briefly.
+  window.addEventListener('sidekick:doc-removed', (ev) => {
+    const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
+    showPinStatus(`Removed ${title ? `"${title}"` : 'document'} — ask the agent to display it again to restore.`);
+  });
 
   refreshCountBanner();
   refreshActivityCountBanner();

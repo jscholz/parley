@@ -13,7 +13,7 @@ Hands-free chat with any agent that speaks the OpenAI Responses API. Configurabl
 ## Try it (one command)
 
 ```bash
-npx github:jscholz/sidekick        # npx sidekick-portal once published
+npx sidekick-portal
 ```
 
 Needs Node 22+. That boots the whole stack — the PWA at

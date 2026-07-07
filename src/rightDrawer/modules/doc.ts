@@ -40,13 +40,18 @@ export function createDocModule(opts: {
     const doc = currentDoc();
     if (!doc) view = 'reader';   // empty shelf → empty state, not a list
 
+    // The drawer-header action sits next to the panel title, where a
+    // button reads as PANEL chrome — so it must never destroy a document
+    // (field UX nit 2026-07-07: "Close" there implied closing the view
+    // but removed the doc). Reader view: header action hidden; removal
+    // lives in the doc's own header row as a trash icon beside Download.
+    // List view: "Clear all" is fine — it sits directly above the rows
+    // it acts on.
     if (ctx.clearButton) {
-      ctx.clearButton.hidden = !doc;
-      const label = view === 'list' ? 'Clear all' : 'Close';
-      ctx.clearButton.textContent = label;
-      ctx.clearButton.setAttribute('aria-label',
-        view === 'list' ? 'Clear all documents' : 'Close this document');
-      ctx.clearButton.setAttribute('title', label);
+      ctx.clearButton.hidden = !doc || view !== 'list';
+      ctx.clearButton.textContent = 'Clear all';
+      ctx.clearButton.setAttribute('aria-label', 'Clear all documents');
+      ctx.clearButton.setAttribute('title', 'Clear all');
     }
     opts.body.innerHTML = '';
     if (!doc) {
@@ -135,6 +140,24 @@ export function createDocModule(opts: {
     dl.onclick = () => downloadDoc(doc);
     header.appendChild(dl);
 
+    // Remove-from-shelf — trash icon NEXT TO the doc's own actions so its
+    // scope (this document) is unmistakable; never in the drawer header.
+    const rm = document.createElement('button');
+    rm.className = 'doc-drawer-remove';
+    rm.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11"/><path d="M6.5 2.5h3"/><path d="M4 4.5l.6 9a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-9"/><path d="M6.5 7v5M9.5 7v5"/></svg>';
+    rm.setAttribute('aria-label', 'Remove document from shelf');
+    rm.setAttribute('title', 'Remove from shelf');
+    rm.onclick = () => {
+      removeDoc(doc.id);
+      try {
+        window.dispatchEvent(new CustomEvent('sidekick:doc-removed', {
+          detail: { title: doc.title },
+        }));
+      } catch { /* non-browser */ }
+      rerender(ctx);
+    };
+    header.appendChild(rm);
+
     opts.body.appendChild(header);
 
     const titleEl = document.createElement('div');
@@ -169,11 +192,10 @@ export function createDocModule(opts: {
     toggleIds: ['btn-doc-drawer-rail'],
     render,
     onClear: (ctx) => {
-      if (view === 'list') { clearDocs(); view = 'reader'; }
-      else {
-        const doc = currentDoc();
-        if (doc) removeDoc(doc.id);
-      }
+      // Only reachable from list view (the header action is hidden in the
+      // reader — see render()); clears the whole shelf.
+      clearDocs();
+      view = 'reader';
       ctx.render();
     },
     onSelect: () => { opts.onSelect?.(); },

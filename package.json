@@ -7,7 +7,7 @@
   "homepage": "https://github.com/jscholz/sidekick",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jscholz/sidekick.git"
+    "url": "git+https://github.com/jscholz/sidekick.git"
   },
   "bin": {
     "sidekick-portal": "bin/cli.mjs"
