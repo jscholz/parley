@@ -30,7 +30,18 @@ ln -s "<sidekick-repo>/backends/hermes/plugin" ~/.hermes/plugins/sidekick
 # 4. Set the shared bearer token on the hermes side:
 echo "SIDEKICK_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 
-# 5. Restart hermes-gateway to load the plugin.
+# 5. Enable BOTH sidekick toolsets in ~/.hermes/config.yaml.
+#    hermes-sidekick = the auto-generated core-tools composite (file,
+#    terminal, web, ...). sidekick = the plugin's own tools
+#    (display_doc). The second entry must be explicit: hermes'
+#    validate_toolset() has no auto-gen branch, so without it the
+#    plugin's tools are silently dropped from sessions.
+#      platform_toolsets:
+#        sidekick:
+#        - hermes-sidekick
+#        - sidekick
+
+# 6. Restart hermes-gateway to load the plugin.
 systemctl --user restart hermes-gateway
 ```
 
