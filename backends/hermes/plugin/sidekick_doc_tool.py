@@ -17,11 +17,20 @@ hard-depends on the other:
   * frontend without the tab  → the ``doc_show`` envelope is an unknown
     SSE event name and is dropped by the proxy/EventSource layers.
 
-Toolset: ``hermes-sidekick`` — the sidekick platform's default toolset
-(``_get_platform_tools`` derives ``hermes-<platform>`` for plugin
-platforms), so the tool is offered to sidekick sessions with zero config
-changes and stays invisible elsewhere. ``check_fn`` additionally gates on
-the session platform so other surfaces never list it.
+Toolset: ``sidekick`` — the BARE platform name, NOT ``hermes-sidekick``.
+This distinction is load-bearing. Hermes resolves a plugin platform's
+default toolset ``hermes-<platform>`` via an auto-generation branch in
+``toolsets.resolve_toolset`` that returns ``_HERMES_CORE_TOOLS`` (file,
+terminal, web, ...) PLUS any registry tools whose ``toolset == <platform>``
+— but ONLY while no registered toolset literally named
+``hermes-<platform>`` exists. Registering this tool under
+``hermes-sidekick`` (as v1 did, 2026-07-04..07-07) created exactly such a
+toolset, shadowing the auto-gen branch and silently stripping every core
+tool from sidekick sessions — the agent was left with only display_doc +
+MCP tools (field regression: filesystem access lost in the deck-writing
+workflow). Registering under the bare platform name keeps the auto-gen
+composite intact: core tools + display_doc. ``check_fn`` additionally
+gates on the session platform so other surfaces never list it.
 """
 
 import json
@@ -170,13 +179,17 @@ def register_display_doc_tool(get_adapter: Callable[[], Any]) -> bool:
     try:
         registry.register(
             name="display_doc",
-            toolset="hermes-sidekick",
+            # Bare platform name — NEVER "hermes-sidekick". See module
+            # docstring: a registered toolset named hermes-sidekick shadows
+            # the auto-generated core-tools composite and strips file/
+            # terminal/web from every sidekick session.
+            toolset="sidekick",
             schema=DISPLAY_DOC_SCHEMA,
             handler=_make_display_doc_handler(get_adapter),
             check_fn=_check_display_doc,
             emoji="📄",
         )
-        logger.info("[sidekick] display_doc tool registered (toolset=hermes-sidekick)")
+        logger.info("[sidekick] display_doc tool registered (toolset=sidekick)")
         return True
     except Exception:
         logger.exception("[sidekick] display_doc registration failed")

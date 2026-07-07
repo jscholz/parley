@@ -98,3 +98,38 @@ def test_display_doc_missing_file_errors_cleanly(monkeypatch, adapter, handler):
     out = json.loads(handler({"path": "/nonexistent/nope.md"}))
     assert "error" in out
     assert adapter.envelopes == []
+
+
+def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
+    """Regression: toolset MUST be the bare platform name "sidekick".
+
+    Registering under "hermes-sidekick" (v1, 2026-07-04) created a real
+    registry toolset with that name, which SHADOWS hermes' auto-generated
+    ``hermes-<platform>`` composite (``_HERMES_CORE_TOOLS`` + platform
+    tools) in ``toolsets.resolve_toolset`` — silently stripping file/
+    terminal/web/every core tool from ALL sidekick sessions. Field
+    regression 2026-07-07: agent lost filesystem access mid-workflow.
+    """
+    import sys
+    import types
+
+    calls = {}
+
+    class FakeRegistry:
+        def register(self, **kwargs):
+            calls.update(kwargs)
+
+    fake_mod = types.ModuleType("tools.registry")
+    fake_mod.registry = FakeRegistry()
+    fake_pkg = types.ModuleType("tools")
+    fake_pkg.registry = fake_mod
+    monkeypatch.setitem(sys.modules, "tools", fake_pkg)
+    monkeypatch.setitem(sys.modules, "tools.registry", fake_mod)
+
+    assert doc_tool.register_display_doc_tool(lambda: None) is True
+    assert calls["name"] == "display_doc"
+    assert calls["toolset"] == "sidekick", (
+        "toolset must be the bare platform name; a literal 'hermes-sidekick' "
+        "registry toolset shadows the core-tools composite and strips "
+        "filesystem/terminal tools from every sidekick session"
+    )
