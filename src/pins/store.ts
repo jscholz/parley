@@ -126,15 +126,37 @@ export async function pinMessage(item: Omit<PinnedItem, 'pinnedAt'>): Promise<vo
       let detail = '';
       try { detail = await r.text(); } catch { /* ignore */ }
       log(`[pins] POST failed: HTTP ${r.status}${detail ? ` ${detail.slice(0, 500)}` : ''}`);
-      notifyPinError(r.status === 400 && /body too large/i.test(detail)
-        ? 'This message is too large to pin.'
-        : 'Could not pin this message.');
+      if (isUnsupported(r.status)) {
+        // Backend without a pins endpoint (e.g. the trial stub): the pin
+        // DID work — it's persisted device-locally by the optimistic
+        // write above — so a red "could not pin" is a false error
+        // (field bug 2026-07-07, first npx tester). Say what's actually
+        // true, once per session, and stay quiet after.
+        notifyLocalOnlyOnce();
+      } else {
+        notifyPinError(r.status === 400 && /body too large/i.test(detail)
+          ? 'This message is too large to pin.'
+          : 'Could not pin this message.');
+      }
     }
   } catch (e: any) {
     log(`[pins] POST failed: ${e?.message ?? e}`);
     notifyPinError('Could not pin this message.');
   }
   void store.refreshFromServer();
+}
+
+/** 404/405/501 = the backend has no pins surface at all — a capability
+ *  gap, not a failure. Anything else stays a real error. */
+function isUnsupported(status: number): boolean {
+  return status === 404 || status === 405 || status === 501;
+}
+
+let localOnlyNoticeShown = false;
+function notifyLocalOnlyOnce(): void {
+  if (localOnlyNoticeShown) return;
+  localOnlyNoticeShown = true;
+  notifyPinError('Pinned on this device — this backend doesn’t sync pins across devices.');
 }
 
 /** Remove a pin. Optimistic local delete + DELETE on server. */
@@ -151,7 +173,9 @@ export async function unpinMessage(chatId: string, msgId: string): Promise<void>
       let detail = '';
       try { detail = await r.text(); } catch { /* ignore */ }
       log(`[pins] DELETE failed: HTTP ${r.status}${detail ? ` ${detail.slice(0, 500)}` : ''}`);
-      notifyPinError('Could not unpin this message.');
+      // Same capability-gap treatment as pinMessage: the local delete
+      // already stuck; a pins-less backend has nothing to unpin.
+      if (!isUnsupported(r.status)) notifyPinError('Could not unpin this message.');
     }
   } catch (e: any) {
     log(`[pins] DELETE failed: ${e?.message ?? e}`);
