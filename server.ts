@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import * as sidekick from './proxy/sidekick/index.ts';
+import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/sidekick/setup.ts';
 import {
   FRONTEND_SETTINGS,
   readAllFrontend,
@@ -118,9 +119,14 @@ const HOST = cfgVal('HOST', 'server.host', '127.0.0.1') as string;
 const HTTPS_CERT_FILE = cfgVal('SIDEKICK_HTTPS_CERT_FILE', 'server.https.cert_file', '') as string;
 const HTTPS_KEY_FILE = cfgVal('SIDEKICK_HTTPS_KEY_FILE', 'server.https.key_file', '') as string;
 const HTTPS_ENABLED = HTTPS_CERT_FILE !== '' || HTTPS_KEY_FILE !== '';
+// Dual mode: cert pair + SIDEKICK_HTTPS_PORT → main server stays HTTP,
+// an auxiliary HTTPS listener binds that port on 0.0.0.0 (see bottom of
+// file). Cert pair alone = legacy single-HTTPS-server behavior.
+const HTTPS_PORT = Number(cfgVal('SIDEKICK_HTTPS_PORT', 'server.https.port', 0));
+const DUAL_HTTPS = HTTPS_ENABLED && HTTPS_PORT > 0;
 
 function createHttpServer(handler: http.RequestListener): http.Server | https.Server {
-  if (!HTTPS_ENABLED) return http.createServer(handler);
+  if (!HTTPS_ENABLED || DUAL_HTTPS) return http.createServer(handler);
   if (!HTTPS_CERT_FILE || !HTTPS_KEY_FILE) {
     throw new Error('HTTPS requires both SIDEKICK_HTTPS_CERT_FILE and SIDEKICK_HTTPS_KEY_FILE');
   }
@@ -130,7 +136,9 @@ function createHttpServer(handler: http.RequestListener): http.Server | https.Se
   }, handler);
 }
 
-const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY || '';
+// Mutable: the first-run setup wizard can supply the key live
+// (POST /api/sidekick/setup) — TTS starts working without a restart.
+let DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY || '';
 if (!DEEPGRAM_KEY) {
   console.warn('DEEPGRAM_API_KEY not set — voice STT/TTS and /transcribe disabled');
 }
@@ -1008,11 +1016,22 @@ const HOME = os.homedir();
 // backends/hermes/plugin is the typical upstream; the stub agent under
 // `agent/` is a hermes-free reference. With no token configured,
 // `/api/sidekick/*` endpoints return 503.
+const SIDEKICK_UPSTREAM_URL = cfgVal('SIDEKICK_PLATFORM_URL', 'backend.sidekick_platform.url',
+  'http://127.0.0.1:8645') as string;
 sidekick.init({
   token: process.env.SIDEKICK_PLATFORM_TOKEN
     || (cfgVal('SIDEKICK_PLATFORM_TOKEN', 'backend.sidekick_platform.token', '') as string),
-  url: cfgVal('SIDEKICK_PLATFORM_URL', 'backend.sidekick_platform.url',
-    'http://127.0.0.1:8645') as string,
+  url: SIDEKICK_UPSTREAM_URL,
+});
+
+// First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
+// same .env start-all loads (SIDEKICK_ENV_FILE from the npx launcher,
+// else the repo-root .env) and live-swaps the TTS key above.
+initSetup({
+  envFile: process.env.SIDEKICK_ENV_FILE || path.join(__dirname, '.env'),
+  upstreamUrl: () => SIDEKICK_UPSTREAM_URL,
+  setDeepgramKey: (key: string) => { DEEPGRAM_KEY = key; },
+  hasDeepgramKey: () => !!DEEPGRAM_KEY,
 });
 
 // ── WebRTC voice transport proxy: /api/rtc/* → audio-bridge /v1/rtc/* ────────
@@ -1094,7 +1113,7 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
   }
 }
 
-const server = createHttpServer(async (req, res) => {
+const requestHandler: http.RequestListener = async (req, res) => {
   applyCors(req, res);
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
@@ -1129,6 +1148,13 @@ const server = createHttpServer(async (req, res) => {
   // fallback. The DELETE pattern's chat_id capture group is permissive
   // on character class to match the IDB-minted UUIDs we expect.
   if (req.url) {
+    // First-run setup wizard surface (see proxy/sidekick/setup.ts).
+    if (req.method === 'GET' && req.url === '/api/sidekick/setup/status') {
+      return handleSetupStatus(req, res);
+    }
+    if (req.method === 'POST' && req.url === '/api/sidekick/setup') {
+      return handleSetupApply(req, res);
+    }
     if (req.method === 'POST' && req.url === '/api/sidekick/messages') {
       return sidekick.handleSidekickMessage(req, res);
     }
@@ -1314,7 +1340,9 @@ const server = createHttpServer(async (req, res) => {
   if (req.method === 'GET' && req.url.startsWith('/render')) return handleRender(req, res);
   if (req.method === 'GET') return serveStatic(req, res);
   res.writeHead(405); res.end('method not allowed');
-});
+};
+
+const server = createHttpServer(requestHandler);
 
 // ── WebSocket servers ──────────────────────────────────────────────────────
 // (Legacy /ws/deepgram STT proxy removed when classic pipeline was gut-cut;
@@ -1344,7 +1372,7 @@ const ZC_TOKEN = process.env.SIDEKICK_ZEROCLAW_TOKEN || '';  // secret — env o
 // is still around for whoever wants envelope-shape validation on
 // the SSE side; it's just not imported here anymore.
 
-server.on('upgrade', (req, socket, head) => {
+const upgradeHandler = (req: http.IncomingMessage, socket: any, head: Buffer) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (url.pathname === '/ws/zeroclaw') {
@@ -1406,9 +1434,28 @@ server.on('upgrade', (req, socket, head) => {
 
   // Unknown WS path
   socket.destroy();
-});
+};
+server.on('upgrade', upgradeHandler);
 
 server.listen(PORT, HOST, () => {
-  const protocol = HTTPS_ENABLED ? 'https' : 'http';
+  const protocol = HTTPS_ENABLED && !DUAL_HTTPS ? 'https' : 'http';
   console.log(`SideKick server on ${protocol}://${HOST}:${PORT} (TTS: ${DEFAULT_TTS_MODEL})`);
 });
+
+// ── Auxiliary HTTPS listener (auto-HTTPS trial path) ─────────────────
+// When SIDEKICK_HTTPS_PORT is set alongside the cert pair (start-all's
+// auto-generated self-signed cert), the main server stays plain HTTP on
+// localhost and this second listener serves the SAME app over HTTPS on
+// all interfaces — the secure context phones need for mic/PWA/push.
+// Explicit cert WITHOUT the port keeps the legacy behavior (main server
+// itself is HTTPS), so existing deployments are untouched.
+if (DUAL_HTTPS) {
+  const httpsServer = https.createServer({
+    cert: fsSync.readFileSync(HTTPS_CERT_FILE),
+    key: fsSync.readFileSync(HTTPS_KEY_FILE),
+  }, requestHandler);
+  httpsServer.on('upgrade', upgradeHandler);
+  httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+    console.log(`SideKick HTTPS on https://0.0.0.0:${HTTPS_PORT} (self-signed — phones accept the one-time warning)`);
+  });
+}

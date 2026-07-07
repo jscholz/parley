@@ -30,9 +30,27 @@ const BEARER_TOKEN = process.env.AGENT_BEARER_TOKEN || undefined;
 
 const conversations = new Conversations(`${DATA_DIR}/conversations.json`);
 await conversations.load();
-const llm = pickAdapter();
 
-const server = createServer({ conversations, llm, bearerToken: BEARER_TOKEN });
+// Swappable adapter: the first-run setup wizard reconfigures the LLM
+// live (POST /v1/admin/llm, proxied by sidekick) without a process
+// restart. The delegate keeps createServer's `llm` reference stable
+// while the active adapter underneath changes.
+let active = pickAdapter();
+const llm = {
+  get name() { return active.name; },
+  stream(messages) { return active.stream(messages); },
+};
+const reconfigure = (envPatch) => {
+  for (const [k, v] of Object.entries(envPatch || {})) {
+    if (v === null || v === undefined || v === '') delete process.env[k];
+    else process.env[k] = String(v);
+  }
+  active = pickAdapter();
+  console.log(`[stub-agent] llm reconfigured → ${active.name}`);
+  return active.name;
+};
+
+const server = createServer({ conversations, llm, bearerToken: BEARER_TOKEN, reconfigure });
 server.listen(PORT, HOST, () => {
   console.log(`[stub-agent] listening on http://${HOST}:${PORT}`);
   console.log(`[stub-agent] llm: ${llm.name}`);

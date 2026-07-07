@@ -41,6 +41,7 @@ import { initVisibilityReporting } from './notifications/visibility.ts';
 import * as status from './status.ts';
 import { toast } from './toast.ts';
 import * as settings from './settings.ts';
+import * as setupWizard from './setupWizard.ts';
 import * as sessionPins from './sessionPins.ts';
 import * as sessionIdentity from './sessionIdentity.ts';
 import * as headphones from './audio/shared/headphones.ts';
@@ -327,6 +328,10 @@ async function boot() {
   // call. Built-in DEFAULTS are the offline / proxy-down fallback.
   await settings.load();
   bootMark('settings.load done');
+  // First-run model gate — fire-and-forget probe; on a fresh trial
+  // install (stub echo LLM) it opens the setup wizard. Fail-open:
+  // errors mean no gate, never a locked UI.
+  void setupWizard.init();
   // Pinned-session order rides the synced `pinnedSessions` setting, so
   // hydrate it from the snapshot settings.load() just pulled — before
   // the drawer's first render reads sessionPins.isPinned()/topPinned().
@@ -1935,6 +1940,10 @@ async function boot() {
     const hasAttachments = attachments.hasPending();
 
     if (text || hasAttachments) {
+      // First-run model gate (setupWizard.ts): on a fresh trial install
+      // (stub backend still on its echo LLM) a send is HELD, not errored
+      // — the wizard opens and the text stays in the composer.
+      if (setupWizard.gateIfNeeded()) return;
       if (!backend.isConnected()) {
         status.setStatus('Gateway offline', 'err');
         // Don't leave the mic hot after a blocked send — user expects

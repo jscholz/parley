@@ -1,10 +1,12 @@
 // LLM adapter interface + factory for the stub agent.
 //
 // An adapter takes the conversation history and yields the assistant
-// reply, optionally streaming text deltas. Three impls ship in-tree:
+// reply, optionally streaming text deltas. Impls in-tree:
 //
 //   echo   — returns "You said: <last>".  No setup, default if nothing else.
-//   gemini — Google's Gemini API.        Set GEMINI_API_KEY.
+//   cloud  — any OpenAI-compatible API.   Set OPENAI_COMPAT_API_KEY
+//            (OpenRouter by default; base URL + model overridable).
+//   gemini — Google's Gemini API.         Set GEMINI_API_KEY.
 //   ollama — Local Ollama instance.       Set OLLAMA_URL (default 11434).
 //
 // Add a new adapter by implementing `LLM` below and registering it
@@ -16,6 +18,7 @@ import { EchoLLM } from './echo.mjs';
 import { GeminiLLM } from './gemini.mjs';
 import { OllamaLLM } from './ollama.mjs';
 import { FixedLLM } from './fixed.mjs';
+import { OpenAICompatLLM } from './openai-compat.mjs';
 
 /**
  * @typedef {{ role: 'user' | 'assistant' | 'system', content: string }} ChatMessage
@@ -32,6 +35,13 @@ export function pickAdapter(env = process.env) {
   const mode = (env.AGENT_LLM || '').toLowerCase();
   if (mode === 'fixed') {
     return new FixedLLM({ reply: env.AGENT_LLM_FIXED_REPLY });
+  }
+  if (mode === 'cloud' || (!mode && env.OPENAI_COMPAT_API_KEY)) {
+    return new OpenAICompatLLM({
+      apiKey: env.OPENAI_COMPAT_API_KEY ?? '',
+      baseUrl: env.OPENAI_COMPAT_BASE_URL,
+      model: env.OPENAI_COMPAT_MODEL,
+    });
   }
   if (mode === 'gemini' || (!mode && env.GEMINI_API_KEY)) {
     return new GeminiLLM({

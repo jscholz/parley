@@ -37,9 +37,10 @@ import { randomBytes } from 'node:crypto';
  *   conversations: Conversations,
  *   llm: LLM,
  *   bearerToken?: string,
+ *   reconfigure?: (envPatch: Record<string, string|null>) => string,
  * }} opts
  */
-export function createServer({ conversations, llm, bearerToken }) {
+export function createServer({ conversations, llm, bearerToken, reconfigure }) {
   /** Out-of-turn event channel state. Stub agent rarely emits these
    *  (no cron, no proactive replies), but the contract requires the
    *  endpoint so proxies can subscribe. We keep a bounded ring +
@@ -157,6 +158,29 @@ export function createServer({ conversations, llm, bearerToken }) {
         try { body = JSON.parse(raw || '{}'); }
         catch { return json(res, 400, errorBody('invalid_request_error', 'body is not valid JSON')); }
         return handleSettingsUpdate(res, llm, id, body?.value);
+      }
+      // Live LLM reconfigure — powers the sidekick first-run wizard.
+      // LOOPBACK-ONLY on top of the bearer check: this endpoint takes
+      // env-shaped input (API keys, base URLs), so even in open mode
+      // (no bearer) it must never be reachable from another machine.
+      if (req.method === 'POST' && url.pathname === '/v1/admin/llm') {
+        if (!checkAuth(req)) return json(res, 401, errorBody('authentication_error', 'invalid bearer token'));
+        const remote = req.socket.remoteAddress || '';
+        const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+        if (!loopback) return json(res, 403, errorBody('invalid_request_error', 'admin endpoint is loopback-only'));
+        if (typeof reconfigure !== 'function') {
+          return json(res, 501, errorBody('invalid_request_error', 'reconfigure not wired'));
+        }
+        const raw = await readBody(req);
+        let body;
+        try { body = JSON.parse(raw || '{}'); }
+        catch { return json(res, 400, errorBody('invalid_request_error', 'body is not valid JSON')); }
+        const patch = body?.env;
+        if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+          return json(res, 400, errorBody('invalid_request_error', 'expected { env: { KEY: value } }'));
+        }
+        const name = reconfigure(patch);
+        return json(res, 200, { ok: true, llm: name });
       }
       if (req.method === 'POST' && url.pathname === '/v1/responses') {
         if (bearerToken) {
