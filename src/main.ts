@@ -88,6 +88,7 @@ import * as attachments from './attachments.ts';
 import * as draft from './draft.ts';
 import * as composer from './composer.ts';
 import * as selectToQuote from './selectToQuote.ts';
+import * as docStore from './rightDrawer/docStore.ts';
 import * as slashCommands from './slashCommands.ts';
 import * as webrtcControls from './audio/realtime/controls.ts';
 import * as webrtcConnection from './audio/realtime/realtime.ts';
@@ -2104,10 +2105,23 @@ async function boot() {
   // Select-to-quote: selecting transcript text floats a "Quote" button that
   // inserts the selection as a markdown blockquote into the composer for
   // reply (accumulating multiple quote+reply pairs into one message).
+  const docQuoteRoot = document.getElementById('doc-drawer-body');
   selectToQuote.init({
     transcriptEl: document.getElementById('transcript'),
-    extraEls: [document.getElementById('pin-drawer-list')],
-    onQuote: composer.appendQuote,
+    extraEls: [document.getElementById('pin-drawer-list'), docQuoteRoot],
+    onQuote: (text, root) => {
+      // Doc-panel selections get an attribution line inside the quote so
+      // the agent knows the passage came from a document, not the
+      // transcript — this is the agent-mediated-edit bridge (quote →
+      // spoken instruction → agent edits the file → re-push). Known
+      // limit: selections inside the sandboxed HTML iframe are invisible
+      // to the parent, so this covers markdown/text docs only.
+      if (root && docQuoteRoot && root === docQuoteRoot) {
+        const doc = docStore.currentDoc();
+        if (doc) text = `${text}\n— from "${doc.title}"${doc.path ? ` (${doc.path})` : ''}`;
+      }
+      composer.appendQuote(text);
+    },
   });
   // Retry-send wire-up (Crack A): reconciler renders a Retry button
   // on a `.failed` user bubble and dispatches `sidekick:retry-send`

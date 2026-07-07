@@ -133,3 +133,32 @@ def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
         "registry toolset shadows the core-tools composite and strips "
         "filesystem/terminal tools from every sidekick session"
     )
+
+
+def test_doc_id_mirrors_pwa_djb2():
+    """doc_id keys the PWA shelf — the Python hash MUST match
+    docStore.docIdFor (djb2, hex). Pinned vector cross-checked against
+    the TS implementation."""
+    assert doc_tool._doc_id_for("/home/user/deck.md", "Deck") == "a4988a70"
+    # Title fallback normalizes case.
+    assert doc_tool._doc_id_for("", "Same Title") == doc_tool._doc_id_for("", "same title")
+
+
+def test_display_doc_result_carries_doc_id_and_open_docs(tmp_path, monkeypatch, adapter, handler):
+    monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "chat-shelf")
+    doc_tool._OPEN_DOCS.clear()
+
+    a = tmp_path / "a.md"; a.write_text("# A", encoding="utf-8")
+    b = tmp_path / "b.md"; b.write_text("# B", encoding="utf-8")
+
+    out_a = json.loads(handler({"path": str(a), "title": "Doc A"}))
+    assert out_a["doc_id"] == doc_tool._doc_id_for(str(a), "Doc A")
+    assert out_a["open_docs"] == ["Doc A"]
+
+    out_b = json.loads(handler({"path": str(b), "title": "Doc B"}))
+    assert out_b["open_docs"] == ["Doc B", "Doc A"], "newest first"
+
+    # Re-push of A refreshes, never duplicates — mirrors the shelf rule.
+    out_a2 = json.loads(handler({"path": str(a), "title": "Doc A"}))
+    assert out_a2["open_docs"] == ["Doc A", "Doc B"]
+    assert adapter.envelopes[-1]["doc_id"] == out_a2["doc_id"]

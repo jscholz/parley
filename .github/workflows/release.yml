@@ -1,0 +1,38 @@
+# Publish sidekick-portal to npm on version tags — via npm Trusted
+# Publishing (GitHub OIDC), so there are no tokens to store or rotate
+# and no 2FA prompt: npm trusts this exact repo+workflow identity.
+#
+# One-time setup (after the package exists on npm):
+#   npmjs.com → sidekick-portal → Settings → Trusted Publisher →
+#   GitHub Actions, repository jscholz/sidekick, workflow release.yml.
+#
+# Releasing:
+#   npm version minor        # bumps package.json + creates the v* tag
+#   git push origin master --tags
+#
+# --provenance additionally publishes a signed attestation linking the
+# tarball to this commit + workflow run (shown on the npm package page).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write   # OIDC token for npm trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      # prepack runs the client+server build, so the tarball ships build/
+      - run: npm publish --provenance --access public

@@ -125,6 +125,12 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
             return json.dumps({"error": "sidekick adapter is not running"})
 
         fmt = _FORMAT_BY_SUFFIX.get(path.suffix.lower(), "text")
+        title = (args.get("title") or "").strip() or path.name
+        # Shelf identity (v2 PWA "doc shelf"): the client dedups by a djb2
+        # hash of the path — mirror it here so the tool result's doc_id
+        # matches what the panel shows. Re-pushing the same path REPLACES
+        # that shelf entry (refresh), it never duplicates.
+        doc_id = _doc_id_for(str(path), title)
         try:
             # Sync tool handlers run on worker threads (run_in_executor in
             # run_agent.py); _schedule_envelope is the thread-safe path
@@ -132,22 +138,59 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
             adapter._schedule_envelope({
                 "type": "doc_show",
                 "chat_id": chat_id,
-                "title": (args.get("title") or "").strip() or path.name,
+                "title": title,
                 "content": content,
                 "format": fmt,
                 "path": str(path),
+                "doc_id": doc_id,
             })
         except Exception as e:
             return json.dumps({"error": f"could not deliver doc to the app: {e}"})
+        open_docs = _remember_open_doc(chat_id, doc_id, title)
         return json.dumps({
             "success": True,
             "displayed": str(path),
             "format": fmt,
             "bytes": size,
-            "note": "The document is now open in the user's Docs panel.",
+            "doc_id": doc_id,
+            # Titles currently on the user's doc shelf for this chat
+            # (this process's view — the user may have closed some in the
+            # panel). Lets the agent talk about the shelf ("that's the
+            # second doc in your panel") without a list tool.
+            "open_docs": open_docs,
+            "note": (
+                "The document is now open in the user's Docs panel. "
+                "Re-calling display_doc with the same path refreshes that "
+                "panel entry in place (no duplicate)."
+            ),
         })
 
     return display_doc_tool
+
+
+def _doc_id_for(path: str, title: str) -> str:
+    """djb2 hash, hex — MUST mirror docStore.docIdFor in the PWA."""
+    key = path.strip() or f"title:{title.strip().lower()}"
+    h = 5381
+    for ch in key:
+        h = ((h << 5) + h + ord(ch)) & 0xFFFFFFFF
+    return format(h, "x")
+
+
+# Per-chat memory of docs this process pushed — newest first, deduped by
+# doc_id, soft-capped to the PWA shelf size. In-memory only (best-effort
+# awareness for the agent; the panel is the source of truth and the user
+# can close entries there without us knowing).
+_OPEN_DOCS: Dict[str, list] = {}
+_OPEN_DOCS_CAP = 7
+
+
+def _remember_open_doc(chat_id: str, doc_id: str, title: str) -> list:
+    entries = _OPEN_DOCS.setdefault(chat_id, [])
+    entries[:] = [(i, t) for (i, t) in entries if i != doc_id]
+    entries.insert(0, (doc_id, title))
+    del entries[_OPEN_DOCS_CAP:]
+    return [t for (_i, t) in entries]
 
 
 def _check_display_doc() -> bool:

@@ -4648,3 +4648,62 @@
   padding: 4px 0; width: fit-content;
 }
 .setup-wizard-skip:hover { color: var(--fg); }
+
+/* ── Doc shelf (v2 multi-doc — rightDrawer/modules/doc.ts) ────────────
+ * List + single reader. List rows echo the activity-drawer idiom;
+ * reader header gains the `‹ All docs (n)` shelf toggle + download. */
+.doc-drawer-listbtn {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 13px; color: var(--primary); padding: 2px 0;
+  white-space: nowrap;
+}
+.doc-drawer-listbtn:hover { text-decoration: underline; }
+.doc-drawer-header-spacer { flex: 1; }
+.doc-drawer-download {
+  background: none; border: none; cursor: pointer; color: var(--muted);
+  padding: 4px; display: inline-flex; align-items: center;
+  border-radius: 5px; line-height: 0;
+}
+.doc-drawer-download svg { width: 16px; height: 16px; }
+.doc-drawer-download:hover { color: var(--fg); background: var(--surface); }
+.doc-shelf-back {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 13px; color: var(--primary); padding: 4px 0 8px;
+  text-align: left;
+}
+.doc-shelf-back:hover { text-decoration: underline; }
+.doc-shelf-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.doc-shelf-item {
+  display: flex; align-items: center; gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.doc-shelf-item.active .doc-shelf-item-title { color: var(--primary); }
+.doc-shelf-item-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; cursor: pointer; font: inherit;
+  text-align: left; padding: 10px 4px 10px 2px; color: var(--fg);
+}
+.doc-shelf-item-main:hover .doc-shelf-item-title { text-decoration: underline; }
+.doc-shelf-item-title {
+  font-size: calc(var(--content-size) - 1px); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.doc-shelf-item-meta { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.doc-shelf-item-close {
+  background: none; border: none; cursor: pointer; color: var(--muted);
+  font-size: 13px; padding: 8px; border-radius: 5px;
+  /* Comfortable tap target on mobile (same hardening as other touch
+     controls in this file). */
+  min-width: 32px; min-height: 32px;
+  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.doc-shelf-item-close:hover { color: var(--fg); background: var(--surface); }
+/* Unread dot on the Docs rail button — a doc arrived without being
+ * shown (replay for another chat / boot). Cleared on tab select. */
+.doc-drawer-dot {
+  position: absolute; top: 6px; right: 6px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--primary);
+  pointer-events: none;
+}
+.doc-drawer-dot[hidden] { display: none; }

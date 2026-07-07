@@ -21,17 +21,22 @@
 import { diag } from './util/log.ts';
 
 let roots: HTMLElement[] = [];
-let onQuote: (text: string) => void = () => {};
+let onQuote: (text: string, root: HTMLElement | null) => void = () => {};
 let fab: HTMLButtonElement | null = null;
 // The selected text captured at show-time. The button's pointerdown reads
 // THIS, not a live getSelection() — by the time the button is pressed on
 // iOS the selection may already be collapsing.
 let capturedText = '';
+// Which root the captured selection lives in — lets the onQuote handler
+// attribute the quote (e.g. `— from "«doc title»"` for Docs-panel text).
+let capturedRoot: HTMLElement | null = null;
 
 export function init(opts: {
   transcriptEl: HTMLElement | null,
   extraEls?: (HTMLElement | null)[],
-  onQuote: (text: string) => void,
+  /** root = the registered container the selection came from (transcript,
+   *  pin list, doc reader, ...). */
+  onQuote: (text: string, root: HTMLElement | null) => void,
 }) {
   roots = [opts.transcriptEl, ...(opts.extraEls ?? [])]
     .filter((el): el is HTMLElement => !!el);
@@ -58,11 +63,12 @@ export function init(opts: {
     e.preventDefault();
     e.stopPropagation();
     const text = capturedText;
+    const root = capturedRoot;
     hide();
     const sel = window.getSelection();
     if (sel) sel.removeAllRanges();
     if (text) {
-      onQuote(text);
+      onQuote(text, root);
       diag('select-to-quote:', JSON.stringify({ len: text.length }));
     }
   });
@@ -88,12 +94,13 @@ export function init(opts: {
   window.addEventListener('resize', hide);
 }
 
-function selectionInRoots(sel: Selection): boolean {
-  if (!roots.length || sel.rangeCount === 0) return false;
+function selectionRoot(sel: Selection): HTMLElement | null {
+  if (!roots.length || sel.rangeCount === 0) return null;
   const range = sel.getRangeAt(0);
   const node = range.commonAncestorContainer;
   const el = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
-  return !!el && roots.some((root) => root.contains(el));
+  if (!el) return null;
+  return roots.find((root) => root.contains(el)) ?? null;
 }
 
 function maybeShow() {
@@ -101,8 +108,10 @@ function maybeShow() {
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hide(); return; }
   const text = sel.toString().trim();
   if (!text) { hide(); return; }
-  if (!selectionInRoots(sel)) { hide(); return; }
+  const root = selectionRoot(sel);
+  if (!root) { hide(); return; }
   capturedText = text;
+  capturedRoot = root;
   position(sel.getRangeAt(0).getBoundingClientRect());
 }
 

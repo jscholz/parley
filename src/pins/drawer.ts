@@ -66,6 +66,14 @@ function refreshActivityCountBanner(): void {
   }
 }
 
+/** Unread dot on the Docs rail button — set when a doc push arrives
+ *  without being shown (SSE ring replays for other chats / boot),
+ *  cleared when the Docs tab is selected. */
+function setDocDot(on: boolean): void {
+  const dot = document.getElementById('doc-drawer-dot-rail');
+  if (dot) dot.hidden = !on;
+}
+
 function showPinStatus(message: string): void {
   if (!statusEl) return;
   statusEl.textContent = message;
@@ -151,7 +159,7 @@ export function initPinDrawer(opts: {
             panel: docPanelEl,
             body: docBodyEl,
             empty: docEmptyEl,
-            onSelect: () => { activePanel = 'doc'; },
+            onSelect: () => { activePanel = 'doc'; setDocDot(false); },
           })]
         : []),
     ],
@@ -177,13 +185,21 @@ export function initPinDrawer(opts: {
     if (isOpen() && activePanel === 'activity') drawerHost?.render();
   });
   window.addEventListener('sidekick:doc-changed', (ev) => {
-    const autoOpen = !!(ev as CustomEvent<{ autoOpen?: boolean }>).detail?.autoOpen;
+    const detail = (ev as CustomEvent<{ autoOpen?: boolean; kind?: string }>).detail;
+    const autoOpen = !!detail?.autoOpen;
     if (autoOpen) {
       // Agent push (display_doc): the user asked to SEE this — bring the
       // Docs tab up on desktop AND mobile. Hydrate/clear (autoOpen=false)
       // only re-renders in place.
       drawerHost?.select('doc', { open: true });
+      setDocDot(false);
       return;
+    }
+    // A push that DOESN'T auto-open (SSE ring replay on boot/reconnect
+    // carrying a doc newer than what's shown) — mark the rail with the
+    // unread dot unless the Docs tab is already in front.
+    if (detail?.kind === 'push' && !(isOpen() && activePanel === 'doc')) {
+      setDocDot(true);
     }
     if (isOpen() && activePanel === 'doc') drawerHost?.render();
   });

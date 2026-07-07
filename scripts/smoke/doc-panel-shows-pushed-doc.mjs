@@ -85,9 +85,10 @@ export default async function run({ page, log, mock }) {
   await waitForReady(page);
   const afterReload = await page.evaluate(() => ({
     collapsed: document.getElementById('pin-drawer')?.classList.contains('collapsed'),
-    persisted: (localStorage.getItem('sidekick.doc.current') || '').includes('DECK-DOC-MARKER-4711'),
+    // v2 shelf key (multi-doc). The v1 single-slot key migrates away.
+    persisted: (localStorage.getItem('sidekick.docs.v2') || '').includes('DECK-DOC-MARKER-4711'),
   }));
-  if (!afterReload.persisted) throw new Error('doc did not persist to localStorage');
+  if (!afterReload.persisted) throw new Error('doc did not persist to localStorage (sidekick.docs.v2)');
   if (!afterReload.collapsed) throw new Error('hydrate must not auto-open the drawer on reload');
   log('doc persisted across reload without auto-opening the drawer');
 }
