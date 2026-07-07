@@ -10,32 +10,60 @@ Hands-free chat with any agent that speaks the OpenAI Responses API. Configurabl
   <img src="docs/images/hero-mobile.png" alt="Sidekick on iOS — same conversation in mobile portrait" width="200" />
 </p>
 
-## Install
+## Try it (one command)
 
 ```bash
+npx github:jscholz/sidekick        # npx sidekick-portal once published
+```
+
+Needs Node 22+. That boots the whole stack — the PWA at
+`http://localhost:3001` plus a bundled demo agent — and prints a **QR
+code for your phone** (HTTPS is auto-provisioned with a self-signed
+cert, so mic + add-to-home-screen work off-localhost; accept the
+one-time browser warning).
+
+First launch opens a **setup wizard** in the browser. Pick a brain:
+
+- **Cloud key** — paste one API key (OpenRouter by default; any
+  OpenAI-compatible endpoint works).
+- **Local Ollama** — auto-detected if running; pick an installed model.
+  No key, no cloud.
+- **My own agent** — point at any `/v1/responses`-speaking server.
+
+Then optionally add a [Deepgram](https://console.deepgram.com) key in
+the wizard's voice step — spoken replies start working immediately.
+Everything the wizard writes lands in `~/.sidekick/.env` (or the repo
+`.env` in a checkout), so it sticks across restarts. Skip everything
+and you get the echo demo agent — the wizard re-offers whenever the
+demo is still wired.
+
+### Other install paths
+
+```bash
+# curl|bash — clones into ./sidekick and boots the same stack:
 curl -fsSL https://raw.githubusercontent.com/jscholz/sidekick/master/install.sh | bash
-```
 
-Clones into `./sidekick` in your current directory, installs deps, and boots:
-
-- Sidekick proxy on `http://localhost:3001` (open this in a browser)
-- Bundled stub agent on `:4001` (echo LLM, no API keys needed)
-
-Add a [Deepgram](https://console.deepgram.com) key to `./sidekick/.env` to enable voice; everything else is optional. Browser microphone and WebRTC APIs require a secure context when you access Sidekick from another device, so use HTTPS for phone/laptop access. Localhost can stay HTTP.
-
-Manual install:
-
-```bash
+# manual:
 git clone https://github.com/jscholz/sidekick.git
-cd sidekick
-cp .env.example .env
-npm install
-npm start
+cd sidekick && cp .env.example .env && npm install && npm start
 ```
+
+`install.sh` additionally provisions the Python audio-bridge venv
+(server-side voice VAD + streaming mic STT) — the npx path skips it, so
+use the clone paths for the full voice-input experience.
 
 ### Agent self-install
 
 **Wiring up your own agent backend?** Sidekick ships with [`AGENTS.md`](AGENTS.md) — a short context file aimed at AI coding assistants (Claude Code, Cursor, Aider, ...). Open the cloned repo in your assistant of choice and say *"set sidekick up against my agent"*; the file gives it everything it needs (the contract, where to write the adapter, how to test).
+
+### Make it permanent
+
+Liked the trial? Run it as a service: clone the repo, keep your
+`~/.sidekick/.env`, and wire `npm start` into systemd (see
+`backends/hermes/README.md` for a full hermes-backed deployment) or any
+process manager. For a trusted cert with no browser warning, put
+Tailscale Serve / Caddy / nginx in front — Sidekick also terminates TLS
+directly via `SIDEKICK_HTTPS_CERT_FILE` / `SIDEKICK_HTTPS_KEY_FILE`.
 
 ## What's different
 
