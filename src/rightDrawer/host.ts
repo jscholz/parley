@@ -33,7 +33,9 @@ export interface RightDrawerHostOptions {
     widthPrefKey: string;
     defaultWidthPx: number;
     minWidthPx: number;
-    maxWidthPx: number;
+    // Function form lets the ceiling track a live setting (panelMaxWidthPct)
+    // without a reload; passed straight through to createDrawer's resizer.
+    maxWidthPx: number | (() => number);
   };
 }
 

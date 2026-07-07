@@ -1747,14 +1747,14 @@
   /* Markdown blockquotes inside bubbles — both agent markdown and
      select-to-quote replies in user bubbles. A sage left rail + soft
      indent so quoted passages read as set-apart from the surrounding text. */
-  .line .text blockquote, .pin-item-body blockquote {
+  .line .text blockquote, .pin-item-body blockquote , .doc-drawer-content blockquote {
     margin: 6px 0;
     padding: 2px 0 2px 10px;
     border-left: 3px solid var(--primary);
     color: var(--fg-muted, #aaa);
   }
-  .line .text blockquote:first-child, .pin-item-body blockquote:first-child { margin-top: 0; }
-  .line .text blockquote:last-child, .pin-item-body blockquote:last-child { margin-bottom: 0; }
+  .line .text blockquote:first-child, .pin-item-body blockquote:first-child , .doc-drawer-content blockquote:first-child { margin-top: 0; }
+  .line .text blockquote:last-child, .pin-item-body blockquote:last-child , .doc-drawer-content blockquote:last-child { margin-bottom: 0; }
 
   /* Floating "Quote" button (select-to-quote). position:fixed, placed off
      the selection rect by selectToQuote.ts; high z-index so it floats over
@@ -1939,43 +1939,45 @@
   .line.s0 .speaker { display: none; }
   .line.s0 .line-ts { top: 28px; right: 10px; }
   .line.queued .text::after { content: ' \23F3'; opacity: 0.5; }
-  /* Markdown in agent replies — SHARED with the pin drawer body. The pin
-     body renders the exact same miniMarkdown() output, so it must render
-     with the exact same styling ("fork this display", not a parallel copy
-     that drifts). Every element rule is grouped `.line .text X,
-     .pin-item-body X` so the transcript stays the single source of truth;
-     .pin-item-body only carries its own CONTAINER concerns (collapse cap +
-     fade mask) below. Touch nothing here without it landing in both. */
+  /* Markdown in agent replies — SHARED with the pin drawer body AND the
+     Docs tab (rightDrawer/modules/doc.ts). All three render the exact same
+     miniMarkdown() output, so they must render with the exact same styling
+     ("fork this display", not a parallel copy that drifts). Every element
+     rule is grouped `.line .text X, .pin-item-body X, .doc-drawer-content X`
+     so the transcript stays the single source of truth; .pin-item-body /
+     .doc-drawer-content only carry their own CONTAINER concerns (collapse
+     cap, fade mask, scroll) elsewhere. Touch nothing here without it landing
+     in all three. */
   .line .text h1, .line .text h2, .line .text h3,
-  .pin-item-body h1, .pin-item-body h2, .pin-item-body h3 {
+  .pin-item-body h1, .doc-drawer-content h1, .pin-item-body h2, .doc-drawer-content h2, .pin-item-body h3 , .doc-drawer-content h3 {
     font-family: var(--font-sans); color: var(--fg); margin: 12px 0 6px; line-height: 1.3;
   }
-  .line .text h1, .pin-item-body h1 { font-size: calc(var(--content-size) + 4px); }
-  .line .text h2, .pin-item-body h2 { font-size: calc(var(--content-size) + 2px); }
-  .line .text h3, .pin-item-body h3 { font-size: var(--content-size); }
-  .line .text p, .pin-item-body p { margin-bottom: 8px; }
+  .line .text h1, .pin-item-body h1 , .doc-drawer-content h1 { font-size: calc(var(--content-size) + 4px); }
+  .line .text h2, .pin-item-body h2 , .doc-drawer-content h2 { font-size: calc(var(--content-size) + 2px); }
+  .line .text h3, .pin-item-body h3 , .doc-drawer-content h3 { font-size: var(--content-size); }
+  .line .text p, .pin-item-body p , .doc-drawer-content p { margin-bottom: 8px; }
   .line .text ul, .line .text ol,
-  .pin-item-body ul, .pin-item-body ol { margin: 6px 0 6px 20px; }
-  .line .text li, .pin-item-body li { margin-bottom: 3px; }
-  .line .text code, .pin-item-body code {
+  .pin-item-body ul, .doc-drawer-content ul, .pin-item-body ol , .doc-drawer-content ol { margin: 6px 0 6px 20px; }
+  .line .text li, .pin-item-body li , .doc-drawer-content li { margin-bottom: 3px; }
+  .line .text code, .pin-item-body code , .doc-drawer-content code {
     font-family: var(--font-mono); background: var(--bg); padding: 1px 5px;
     border-radius: 4px; font-size: 0.9em; color: var(--primary);
   }
-  .line .text pre, .pin-item-body pre { margin: 8px 0; padding: 10px; background: var(--bg); border-radius: 8px; overflow-x: auto; }
-  .line .text pre code, .pin-item-body pre code { padding: 0; background: none; }
+  .line .text pre, .pin-item-body pre , .doc-drawer-content pre { margin: 8px 0; padding: 10px; background: var(--bg); border-radius: 8px; overflow-x: auto; }
+  .line .text pre code, .pin-item-body pre code , .doc-drawer-content pre code { padding: 0; background: none; }
   /* Fenced code blocks: wrap long lines instead of clipping/scrolling, and
      give them a head row with a language label + copy button. */
-  .line .text .code-block, .pin-item-body .code-block { margin: 8px 0; background: var(--bg); border-radius: 8px; overflow: hidden; }
-  .line .text .code-block-head, .pin-item-body .code-block-head {
+  .line .text .code-block, .pin-item-body .code-block , .doc-drawer-content .code-block { margin: 8px 0; background: var(--bg); border-radius: 8px; overflow: hidden; }
+  .line .text .code-block-head, .pin-item-body .code-block-head , .doc-drawer-content .code-block-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 4px 8px 4px 12px; min-height: 26px;
     border-bottom: 1px solid var(--border);
   }
-  .line .text .code-lang, .pin-item-body .code-lang {
+  .line .text .code-lang, .pin-item-body .code-lang , .doc-drawer-content .code-lang {
     font-family: var(--font-mono); font-size: 0.78em; letter-spacing: 0.03em;
     color: var(--fg-muted, #888); text-transform: lowercase;
   }
-  .line .text .code-copy-btn, .pin-item-body .code-copy-btn {
+  .line .text .code-copy-btn, .pin-item-body .code-copy-btn , .doc-drawer-content .code-copy-btn {
     display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; padding: 4px; margin: 0; cursor: pointer;
     color: var(--fg-muted, #888); border-radius: 5px; line-height: 0;
@@ -1985,25 +1987,25 @@
      button (the "looks a bit shit" report). Touch users get a brighter
      icon on :active instead, with no lingering background. */
   @media (hover: hover) {
-    .line .text .code-copy-btn:hover, .pin-item-body .code-copy-btn:hover { color: var(--fg); background: var(--surface); }
+    .line .text .code-copy-btn:hover, .pin-item-body .code-copy-btn:hover , .doc-drawer-content .code-copy-btn:hover { color: var(--fg); background: var(--surface); }
   }
-  .line .text .code-copy-btn:active, .pin-item-body .code-copy-btn:active { color: var(--fg); }
-  .line .text .code-copy-btn.copied, .pin-item-body .code-copy-btn.copied { color: var(--primary); }
-  .line .text .code-block pre, .pin-item-body .code-block pre { margin: 0; border-radius: 0; background: none; }
-  .line .text .code-block pre code, .pin-item-body .code-block pre code { white-space: pre-wrap; word-break: break-word; }
-  .line .text a, .pin-item-body a { color: var(--primary); text-decoration: underline; }
-  .line .text strong, .pin-item-body strong { font-weight: 600; }
-  .line .text table, .pin-item-body table {
+  .line .text .code-copy-btn:active, .pin-item-body .code-copy-btn:active , .doc-drawer-content .code-copy-btn:active { color: var(--fg); }
+  .line .text .code-copy-btn.copied, .pin-item-body .code-copy-btn.copied , .doc-drawer-content .code-copy-btn.copied { color: var(--primary); }
+  .line .text .code-block pre, .pin-item-body .code-block pre , .doc-drawer-content .code-block pre { margin: 0; border-radius: 0; background: none; }
+  .line .text .code-block pre code, .pin-item-body .code-block pre code , .doc-drawer-content .code-block pre code { white-space: pre-wrap; word-break: break-word; }
+  .line .text a, .pin-item-body a , .doc-drawer-content a { color: var(--primary); text-decoration: underline; }
+  .line .text strong, .pin-item-body strong , .doc-drawer-content strong { font-weight: 600; }
+  .line .text table, .pin-item-body table , .doc-drawer-content table {
     border-collapse: collapse; margin: 8px 0; font-size: 0.95em;
     display: block; max-width: 100%; overflow-x: auto;
   }
   .line .text th, .line .text td,
-  .pin-item-body th, .pin-item-body td {
+  .pin-item-body th, .doc-drawer-content th, .pin-item-body td , .doc-drawer-content td {
     border: 1px solid var(--border); padding: 6px 10px; text-align: left;
   }
-  .line .text th, .pin-item-body th { background: var(--surface); font-weight: 600; }
+  .line .text th, .pin-item-body th , .doc-drawer-content th { background: var(--surface); font-weight: 600; }
   .line .text tr:nth-child(even) td,
-  .pin-item-body tr:nth-child(even) td { background: var(--surface); }
+  .pin-item-body tr:nth-child(even) td , .doc-drawer-content tr:nth-child(even) td { background: var(--surface); }
   .line.sent {
     background: var(--surface); border-left: 3px solid var(--border-strong);
     padding: 8px 12px; border-radius: 0 var(--radius) var(--radius) 0;
@@ -2350,17 +2352,21 @@
   .doc-drawer-meta {
     font-size: 11px; color: var(--muted); white-space: nowrap;
   }
+  /* Doc content renders the SAME miniMarkdown output as the transcript, so
+     it opts into the shared `.line .text / .pin-item-body / .doc-drawer-content`
+     element rules above (headings, code blocks, tables, links, blockquotes) at
+     the reader's --content-size. Only container concerns live here — the
+     element styling is inherited so the doc view never drifts from the
+     transcript grade. */
   .doc-drawer-content {
-    font-size: 13px; line-height: 1.55;
+    font-size: var(--content-size); line-height: 1.5;
     overflow-wrap: break-word;
     min-height: 0;
   }
-  .doc-drawer-content pre { overflow-x: auto; }
   .doc-drawer-content img { max-width: 100%; }
-  .doc-drawer-content table { display: block; overflow-x: auto; }
   .doc-drawer-plain {
     white-space: pre-wrap; margin: 0;
-    font-size: 12px;
+    font-size: var(--content-size);
   }
   /* Sandboxed HTML docs get a light canvas of their own — the doc's
    * inline styles won't know our dark theme. */

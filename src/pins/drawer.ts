@@ -11,6 +11,7 @@ import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHand
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule } from '../rightDrawer/modules/doc.ts';
 import { hydrateDoc } from '../rightDrawer/docStore.ts';
+import * as settings from '../settings.ts';
 
 let drawerEl: HTMLElement | null = null;
 let pinPanelEl: HTMLElement | null = null;
@@ -28,8 +29,11 @@ function defaultDrawerWidthPx(): number {
   return Math.max(320, Math.min(Math.round(window.innerWidth * 0.24), 420));
 }
 
+// Drag ceiling = a user-tunable % of the window (settings → Display → Panel
+// max width). No absolute px cap so the pin/docs drawer can read as a main
+// column on a wide external monitor. Mirrors main.ts's sidebar helper.
 function maxDrawerWidthPx(): number {
-  return Math.max(600, Math.min(Math.round(window.innerWidth * 0.60), 900));
+  return Math.max(320, Math.round(window.innerWidth * (settings.get().panelMaxWidthPct / 100)));
 }
 
 function isOpen(): boolean { return !!drawerHost?.isOpen(); }
@@ -160,7 +164,7 @@ export function initPinDrawer(opts: {
       widthPrefKey: 'sidekick.pinDrawerWidth.v3',
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
-      maxWidthPx: maxDrawerWidthPx(),
+      maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
     },
   });
 

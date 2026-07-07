@@ -266,6 +266,7 @@ const DEFAULTS = {
   bargeVadThreshold: 0.5,
   contentSize: 15,
   transcriptGutter: 12,  // per-side empty margin of the chat column, in %; lower = wider transcript
+  panelMaxWidthPct: 60,  // desktop only: max % of the window width a side panel (sidebar / pin+docs drawer) can be dragged to. Phones use a separate full-width overlay layout, so this is inert there.
   audioFeedbackVolume: 0.85,  // 2026-05-09: 0.5 → 0.85 for bike/walk audibility (BT-headset wind noise was burying chimes)
   theme: 'dark',
   // Mic-button mode: gesture-driven (tap = live dictation to composer
@@ -346,6 +347,10 @@ const PER_DEVICE_KEYS = new Set<string>([
   // Transcript gutter is per-device: it only applies on wide (desktop)
   // viewports — phones override it to zero — so it's form-factor-bound.
   'transcriptGutter',
+  // Panel max width is per-device for the same reason: it only governs the
+  // desktop side-panel drag ceiling — phones override panels to a full-width
+  // overlay — so a laptop and a 4K external monitor each want their own value.
+  'panelMaxWidthPct',
 ]);
 
 /** The synced settings — every DEFAULTS key that isn't per-device. These
@@ -727,6 +732,8 @@ export function hydrate(handlers: {
   const setFontSizeVal = $any('set-fontsize-val');
   const setGutter = $inp('set-gutter');
   const setGutterVal = $any('set-gutter-val');
+  const setPanelWidth = $inp('set-panel-width');
+  const setPanelWidthVal = $any('set-panel-width-val');
   const setTheme = $sel('set-theme');
   const setAgentActivity = $sel('set-agent-activity');
   const setPush = $inp('set-push');
@@ -799,6 +806,8 @@ export function hydrate(handlers: {
     if (setFontSizeVal) setFontSizeVal.textContent = `${current.contentSize}px`;
     if (setGutter) setGutter.value = String(current.transcriptGutter);
     if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
+    if (setPanelWidth) setPanelWidth.value = String(current.panelMaxWidthPct);
+    if (setPanelWidthVal) setPanelWidthVal.textContent = `${current.panelMaxWidthPct}%`;
     if (setTheme) setTheme.value = current.theme;
     if (setAgentActivity) setAgentActivity.value = current.agentActivity;
     if (setHotkeyCall) setHotkeyCall.value = (current as any).hotkeyToggleCall;
@@ -1235,6 +1244,15 @@ export function hydrate(handlers: {
     set('transcriptGutter', parseInt(setGutter.value, 10));
     if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
     applyVisuals();
+  };
+  if (setPanelWidth) setPanelWidth.oninput = () => {
+    set('panelMaxWidthPct', parseInt(setPanelWidth.value, 10));
+    if (setPanelWidthVal) setPanelWidthVal.textContent = `${current.panelMaxWidthPct}%`;
+    // The drag-resizer reads this value live (via a getter) on the next
+    // drag, so raising the ceiling takes effect immediately with no reload.
+    // Broadcast so any open drawer wider than a freshly-LOWERED ceiling can
+    // re-clamp itself now rather than waiting for the next drag.
+    window.dispatchEvent(new CustomEvent('sidekick:panel-max-width-changed'));
   };
   // Hotkey inputs — click-to-capture. Focus the field, press a key
   // combination, and we format it as a string and save. Cmd is used as

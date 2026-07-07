@@ -51,7 +51,9 @@ export interface DrawerConfig {
     widthPrefKey: string;
     defaultWidthPx: number;
     minWidthPx: number;
-    maxWidthPx: number;
+    // A function so the ceiling can track a live setting (panelMaxWidthPct)
+    // without a reload — it's re-read on every clamp.
+    maxWidthPx: number | (() => number);
   };
   /** Optional hooks for caller-side side effects (refresh data on
    *  open, repaint adjacent widgets, etc). */
@@ -197,8 +199,10 @@ function initResizer(
   const handleEl = document.getElementById(cfg.handleId);
   if (!handleEl) return;
 
+  const maxWidth = () =>
+    typeof cfg.maxWidthPx === 'function' ? cfg.maxWidthPx() : cfg.maxWidthPx;
   const clamp = (w: number) =>
-    Math.max(cfg.minWidthPx, Math.min(cfg.maxWidthPx, Math.round(w)));
+    Math.max(cfg.minWidthPx, Math.min(maxWidth(), Math.round(w)));
   const apply = (w: number) =>
     document.documentElement.style.setProperty(cfg.cssVar, `${clamp(w)}px`);
   const readPersisted = (): number | null => {
@@ -266,5 +270,19 @@ function initResizer(
     e.preventDefault();
     apply(cfg.defaultWidthPx);
     writePersisted(cfg.defaultWidthPx);
+  });
+
+  // When the max-width setting changes, re-clamp any persisted/live width so
+  // a drawer wider than a freshly-lowered ceiling snaps back immediately
+  // (raising the ceiling is a no-op here — clamp only shrinks). Guard: only
+  // touch the width if one is actually set, so we don't force the CSS default
+  // onto a drawer the user never resized.
+  window.addEventListener('sidekick:panel-max-width-changed', () => {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue(cfg.cssVar).trim();
+    const current = parseInt(raw, 10);
+    if (!Number.isFinite(current)) return;
+    const clamped = clamp(current);
+    if (clamped !== current) { apply(clamped); writePersisted(clamped); }
   });
 }

@@ -522,7 +522,13 @@ async function boot() {
   };
 
   const defaultDrawerWidthPx = () => Math.max(320, Math.min(Math.round(window.innerWidth * 0.24), 420));
-  const maxDrawerWidthPx = () => Math.max(600, Math.min(Math.round(window.innerWidth * 0.60), 900));
+  // Drag ceiling = a user-tunable % of the window (settings → Display → Panel
+  // max width, default 60%). No absolute px cap: on a wide external monitor the
+  // old min(60vw, 900px) capped panels at ~900px (~35% of a 2560px display), so
+  // they never read as a main column. Floor at 320px so a tiny window still
+  // permits a usable panel.
+  const maxDrawerWidthPx = () =>
+    Math.max(320, Math.round(window.innerWidth * (settings.get().panelMaxWidthPct / 100)));
 
   // Sidebar — always visible (48px rail), expands on hamburger. Holds
   // new-chat, sessions list (if backend supports it), and info/settings
@@ -546,7 +552,7 @@ async function boot() {
       widthPrefKey: 'sidekick.sidebarWidth.v3',
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
-      maxWidthPx: maxDrawerWidthPx(),
+      maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
     },
     onOpen: () => sessionDrawer.refresh(),  // fresh data on open
   });
