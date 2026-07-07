@@ -35,6 +35,22 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 
+// Load .env into process.env BEFORE reading any config below. Nothing
+// else in the terminal path does this — systemd deployments get it via
+// EnvironmentFile=, but `npm start` / install.sh users were silently
+// running without their .env (the README's "add a Deepgram key to
+// .env" promise was broken outside systemd). Real env vars win:
+// loadEnvFile never overrides variables that are already set.
+// SIDEKICK_ENV_FILE lets the npx launcher (bin/cli.mjs) point at a
+// data-home .env outside the (ephemeral) package directory.
+const envFile = process.env.SIDEKICK_ENV_FILE ?? path.join(REPO_ROOT, '.env');
+try {
+  process.loadEnvFile(envFile);
+  process.stdout.write(`[start-all] loaded env from ${envFile}\n`);
+} catch {
+  // No .env — fine; defaults + real env vars cover the ground.
+}
+
 const PORT_RETRY_MAX = 8;
 
 /** Probe whether `port` is bindable on 127.0.0.1. Resolves true if
