@@ -4707,12 +4707,13 @@
   pointer-events: none;
 }
 .doc-drawer-dot[hidden] { display: none; }
-/* Remove-from-shelf (reader header) — destructive to THIS doc, so it
- * lives beside the doc's own actions, never in the drawer header. */
+/* Close-from-shelf (reader header) — an ✕ scoped to THIS doc, beside
+ * the doc's own actions. Non-destructive (the file stays on disk; only
+ * the shelf entry goes), so the hover is neutral, not danger-red. */
 .doc-drawer-remove {
   background: none; border: none; cursor: pointer; color: var(--muted);
   padding: 4px; display: inline-flex; align-items: center;
   border-radius: 5px; line-height: 0;
 }
 .doc-drawer-remove svg { width: 16px; height: 16px; }
-.doc-drawer-remove:hover { color: var(--danger, #e05d5d); background: var(--surface); }
+.doc-drawer-remove:hover { color: var(--fg); background: var(--surface); }

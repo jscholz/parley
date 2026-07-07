@@ -207,10 +207,12 @@ export function initPinDrawer(opts: {
     const detail = (ev as CustomEvent<{ message?: string }>).detail;
     showPinStatus(detail?.message || 'Could not update pinned messages.');
   });
-  // Doc removal is agent-recoverable, not undo-able — say so briefly.
+  // Closing a doc only drops the shelf entry — the file on disk is
+  // untouched. Say exactly that (field nit 2026-07-07: the old trash
+  // icon + "Removed" wording read as deletion).
   window.addEventListener('sidekick:doc-removed', (ev) => {
     const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
-    showPinStatus(`Removed ${title ? `"${title}"` : 'document'} — ask the agent to display it again to restore.`);
+    showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`);
   });
 
   refreshCountBanner();

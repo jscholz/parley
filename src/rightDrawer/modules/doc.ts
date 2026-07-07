@@ -140,13 +140,17 @@ export function createDocModule(opts: {
     dl.onclick = () => downloadDoc(doc);
     header.appendChild(dl);
 
-    // Remove-from-shelf — trash icon NEXT TO the doc's own actions so its
-    // scope (this document) is unmistakable; never in the drawer header.
+    // Close-from-shelf — ✕ NEXT TO the doc's own actions so its scope
+    // (this document) is unmistakable; never in the drawer header. An ✕,
+    // NOT a trash can (field nit 2026-07-07): closing only removes the
+    // shelf entry — the file on disk is untouched and the agent can
+    // re-display it — so a deletion glyph over-promises destruction.
+    // Matches the ✕ the list rows already use.
     const rm = document.createElement('button');
     rm.className = 'doc-drawer-remove';
-    rm.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11"/><path d="M6.5 2.5h3"/><path d="M4 4.5l.6 9a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-9"/><path d="M6.5 7v5M9.5 7v5"/></svg>';
-    rm.setAttribute('aria-label', 'Remove document from shelf');
-    rm.setAttribute('title', 'Remove from shelf');
+    rm.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+    rm.setAttribute('aria-label', 'Close document (file stays on disk)');
+    rm.setAttribute('title', 'Close — file stays on disk');
     rm.onclick = () => {
       removeDoc(doc.id);
       try {
