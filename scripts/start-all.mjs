@@ -151,6 +151,34 @@ function spawnPrefixed(label, cmd, args, opts = {}) {
   return child;
 }
 
+// ── Auto-HTTPS (trial path) ──────────────────────────────────────────
+// Phones need a secure context for mic/PWA/push; localhost is exempt
+// but LAN access is not. When enabled (SIDEKICK_AUTO_HTTPS=1 — the npx
+// launcher's default) and no cert is explicitly configured, provision a
+// self-signed cert and have the proxy serve HTTPS on HTTPS_PORT
+// alongside HTTP (server.ts dual mode). Opt-in for plain `npm start`
+// so existing deployments (systemd, reverse-proxied) see no new
+// listener unless asked.
+let httpsInfo = null;
+const autoHttpsWanted = process.env.SIDEKICK_AUTO_HTTPS === '1'
+  && !process.env.SIDEKICK_HTTPS_CERT_FILE;
+if (autoHttpsWanted) {
+  const { ensureSelfSignedCert, lanAddresses } = await import('./https-cert.mjs');
+  const certDir = process.env.SIDEKICK_CERT_DIR
+    || (process.env.SIDEKICK_HOME ? path.join(process.env.SIDEKICK_HOME, 'certs')
+        : path.join(REPO_ROOT, '.certs'));
+  const cert = ensureSelfSignedCert(certDir);
+  if (cert) {
+    const httpsPort = Number(process.env.SIDEKICK_HTTPS_PORT || proxyPort + 442);
+    httpsInfo = { ...cert, port: httpsPort, lan: lanAddresses()[0] || null };
+  } else {
+    process.stdout.write(
+      '[start-all] openssl not found — skipping auto-HTTPS (phone mic/PWA need it;'
+      + ' install openssl and restart, or configure SIDEKICK_HTTPS_CERT_FILE)\n',
+    );
+  }
+}
+
 // Prefer the bundled server.mjs (built by scripts/build.mjs; ships in the
 // npm tarball) — Node refuses --experimental-strip-types for files under
 // node_modules, so npm/npx installs CANNOT run server.ts. Dev checkouts
@@ -163,7 +191,15 @@ const proxy = spawnPrefixed(
   'proxy',
   process.execPath,
   proxyArgs,
-  { env: { PORT: String(proxyPort), SIDEKICK_PLATFORM_URL: upstreamUrl } },
+  { env: {
+      PORT: String(proxyPort),
+      SIDEKICK_PLATFORM_URL: upstreamUrl,
+      ...(httpsInfo ? {
+        SIDEKICK_HTTPS_CERT_FILE: httpsInfo.certFile,
+        SIDEKICK_HTTPS_KEY_FILE: httpsInfo.keyFile,
+        SIDEKICK_HTTPS_PORT: String(httpsInfo.port),
+      } : {}),
+  } },
 );
 
 let agent = null;
@@ -191,12 +227,26 @@ if (!skipAgent) {
 // points readers at the banner — keep it visually distinct from the
 // child-prefixed log lines so it doesn't get lost in the boot spew.
 const userUrl = `http://localhost:${proxyPort}`;
+const phoneUrl = httpsInfo?.lan ? `https://${httpsInfo.lan}:${httpsInfo.port}` : null;
 process.stdout.write(
   '\n' +
   '────────────────────────────────────────────────────────\n' +
   `  Sidekick is ready — open ${userUrl} in your browser.\n` +
+  (phoneUrl
+    ? `  On your phone (same wifi): ${phoneUrl}\n` +
+      '  (self-signed cert — accept the one-time browser warning)\n'
+    : '') +
   '────────────────────────────────────────────────────────\n\n',
 );
+// QR for the phone URL — the "add to home screen" moment shouldn't
+// require typing an IP. Best-effort: qrcode-terminal is a tiny dep but
+// keep boot resilient if it's somehow absent.
+if (phoneUrl) {
+  try {
+    const { default: qrcode } = await import('qrcode-terminal');
+    qrcode.generate(phoneUrl, { small: true }, (qr) => process.stdout.write(qr + '\n'));
+  } catch { /* dep missing — the printed URL above still works */ }
+}
 process.stdout.write(
   `[start-all] proxy on ${userUrl}` +
   (skipAgent ? ' (no in-tree agent)\n' : `, agent on http://127.0.0.1:${agentPort}\n`),

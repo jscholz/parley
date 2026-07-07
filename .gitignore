@@ -24,3 +24,5 @@ __pycache__/
 *.pyc
 # Bundled Node proxy (built by scripts/build.mjs for npm-installed runs).
 /server.mjs
+# Auto-generated self-signed certs (scripts/https-cert.mjs).
+/.certs/

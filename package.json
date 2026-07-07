@@ -2,7 +2,7 @@
   "name": "sidekick-portal",
   "version": "0.3.0",
   "type": "module",
-  "description": "Voice-first PWA agent portal \u2014 bring your own backend. Speaks the OpenAI Responses API.",
+  "description": "Voice-first PWA agent portal — bring your own backend. Speaks the OpenAI Responses API.",
   "license": "MIT",
   "homepage": "https://github.com/jscholz/sidekick",
   "repository": {
@@ -21,6 +21,7 @@
     "backends/stub/",
     "scripts/build.mjs",
     "scripts/start-all.mjs",
+    "scripts/https-cert.mjs",
     "server.ts",
     "server.mjs",
     "index.html",
@@ -54,6 +55,7 @@
   },
   "dependencies": {
     "playwright-core": "^1.59.1",
+    "qrcode-terminal": "^0.12.0",
     "web-push": "^3.6.7",
     "ws": "^8.20.0",
     "yaml": "^2.8.4"

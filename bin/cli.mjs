@@ -83,6 +83,11 @@ if (!fs.existsSync(buildMarker)) {
   }
 }
 
+// Auto-HTTPS defaults ON for the npx trial: phones need a secure
+// context for mic/PWA (see scripts/https-cert.mjs). `npm start` in a
+// checkout keeps it opt-in. SIDEKICK_AUTO_HTTPS=0 disables.
+env.SIDEKICK_AUTO_HTTPS ??= '1';
+
 // ── 4. Hand off to the orchestrator ──────────────────────────────────
 const child = spawn(
   process.execPath,
