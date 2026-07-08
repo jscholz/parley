@@ -1,0 +1,308 @@
+<!doctype html>
+<!--
+  Capture Phase-0 probe (sidekick-capture-design-and-plan-2026-07-07.md §Phase 0).
+
+  TEMPORARY diagnostic page — measures whether MediaRecorder keeps
+  delivering audio chunks on iOS through: (a) manual screen lock,
+  (b) pocket idle, (c) an incoming call, (d) Siri, (e) launch-to-record
+  (?autostart=1 — can getUserMedia start from a URL launch with mic
+  permission pre-granted, without an in-page tap?).
+
+  Deliberately standalone: no app imports, no build step, no service-worker
+  coupling — served straight from the repo root by server.ts's static
+  handler. The verdict artifact is the CHUNK TIMELINE persisted to IDB
+  (survives the page being killed — absence of chunks IS the data) plus
+  playback of the assembled recording (a gap-free timeline with silent
+  audio would be a false pass; listen to it).
+
+  Delete this file when Phase 0's appendix is filled in.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Capture probe</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 15px/1.45 -apple-system, system-ui, sans-serif; background:#111; color:#eee; margin:0; padding:16px calc(12px + env(safe-area-inset-right)) 40px calc(12px + env(safe-area-inset-left)); }
+  h1 { font-size: 17px; margin: 8px 0 2px; }
+  .sub { color:#888; font-size:12px; margin-bottom:12px; }
+  button { font-size:17px; padding:14px 18px; border-radius:12px; border:none; margin:4px 6px 4px 0; }
+  #btn-start { background:#c0392b; color:#fff; font-weight:600; min-width:44%; }
+  #btn-stop  { background:#444; color:#fff; min-width:28%; }
+  #btn-reset, #btn-copy { background:#222; color:#aaa; font-size:13px; padding:8px 12px; }
+  .stat { display:flex; justify-content:space-between; padding:6px 2px; border-bottom:1px solid #222; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .ok { color:#2ecc71; } .bad { color:#e74c3c; } .warn { color:#f1c40f; }
+  #gaps, #events { font: 12px/1.5 ui-monospace, monospace; color:#bbb; white-space:pre-wrap; max-height:180px; overflow-y:auto; background:#181818; border-radius:8px; padding:8px; margin-top:8px; }
+  #play { width:100%; margin-top:10px; }
+  .banner { background:#26221a; border:1px solid #665c33; border-radius:8px; padding:8px 10px; font-size:13px; margin:10px 0; }
+</style>
+</head>
+<body>
+<h1>🎙 Capture probe <span id="ctx" class="sub"></span></h1>
+<div class="sub">Phase-0 spike: does recording survive lock / pocket / call / Siri?</div>
+
+<div id="autostart-banner" class="banner" hidden></div>
+<div id="prev-banner" class="banner" hidden></div>
+
+<div>
+  <button id="btn-start">● Start recording</button>
+  <button id="btn-stop" disabled>Stop</button>
+</div>
+
+<div class="stat"><span>Elapsed</span><b id="s-elapsed">–</b></div>
+<div class="stat"><span>Chunks</span><b id="s-chunks">0</b></div>
+<div class="stat"><span>Total bytes</span><b id="s-bytes">0</b></div>
+<div class="stat"><span>Last chunk age</span><b id="s-age">–</b></div>
+<div class="stat"><span>Gaps &gt; 5s</span><b id="s-gaps">0</b></div>
+<div class="stat"><span>Mime</span><b id="s-mime">–</b></div>
+<div class="stat"><span>Wake lock</span><b id="s-wake">–</b></div>
+
+<div id="gaps"></div>
+<div id="events"></div>
+
+<audio id="play" controls hidden></audio>
+<div>
+  <button id="btn-copy" hidden>Copy results JSON</button>
+  <a id="btn-dl" hidden><button style="background:#222;color:#aaa;font-size:13px;padding:8px 12px;">Download audio</button></a>
+  <button id="btn-reset">Reset log</button>
+</div>
+
+<script>
+'use strict';
+/* All state also lands in IDB so a killed page still leaves evidence. */
+const $ = id => document.getElementById(id);
+const now = () => Date.now();
+let db, rec, stream, wakeLock, keepCtx, keepEl;
+let runId = null, startedAt = 0, lastChunkAt = 0, chunkCount = 0, totalBytes = 0, gaps = [];
+const GAP_MS = 5000;
+
+const standalone = window.matchMedia('(display-mode: standalone)').matches
+  || navigator.standalone === true;
+$('ctx').textContent = standalone ? '(installed PWA)' : '(browser tab)';
+
+function logEvent(kind, detail) {
+  const line = `[+${startedAt ? ((now()-startedAt)/1000).toFixed(1) : '0.0'}s] ${kind}${detail ? ' ' + detail : ''}`;
+  $('events').textContent += line + '\n';
+  $('events').scrollTop = 1e9;
+  idbPut('events', { runId, t: now(), kind, detail: detail || '' });
+}
+
+/* ---------- IDB (chunk log + blobs + events; keyed by autoincrement) ---------- */
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('capture-probe', 1);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      d.createObjectStore('chunks', { autoIncrement: true });
+      d.createObjectStore('blobs', { autoIncrement: true });
+      d.createObjectStore('events', { autoIncrement: true });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function idbPut(store, val) {
+  if (!db) return;
+  try { db.transaction(store, 'readwrite').objectStore(store).put(val); } catch {}
+}
+function idbAll(store) {
+  return new Promise(resolve => {
+    if (!db) return resolve([]);
+    const out = [];
+    const cur = db.transaction(store).objectStore(store).openCursor();
+    cur.onsuccess = () => {
+      const c = cur.result;
+      if (c) { out.push(c.value); c.continue(); } else resolve(out);
+    };
+    cur.onerror = () => resolve(out);
+  });
+}
+function idbClear() {
+  if (!db) return;
+  for (const s of ['chunks', 'blobs', 'events']) {
+    try { db.transaction(s, 'readwrite').objectStore(s).clear(); } catch {}
+  }
+}
+
+/* ---------- keepalive: silent WebAudio osc + looped silent <audio> ---------- */
+function silentWavUrl() {
+  // 1s of 8kHz mono silence, hand-built RIFF header + zero PCM.
+  const n = 8000, buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0,'RIFF'); v.setUint32(4, 36 + n*2, true); w(8,'WAVEfmt '); v.setUint32(16,16,true);
+  v.setUint16(20,1,true); v.setUint16(22,1,true); v.setUint32(24,8000,true);
+  v.setUint32(28,16000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  w(36,'data'); v.setUint32(40, n*2, true);
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+function startKeepalive() {
+  try {
+    keepCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = keepCtx.createOscillator(), g = keepCtx.createGain();
+    g.gain.value = 0.001; osc.connect(g); g.connect(keepCtx.destination); osc.start();
+  } catch (e) { logEvent('keepalive-webaudio-fail', e.name); }
+  try {
+    keepEl = new Audio(silentWavUrl());
+    keepEl.loop = true;
+    keepEl.play().catch(e => logEvent('keepalive-audioel-fail', e.name));
+  } catch {}
+}
+async function grabWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    $('s-wake').textContent = 'held'; $('s-wake').className = 'ok';
+    wakeLock.addEventListener('release', () => {
+      $('s-wake').textContent = 'released'; $('s-wake').className = 'warn';
+      logEvent('wakelock-released');
+    });
+  } catch (e) {
+    $('s-wake').textContent = e.name; $('s-wake').className = 'bad';
+    logEvent('wakelock-fail', e.name);
+  }
+}
+
+/* ---------- recording ---------- */
+function pickMime() {
+  for (const m of ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+async function start(auto) {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    logEvent(auto ? 'AUTOSTART-getUserMedia-FAIL' : 'getUserMedia-fail', e.name);
+    if (auto) showAutostart(false, e.name);
+    return;
+  }
+  if (auto) showAutostart(true);
+  runId = 'run_' + now();
+  startedAt = now(); lastChunkAt = 0; chunkCount = 0; totalBytes = 0; gaps = [];
+  const mime = pickMime();
+  $('s-mime').textContent = mime || '(default)';
+  rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
+  rec.ondataavailable = (ev) => {
+    const t = now();
+    if (lastChunkAt && t - lastChunkAt > GAP_MS) {
+      gaps.push({ afterChunk: chunkCount, gapMs: t - lastChunkAt, atS: +((lastChunkAt - startedAt)/1000).toFixed(1) });
+      $('s-gaps').textContent = String(gaps.length); $('s-gaps').className = 'bad';
+      $('gaps').textContent = gaps.map(g => `gap ${(g.gapMs/1000).toFixed(1)}s after +${g.atS}s`).join('\n');
+    }
+    lastChunkAt = t; chunkCount++; totalBytes += ev.data.size;
+    idbPut('chunks', { runId, seq: chunkCount, t, size: ev.data.size });
+    if (ev.data.size) idbPut('blobs', { runId, seq: chunkCount, blob: ev.data, type: ev.data.type });
+  };
+  for (const evName of ['pause', 'resume', 'stop', 'error']) {
+    rec.addEventListener(evName, (e) => logEvent('recorder-' + evName, e.error ? e.error.name : ''));
+  }
+  const track = stream.getAudioTracks()[0];
+  for (const evName of ['mute', 'unmute', 'ended']) {
+    track.addEventListener(evName, () => logEvent('track-' + evName));
+  }
+  rec.start(1000);
+  startKeepalive();
+  grabWakeLock();
+  logEvent('recording-started', `${mime} standalone=${standalone}`);
+  $('btn-start').disabled = true; $('btn-stop').disabled = false;
+}
+async function stop() {
+  try { rec && rec.state !== 'inactive' && rec.stop(); } catch {}
+  try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+  try { wakeLock && wakeLock.release(); } catch {}
+  try { keepEl && keepEl.pause(); keepCtx && keepCtx.close(); } catch {}
+  logEvent('stopped');
+  $('btn-start').disabled = false; $('btn-stop').disabled = true;
+  // Give the final dataavailable a beat to land, then assemble playback.
+  setTimeout(assemble, 400);
+}
+async function assemble() {
+  const all = (await idbAll('blobs')).filter(b => b.runId === runId);
+  if (!all.length) return;
+  all.sort((a, b) => a.seq - b.seq);
+  const blob = new Blob(all.map(b => b.blob), { type: all[0].type || 'audio/mp4' });
+  const url = URL.createObjectURL(blob);
+  $('play').src = url; $('play').hidden = false;
+  $('btn-dl').href = url;
+  $('btn-dl').download = runId + (blob.type.includes('mp4') ? '.m4a' : '.webm');
+  $('btn-dl').hidden = false;
+  $('btn-copy').hidden = false;
+}
+
+/* ---------- results ---------- */
+async function copyResults() {
+  const chunks = (await idbAll('chunks')).filter(c => c.runId === runId);
+  const events = (await idbAll('events')).filter(e => e.runId === runId);
+  const json = JSON.stringify({
+    runId, standalone, mime: $('s-mime').textContent,
+    ua: navigator.userAgent,
+    chunkCount: chunks.length,
+    totalBytes: chunks.reduce((s, c) => s + c.size, 0),
+    durationS: chunks.length ? +((chunks[chunks.length-1].t - startedAt)/1000).toFixed(1) : 0,
+    gaps, events: events.map(e => ({ t: e.t, kind: e.kind, detail: e.detail })),
+  }, null, 2);
+  try { await navigator.clipboard.writeText(json); $('btn-copy').textContent = 'Copied ✓'; }
+  catch { $('events').textContent += '\n---- RESULTS ----\n' + json; }
+}
+
+/* ---------- lifecycle evidence ---------- */
+document.addEventListener('visibilitychange', () => logEvent('visibility', document.visibilityState));
+window.addEventListener('pagehide', () => logEvent('pagehide'));
+window.addEventListener('pageshow', (e) => logEvent('pageshow', e.persisted ? 'bfcache' : ''));
+window.addEventListener('freeze', () => logEvent('freeze'));
+window.addEventListener('resume', () => logEvent('resume'));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && rec && rec.state === 'recording') grabWakeLock();
+});
+
+/* UI ticker (background throttling only affects display; chunk timestamps
+   in IDB are the ground truth). */
+setInterval(() => {
+  if (!startedAt || !rec || rec.state !== 'recording') return;
+  $('s-elapsed').textContent = ((now() - startedAt)/1000).toFixed(0) + 's';
+  $('s-chunks').textContent = String(chunkCount);
+  $('s-bytes').textContent = totalBytes.toLocaleString();
+  if (lastChunkAt) {
+    const age = (now() - lastChunkAt)/1000;
+    $('s-age').textContent = age.toFixed(1) + 's';
+    $('s-age').className = age > 5 ? 'bad' : 'ok';
+  }
+}, 500);
+
+function showAutostart(ok, err) {
+  const b = $('autostart-banner');
+  b.hidden = false;
+  b.textContent = ok
+    ? 'AUTOSTART: getUserMedia succeeded WITHOUT an in-page tap — pocket-start can be 2 gestures. ✓'
+    : `AUTOSTART: blocked without a tap (${err}) — pocket-start needs the one-tap fallback screen.`;
+  b.className = 'banner ' + (ok ? 'ok' : 'warn');
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  db = await openDb();
+  // Evidence from a previous (possibly killed) run.
+  const prev = await idbAll('chunks');
+  if (prev.length) {
+    const lastRun = prev[prev.length - 1].runId;
+    const runChunks = prev.filter(c => c.runId === lastRun);
+    $('prev-banner').hidden = false;
+    $('prev-banner').textContent =
+      `Previous run on record: ${runChunks.length} chunks, last at ${new Date(runChunks[runChunks.length-1].t).toLocaleTimeString()}. ` +
+      `If the page was killed on lock, that timestamp is when recording actually died. Reset to clear.`;
+  }
+  $('btn-start').onclick = () => start(false);
+  $('btn-stop').onclick = stop;
+  $('btn-reset').onclick = () => { idbClear(); location.search = ''; };
+  $('btn-copy').onclick = copyResults;
+  // Scenario (e): launch-to-record. Attempt with NO gesture.
+  if (new URLSearchParams(location.search).get('autostart') === '1') {
+    start(true);
+  }
+})();
+</script>
+</body>
+</html>
