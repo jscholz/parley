@@ -742,6 +742,12 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
           content: typeof env.content === 'string' ? env.content : '',
           format: typeof env.format === 'string' ? env.format : 'text',
           path: typeof env.path === 'string' ? env.path : undefined,
+          // Server clock: when the agent displayed the doc (plugin
+          // stamps epoch ms). The doc store uses this — not client
+          // receipt time — so the "26s ago" meta is device-independent
+          // and survives ring replay (the ring stores the original
+          // envelope, original stamp included).
+          displayedAt: typeof env.displayed_at === 'number' ? env.displayed_at : undefined,
         },
         conversation: chatId,
         isReplay: env?._replay === true,

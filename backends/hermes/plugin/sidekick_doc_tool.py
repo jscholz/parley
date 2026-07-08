@@ -36,6 +36,7 @@ gates on the session platform so other surfaces never list it.
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -143,6 +144,12 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
                 "format": fmt,
                 "path": str(path),
                 "doc_id": doc_id,
+                # Server clock, epoch ms: when the agent displayed this.
+                # THE timestamp the PWA shows ("26s ago") — one server
+                # value keeps it constant across devices, and the SSE
+                # ring replays this envelope verbatim so boot/reconnect
+                # can't reset it to 0s (field bug 2026-07-08).
+                "displayed_at": int(time.time() * 1000),
             })
         except Exception as e:
             return json.dumps({"error": f"could not deliver doc to the app: {e}"})

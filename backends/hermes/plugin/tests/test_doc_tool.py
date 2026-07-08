@@ -53,6 +53,26 @@ def test_display_doc_reads_file_and_emits_envelope(tmp_path, monkeypatch, adapte
     assert env["path"] == str(f)
 
 
+def test_display_doc_envelope_carries_server_display_time(tmp_path, monkeypatch, adapter, handler):
+    """displayed_at (server epoch ms) is THE clock the PWA shows — one
+    server value keeps the '26s ago' meta constant across devices, and
+    the SSE ring replays the envelope verbatim so a boot/reconnect
+    replay can't reset it to 0s (field bug 2026-07-08)."""
+    import time as _time
+
+    f = tmp_path / "report.md"
+    f.write_text("# R\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "chat-123")
+
+    before = int(_time.time() * 1000)
+    json.loads(handler({"path": str(f)}))
+    after = int(_time.time() * 1000)
+
+    env = adapter.envelopes[0]
+    assert isinstance(env["displayed_at"], int)
+    assert before <= env["displayed_at"] <= after
+
+
 def test_display_doc_format_detection(tmp_path, monkeypatch, adapter, handler):
     monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "chat-123")
     cases = {

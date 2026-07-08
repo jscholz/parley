@@ -28,6 +28,12 @@ export interface DocPayload {
   /** Source path on the agent host; identity + display hint. */
   path?: string;
   chatId?: string;
+  /** Server epoch ms of when the agent DISPLAYED the doc (plugin stamps
+   *  `displayed_at` into the doc_show envelope). THE clock for the
+   *  "26s ago" meta: one server value → constant across devices, and a
+   *  ring-replayed envelope carries the ORIGINAL stamp so boot/reconnect
+   *  can't reset it to 0s (field bug 2026-07-08). */
+  displayedAt?: number;
 }
 
 export interface DocState extends DocPayload {
@@ -138,26 +144,44 @@ export function currentDoc(): DocState | null {
 
 /** Agent push: add-or-replace by identity (path, else title), activate,
  *  move to front. Same-path re-push = in-place refresh, keeping the
- *  original receivedAt so "first seen" survives updates. */
+ *  original receivedAt so "first seen" survives updates.
+ *
+ *  Timestamp rule (audit 2026-07-08): updatedAt = "when the agent
+ *  displayed this", NOT "when this client processed the envelope".
+ *  Prefer the server's displayedAt — it's identical on every device and
+ *  identical when the SSE ring replays the envelope on boot/reconnect.
+ *  Old-backend fallback (no displayed_at field): a byte-identical
+ *  re-push keeps the prior stamp — only genuinely new content moves the
+ *  clock — so replays still can't reset timestamps to 0s. */
 export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void {
   const title = payload.title || 'Document';
   const id = docIdFor(payload.path, title);
   const existing = docs.find(d => d.id === id);
   const now = Date.now();
+  const content = payload.content || '';
+  const displayedAt = typeof payload.displayedAt === 'number'
+    && Number.isFinite(payload.displayedAt) && payload.displayedAt > 0
+    ? payload.displayedAt : undefined;
+  const updatedAt = displayedAt
+    ?? (existing && existing.content === content ? existing.updatedAt : now);
   const entry: DocState = {
     id,
     title,
-    content: payload.content || '',
+    content,
     format: payload.format || 'text',
     path: payload.path,
     chatId: payload.chatId,
-    receivedAt: existing?.receivedAt ?? now,
-    updatedAt: now,
+    receivedAt: existing?.receivedAt ?? displayedAt ?? now,
+    updatedAt,
   };
   docs = [entry, ...docs.filter(d => d.id !== id)].slice(0, MAX_DOCS);
   activeId = id;
   persist();
-  notify(opts?.autoOpen !== false, 'push');
+  // 'push' drives the unread dot — only claim it when something actually
+  // changed. A ring-replayed envelope lands here byte-identical with the
+  // same stamp; flagging that as 'push' lit a false dot every reconnect.
+  const fresh = !existing || existing.content !== content || existing.updatedAt !== updatedAt;
+  notify(opts?.autoOpen !== false, fresh ? 'push' : 'change');
 }
 
 /** User taps a shelf row — make it the reader's doc. */
