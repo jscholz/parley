@@ -33,7 +33,12 @@ export {
   handleCaptureList,
   handleCaptureGet,
   handleCaptureControl,
+  listCaptures,
 } from './capture.ts';
+export {
+  initCaptureTranscription,
+  recoverPendingTranscriptions,
+} from './captureTranscribe.ts';
 export {
   handleSidekickModelCapabilities,
   handleSidekickAuxiliaryModels,

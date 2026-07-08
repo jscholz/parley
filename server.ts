@@ -1024,6 +1024,17 @@ sidekick.init({
   url: SIDEKICK_UPSTREAM_URL,
 });
 
+// Meeting-capture transcription pipeline (proxy/sidekick/
+// captureTranscribe.ts): hooks segment arrivals into audio-bridge
+// batch STT → rolling transcript.md → doc_show pushes, plus the
+// start-message + post-stop ingest turn. Wired only when the bridge
+// is configured — without it, captures still record + store (stop
+// completes immediately; retro-transcription stays possible since
+// raw segments persist). Boot recovery re-enqueues anything a restart
+// interrupted.
+sidekick.initCaptureTranscription({ bridgeUrl: AUDIO_BRIDGE_UPSTREAM });
+void sidekick.recoverPendingTranscriptions(sidekick.listCaptures);
+
 // First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
 // same .env start-all loads (SIDEKICK_ENV_FILE from the npx launcher,
 // else the repo-root .env) and live-swaps the TTS key above.

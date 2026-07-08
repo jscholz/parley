@@ -70,6 +70,32 @@ export class CaptureError extends Error {
   }
 }
 
+// ── Pipeline hooks ─────────────────────────────────────────────────────
+//
+// capture.ts is deliberately PURE STORAGE + API; everything that
+// happens *because* of a capture event (start-message into the linked
+// chat, rolling transcription, the diarize pass) hangs off this hooks
+// registry, wired at server boot (server.ts → captureTranscribe.ts).
+// This is also the extension seam: a fork can hook captures into
+// anything without touching the storage contract. No hooks registered
+// (unit tests, transcription-less deployments) → stop goes straight to
+// 'complete' and everything still works.
+
+export interface CaptureHooks {
+  onCreated?(m: CaptureManifest): void;
+  onSegmentStored?(m: CaptureManifest, seg: SegmentMeta): void;
+  /** Called when the user stops. Return true to CLAIM finalization —
+   *  the capture parks in 'transcribing' until the claimant calls
+   *  finalizeCapture(). Return false/undefined → immediate 'complete'. */
+  onStopRequested?(m: CaptureManifest): boolean | undefined;
+}
+
+let hooks: CaptureHooks | null = null;
+
+export function setCaptureHooks(h: CaptureHooks | null): void {
+  hooks = h;
+}
+
 // ── Storage root ───────────────────────────────────────────────────────
 
 let capturesDirOverride: string | null = null;
@@ -98,6 +124,13 @@ function assertValidId(id: string): void {
 }
 
 function captureDir(id: string): string { return path.join(capturesDir(), id); }
+
+/** Public: a capture's on-disk directory (transcripts, seg/, …).
+ *  Pipeline modules and the ingest message build paths from this. */
+export function captureDirPath(id: string): string {
+  assertValidId(id);
+  return captureDir(id);
+}
 function manifestPath(id: string): string { return path.join(captureDir(id), 'manifest.json'); }
 
 function extForMime(mime: string): string {
@@ -229,6 +262,7 @@ export async function createCapture(opts: {
   await fs.mkdir(path.join(captureDir(id), 'seg'), { recursive: true });
   await saveManifest(manifest);
   notifyChanged(manifest, 'created');
+  try { hooks?.onCreated?.(manifest); } catch { /* hook errors never break storage */ }
   return manifest;
 }
 
@@ -272,6 +306,7 @@ export async function putSegment(
   m.segments.push(seg);
   m.segments.sort((a, b) => a.seq - b.seq);
   await saveManifest(m);
+  try { hooks?.onSegmentStored?.(m, seg); } catch { /* hook errors never break storage */ }
   return { manifest: m, duplicate: false };
 }
 
@@ -307,12 +342,26 @@ export async function stopCapture(id: string): Promise<CaptureManifest> {
   const m = await readManifest(id);
   if (m.status !== 'recording') return m;   // idempotent stop
   m.ended_at = Date.now();
-  // Phase 1: no transcription pipeline yet → straight to complete.
-  // Phase 2 replaces this with 'transcribing' + the rolling worker's
-  // finalization; Phase 3 adds the conditional diarize pass.
-  m.status = 'complete';
+  // A registered pipeline (captureTranscribe) may CLAIM finalization —
+  // the capture parks in 'transcribing' until finalizeCapture(). No
+  // claimant (unit tests, transcription-less installs) → complete now.
+  let claimed = false;
+  try { claimed = hooks?.onStopRequested?.(m) === true; } catch { /* hook errors never break stop */ }
+  m.status = claimed ? 'transcribing' : 'complete';
   await saveManifest(m);
   notifyChanged(m, 'stopped');
+  return m;
+}
+
+/** Pipeline hand-back: the onStopRequested claimant calls this when
+ *  transcription (and, when enabled, the diarize pass) is done. */
+export async function finalizeCapture(id: string, opts?: { failed?: boolean }): Promise<CaptureManifest> {
+  const m = await readManifest(id);
+  if (m.status === 'complete' || m.status === 'failed') return m;
+  m.status = opts?.failed ? 'failed' : 'complete';
+  if (!m.ended_at) m.ended_at = Date.now();
+  await saveManifest(m);
+  notifyChanged(m, 'completed');
   return m;
 }
 
@@ -341,7 +390,7 @@ export async function listCaptures(): Promise<CaptureSummary[]> {
  *  records, list refreshes) rides the same fanout as everything else.
  *  `kind` distinguishes lifecycle steps so clients can badge/update
  *  without refetching on every segment. */
-function notifyChanged(m: CaptureManifest, kind: 'created' | 'patched' | 'stopped'): void {
+function notifyChanged(m: CaptureManifest, kind: 'created' | 'patched' | 'stopped' | 'completed'): void {
   try {
     pushEnvelope({
       type: 'capture_changed',

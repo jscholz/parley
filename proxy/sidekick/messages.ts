@@ -138,6 +138,21 @@ export async function handleSidekickMessage(req, res) {
   res.end(JSON.stringify({ ok: true, message_id: messageId }));
 }
 
+/** Internal (non-HTTP) message dispatch — the same upstream send path
+ *  a user's composer message rides, callable by other proxy modules.
+ *  Capture uses it for the "📼 Recording started" line and the
+ *  post-meeting ingest turn (capture plan §3.3): the message lands as
+ *  a normal turn on ANY backend — hermes, Claude Code, stub — which is
+ *  the whole backend-neutrality trick. Fire-and-forget; returns false
+ *  when the upstream isn't initialized (caller decides whether that's
+ *  worth surfacing). */
+export function dispatchInternalMessage(chatId: string, text: string): boolean {
+  const upstream = getUpstream();
+  if (!upstream || !chatId || !text) return false;
+  void dispatchTurnViaUpstream(upstream, chatId, text);
+  return true;
+}
+
 async function dispatchTurnViaUpstream(
   upstream: UpstreamAgent,
   chatId: string,
