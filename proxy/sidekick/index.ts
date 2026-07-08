@@ -25,6 +25,16 @@ import { HTTPAgentUpstream, type UpstreamAgent } from './upstream.ts';
 export { handleSidekickMessage } from './messages.ts';
 export { handleSidekickUpload } from './upload.ts';
 export {
+  handleCaptureCreate,
+  handleCaptureSegment,
+  handleCaptureStop,
+  handleCapturePatch,
+  handleCaptureMark,
+  handleCaptureList,
+  handleCaptureGet,
+  handleCaptureControl,
+} from './capture.ts';
+export {
   handleSidekickModelCapabilities,
   handleSidekickAuxiliaryModels,
 } from './modelModalities.ts';

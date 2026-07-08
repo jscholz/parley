@@ -104,6 +104,11 @@ const FANOUT_TYPES = new Set<string>([
   // (plugin caps it at 1MB) — rides the ring like any other envelope so
   // a tab opened seconds after the push still receives it via replay.
   'doc_show',
+  // Meeting capture (proxy-owned — capture.ts): lifecycle state for
+  // cross-device pills/lists, and the external-trigger control plane
+  // ("start recording" from a Shortcut → foregrounded device's mic).
+  'capture_changed',
+  'capture_control',
 ]);
 
 // Bumped from 32 → 128: traffic is heavier now (every reply_delta

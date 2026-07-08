@@ -1164,6 +1164,43 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/sidekick/upload') {
       return sidekick.handleSidekickUpload(req, res);
     }
+    // Meeting capture — proxy-owned public API (capture.ts; design doc
+    // §3.3). Order matters: /control and the id-scoped subroutes match
+    // before the bare /captures collection routes.
+    if (req.method === 'POST' && req.url === '/api/sidekick/captures/control') {
+      return sidekick.handleCaptureControl(req, res);
+    }
+    const capSegment = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/segments\/(\d+)$/);
+    if (capSegment) {
+      return sidekick.handleCaptureSegment(req, res, capSegment[1], capSegment[2]);
+    }
+    const capStop = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/stop$/);
+    if (capStop) {
+      return sidekick.handleCaptureStop(req, res, capStop[1]);
+    }
+    const capMark = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/marks$/);
+    if (capMark) {
+      return sidekick.handleCaptureMark(req, res, capMark[1]);
+    }
+    const capPatch = req.method === 'PATCH'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+    if (capPatch) {
+      return sidekick.handleCapturePatch(req, res, capPatch[1]);
+    }
+    const capGet = req.method === 'GET'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+    if (capGet) {
+      return sidekick.handleCaptureGet(req, res, capGet[1]);
+    }
+    if (req.method === 'GET' && /^\/api\/sidekick\/captures(?:\?.*)?$/.test(req.url)) {
+      return sidekick.handleCaptureList(req, res);
+    }
+    if (req.method === 'POST' && req.url === '/api/sidekick/captures') {
+      return sidekick.handleCaptureCreate(req, res);
+    }
     if (req.method === 'GET' && /^\/api\/sidekick\/stream(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickStream(req, res);
     }
