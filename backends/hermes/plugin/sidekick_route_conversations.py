@@ -264,6 +264,65 @@ def _summaries_by_user_id(
     return out
 
 
+def _rows_with_unread_included(adapter, sources, limit: int) -> list:
+    """Window completeness: the drawer's recency LIMIT must never hide
+    a chat with unread state.
+
+    Field bug 2026-07-08: an unread reply on a session at position 72
+    was invisible in the 50-row drawer, so the OS app badge — which
+    badge.ts derives from the FULL unread set served by /v1/unread —
+    read 1 while the sidebar read 0, permanently, with no way to find
+    or clear it. The badge, the sidebar sum, and this list must all
+    derive from the same visible set, so chats with unread_count > 0
+    or sticky marked_unread are force-included here regardless of the
+    window.
+
+    Sync + O(heavy) (compute_unread + a possible wide re-query) — call
+    ONLY through run_in_sidekick_worker, same rule as
+    _summaries_by_user_id. Both underlying calls are TTL-cached, so
+    the common no-missing-unread case costs one cache lookup extra.
+    """
+    rows = _summaries_by_user_id(adapter, sources, limit)
+    try:
+        from .sidekick_unread import compute_unread  # noqa: WPS433 (late import, cycle-safe)
+        unread = compute_unread(
+            db=adapter._sidekick_db,
+            state_db_path=adapter._state_db_path,
+            source=SIDEKICK_SOURCE,
+        )
+        # compute_unread emits the PWA-facing prefixed form
+        # (`sidekick:<chat>`) while summary rows carry the bare
+        # state.db user_id — normalize to bare before intersecting or
+        # nothing ever matches (the exact trap this helper's first
+        # draft fell into).
+        prefix = f"{SIDEKICK_SOURCE}:"
+        wanted = set()
+        for c in unread.get("chats", []):
+            if not (c.get("unread_count", 0) > 0 or c.get("marked_unread")):
+                continue
+            cid = c.get("chat_id") or ""
+            if cid.startswith(prefix):
+                cid = cid[len(prefix):]
+            if cid:
+                wanted.add(cid)
+    except Exception as exc:
+        logger.debug("[sidekick] unread force-include skipped: %s", exc)
+        return rows
+    have = {r[0] for r in rows}
+    missing = {w for w in wanted if w and w not in have}
+    if not missing:
+        return rows
+    # Pull the widest window the endpoint itself allows and lift the
+    # missing rows out of it. An unread chat older than the 200th-most-
+    # recent stays hidden — accepted edge; it would need a dedicated
+    # per-chat summary query.
+    wide = _summaries_by_user_id(adapter, sources, 200)
+    extras = [r for r in wide if r[0] in missing]
+    merged = rows + extras
+    merged.sort(key=lambda r: r[7], reverse=True)  # last_active_at
+    return merged
+
+
 async def handle_list(adapter, request: "web.Request") -> "web.Response":
     """GET /v1/conversations — return the sidekick-only drawer list.
 
@@ -281,7 +340,7 @@ async def handle_list(adapter, request: "web.Request") -> "web.Response":
 
     from . import sidekick_perf_trace as _perf  # noqa: WPS433
     rows = await _perf.run_in_sidekick_worker(
-        _summaries_by_user_id, adapter, (SIDEKICK_SOURCE,), limit,
+        _rows_with_unread_included, adapter, (SIDEKICK_SOURCE,), limit,
     )
     data = [
         {
@@ -336,7 +395,10 @@ async def handle_list_gateway(adapter, request: "web.Request") -> "web.Response"
 
     from . import sidekick_perf_trace as _perf  # noqa: WPS433
     rows = await _perf.run_in_sidekick_worker(
-        _summaries_by_user_id, adapter, GATEWAY_DRAWER_SOURCES, limit,
+        # Same unread force-include as handle_list: unread state only
+        # exists for sidekick-source chats, so the union is a no-op for
+        # the other platforms' rows.
+        _rows_with_unread_included, adapter, GATEWAY_DRAWER_SOURCES, limit,
     )
     data = [
         {

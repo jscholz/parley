@@ -22,7 +22,7 @@ import json
 import logging
 import re
 import time
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 from urllib.parse import quote
 
 from pywebpush import webpush, WebPushException  # type: ignore
@@ -249,9 +249,17 @@ def _strip_leading_metadata(s: str) -> str:
     return "\n".join(lines[i:])
 
 
-def _build_payload(env: Dict, *, body_override: Optional[str] = None) -> Dict:
+def _build_payload(env: Dict, *, body_override: Optional[str] = None,
+                   badge: Optional[int] = None) -> Dict:
     """Translate an envelope into the push payload shape sw.js
-    expects: ``{title, body, chat_id?, tag?, url?}``.
+    expects: ``{title, body, chat_id?, tag?, url?, badge?}``.
+
+    ``badge`` is the server-computed unread TOTAL — sw.js passes it to
+    ``navigator.setAppBadge`` alongside showNotification, so the OS
+    app badge tracks the same clock as the sidebar even while no page
+    is open (field bug 2026-07-08: the badge went stale-low when
+    pushes arrived with the PWA closed, because nothing updated it
+    until a page next opened and reconciled).
 
     Title carries a discriminator emoji (per envelope type/kind) so
     a user can tell apart agent-reply vs cron-output vs reminder at
@@ -314,13 +322,16 @@ def _build_payload(env: Dict, *, body_override: Optional[str] = None) -> Dict:
         if message_id:
             url += f"&msg={quote(message_id, safe='')}"
 
-    return {
+    payload = {
         "title": f"{icon} {title_label}".strip(),
         "body": body[:PUSH_BODY_MAX_CHARS],
         "chat_id": chat_id,
         "tag": chat_id or "sidekick",
         "url": url,
     }
+    if isinstance(badge, int):
+        payload["badge"] = badge
+    return payload
 
 
 # ── Per-kind toggles ───────────────────────────────────────────────────
@@ -377,12 +388,18 @@ class PushDispatcher:
         vapid_subject: str,
         engagement: Optional[EngagementState] = None,
         reply_buffer: Optional[ReplyBuffer] = None,
+        unread_total_fn: Optional[Callable[[], int]] = None,
     ) -> None:
         self.db = db
         self.engagement = engagement or EngagementState()
         self.reply_buffer = reply_buffer or ReplyBuffer()
         self._vapid_subject = vapid_subject
         self._vapid = None  # lazy
+        # Server-truth unread total for the payload `badge` field (the
+        # plugin injects a compute_unread closure). Optional: absent →
+        # payloads simply omit badge and sw.js leaves the OS badge to
+        # the page-side reconciler.
+        self.unread_total_fn = unread_total_fn
 
     def _ensure_vapid(self) -> Dict[str, str]:
         if self._vapid is None:
@@ -446,7 +463,17 @@ class PushDispatcher:
         if not subs:
             logger.warning("skip type=%s chat=%s reason=no_subscribers", env_type, chat_id)
             return {"delivered": 0, "pruned": 0, "skipped": "no_subscribers"}
-        payload = json.dumps(_build_payload(env, body_override=body_override))
+        # Badge = unread total, floored at 1: the push being dispatched
+        # IS an unread-worthy event, and the msg_links write-through may
+        # not have landed yet when the (TTL-cached) count is computed.
+        # Compute failure never blocks the push — badge is decorative.
+        badge: Optional[int] = None
+        if self.unread_total_fn is not None:
+            try:
+                badge = max(1, int(self.unread_total_fn()))
+            except Exception as err:
+                logger.debug("badge compute failed (push proceeds): %s", err)
+        payload = json.dumps(_build_payload(env, body_override=body_override, badge=badge))
         delivered = 0
         pruned = 0
         for sub in subs:

@@ -534,3 +534,54 @@ def test_is_push_eligible_default_allowlist():
     assert _is_push_eligible({"type": "notification"})
     assert not _is_push_eligible({"type": "typing"})
     assert not _is_push_eligible({"type": "tool_call"})
+
+
+# ── App-icon badge count (field bug 2026-07-08) ───────────────────────
+#
+# The OS app badge went stale-LOW while the PWA was closed: pushes
+# arrived but nothing updated the badge until a page next opened and
+# reconciled. Fix: the dispatch payload carries the server-computed
+# unread total; sw.js calls setAppBadge(payload.badge) alongside
+# showNotification. One clock (the plugin's compute_unread), three
+# surfaces (sidebar, in-app, OS badge).
+
+
+def test_build_payload_carries_badge_when_given():
+    p = _build_payload({"type": "reply_final", "chat_id": "x", "text": "hi"}, badge=3)
+    assert p["badge"] == 3
+
+
+def test_build_payload_omits_badge_when_none():
+    p = _build_payload({"type": "reply_final", "chat_id": "x", "text": "hi"})
+    assert "badge" not in p
+
+
+def test_dispatch_payload_includes_unread_total(db, monkeypatch):
+    """dispatch_envelope injects the unread total via the injected
+    unread_total_fn — floored at 1, because the push being dispatched
+    IS an unread-worthy event even if the msg_links write-through
+    hasn't landed when the count is computed."""
+    import json as _json
+    from .. import sidekick_dispatcher as sd
+
+    sent = []
+    monkeypatch.setattr(sd, "webpush", lambda *, subscription_info, data, **kw:
+                        sent.append(data))
+    d = PushDispatcher(db, vapid_subject="mailto:t@e.com",
+                       unread_total_fn=lambda: 7)
+    _add_sub(db)
+    d.dispatch_envelope({"type": "reply_final", "chat_id": "abc", "text": "yo"})
+    assert len(sent) == 1
+    assert _json.loads(sent[0])["badge"] == 7
+
+    sent.clear()
+    d2 = PushDispatcher(db, vapid_subject="mailto:t@e.com",
+                        unread_total_fn=lambda: 0)
+    d2.dispatch_envelope({"type": "reply_final", "chat_id": "abc", "text": "yo"})
+    assert _json.loads(sent[0])["badge"] == 1  # floor: this push is itself unread
+
+    sent.clear()
+    d3 = PushDispatcher(db, vapid_subject="mailto:t@e.com",
+                        unread_total_fn=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    d3.dispatch_envelope({"type": "reply_final", "chat_id": "abc", "text": "yo"})
+    assert "badge" not in _json.loads(sent[0])  # compute failure never blocks the push

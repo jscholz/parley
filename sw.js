@@ -394,7 +394,7 @@ self.addEventListener('push', (e) => {
   // synthetic so unrelated pushes don't accidentally overwrite each other.
   const tag = payload.tag || (chatId ? `chat:${chatId}` : `push:${Date.now()}`);
   const url = payload.url || (chatId ? `/?chat=${encodeURIComponent(chatId)}` : '/');
-  e.waitUntil(
+  const tasks = [
     self.registration.showNotification(title, {
       body,
       tag,
@@ -405,8 +405,18 @@ self.addEventListener('push', (e) => {
       // on platforms that respect the flag. iOS PWA honors it; helps the
       // user notice an update vs a silent overwrite.
       renotify: true,
-    })
-  );
+    }),
+  ];
+  // OS app-icon badge from the SAME clock the sidebar uses: the plugin
+  // computes the unread total at dispatch and ships it as payload.badge.
+  // Without this the badge went stale-low whenever pushes arrived with
+  // no page open — nothing updated it until the next foreground
+  // reconcile (badge.ts syncBadge, which remains the authority whenever
+  // a page IS open and overwrites this on its next refresh).
+  if (typeof payload.badge === 'number' && typeof navigator.setAppBadge === 'function') {
+    tasks.push(navigator.setAppBadge(payload.badge).catch(() => {}));
+  }
+  e.waitUntil(Promise.all(tasks));
 });
 
 // Notification click: focus an existing tab on the target URL if one

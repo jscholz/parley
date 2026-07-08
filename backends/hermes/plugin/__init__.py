@@ -523,7 +523,22 @@ class SidekickAdapter(BasePlatformAdapter):
         # starts see the rows already there and skip silently.
         self._maybe_migrate_legacy_push_subs()
         vapid_subject = os.environ.get("VAPID_SUBJECT") or "mailto:jscholz@reimaginerobotics.ai"
-        self._push_dispatcher = _PushDispatcher(self._sidekick_db, vapid_subject=vapid_subject)
+        # unread_total_fn: server-truth badge count for push payloads
+        # (sw.js → setAppBadge). Deferred closure — _state_db_path is
+        # set above; compute_unread is TTL-cached so per-dispatch cost
+        # is a cache lookup in the common case. Runs on the dispatch
+        # worker thread, never the loop (sidekick_unread.py warning).
+        def _unread_total() -> int:
+            from .sidekick_unread import compute_unread  # noqa: WPS433
+            return int(compute_unread(
+                db=self._sidekick_db,
+                state_db_path=self._state_db_path,
+                source="sidekick",
+            ).get("total", 0))
+        self._push_dispatcher = _PushDispatcher(
+            self._sidekick_db, vapid_subject=vapid_subject,
+            unread_total_fn=_unread_total,
+        )
         # Route ctx — collected fields the route handlers consume.
         # Wraps as a SimpleNamespace so the handlers can `ctx.db`,
         # `ctx.dispatcher`, etc. emit_envelope routes to the
