@@ -31,7 +31,10 @@ const WEBDIR = join(ROOT, 'mobile/webdir');
 // Generated entries we own — wiped on each run so stale files don't linger.
 // index.html (the host-picker) is deliberately absent: it's committed.
 const DIRS = ['build', 'styles', 'assets'];
-const FILES = ['manifest.json', 'sw.js'];
+// capture-probe.html is TEMPORARY (capture Phase-1 CAP checkpoint —
+// lock-screen recording spike, linked from Settings → Interaction).
+// Drop it from this list when the probe file is deleted.
+const FILES = ['manifest.json', 'sw.js', 'capture-probe.html'];
 
 async function main() {
   await mkdir(WEBDIR, { recursive: true });
