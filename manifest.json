@@ -11,5 +11,19 @@
       "sizes": "512x512",
       "type": "image/png"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Record meeting",
+      "short_name": "Record",
+      "description": "Start a meeting recording immediately",
+      "url": "/?capture=start",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
   ]
 }

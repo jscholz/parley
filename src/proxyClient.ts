@@ -392,7 +392,10 @@ function startStreamChannel(): void {
                    'unread_changed', 'pins_changed', 'activity_changed',
                    'conversation_deleted',
                    // display_doc tool → Docs panel push.
-                   'doc_show']) {
+                   'doc_show',
+                   // Meeting capture: external start/stop triggers +
+                   // cross-device lifecycle state.
+                   'capture_control', 'capture_changed']) {
     streamES.addEventListener(t, onEvent as any);
   }
   // #204: the server emits replay_gap when our cursor predates its
@@ -751,6 +754,25 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
         },
         conversation: chatId,
         isReplay: env?._replay === true,
+      });
+      return;
+    }
+
+    case 'capture_control':
+    case 'capture_changed': {
+      // Meeting capture control plane + lifecycle (proxy capture.ts).
+      // Ring replays must never re-trigger a start/stop — a stale
+      // 'start' replayed on boot would grab the mic unprompted.
+      if (env?._replay === true) return;
+      subs?.onToolEvent?.({
+        kind: env.type === 'capture_control' ? 'capture.control' : 'capture.changed',
+        payload: {
+          action: typeof env.action === 'string' ? env.action : undefined,
+          capture: env.capture,
+          captureKind: typeof env.kind === 'string' ? env.kind : undefined,
+        },
+        conversation: chatId,
+        isReplay: false,
       });
       return;
     }

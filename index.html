@@ -640,6 +640,25 @@
       <button id="call-dropped-reconnect" class="call-dropped-reconnect" type="button">Reconnect</button>
       <button id="call-dropped-dismiss" class="call-dropped-dismiss" type="button" aria-label="Dismiss">✕</button>
     </div>
+    <!-- Meeting-capture pill (src/capture/pill.ts). App-GLOBAL chrome —
+         deliberately outside any chat-scoped container so recording
+         survives session switches (capture plan §3.6 multisession
+         property). Hidden unless a capture is live. -->
+    <div id="capture-pill" class="capture-pill" hidden>
+      <span class="capture-pill-dot" aria-hidden="true"></span>
+      <span class="capture-pill-title" id="capture-pill-title">Recording</span>
+      <span class="capture-pill-timer" id="capture-pill-timer">0:00</span>
+      <button id="capture-pill-flag" class="capture-pill-btn" title="Mark this moment" aria-label="Mark this moment">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      </button>
+      <button id="capture-pill-pause" class="capture-pill-btn" title="Pause recording" aria-label="Pause recording">
+        <svg data-icon="pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
+        <svg data-icon="resume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><polygon points="6 4 20 12 6 20 6 4" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button id="capture-pill-stop" class="capture-pill-btn capture-pill-stop" title="Stop recording" aria-label="Stop recording">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </div>
     <div class="composer">
       <div class="composer-attachments" id="composer-attachments" style="display:none"></div>
       <textarea id="composer-input" rows="1" placeholder="Type / for commands"></textarea>
@@ -736,6 +755,16 @@
               <button type="button" class="mic-toggle-row" role="menuitemcheckbox" data-toggle="dictateRealtime" aria-checked="false">
                 <span class="mic-toggle-label">Realtime</span>
                 <span class="mic-toggle-switch" aria-hidden="true"><span class="mic-toggle-thumb"></span></span>
+              </button>
+              <!-- Meeting capture entry point (capture plan §3.4). Lives in
+                   the mic chevron menu because no "+" popup exists — the
+                   attach + is a direct-action button — and capture is
+                   audio-domain. Instant-start: recording begins on tap,
+                   title defaults to "Meeting <date>", annotate later via
+                   the pill. -->
+              <button type="button" class="mic-toggle-row" id="mic-menu-record-meeting" role="menuitem">
+                <span class="mic-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><circle cx="19.5" cy="5.5" r="2" fill="currentColor" stroke="none"/></svg></span>
+                <span class="mic-toggle-label">Record meeting</span>
               </button>
             </div>
           </div>

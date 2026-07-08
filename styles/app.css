@@ -4717,3 +4717,81 @@
 }
 .doc-drawer-remove svg { width: 16px; height: 16px; }
 .doc-drawer-remove:hover { color: var(--fg); background: var(--surface); }
+
+/* ── Meeting-capture pill (src/capture/pill.ts; capture plan §3.4) ──
+   App-global chrome docked above the composer. Deliberately LOUD —
+   the pill is the on-device consent surface: a red pulsing dot that
+   is visible from across a table. */
+.capture-pill {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  margin: 0 auto 6px; padding: 8px 14px;
+  max-width: min(560px, calc(100% - 24px));
+  background: color-mix(in srgb, #b3261e 14%, var(--surface-1, #1c1c1e));
+  border: 1px solid color-mix(in srgb, #b3261e 45%, transparent);
+  border-radius: 999px;
+  font-size: 13px;
+  box-shadow: 0 2px 12px rgba(179, 38, 30, 0.25);
+}
+.capture-pill[hidden] { display: none; }
+.capture-pill-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #e5484d; flex: none;
+  animation: capture-pill-pulse 1.6s ease-in-out infinite;
+}
+@keyframes capture-pill-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+.capture-pill-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600;
+}
+.capture-pill-timer {
+  font-variant-numeric: tabular-nums; color: var(--muted, #9a9a9a);
+  flex: none;
+}
+.capture-pill-btn {
+  background: transparent; border: none; color: var(--fg, #eee);
+  cursor: pointer; font-size: 15px; line-height: 1;
+  padding: 6px 8px; border-radius: 8px; flex: none;
+}
+.capture-pill-btn:hover { background: rgba(255, 255, 255, 0.08); }
+.capture-pill-btn.flashed { background: rgba(229, 72, 77, 0.4); }
+.capture-pill-stop { color: #e5484d; font-size: 13px; }
+/* Interrupted (mic stolen by a call/Siri): amber, dot stops pulsing —
+   visibly different from "recording fine". */
+.capture-pill.interrupted {
+  border-color: color-mix(in srgb, #f1c40f 55%, transparent);
+  background: color-mix(in srgb, #f1c40f 12%, var(--surface-1, #1c1c1e));
+}
+.capture-pill.interrupted .capture-pill-dot {
+  background: #f1c40f; animation: none;
+}
+/* Finishing (uploader draining after stop): neutral, no red urgency. */
+.capture-pill.finishing {
+  border-color: var(--border, #333);
+  background: var(--surface-1, #1c1c1e);
+  box-shadow: none;
+}
+.capture-pill.finishing .capture-pill-dot { background: #6e6e6e; animation: none; }
+/* Paused (user-deliberate — mic RELEASED, OS indicator dark): calm
+   neutral, dot solid gray. Visually distinct from amber 'interrupted'
+   (involuntary, auto-resuming). */
+.capture-pill.paused {
+  border-color: var(--border, #333);
+  background: var(--surface-1, #1c1c1e);
+  box-shadow: none;
+}
+.capture-pill.paused .capture-pill-dot { background: #8a8a8a; animation: none; }
+/* Pill buttons hold small stroke SVGs (matches the app's icon set —
+   the cartoon-emoji pass was replaced 2026-07-08). */
+.capture-pill-btn svg { width: 15px; height: 15px; display: block; }
+/* Mic-menu action rows: leading icon + label (the toggle rows have a
+   trailing switch instead; both share .mic-toggle-row chrome). */
+.mic-mode-menu .mic-menu-icon { display: flex; flex: none; }
+.mic-mode-menu .mic-menu-icon svg { width: 15px; height: 15px; color: #e5484d; }
+/* [hidden] must beat the display:block above (UA [hidden] rule loses
+   that specificity fight — caught by render-verify 2026-07-08). */
+.capture-pill-btn svg[hidden] { display: none; }

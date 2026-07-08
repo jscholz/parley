@@ -400,6 +400,66 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 
+  // ── Meeting capture (proxy capture.ts contract, minimal mock) ──
+  // In-memory manifests + segment acks; `setCaptureOutage(true)` makes
+  // segment POSTs 503 so smokes can exercise the durable-uploader
+  // retry path.
+  const captures = new Map();
+  let captureOutage = false;
+  await page.route('**/api/sidekick/captures', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    let body;
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch { body = {}; }
+    const id = `cap_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    const capture = {
+      id,
+      title: body.title || `Meeting ${new Date().toISOString().slice(0, 10)}`,
+      linked_chat: body.linked_chat === 'new'
+        ? `sidekick:mock-capture-${Math.random().toString(16).slice(2, 8)}`
+        : (body.linked_chat || null),
+      diarize: body.diarize !== false,
+      status: 'recording',
+      started_at: Date.now(),
+      ended_at: null,
+      marks: [],
+      speakers: {},
+      segments: [],
+    };
+    captures.set(id, capture);
+    await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ capture }) });
+  });
+  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/segments\/\d+$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    if (captureOutage) {
+      return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"outage"}' });
+    }
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/segments\/(\d+)$/);
+    const cap = captures.get(m ? m[1] : '');
+    if (!cap) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"unknown capture"}' });
+    const seq = Number(m[2]);
+    const duplicate = cap.segments.some((s) => s.seq === seq);
+    if (!duplicate) {
+      cap.segments.push({ seq, bytes: (route.request().postDataBuffer() || Buffer.alloc(0)).length });
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, seq, duplicate }) });
+  });
+  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/stop$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/stop$/);
+    const cap = captures.get(m ? m[1] : '');
+    if (cap) { cap.status = 'complete'; cap.ended_at = Date.now(); }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
+  });
+  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/marks$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/marks$/);
+    const cap = captures.get(m ? m[1] : '');
+    let body;
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch { body = {}; }
+    if (cap) cap.marks.push({ t_ms: Number(body.t_ms) || 0 });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, marks: cap?.marks || [] }) });
+  });
+
   // POST /api/sidekick/messages — fire-and-forget, returns 202.
   // Body has {chat_id, text}. Auto-creates the chat in our map and
   // schedules a reply envelope on the persistent stream.
@@ -939,6 +999,12 @@ export async function installMockBackend(page) {
         clearUnreadFor(env.chat_id);
       }
     },
+    /** Meeting capture: flip the mocked segment endpoint into a 503
+     *  outage (and back) — exercises the client uploader's durable
+     *  retry path. `getCaptures()` exposes the mock's manifests for
+     *  assertions (segment acks, marks, stop state). */
+    setCaptureOutage(on) { captureOutage = !!on; },
+    getCaptures() { return Array.from(captures.values()); },
     /** Test escape hatch: set raw unread state. Use this when a test
      *  needs to simulate the plugin having pre-existing unread (e.g.
      *  cross-device scenarios where another device left mark-unread). */

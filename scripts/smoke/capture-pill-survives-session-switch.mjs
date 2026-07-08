@@ -1,0 +1,102 @@
+// The multisession property of meeting capture (capture plan §3.4/§3.6)
+// — LOAD-BEARING, pinned here: the recorder + pill are app-global
+// chrome, so a live recording must survive switching sessions and
+// chatting elsewhere. A regression that ties capture to chat-scoped
+// lifecycle (torn down on switch) is exactly what this smoke catches.
+//
+// Covered:
+//   1. Mic menu "🎙 Record meeting" → instant start (no prompt), pill
+//      visible with default "Meeting <date>" title, timer ticking.
+//   2. Switch to another session + send a text turn → pill still
+//      visible, recorder still active.
+//   3. Flag button → mark lands on the mock manifest.
+//   4. Stop → pill leaves, mock capture is status=complete with ≥1
+//      sealed segment uploaded (fake mic produces real chunks).
+
+import { waitForReady } from './lib.mjs';
+
+export const NAME = 'capture-pill-survives-session-switch';
+export const DESCRIPTION = 'Meeting capture is app-global: pill + recorder survive session switches; marks + stop land server-side';
+export const STATUS = 'implemented';
+export const BACKEND = 'mocked';
+
+const CHAT_A = 'mock-capture-chat-a';
+const CHAT_B = 'mock-capture-chat-b';
+
+export function MOCK_SETUP(mock) {
+  const t0 = Date.now() / 1000 - 120;
+  mock.addChat(CHAT_A, {
+    title: 'Chat A',
+    messages: [{ role: 'user', content: 'seed a', sidekick_id: 'umsg_cap_a', timestamp: t0 }],
+    lastActiveAt: Date.now() - 2000,
+  });
+  mock.addChat(CHAT_B, {
+    title: 'Chat B',
+    messages: [{ role: 'user', content: 'seed b', sidekick_id: 'umsg_cap_b', timestamp: t0 + 10 }],
+    lastActiveAt: Date.now() - 1000,
+  });
+}
+
+export default async function run({ page, log, mock }) {
+  await waitForReady(page);
+
+  // 1. Start from the mic menu (instant start — no prompts).
+  await page.evaluate(() => {
+    const menu = document.getElementById('mic-mode-menu');
+    if (menu) { menu.hidden = false; menu.setAttribute('aria-hidden', 'false'); }
+    document.getElementById('mic-menu-record-meeting')?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true }));
+  });
+  await page.waitForFunction(
+    () => !document.getElementById('capture-pill')?.hidden,
+    null, { timeout: 8000, polling: 50 },
+  );
+  const title = await page.textContent('#capture-pill-title');
+  if (!/^Meeting \d{4}-\d{2}-\d{2}$/.test(title || '')) {
+    throw new Error(`pill should show the default instant-start title, got: ${title}`);
+  }
+  log('capture started from mic menu; pill visible with default title');
+
+  // 2. Switch sessions and send a turn — the pill must survive.
+  await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#session-list li, .sess-item, [data-chat-id]')];
+    const target = rows.find((r) => (r.getAttribute('data-chat-id') || '').includes('mock-capture-chat-a'))
+      || rows.find((r) => (r.textContent || '').includes('Chat A'));
+    (target?.querySelector('button, a') || target)?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true }));
+  });
+  await new Promise((r) => setTimeout(r, 800));
+  const stillVisible = await page.evaluate(() =>
+    !document.getElementById('capture-pill')?.hidden);
+  if (!stillVisible) throw new Error('pill vanished on session switch — capture must be app-global');
+  const stateAfterSwitch = await page.evaluate(async () => {
+    const mod = await import('/build/capture/recorder.mjs').catch(() => null);
+    return mod ? mod.getCaptureState() : null;
+  });
+  if (stateAfterSwitch && !stateAfterSwitch.active) {
+    throw new Error('recorder deactivated on session switch');
+  }
+  log('pill + recorder survive the session switch');
+
+  // 3. Flag a moment.
+  await page.click('#capture-pill-flag');
+  await page.waitForFunction(
+    () => true, null, { timeout: 500 },
+  ).catch(() => {});
+  await new Promise((r) => setTimeout(r, 300));
+  const marks = mock.getCaptures()[0]?.marks?.length ?? 0;
+  if (marks !== 1) throw new Error(`expected 1 mark on the manifest, got ${marks}`);
+  log('flag button lands a mark server-side');
+
+  // 4. Let the recorder run long enough to have chunk data, then stop.
+  await new Promise((r) => setTimeout(r, 2500));
+  await page.click('#capture-pill-stop');
+  await page.waitForFunction(
+    () => document.getElementById('capture-pill')?.hidden,
+    null, { timeout: 20_000, polling: 100 },
+  );
+  const cap = mock.getCaptures()[0];
+  if (cap.status !== 'complete') throw new Error(`capture should be complete, got ${cap.status}`);
+  if (!cap.segments.length) throw new Error('no segments were uploaded — fake mic should produce chunks');
+  log(`stop: capture complete with ${cap.segments.length} uploaded segment(s)`);
+}

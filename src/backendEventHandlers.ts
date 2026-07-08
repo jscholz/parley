@@ -388,6 +388,23 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
 /** Tool-events — cards and similar side-channel data the agent emits.
  *  canvas.show (inline bubble cards) + doc.show (Docs drawer panel). */
 export function handleToolEvent({ kind, payload, conversation, isReplay }: any) {
+  if (kind === 'capture.control' && payload) {
+    // External capture trigger (capture plan §3.3) — hand to the pill
+    // module, which gates on visibility so only the foregrounded
+    // device grabs the mic. Replays are dropped in proxyClient.
+    try {
+      window.dispatchEvent(new CustomEvent('sidekick:capture-control', {
+        detail: { action: payload.action },
+      }));
+    } catch { /* non-browser */ }
+    return;
+  }
+  if (kind === 'capture.changed') {
+    // Cross-device lifecycle state — reserved for the passive
+    // "recording on iPhone" pill (Phase 4). Consumed here so it never
+    // falls through to the viewed-session gate below.
+    return;
+  }
   if (kind === 'doc.show' && payload) {
     // Docs drawer is chat-independent chrome — no viewed-session gate:
     // the user may have switched chats while the turn ran, and they
