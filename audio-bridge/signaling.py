@@ -521,6 +521,57 @@ async def handle_transcribe(request: "web.Request") -> "web.Response":
     return web.json_response({"transcript": text or ""})
 
 
+async def handle_transcribe_diarized(request: "web.Request") -> "web.Response":
+    """POST /v1/transcribe-diarized — full-audio batch pass with speaker
+    labels (meeting-capture canonical pass; capture plan §3.3 Phase 3).
+
+    Body is ONE contiguous audio file (the sidekick proxy stitches the
+    capture's segments first — diarize_model=v2 is batch-only and
+    speaker ids can't be correlated across separate calls). Returns
+    ``{ok, utterances: [{speaker, start, text}]}``.
+
+    Providers that don't implement ``transcribe_diarized`` → 501, same
+    contract as batch-less providers on /v1/transcribe.
+    """
+    if _VOICE_CONFIG is None:
+        return _err("not initialized", status=503, code="not_ready")
+    mime = request.headers.get("Content-Type", "audio/wav")
+    try:
+        audio = await request.read()
+    except Exception as e:
+        return _err(f"could not read body: {e}", status=400)
+    if not audio:
+        return _err("empty body", status=400, code="empty_body")
+
+    from providers import get_stt_provider
+    try:
+        provider = get_stt_provider(_VOICE_CONFIG.stt)
+    except KeyError as e:
+        return _err(str(e), status=500, code="unknown_provider")
+    diarize_fn = getattr(provider, "transcribe_diarized", None)
+    if diarize_fn is None:
+        return web.json_response(
+            {"error": "provider does not support diarized batch"},
+            status=501,
+        )
+    try:
+        utterances = await diarize_fn(audio, mime)
+    except NotImplementedError as e:
+        return web.json_response(
+            {"error": f"provider does not support diarized batch: {e}"},
+            status=501,
+        )
+    except Exception as e:
+        logger.exception("[transcribe-diarized] failed")
+        return _err(str(e), status=500, code="transcribe_failed")
+    finally:
+        try:
+            await provider.aclose()
+        except Exception:  # pragma: no cover
+            pass
+    return web.json_response({"ok": True, "utterances": utterances})
+
+
 async def handle_health(request: "web.Request") -> "web.Response":
     """GET /v1/rtc/health — diagnostic endpoint."""
     if not AIORTC_AVAILABLE:
@@ -597,6 +648,7 @@ def register_routes(
     # Batch transcription — same STT provider as the streaming path,
     # so swapping providers in voice config affects live + memo together.
     app.router.add_post("/v1/transcribe", handle_transcribe)
+    app.router.add_post("/v1/transcribe-diarized", handle_transcribe_diarized)
 
     # Defer the registry sweep loop until the event loop is running.
     # When mounted in-process by an existing aiohttp app (the legacy

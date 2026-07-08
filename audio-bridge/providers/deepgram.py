@@ -253,6 +253,71 @@ class DeepgramSTT(STTProvider):
         text = _WHITESPACE_RE.sub(" ", text).strip()
         return text
 
+    async def transcribe_diarized(self, audio: bytes, mime: str) -> list:
+        """Batch transcribe with SPEAKER labels — the meeting-capture
+        canonical pass (capture plan §1.5/§3.3 Phase 3).
+
+        Deliberately a SEPARATE method from :meth:`transcribe`: the
+        general batch path must stay diarize-free (see the warning in
+        its docstring — diarize params don't belong on the memo path),
+        and the diarize pass needs the FULL meeting audio in one call
+        (``diarize_model=v2`` is batch-only, and per-chunk speaker ids
+        can't be correlated across chunks).
+
+        Returns ``[{speaker: int, start: float_s, text: str}, ...]``
+        from Deepgram's utterances — the natural render unit for
+        speaker-turn markdown.
+        """
+        if not self._api_key:
+            raise RuntimeError(
+                "DeepgramSTT requires an API key.  Set the env var named in "
+                "voice.stt.api_key_env (default DEEPGRAM_API_KEY)."
+            )
+        if not audio:
+            return []
+
+        try:
+            import aiohttp  # type: ignore
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError(
+                "aiohttp not installed; install hermes-agent[messaging] or [webrtc]"
+            ) from exc
+
+        params = {
+            "model": self._model,
+            "language": self._language,
+            "smart_format": "true",
+            # diarize_model=v2 IMPLIES diarization — combining it with
+            # diarize=true is an INVALID_QUERY_PARAMETER 400 (verified
+            # live 2026-07-08; Deepgram tightened this after the plan's
+            # research pass).
+            "diarize_model": "v2",
+            "utterances": "true",
+        }
+        qs = urllib.parse.urlencode(params)
+        for kw in self._keyterms:
+            qs += "&keyterm=" + urllib.parse.quote(str(kw))
+        url = f"{DEEPGRAM_REST_URL}?{qs}"
+        headers = {
+            "Authorization": f"Token {self._api_key}",
+            "Content-Type": mime or "audio/wav",
+        }
+        logger.info(
+            "[deepgram-stt] diarized batch bytes=%d mime=%s model=%s",
+            len(audio), mime, self._model,
+        )
+        # Long meetings take minutes server-side; generous read timeout.
+        timeout = aiohttp.ClientTimeout(total=900)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=audio, headers=headers) as resp:
+                if resp.status != 200:
+                    err = (await resp.text())[:200]
+                    raise RuntimeError(
+                        f"deepgram REST returned {resp.status}: {err}"
+                    )
+                payload = await resp.json()
+        return _parse_diarized_utterances(payload)
+
     async def aclose(self) -> None:
         self._closed = True
         if self._ws is not None:
@@ -260,6 +325,26 @@ class DeepgramSTT(STTProvider):
                 await self._ws.close()
             except Exception:  # pragma: no cover
                 pass
+
+
+def _parse_diarized_utterances(payload: dict) -> list:
+    """Extract ``[{speaker, start, text}]`` from a Deepgram batch
+    response with ``utterances=true``. Defensive: any malformed
+    utterance is skipped rather than failing the whole meeting."""
+    out = []
+    for utt in payload.get("results", {}).get("utterances", []) or []:
+        try:
+            text = _WHITESPACE_RE.sub(" ", str(utt.get("transcript") or "")).strip()
+            if not text:
+                continue
+            out.append({
+                "speaker": int(utt.get("speaker", 0)),
+                "start": float(utt.get("start", 0.0)),
+                "text": text,
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _parse_results(payload: dict):

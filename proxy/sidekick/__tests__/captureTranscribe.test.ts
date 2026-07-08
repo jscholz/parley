@@ -199,3 +199,90 @@ test('rebuildTranscript is idempotent and skips missing tails', async () => {
   await stopCapture(m.id);
   await waitFor(async () => (await getCapture(m.id)).status === 'complete');
 });
+
+// ── Phase 3: diarize pass ──────────────────────────────────────────────
+
+function diarizedBridge(utterances: { speaker: number; start: number; text: string }[] | { status: number }) {
+  const calls: string[] = [];
+  const fn = async (url: any, init?: any): Promise<Response> => {
+    const u = String(url);
+    calls.push(u);
+    if (u.includes('/v1/transcribe-diarized')) {
+      if (!Array.isArray(utterances)) {
+        return new Response(JSON.stringify({ error: 'diarize sad' }), { status: utterances.status });
+      }
+      return new Response(JSON.stringify({ ok: true, utterances }), { status: 200 });
+    }
+    // Rolling path: echo the segment seq.
+    const seq = Number(Buffer.from(init.body).toString('utf8').replace('audio-', ''));
+    return new Response(JSON.stringify({ ok: true, transcript: `plain ${seq}.` }), { status: 200 });
+  };
+  return { fn: fn as unknown as typeof fetch, calls };
+}
+
+test('diarize=true: stitched audio → speaker-turn transcript REPLACES transcript.md; plain preserved', async () => {
+  const { fn, calls } = diarizedBridge([
+    { speaker: 0, start: 0.5, text: 'Morning everyone.' },
+    { speaker: 0, start: 3.0, text: 'Let us start.' },
+    { speaker: 1, start: 6.2, text: 'I have the numbers.' },
+    { speaker: 0, start: 61.0, text: 'Great.' },
+  ]);
+  const stitched: string[][] = [];
+  wire(fn, {
+    stitchFn: async (files: string[], out: string) => {
+      stitched.push(files);
+      const { promises: f } = await import('node:fs');
+      await f.writeFile(out, 'fake-wav');
+      return out;
+    },
+  });
+  const m = await createCapture({ title: 'Diarized', linkedChat: 'sidekick:d', diarize: true });
+  await seg(m.id, 0, 0);
+  await seg(m.id, 1, 45_000);
+  await addMark(m.id, 5_000);
+  await stopCapture(m.id);
+  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+
+  assert.equal(stitched.length, 1);
+  assert.equal(stitched[0].length, 2);         // both segments stitched
+  const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
+  assert.match(t, /diarized_/);
+  assert.match(t, /\*\*Speaker 0\*\* \[0:00\]: Morning everyone\. Let us start\./);  // same-speaker turns grouped
+  assert.match(t, /\*\*Speaker 1\*\* \[0:06\]: I have the numbers\./);
+  assert.ok(t.indexOf('[MARK 0:05]') < t.indexOf('Speaker 1'), 'mark interleaved by time');
+  const plain = await fs.readFile(path.join(dir, m.id, 'transcript.plain.md'), 'utf8');
+  assert.match(plain, /plain 0\./);            // stitched version preserved
+  assert.ok(calls.some((u) => u.includes('/v1/transcribe-diarized')));
+});
+
+test('diarize failure falls back to the stitched transcript — meeting never lost', async () => {
+  const { fn } = diarizedBridge({ status: 500 });
+  wire(fn, {
+    stitchFn: async (_files: string[], out: string) => {
+      const { promises: f } = await import('node:fs');
+      await f.writeFile(out, 'fake-wav');
+      return out;
+    },
+  });
+  const m = await createCapture({ title: 'Fallback', diarize: true });
+  await seg(m.id, 0, 0);
+  await stopCapture(m.id);
+  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
+  assert.match(t, /plain 0\./);                // stitched content survived
+  assert.doesNotMatch(t, /diarized_/);
+  assert.doesNotMatch(t, /recording in progress/);
+});
+
+test('stitch failure (no ffmpeg / bad audio) also falls back cleanly', async () => {
+  const { fn } = diarizedBridge([]);
+  wire(fn, {
+    stitchFn: async () => { throw new Error('ffmpeg exploded'); },
+  });
+  const m = await createCapture({ title: 'StitchFail', diarize: true });
+  await seg(m.id, 0, 0);
+  await stopCapture(m.id);
+  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
+  assert.match(t, /plain 0\./);
+});

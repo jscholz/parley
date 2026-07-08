@@ -49,6 +49,10 @@ export interface TranscribeConfig {
   /** Message dispatch seam — production default is messages.ts
    *  dispatchInternalMessage; tests inject a recorder. */
   dispatchFn?: (chatId: string, text: string) => boolean;
+  /** Segment-stitch seam — production default runs ffmpeg (concat
+   *  demuxer → 16k mono wav); tests inject a stub. Returns the path
+   *  of the stitched file. */
+  stitchFn?: (segmentFiles: string[], outFile: string) => Promise<string>;
 }
 
 interface CaptureJob {
@@ -236,19 +240,127 @@ async function drain(id: string): Promise<void> {
   }
 }
 
+// ── Diarize pass (Phase 3) ─────────────────────────────────────────────
+//
+// One full-audio batch call with diarize_model=v2 (batch-ONLY — plan
+// finding #5; per-segment speaker ids can't be correlated, which is
+// the entire reason this pass exists). The diarized render REPLACES
+// transcript.md — one canonical path for the shelf entry and the
+// agent — and the plain stitched version is kept as
+// transcript.plain.md. Any failure falls back to the stitched
+// transcript: a meeting must never be lost to diarization, and raw
+// segments keep it retro-diarizable (plan §Phase 4g).
+
+async function ffmpegStitch(segmentFiles: string[], outFile: string): Promise<string> {
+  const { execFile } = await import('node:child_process');
+  const listFile = `${outFile}.list.txt`;
+  // concat demuxer list: same-codec inputs (one recorder config), so a
+  // decode→resample pass to 16k mono wav is reliable where -c copy on
+  // mp4 parts is not.
+  await fs.writeFile(listFile, segmentFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+  await new Promise<void>((resolve, reject) => {
+    execFile('ffmpeg', [
+      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
+      '-ac', '1', '-ar', '16000', outFile,
+    ], { timeout: 600_000 }, (err, _out, stderr) => {
+      if (err) reject(new Error(`ffmpeg: ${String(stderr).slice(-400)}`));
+      else resolve();
+    });
+  });
+  await fs.unlink(listFile).catch(() => { /* best-effort */ });
+  return outFile;
+}
+
+function renderDiarized(
+  m: CaptureManifest,
+  utterances: { speaker: number; start: number; text: string }[],
+): string {
+  const lines: string[] = [
+    `# 🎙 ${m.title}`,
+    '',
+    `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized_`,
+    '',
+  ];
+  const marks = [...m.marks].sort((a, b) => a.t_ms - b.t_ms);
+  let markIdx = 0;
+  // Group consecutive same-speaker utterances into one turn.
+  let curSpeaker = -1;
+  let turn: string[] = [];
+  let turnStart = 0;
+  const flush = () => {
+    if (turn.length) lines.push(`**Speaker ${curSpeaker}** [${fmtOffset(turnStart * 1000)}]: ${turn.join(' ')}`, '');
+    turn = [];
+  };
+  for (const u of utterances) {
+    while (markIdx < marks.length && marks[markIdx].t_ms <= u.start * 1000) {
+      flush();
+      lines.push(`**[MARK ${fmtOffset(marks[markIdx].t_ms)}]**`, '');
+      markIdx += 1;
+    }
+    if (u.speaker !== curSpeaker) {
+      flush();
+      curSpeaker = u.speaker;
+      turnStart = u.start;
+    }
+    turn.push(u.text);
+  }
+  flush();
+  while (markIdx < marks.length) {
+    lines.push(`**[MARK ${fmtOffset(marks[markIdx].t_ms)}]**`, '');
+    markIdx += 1;
+  }
+  return lines.join('\n');
+}
+
+async function runDiarizePass(id: string): Promise<boolean> {
+  if (!cfg) return false;
+  const m = await getCapture(id);
+  if (!m.segments.length) return false;
+  try {
+    const stitch = cfg.stitchFn ?? ffmpegStitch;
+    const wav = await stitch(
+      m.segments.map((s) => segmentPath(m.id, s)),
+      path.join(captureDirPath(m.id), 'audio.full.wav'),
+    );
+    const audio = await fs.readFile(wav);
+    const fetchFn = cfg.fetchFn ?? fetch;
+    const res = await fetchFn(new URL('/v1/transcribe-diarized', cfg.bridgeUrl).toString(), {
+      method: 'POST',
+      headers: { 'content-type': 'audio/wav' },
+      body: audio,
+      signal: AbortSignal.timeout(900_000),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error?.message || data?.error || `bridge ${res.status}`);
+    const utterances = Array.isArray(data?.utterances) ? data.utterances : [];
+    if (!utterances.length) throw new Error('diarize pass returned no utterances');
+    // Preserve the stitched plain version, then make the diarized
+    // render THE transcript (same path = same shelf entry, same path
+    // the start-message promised the agent).
+    const file = transcriptPath(m);
+    await fs.copyFile(file, path.join(captureDirPath(m.id), 'transcript.plain.md')).catch(() => { /* first render may not exist */ });
+    const body = renderDiarized(m, utterances);
+    const tmp = `${file}.tmp-${process.pid}`;
+    await fs.writeFile(tmp, body);
+    await fs.rename(tmp, file);
+    return true;
+  } catch (e) {
+    console.error(`[capture-transcribe] diarize pass failed for ${id} — completing with the stitched transcript: ${String(e)}`);
+    return false;
+  }
+}
+
 async function finalize(id: string): Promise<void> {
   const m = await getCapture(id);
   if (m.status === 'complete' || m.status === 'failed') return;
-  await rebuildTranscript(id);   // header flips off "in progress" after finalizeCapture below
-  if (m.diarize) {
-    // Phase 3 seam: the diarize pass slots in HERE (stitch → bridge
-    // diarize_model=v2 → transcript.diarized.md → then finalize). Until
-    // it ships, diarize captures complete with the stitched transcript
-    // and remain retro-diarizable (raw segments persist).
-    console.log(`[capture-transcribe] ${id}: diarize requested — pass not yet implemented, completing with stitched transcript`);
-  }
+  await rebuildTranscript(id);
+  let diarized = false;
+  if (m.diarize) diarized = await runDiarizePass(id);
   await finalizeCapture(id);
-  await rebuildTranscript(id);   // re-render with the final header
+  // Final-header re-render — ONLY for the stitched path: a diarized
+  // pass already replaced transcript.md and a rebuild here would
+  // clobber it back to the plain version.
+  if (!diarized) await rebuildTranscript(id);
   await pushDoc(id, { immediate: true });
   const done = await getCapture(id);
   if ((cfg?.autoIngest ?? true) && done.linked_chat) {
