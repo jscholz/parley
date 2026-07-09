@@ -4804,3 +4804,10 @@
 /* [hidden] must beat the display:block above (UA [hidden] rule loses
    that specificity fight — caught by render-verify 2026-07-08). */
 .capture-pill-btn svg[hidden] { display: none; }
+/* App-level record button (right rail): neutral glyph at rest, red
+   while a capture is live — same color rule as the shelf + pill. */
+.capture-rail-btn.recording { color: #e5484d; }
+.capture-rail-btn.recording svg circle:last-child {
+  animation: capture-pill-pulse 1.6s ease-in-out infinite;
+  transform-origin: center;
+}

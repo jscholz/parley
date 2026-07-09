@@ -55,7 +55,14 @@ export default async function run({ page, log, mock }) {
   if (!/^Meeting \d{4}-\d{2}-\d{2}$/.test(title || '')) {
     throw new Error(`pill should show the default instant-start title, got: ${title}`);
   }
-  log('capture started from mic menu; pill visible with default title');
+  // Placement semantics (field UX 2026-07-09): the COMPOSER menu item
+  // records into the ACTIVE session, not a freshly minted one.
+  const linked = mock.getCaptures()[0]?.linked_chat || '';
+  if (linked.startsWith('sidekick:mock-capture-')) {
+    throw new Error(`composer-menu start must link the ACTIVE chat, got minted session: ${linked}`);
+  }
+  if (!linked) throw new Error('composer-menu start produced no linked_chat');
+  log(`capture started from mic menu; linked to active chat (${linked})`);
 
   // 2. Switch sessions and send a turn — the pill must survive.
   await page.evaluate(() => {

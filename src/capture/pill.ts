@@ -18,6 +18,7 @@ import {
   pauseMeetingCapture, resumeMeetingCapture,
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
+import * as switchCtl from '../switchController.ts';
 import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
@@ -38,6 +39,8 @@ function render(state: CaptureUiState): void {
   const timer = document.getElementById('capture-pill-timer');
   const show = state.active || state.phase === 'finishing';
   pill.hidden = !show;
+  document.getElementById('btn-capture-rail')?.classList.toggle(
+    'recording', state.active && state.phase === 'recording');
   pill.classList.toggle('interrupted', state.phase === 'interrupted');
   pill.classList.toggle('paused', state.phase === 'paused');
   pill.classList.toggle('finishing', state.phase === 'finishing');
@@ -81,9 +84,14 @@ function toast(message: string): void {
   log(`[capture] ${message}`);
 }
 
-async function startFromUi(): Promise<void> {
+/** Placement-scoped start (field UX 2026-07-09): app-level entry
+ *  points (rail button, URL param, capture_control, shortcuts) omit
+ *  linkedChat → new dedicated session; the composer mic-menu passes
+ *  the viewed chat so the meeting lands where the user is standing —
+ *  matching what each button's LOCATION already implies. */
+async function startFromUi(linkedChat?: string): Promise<void> {
   try {
-    await startMeetingCapture({});
+    await startMeetingCapture({ linkedChat });
   } catch (e) {
     const msg = String((e as Error)?.message || e);
     toast(/already held/.test(msg)
@@ -122,6 +130,18 @@ export function initCapturePill(): void {
     // aria-expanded bookkeeping — hiding is enough to dismiss).
     const menu = document.getElementById('mic-mode-menu');
     if (menu) { menu.hidden = true; menu.setAttribute('aria-hidden', 'true'); }
+    // Composer placement → this chat ("Record meeting here").
+    void startFromUi(switchCtl.viewedId() || undefined);
+  });
+  // App-level rail button → new dedicated session; the glyph turns red
+  // while a capture is live (same color rule as everywhere: red = live
+  // mic). Tapping while recording focuses attention on the pill rather
+  // than double-starting.
+  document.getElementById('btn-capture-rail')?.addEventListener('click', () => {
+    if (getCaptureState().active) {
+      document.getElementById('capture-pill')?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     void startFromUi();
   });
 

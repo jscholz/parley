@@ -162,6 +162,16 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
       <span id="doc-drawer-dot-rail" class="doc-drawer-dot" hidden></span>
     </button>
+    <!-- APP-LEVEL record button (capture plan §3.4, placement-scoped
+         semantics — field UX 2026-07-09): chrome OUTSIDE the composer
+         reads as app-general, so this starts a meeting in a NEW
+         dedicated session. The composer mic-menu item is the
+         "record into THIS chat" variant. Action button, not a drawer
+         tab — no right-drawer-rail-btn/tab wiring. Glyph turns red
+         while a capture is live (pill.ts toggles .recording). -->
+    <button id="btn-capture-rail" class="sb-icon-btn capture-rail-btn" type="button" title="Record meeting (new session)" aria-label="Record meeting in a new session">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>
+    </button>
   </div>
 
   <div class="pin-drawer-content">
@@ -769,7 +779,7 @@
                      here; red is reserved for a LIVE mic (the pill's
                      pulsing dot is this same glyph in its live state). -->
                 <span class="mic-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></span>
-                <span class="mic-toggle-label">Record meeting</span>
+                <span class="mic-toggle-label">Record meeting here</span>
               </button>
             </div>
           </div>

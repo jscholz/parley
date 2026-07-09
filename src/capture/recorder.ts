@@ -185,15 +185,24 @@ function watchTracks(): void {
   });
 }
 
-export async function startMeetingCapture(opts: { title?: string } = {}): Promise<CaptureUiState> {
+export async function startMeetingCapture(
+  opts: { title?: string; linkedChat?: string } = {},
+): Promise<CaptureUiState> {
   if (state.active) return getCaptureState();
   // Create server-side FIRST (instant-start: no prompts — title
-  // defaults, annotate later via PATCH; §3.4). linked_chat 'new' mints
-  // the meeting's dedicated session (§3.6).
+  // defaults, annotate later via PATCH; §3.4). linkedChat carries the
+  // PLACEMENT-SCOPED semantics (field UX 2026-07-09): app-level entry
+  // points omit it → 'new' mints a dedicated meeting session (§3.6);
+  // the composer mic-menu passes the viewed chat → the meeting lands
+  // in the session the user is standing in.
   const res = await fetch(apiUrl('/api/sidekick/captures'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ title: opts.title || undefined, linked_chat: 'new', diarize: true }),
+    body: JSON.stringify({
+      title: opts.title || undefined,
+      linked_chat: opts.linkedChat || 'new',
+      diarize: true,
+    }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
