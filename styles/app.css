@@ -4791,7 +4791,16 @@
 /* Mic-menu action rows: leading icon + label (the toggle rows have a
    trailing switch instead; both share .mic-toggle-row chrome). */
 .mic-mode-menu .mic-menu-icon { display: flex; flex: none; }
-.mic-mode-menu .mic-menu-icon svg { width: 15px; height: 15px; color: #e5484d; }
+/* Neutral, slightly dimmed — the glyph identifies the feature; RED is
+   reserved for a live mic (capture pill). A red icon in a resting menu
+   both screams and lies. */
+.mic-mode-menu .mic-menu-icon svg { width: 15px; height: 15px; color: var(--muted, #9a9a9a); }
+/* Capture-doc glyph on the Docs shelf (list rows + reader title) —
+   same ring+dot record mark as the menu item; neutral for finished
+   captures, red only while the capture is LIVE. */
+.doc-capture-glyph { display: inline-flex; vertical-align: -2px; margin-right: 7px; }
+.doc-capture-glyph svg { width: 13px; height: 13px; color: var(--muted, #9a9a9a); }
+.doc-capture-glyph.live svg { color: #e5484d; }
 /* [hidden] must beat the display:block above (UA [hidden] rule loses
    that specificity fight — caught by render-verify 2026-07-08). */
 .capture-pill-btn svg[hidden] { display: none; }

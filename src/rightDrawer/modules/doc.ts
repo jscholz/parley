@@ -84,7 +84,8 @@ export function createDocModule(opts: {
       main.className = 'doc-shelf-item-main';
       const title = document.createElement('span');
       title.className = 'doc-shelf-item-title';
-      title.textContent = d.title;
+      appendCaptureGlyph(title, d);
+      title.appendChild(document.createTextNode(d.title));
       const meta = document.createElement('span');
       meta.className = 'doc-shelf-item-meta';
       const chip = d.format === 'markdown' ? 'md' : d.format === 'html' ? 'html' : 'txt';
@@ -166,7 +167,8 @@ export function createDocModule(opts: {
 
     const titleEl = document.createElement('div');
     titleEl.className = 'doc-drawer-title';
-    titleEl.textContent = doc.title;
+    appendCaptureGlyph(titleEl, doc);
+    titleEl.appendChild(document.createTextNode(doc.title));
     opts.body.appendChild(titleEl);
 
     if (doc.format === 'html') {
@@ -204,6 +206,20 @@ export function createDocModule(opts: {
     },
     onSelect: () => { opts.onSelect?.(); },
   };
+}
+
+/** Capture docs (meeting transcripts) get the record glyph — ring +
+ *  filled dot, the feature's mark everywhere it appears — instead of
+ *  emoji in the title string. Red only while the capture is LIVE
+ *  (title carries the pipeline's "(live)" suffix); neutral once done.
+ *  Same color rule as the pill: shape = identity, red = live mic. */
+function appendCaptureGlyph(parent: HTMLElement, doc: DocState): void {
+  if (doc.source !== 'capture') return;
+  const glyph = document.createElement('span');
+  glyph.className = 'doc-capture-glyph' + (/\(live\)\s*$/.test(doc.title) ? ' live' : '');
+  glyph.setAttribute('aria-hidden', 'true');
+  glyph.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>';
+  parent.appendChild(glyph);
 }
 
 function downloadDoc(doc: DocState): void {

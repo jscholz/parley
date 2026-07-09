@@ -751,6 +751,10 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
           // and survives ring replay (the ring stores the original
           // envelope, original stamp included).
           displayedAt: typeof env.displayed_at === 'number' ? env.displayed_at : undefined,
+          // Producer tag ('capture' = meeting transcript) — the shelf
+          // renders capture docs with the record glyph instead of a
+          // title emoji.
+          source: typeof env.source === 'string' ? env.source : undefined,
         },
         conversation: chatId,
         isReplay: env?._replay === true,

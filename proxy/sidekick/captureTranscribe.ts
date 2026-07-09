@@ -102,7 +102,7 @@ export async function rebuildTranscript(id: string): Promise<string> {
   const m = await getCapture(id);
   const live = m.status === 'recording' || m.status === 'transcribing';
   const lines: string[] = [
-    `# 🎙 ${m.title}`,
+    `# ${m.title}`,
     '',
     live
       ? '_Live transcript — recording in progress; updates roughly every minute._'
@@ -163,7 +163,7 @@ async function pushDoc(id: string, opts?: { immediate?: boolean }): Promise<void
     pushEnvelope({
       type: 'doc_show',
       chat_id: m.linked_chat || '',
-      title: live ? `🎙 ${m.title} (live)` : `🎙 ${m.title}`,
+      title: live ? `${m.title} (live)` : m.title,
       content,
       format: 'markdown',
       path: transcriptPath(m),
@@ -276,7 +276,7 @@ function renderDiarized(
   utterances: { speaker: number; start: number; text: string }[],
 ): string {
   const lines: string[] = [
-    `# 🎙 ${m.title}`,
+    `# ${m.title}`,
     '',
     `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized_`,
     '',

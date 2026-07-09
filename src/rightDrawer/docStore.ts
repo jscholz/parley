@@ -34,6 +34,9 @@ export interface DocPayload {
    *  ring-replayed envelope carries the ORIGINAL stamp so boot/reconnect
    *  can't reset it to 0s (field bug 2026-07-08). */
   displayedAt?: number;
+  /** Producer tag: 'capture' = meeting transcript (rendered with the
+   *  record glyph — ring+dot — instead of emoji in the title). */
+  source?: string;
 }
 
 export interface DocState extends DocPayload {
@@ -171,6 +174,7 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
     format: payload.format || 'text',
     path: payload.path,
     chatId: payload.chatId,
+    source: payload.source ?? existing?.source,
     receivedAt: existing?.receivedAt ?? displayedAt ?? now,
     updatedAt,
   };
