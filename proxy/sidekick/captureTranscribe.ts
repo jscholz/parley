@@ -54,6 +54,17 @@ export interface TranscribeConfig {
    *  demuxer → 16k mono wav); tests inject a stub. Returns the path
    *  of the stitched file. */
   stitchFn?: (segmentFiles: string[], outFile: string) => Promise<string>;
+  /** STT vocabulary biasing (capture plan §Phase 4b): terms appended
+   *  as repeated ?keyterms= on BOTH bridge calls — same biasing the
+   *  memo/dictate paths get. server.ts wires its config seed list;
+   *  live so yaml reloads apply. */
+  keytermsFn?: () => string[];
+}
+
+function keytermsQuery(): string {
+  const terms = cfg?.keytermsFn?.() ?? [];
+  if (!terms.length) return '';
+  return '?' + terms.map((t) => `keyterms=${encodeURIComponent(t)}`).join('&');
 }
 
 interface CaptureJob {
@@ -190,7 +201,7 @@ async function transcribeSegment(m: CaptureManifest, seg: SegmentMeta): Promise<
   const maxAttempts = cfg.maxAttempts ?? 4;
   for (let attempt = 1; ; attempt++) {
     try {
-      const res = await fetchFn(new URL('/v1/transcribe', cfg.bridgeUrl).toString(), {
+      const res = await fetchFn(new URL('/v1/transcribe' + keytermsQuery(), cfg.bridgeUrl).toString(), {
         method: 'POST',
         headers: { 'content-type': seg.mime },
         body: audio,
@@ -307,7 +318,7 @@ async function runDiarizePass(id: string): Promise<boolean> {
     );
     const audio = await fs.readFile(wav);
     const fetchFn = cfg.fetchFn ?? fetch;
-    const res = await fetchFn(new URL('/v1/transcribe-diarized', cfg.bridgeUrl).toString(), {
+    const res = await fetchFn(new URL('/v1/transcribe-diarized' + keytermsQuery(), cfg.bridgeUrl).toString(), {
       method: 'POST',
       headers: { 'content-type': 'audio/wav' },
       body: audio,
@@ -392,6 +403,20 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
       jobs.delete(id);
     },
   });
+}
+
+/** Retro-diarize (plan §Phase 4g — the lazy property §1.5 promised):
+ *  re-run the speaker pass on a FINISHED capture. Raw segments
+ *  persist, so this works any time — a capture recorded with
+ *  diarize=false, or a failed pass, can gain speakers later. Rewrites
+ *  transcript.md (plain preserved) and re-pushes the doc. */
+export async function retroDiarize(id: string): Promise<boolean> {
+  if (!cfg) return false;
+  const m = await getCapture(id);
+  if (m.status !== 'complete') throw new Error(`capture ${id} is ${m.status}; retro-diarize needs a finished capture`);
+  const ok = await runDiarizePass(id);
+  if (ok) await pushDoc(id, { immediate: true });
+  return ok;
 }
 
 /** Boot recovery: any capture parked in recording/transcribing with

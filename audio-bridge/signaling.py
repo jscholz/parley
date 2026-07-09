@@ -543,9 +543,33 @@ async def handle_transcribe_diarized(request: "web.Request") -> "web.Response":
     if not audio:
         return _err("empty body", status=400, code="empty_body")
 
+    # Per-request keyterms — same merge handle_transcribe does, so the
+    # diarize pass gets the same vocabulary biasing as the rolling pass
+    # (without this, capture keyterms silently applied to only one of
+    # the two transcription paths).
+    req_keyterms = []
+    seen_kt: set[str] = set()
+    for t in request.query.getall("keyterms", []):
+        s = str(t).strip()
+        if s and s.lower() not in seen_kt:
+            seen_kt.add(s.lower())
+            req_keyterms.append(s)
+    spec = _VOICE_CONFIG.stt
+    if req_keyterms:
+        from dataclasses import replace
+        merged_options = dict(spec.options)
+        existing_lc = {str(t).strip().lower() for t in merged_options.get("keyterms", []) or []}
+        existing = list(merged_options.get("keyterms", []) or [])
+        for t in req_keyterms:
+            if t.lower() not in existing_lc:
+                existing.append(t)
+                existing_lc.add(t.lower())
+        merged_options["keyterms"] = existing
+        spec = replace(spec, options=merged_options)
+
     from providers import get_stt_provider
     try:
-        provider = get_stt_provider(_VOICE_CONFIG.stt)
+        provider = get_stt_provider(spec)
     except KeyError as e:
         return _err(str(e), status=500, code="unknown_provider")
     diarize_fn = getattr(provider, "transcribe_diarized", None)

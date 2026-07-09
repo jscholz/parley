@@ -1032,7 +1032,12 @@ sidekick.init({
 // completes immediately; retro-transcription stays possible since
 // raw segments persist). Boot recovery re-enqueues anything a restart
 // interrupted.
-sidekick.initCaptureTranscription({ bridgeUrl: AUDIO_BRIDGE_UPSTREAM });
+sidekick.initCaptureTranscription({
+  bridgeUrl: AUDIO_BRIDGE_UPSTREAM,
+  // Same vocabulary biasing the memo/dictate paths get (§Phase 4b) —
+  // live closure so yaml config reloads apply without a restart.
+  keytermsFn: readSeedKeyterms,
+});
 void sidekick.recoverPendingTranscriptions(sidekick.listCaptures);
 
 // First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
@@ -1200,6 +1205,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
       && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/audio(?:\?.*)?$/);
     if (capAudio) {
       return sidekick.handleCaptureAudio(req, res, capAudio[1]);
+    }
+    const capRediarize = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/diarize$/);
+    if (capRediarize) {
+      return sidekick.handleCaptureRetroDiarize(req, res, capRediarize[1]);
     }
     const capPatch = req.method === 'PATCH'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);

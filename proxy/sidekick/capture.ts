@@ -528,6 +528,19 @@ export async function handleCapturePatch(
   } catch (err) { sendError(res, err); }
 }
 
+/** POST /api/sidekick/captures/{id}/diarize — retro-diarize a finished
+ *  capture (plan §Phase 4g). Late import avoids a module cycle
+ *  (captureTranscribe imports this file). */
+export async function handleCaptureRetroDiarize(
+  _req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try {
+    const { retroDiarize } = await import('./captureTranscribe.ts');
+    const ok = await retroDiarize(id);
+    sendJson(res, ok ? 200 : 502, ok ? { ok: true } : { error: 'diarize pass failed — transcript unchanged' });
+  } catch (err) { sendError(res, err); }
+}
+
 /** DELETE /api/sidekick/captures/{id} — discard (cancel or delete). */
 export async function handleCaptureDelete(
   _req: IncomingMessage, res: ServerResponse, id: string,

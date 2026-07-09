@@ -33,6 +33,7 @@ export {
   handleCaptureList,
   handleCaptureGet,
   handleCaptureDelete,
+  handleCaptureRetroDiarize,
   handleCaptureControl,
   listCaptures,
 } from './capture.ts';

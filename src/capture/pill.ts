@@ -92,6 +92,17 @@ function toast(message: string): void {
 async function startFromUi(linkedChat?: string): Promise<void> {
   try {
     await startMeetingCapture({ linkedChat });
+    // First-use consent hint (plan finding #9, Granola convention):
+    // no auto-announcements — the visible pill is the on-device state,
+    // and disclosure to participants is the human's obligation. Say it
+    // once, ever.
+    try {
+      const KEY = 'sidekick.capture.consentHintShown';
+      if (!localStorage.getItem(KEY)) {
+        localStorage.setItem(KEY, '1');
+        toast('Recording started. Heads up: letting participants know is on you.');
+      }
+    } catch { /* storage unavailable — skip the hint, never the capture */ }
   } catch (e) {
     const msg = String((e as Error)?.message || e);
     toast(/already held/.test(msg)
