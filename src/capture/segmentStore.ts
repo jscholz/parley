@@ -131,3 +131,13 @@ export async function removeSegment(key: string): Promise<void> {
 export async function clearAll(): Promise<void> {
   await resolveBackend().clear();
 }
+
+/** Drop every buffered segment for one capture — the cancel path
+ *  (discard-without-ingest): un-uploaded audio must not drain to a
+ *  server capture that no longer exists. */
+export async function clearCapture(captureId: string): Promise<void> {
+  const backend = resolveBackend();
+  for (const seg of await backend.getAll()) {
+    if (seg.captureId === captureId) await backend.remove(seg.key);
+  }
+}

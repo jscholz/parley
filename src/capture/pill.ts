@@ -15,7 +15,7 @@
 
 import {
   startMeetingCapture, stopMeetingCapture, markMoment,
-  pauseMeetingCapture, resumeMeetingCapture,
+  pauseMeetingCapture, resumeMeetingCapture, cancelMeetingCapture,
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
 import * as switchCtl from '../switchController.ts';
@@ -39,7 +39,7 @@ function render(state: CaptureUiState): void {
   const timer = document.getElementById('capture-pill-timer');
   const show = state.active || state.phase === 'finishing';
   pill.hidden = !show;
-  document.getElementById('btn-capture-rail')?.classList.toggle(
+  document.getElementById('btn-capture-header')?.classList.toggle(
     'recording', state.active && state.phase === 'recording');
   pill.classList.toggle('interrupted', state.phase === 'interrupted');
   pill.classList.toggle('paused', state.phase === 'paused');
@@ -133,16 +133,23 @@ export function initCapturePill(): void {
     // Composer placement → this chat ("Record meeting here").
     void startFromUi(switchCtl.viewedId() || undefined);
   });
-  // App-level rail button → new dedicated session; the glyph turns red
-  // while a capture is live (same color rule as everywhere: red = live
-  // mic). Tapping while recording focuses attention on the pill rather
-  // than double-starting.
-  document.getElementById('btn-capture-rail')?.addEventListener('click', () => {
+  // App-level header button → new dedicated session; the glyph turns
+  // red while a capture is live (same color rule as everywhere: red =
+  // live mic). Tapping while recording focuses attention on the pill
+  // rather than double-starting.
+  document.getElementById('btn-capture-header')?.addEventListener('click', () => {
     if (getCaptureState().active) {
       document.getElementById('capture-pill')?.scrollIntoView({ block: 'nearest' });
       return;
     }
     void startFromUi();
+  });
+  // Cancel = discard, the inverse promise of stop — confirm before
+  // throwing audio away.
+  document.getElementById('capture-pill-cancel')?.addEventListener('click', () => {
+    if (window.confirm('Discard this recording? Nothing will be saved or sent to the agent.')) {
+      void cancelMeetingCapture();
+    }
   });
 
   // External control plane: capture_control envelopes broadcast by

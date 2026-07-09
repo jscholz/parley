@@ -45,7 +45,7 @@ export function createActivityModule(opts: {
     id: 'activity',
     title: 'Activity',
     panel: opts.panel,
-    toggleIds: ['btn-activity-drawer', 'btn-activity-drawer-rail'],
+    toggleIds: ['btn-activity-drawer-rail'],
     render,
     onClear: () => { clearDismissibleActivity(); },
     onSelect: () => { opts.onSelect?.(); },

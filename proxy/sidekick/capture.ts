@@ -88,6 +88,9 @@ export interface CaptureHooks {
    *  the capture parks in 'transcribing' until the claimant calls
    *  finalizeCapture(). Return false/undefined → immediate 'complete'. */
   onStopRequested?(m: CaptureManifest): boolean | undefined;
+  /** Called after a capture is deleted (cancel mid-recording, or
+   *  delete of a finished recording) — pipelines drop queued work. */
+  onDeleted?(id: string): void;
 }
 
 let hooks: CaptureHooks | null = null;
@@ -369,6 +372,27 @@ export async function getCapture(id: string): Promise<CaptureManifest> {
   return readManifest(id);
 }
 
+/** Hard delete — the whole capture directory, audio included. Serves
+ *  BOTH cancel-without-ingest (discard an in-flight recording; the
+ *  pill's ✕) and deleting a finished recording later. This is the one
+ *  deliberately destructive verb in the API, so it validates the id,
+ *  confirms the manifest exists (404 otherwise), and never touches
+ *  anything outside the capture dir. */
+export async function deleteCapture(id: string): Promise<void> {
+  const m = await readManifest(id);   // 404s unknown ids; validates shape
+  await fs.rm(captureDir(m.id), { recursive: true, force: true });
+  await rebuildIndex();
+  try { hooks?.onDeleted?.(id); } catch { /* hook errors never break delete */ }
+  try {
+    pushEnvelope({
+      type: 'capture_changed',
+      kind: 'deleted',
+      chat_id: m.linked_chat || '',
+      capture: { id },
+    } as any);
+  } catch { /* fanout unavailable */ }
+}
+
 export async function listCaptures(): Promise<CaptureSummary[]> {
   let entries: string[] = [];
   try {
@@ -501,6 +525,16 @@ export async function handleCapturePatch(
       diarize: typeof body.diarize === 'boolean' ? body.diarize : undefined,
     });
     sendJson(res, 200, { capture: manifest });
+  } catch (err) { sendError(res, err); }
+}
+
+/** DELETE /api/sidekick/captures/{id} — discard (cancel or delete). */
+export async function handleCaptureDelete(
+  _req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try {
+    await deleteCapture(id);
+    sendJson(res, 200, { ok: true, deleted: id });
   } catch (err) { sendError(res, err); }
 }
 

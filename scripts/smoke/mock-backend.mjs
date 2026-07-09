@@ -450,6 +450,16 @@ export async function installMockBackend(page) {
     if (cap) { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
+  await page.route(/.*\/api\/sidekick\/captures\/[^/]+$/, async (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
+    const existed = captures.delete(m ? m[1] : '');
+    await route.fulfill({
+      status: existed ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(existed ? { ok: true } : { error: 'unknown capture' }),
+    });
+  });
   await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/marks$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/marks$/);

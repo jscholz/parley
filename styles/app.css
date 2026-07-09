@@ -4811,3 +4811,18 @@
   animation: capture-pill-pulse 1.6s ease-in-out infinite;
   transform-origin: center;
 }
+/* Floating status bubble (field nit 2026-07-09: the in-flow banner
+   shifted the panel content down). Overlays the top of the drawer
+   content; .info = neutral chrome for benign notices (doc closed),
+   default stays danger-tinted for errors. */
+.pin-drawer-content { position: relative; }
+.pin-drawer-status {
+  position: absolute; top: 8px; left: 10px; right: 10px; z-index: 30;
+  margin: 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+.pin-drawer-status.info {
+  border-color: var(--border, #333);
+  background: var(--surface-2, #232323);
+  color: var(--muted, #b5b5b5);
+}

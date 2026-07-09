@@ -169,3 +169,22 @@ test('stop is idempotent', async () => {
   const s2 = await stopCapture(m.id);
   assert.equal(s1.ended_at, s2.ended_at);
 });
+
+test('deleteCapture: whole dir gone, index rebuilt, later ops 404', async () => {
+  const a = await createCapture({ title: 'Keep' });
+  await stopCapture(a.id);
+  const b = await createCapture({ title: 'Discard' });
+  await putSegment(b.id, 0, Buffer.from('bytes'), { t0Ms: 0, mime: 'audio/mp4' });
+
+  const { deleteCapture } = await import('../capture.ts');
+  await deleteCapture(b.id);
+
+  await assert.rejects(() => getCapture(b.id), (e: CaptureError) => e.status === 404);
+  await assert.rejects(
+    () => putSegment(b.id, 1, Buffer.from('late'), { t0Ms: 45_000, mime: 'audio/mp4' }),
+    (e: CaptureError) => e.status === 404,
+  );
+  const rows = await listCaptures();
+  assert.deepEqual(rows.map((r) => r.title), ['Keep']);
+  await assert.rejects(() => fs.access(path.join(dir, b.id)), 'directory must be gone');
+});

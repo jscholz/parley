@@ -35,7 +35,7 @@ export function createPinsModule(opts: {
     id: 'pins',
     title: 'Pinned',
     panel: opts.panel,
-    toggleIds: ['btn-pin-drawer', 'btn-pin-drawer-rail'],
+    toggleIds: ['btn-pin-drawer-rail'],
     render,
     onClear: () => { if (window.confirm('Clear all pinned messages?')) void clearAllPins(); },
     onSelect: () => { opts.onSelect?.(); },

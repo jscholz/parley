@@ -19,7 +19,7 @@
 // capture-pill-survives-session-switch smoke).
 
 import * as mic from '../audio/shared/capture.ts';
-import { putSegment } from './segmentStore.ts';
+import { putSegment, clearCapture } from './segmentStore.ts';
 import { createUploader, type Uploader } from './uploader.ts';
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
@@ -261,6 +261,31 @@ export async function stopMeetingCapture(): Promise<void> {
   };
   emit();
   log(`[capture] stopped ${captureId}`);
+}
+
+/** Cancel = discard WITHOUT ingesting (field ask 2026-07-09). The
+ *  inverse promise of stop: nothing is saved, no agent turn fires.
+ *  Clearing state.captureId BEFORE stopping the recorder makes the
+ *  onstop seal a no-op (its persist path checks captureId), then the
+ *  IDB buffer for this capture is dropped and the server capture is
+ *  hard-deleted (segments already uploaded included). */
+export async function cancelMeetingCapture(): Promise<void> {
+  if (!state.active || !state.captureId) return;
+  const captureId = state.captureId;
+  state = {
+    active: false, captureId: null, title: '', chatId: null,
+    startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
+  };
+  emit();
+  if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
+  sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
+  try { mic.release('meeting'); } catch { /* fine */ }
+  stream = null;
+  await clearCapture(captureId);       // un-uploaded audio must not drain later
+  try {
+    await fetch(apiUrl(`/api/sidekick/captures/${captureId}`), { method: 'DELETE' });
+  } catch { /* server unreachable — stale-recording auto-heal covers the manifest */ }
+  log(`[capture] canceled + discarded ${captureId}`);
 }
 
 /** Pause = seal the running segment and RELEASE the mic (the OS mic

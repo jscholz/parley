@@ -1201,6 +1201,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capPatch) {
       return sidekick.handleCapturePatch(req, res, capPatch[1]);
     }
+    const capDelete = req.method === 'DELETE'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+    if (capDelete) {
+      return sidekick.handleCaptureDelete(req, res, capDelete[1]);
+    }
     const capGet = req.method === 'GET'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
     if (capGet) {

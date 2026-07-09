@@ -109,7 +109,12 @@ test('segments → ordered transcript with marks; stop claims, drains, completes
 
   const stopped = await stopCapture(m.id);
   assert.equal(stopped.status, 'transcribing');   // pipeline claimed finalization
-  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  // Wait on the INGEST DISPATCH, not just status: finalize flips
+  // 'complete' before the dispatch (rebuild + doc push in between),
+  // so polling status alone races under load (flaked in the full
+  // suite 2026-07-09).
+  await waitFor(async () => sent.length >= 2);
+  assert.equal((await getCapture(m.id)).status, 'complete');
   const final = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
   assert.doesNotMatch(final, /recording in progress/);
   assert.match(final, /Recorded /);

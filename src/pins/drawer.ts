@@ -46,6 +46,21 @@ function refreshCountBanner(): void {
     if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
     else { banner.hidden = false; banner.textContent = txt; }
   }
+  refreshCombinedBanner();
+}
+
+/** The header's single drawer-toggle badge (mobile header consolidation
+ *  2026-07-09: lock · record · drawer-toggle replaced the per-tab pin +
+ *  bell buttons). Aggregates pins + activity; urgent styling when an
+ *  approval is pending — the one signal that must not be missed. */
+function refreshCombinedBanner(): void {
+  const banner = document.getElementById('right-drawer-count');
+  if (!banner) return;
+  const urgent = unresolvedApprovalCount();
+  const n = totalPinCount() + (urgent || unreadActivityCount());
+  banner.classList.toggle('urgent', urgent > 0);
+  if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
+  else { banner.hidden = false; banner.textContent = n > 99 ? '99+' : String(n); }
 }
 
 function refreshActivityCountBanner(): void {
@@ -64,6 +79,7 @@ function refreshActivityCountBanner(): void {
     if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
     else { banner.hidden = false; banner.textContent = txt; }
   }
+  refreshCombinedBanner();
 }
 
 /** Unread dot on the Docs rail button — set when a doc push arrives
@@ -74,11 +90,16 @@ function setDocDot(on: boolean): void {
   if (dot) dot.hidden = !on;
 }
 
-function showPinStatus(message: string): void {
+/** Transient drawer status. Renders as a FLOATING bubble overlaying
+ *  the drawer content (field nit 2026-07-09: the old in-flow banner
+ *  shifted the whole panel down while visible). kind 'info' = neutral
+ *  (benign events like closing a doc); 'error' = danger styling. */
+function showPinStatus(message: string, kind: 'error' | 'info' = 'error'): void {
   if (!statusEl) return;
   statusEl.textContent = message;
   statusEl.hidden = false;
   statusEl.classList.add('visible');
+  statusEl.classList.toggle('info', kind === 'info');
   openDrawer();
   if (statusTimer != null) window.clearTimeout(statusTimer);
   statusTimer = window.setTimeout(() => {
@@ -212,7 +233,16 @@ export function initPinDrawer(opts: {
   // icon + "Removed" wording read as deletion).
   window.addEventListener('sidekick:doc-removed', (ev) => {
     const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
-    showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`);
+    // info, not error: closing a doc is benign (red implied breakage).
+    showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`, 'info');
+  });
+
+  // Header drawer-toggle (mobile consolidation 2026-07-09): one button
+  // opens/closes the right drawer at its last-active tab; the per-tab
+  // pin + bell header buttons are gone (tabs live inside the drawer).
+  document.getElementById('btn-right-drawer')?.addEventListener('click', () => {
+    if (drawerHost?.isOpen()) drawerHost.close();
+    else drawerHost?.open();
   });
 
   refreshCountBanner();

@@ -401,6 +401,13 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
       if (!j.running && !j.queue.length) void finalize(m.id);
       return true;
     },
+    onDeleted(id) {
+      // Cancel/delete: drop queued work; an in-flight transcribe of a
+      // now-missing file errors harmlessly (drain catches it).
+      const j = jobs.get(id);
+      if (j?.pushTimer != null) clearTimeout(j.pushTimer);
+      jobs.delete(id);
+    },
   });
 }
 
