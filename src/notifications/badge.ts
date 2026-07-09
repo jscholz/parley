@@ -29,18 +29,22 @@ const markedUnread = new Set<string>();
 let refreshDebounce: number | null = null;
 let hydrated = false;
 
-/** Sum of unread counts across every chat. The number that lands on
- *  the app-icon badge. */
+/** Every chat with any unread state (count > 0 or sticky mark). */
+function unreadChatIds(): Set<string> {
+  const ids = new Set<string>(markedUnread);
+  for (const [id, n] of unreadByChat) if (n > 0) ids.add(id);
+  return ids;
+}
+
+/** Sum of unread across every chat — the app-icon badge number.
+ *  DEFINED as Σ unreadFor(id): the OS badge and the sidebar row chips
+ *  read the SAME per-chat accessor, so they cannot disagree by
+ *  construction (field bug 2026-07-09: the old total counted
+ *  marked-unread chats that unreadFor() ignored — two formulas over
+ *  one map, permanently divergent surfaces). */
 function totalUnread(): number {
   let total = 0;
-  const seen = new Set<string>();
-  for (const [id, n] of unreadByChat) {
-    total += Math.max(n, markedUnread.has(id) ? 1 : 0);
-    seen.add(id);
-  }
-  for (const id of markedUnread) {
-    if (!seen.has(id)) total += 1;
-  }
+  for (const id of unreadChatIds()) total += unreadFor(id);
   return total;
 }
 
@@ -132,8 +136,12 @@ function requestRefresh(): void {
   }, 1500);
 }
 
+/** THE per-chat unread accessor — the single formula every surface
+ *  renders from (row chips, the OS badge via totalUnread, future
+ *  consumers). A sticky marked-unread chat counts as 1 even with no
+ *  new messages: "one thing to look at". */
 export function unreadFor(chatId: string): number {
-  return unreadByChat.get(chatId) ?? 0;
+  return Math.max(unreadByChat.get(chatId) ?? 0, markedUnread.has(chatId) ? 1 : 0);
 }
 
 export function isMarkedUnread(chatId: string): boolean {

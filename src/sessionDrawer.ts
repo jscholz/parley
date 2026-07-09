@@ -1044,7 +1044,16 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   const isFresh = !!activeId
     && !merged.some(s => s.id === activeId)
     && !isRecentlyDeleted(activeId);
-  renderList(listEl, filtered, activeId, isFresh);
+  // UNREAD-FIRST ordering (field bug 2026-07-09, by-construction leg 2):
+  // the server force-includes unread chats in the window, but a chat at
+  // recency position ~70 rendered below the fold — the OS badge counted
+  // it while nothing visible showed it. Unread rows now bubble to the
+  // top of the unpinned region (stable within each group), so every
+  // badge unit has a visible chip. Same accessor as the badge
+  // (unreadFor), so the invariant holds for marked-unread too.
+  const ordered = [...filtered].sort((a: any, b: any) =>
+    (unreadFor(b.id) > 0 ? 1 : 0) - (unreadFor(a.id) > 0 ? 1 : 0));
+  renderList(listEl, ordered, activeId, isFresh);
 }
 
 /** Fingerprint of the last successful renderList. Compared on every
