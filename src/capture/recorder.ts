@@ -41,6 +41,13 @@ export interface CaptureUiState {
   uploaderPending: number;
   sealedSegments: number;
   marks: number;
+  /** Wall-clock ms spent paused/interrupted so far (completed spans). */
+  stalledTotalMs: number;
+  /** Start of the CURRENT paused/interrupted span (null while
+   *  recording). The pill timer shows RECORDED time — it freezes
+   *  during pause (field nit 2026-07-09) — while segment t0/marks stay
+   *  wall-relative so transcript offsets line up with real gaps. */
+  stalledSince: number | null;
 }
 
 const SEGMENT_MS = 45_000;
@@ -58,6 +65,7 @@ const MIC_CONSTRAINTS: MediaTrackConstraints = {
 let state: CaptureUiState = {
   active: false, captureId: null, title: '', chatId: null,
   startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
+  stalledTotalMs: 0, stalledSince: null,
 };
 
 let stream: MediaStream | null = null;
@@ -183,6 +191,7 @@ function sealCurrent(): void {
 function handleInterruption(): void {
   if (!state.active) return;
   state.phase = 'interrupted';
+  if (state.stalledSince == null) state.stalledSince = Date.now();
   emit();
   sealCurrent();
   try { mic.release('meeting'); } catch { /* released */ }
@@ -201,6 +210,10 @@ function handleInterruption(): void {
       }
       stream = acquired;
       watchTracks();
+      if (state.stalledSince != null) {
+        state.stalledTotalMs += Date.now() - state.stalledSince;
+        state.stalledSince = null;
+      }
       state.phase = 'recording';
       emit();
       startSegment();
@@ -225,12 +238,17 @@ function watchTracks(): void {
   track.addEventListener('mute', () => {
     if (state.active && state.phase === 'recording') {
       state.phase = 'interrupted';
+      if (state.stalledSince == null) state.stalledSince = Date.now();
       emit();
       sealCurrent();
     }
   });
   track.addEventListener('unmute', () => {
     if (state.active && state.phase === 'interrupted' && stream) {
+      if (state.stalledSince != null) {
+        state.stalledTotalMs += Date.now() - state.stalledSince;
+        state.stalledSince = null;
+      }
       state.phase = 'recording';
       emit();
       startSegment();
@@ -305,6 +323,7 @@ export async function startMeetingCapture(
     active: true, captureId: capture.id, title: capture.title,
     chatId: capture.linked_chat, startedAt: Date.now(), phase: 'recording',
     uploaderPending: 0, sealedSegments: 0, marks: 0,
+    stalledTotalMs: 0, stalledSince: null,
   };
   watchTracks();
   startSegment();
@@ -354,6 +373,7 @@ export async function stopMeetingCapture(): Promise<void> {
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
+    stalledTotalMs: 0, stalledSince: null,
   };
   emit();
   log(`[capture] stopped ${captureId}`);
@@ -371,6 +391,7 @@ export async function cancelMeetingCapture(): Promise<void> {
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
+    stalledTotalMs: 0, stalledSince: null,
   };
   emit();
   stopWatchdog();
@@ -393,6 +414,7 @@ export async function cancelMeetingCapture(): Promise<void> {
 export function pauseMeetingCapture(): void {
   if (!state.active || state.phase !== 'recording') return;
   state.phase = 'paused';
+  state.stalledSince = Date.now();
   emit();
   sealCurrent();
   try { mic.release('meeting'); } catch { /* released */ }
@@ -411,6 +433,10 @@ export async function resumeMeetingCapture(): Promise<void> {
   }
   stream = acquired;
   watchTracks();
+  if (state.stalledSince != null) {
+    state.stalledTotalMs += Date.now() - state.stalledSince;
+    state.stalledSince = null;
+  }
   state.phase = 'recording';
   emit();
   startSegment();

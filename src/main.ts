@@ -58,6 +58,7 @@ import * as hotkeysHelp from './hotkeysHelp.ts';
 import { initPinDrawer } from './pins/drawer.ts';
 import { initCapturePill } from './capture/pill.ts';
 import { initMeetingsIndex } from './capture/meetingsIndex.ts';
+import { getCaptureState } from './capture/recorder.ts';
 import { initTranscriptHighlight } from './transcriptHighlight.ts';
 import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as activityStore from './notifications/activityStore.ts';
@@ -511,9 +512,10 @@ async function boot() {
     // Pocket-lock only makes sense when audio is actually live —
     // otherwise the user is staring at a locked screen with nothing
     // happening, and the unlock-swipe affordance is just confusing.
-    // Gate on voiceActive() (memo || dictate || webrtc || listen);
-    // surface a status hint so the button doesn't feel broken.
-    if (!voiceActive()) {
+    // Gate on voiceActive() (memo || dictate || webrtc || listen) OR a
+    // live meeting capture (field ask 2026-07-09: pocketing the phone
+    // mid-meeting is exactly what capture is FOR).
+    if (!voiceActive() && !getCaptureState().active) {
       try { status.setStatus('Start a call or recording first', 'err'); } catch {}
       return;
     }

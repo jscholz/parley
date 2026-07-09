@@ -217,6 +217,12 @@ export function project(state: ChatState): BubbleSpec[] {
   // Anchor synthetic timestamps onto the tail of durable so the
   // inflight bubbles always sort AFTER the durable ones.
   let inflightTs = Math.max(currentTurnTs, lastTimestamp(specs)) + 1;
+  // No anchor at all — a FRESH session whose first content arrives as
+  // live envelopes (the capture start-message lands in a just-minted
+  // meeting session; no optimistic pendingSend, no durable rows).
+  // Without this the synthetic stamps start at ~0 and every bubble
+  // renders as "01:00 Thu, 1 Jan 1970" (field 2026-07-09).
+  if (specs.length === 0 && currentTurnTs === 0) inflightTs = Date.now();
   const inflightAssistantByKey = new Map<string, AssistantBubbleSpec>();
   // Pending lookup so user_message echoes inherit source/attachments
   // from the optimistic send.

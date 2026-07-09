@@ -176,7 +176,10 @@ export function createDocModule(opts: {
     // stitched audio, tap a transcript timestamp to seek. This is the
     // trust-but-verify feature: STT/diarization errors cluster in
     // exactly the sentences that matter ("did she say 15 or 50?").
-    if (doc.source === 'capture' && doc.captureId) {
+    // NOT while live (field bug 2026-07-09): playback exists once the
+    // capture is terminal — the endpoint 409s until then, which the
+    // native <audio> controls render as a scary "Error".
+    if (doc.source === 'capture' && doc.captureId && !isLiveCaptureDoc(doc)) {
       opts.body.appendChild(buildPlayerStrip(doc));
     }
 
@@ -223,6 +226,13 @@ export function createDocModule(opts: {
 // ── Capture player strip (§3.6 — trust-but-verify playback) ───────────
 
 const PLAYBACK_RATES = [1, 1.5, 2];
+
+/** Live = the pipeline's "(live)" title suffix — the same signal the
+ *  glyph's red state uses. The finished push re-titles without it,
+ *  which re-renders the reader and the strip appears. */
+export function isLiveCaptureDoc(doc: Pick<DocState, 'title'>): boolean {
+  return /\(live\)\s*$/.test(doc.title);
+}
 
 function audioUrlFor(doc: DocState): string {
   // apiUrl, not a bare path — the CAP shell serves the app from its
@@ -328,7 +338,7 @@ function wireTapToSeek(md: HTMLElement): void {
 function appendCaptureGlyph(parent: HTMLElement, doc: DocState): void {
   if (doc.source !== 'capture') return;
   const glyph = document.createElement('span');
-  glyph.className = 'doc-capture-glyph' + (/\(live\)\s*$/.test(doc.title) ? ' live' : '');
+  glyph.className = 'doc-capture-glyph' + (isLiveCaptureDoc(doc) ? ' live' : '');
   glyph.setAttribute('aria-hidden', 'true');
   glyph.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>';
   parent.appendChild(glyph);

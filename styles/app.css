@@ -2561,7 +2561,11 @@
    * Both mobile toolbar toggles host a .pin-count-banner child, so both
    * need to be the badge's positioned ancestor — without it on the
    * activity button the badge escaped to the viewport's top-right on iOS. */
-  #btn-pin-drawer, #btn-activity-drawer { position: relative; }
+  /* (2026-07-09: the per-tab pin/bell buttons were consolidated into
+     #btn-right-drawer — same badge, same escape bug when the anchor
+     rule didn't follow the button. Field screenshot: the "9" floated
+     at the viewport's top-right corner.) */
+  #btn-right-drawer, #btn-capture-header { position: relative; }
   .pin-count-banner {
     position: absolute; top: -2px; right: -2px;
     min-width: 16px; height: 16px; padding: 0 4px;

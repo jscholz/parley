@@ -23,8 +23,14 @@ import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
 
-function fmtElapsed(startedAt: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+/** RECORDED time, not wall time: pause/interruption spans are
+ *  subtracted, so the timer freezes while paused (field nit
+ *  2026-07-09). Segment t0s and marks stay wall-relative — transcript
+ *  offsets reflect real gaps; this is display-only. */
+function fmtElapsed(st: CaptureUiState): string {
+  const end = st.stalledSince ?? Date.now();
+  const ms = Math.max(0, end - st.startedAt - st.stalledTotalMs);
+  const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const h = Math.floor(m / 60);
   return h > 0
@@ -76,12 +82,12 @@ function render(state: CaptureUiState): void {
     pauseBtn.setAttribute('title', paused ? 'Resume recording' : 'Pause recording');
     pauseBtn.setAttribute('aria-label', paused ? 'Resume recording' : 'Pause recording');
   }
-  if (timer && state.startedAt) timer.textContent = fmtElapsed(state.startedAt);
+  if (timer && state.startedAt) timer.textContent = fmtElapsed(state);
   if (timerInterval == null) {
     timerInterval = window.setInterval(() => {
       const s = getCaptureState();
       const t = document.getElementById('capture-pill-timer');
-      if (t && s.startedAt) t.textContent = fmtElapsed(s.startedAt);
+      if (t && s.startedAt) t.textContent = fmtElapsed(s);
     }, 1000);
   }
 }
