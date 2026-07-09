@@ -37,6 +37,9 @@ export interface DocPayload {
   /** Producer tag: 'capture' = meeting transcript (rendered with the
    *  record glyph — ring+dot — instead of emoji in the title). */
   source?: string;
+  /** For capture docs: the capture id — the reader's player strip
+   *  streams /api/sidekick/captures/{captureId}/audio. */
+  captureId?: string;
 }
 
 export interface DocState extends DocPayload {
@@ -175,6 +178,7 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
     path: payload.path,
     chatId: payload.chatId,
     source: payload.source ?? existing?.source,
+    captureId: payload.captureId ?? existing?.captureId,
     receivedAt: existing?.receivedAt ?? displayedAt ?? now,
     updatedAt,
   };

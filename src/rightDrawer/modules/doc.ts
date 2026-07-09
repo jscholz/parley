@@ -19,6 +19,7 @@
 // is untrusted), everything else plain text.
 
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
+import { apiUrl } from '../../apiBase.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
   currentDoc, listDocs, docCount, selectDoc, removeDoc, clearDocs,
@@ -171,6 +172,14 @@ export function createDocModule(opts: {
     titleEl.appendChild(document.createTextNode(doc.title));
     opts.body.appendChild(titleEl);
 
+    // Player strip — capture transcripts only (§3.6): stream the
+    // stitched audio, tap a transcript timestamp to seek. This is the
+    // trust-but-verify feature: STT/diarization errors cluster in
+    // exactly the sentences that matter ("did she say 15 or 50?").
+    if (doc.source === 'capture' && doc.captureId) {
+      opts.body.appendChild(buildPlayerStrip(doc));
+    }
+
     if (doc.format === 'html') {
       const frame = document.createElement('iframe');
       frame.className = 'doc-drawer-frame';
@@ -182,6 +191,9 @@ export function createDocModule(opts: {
       const md = document.createElement('div');
       md.className = 'doc-drawer-content';
       md.innerHTML = miniMarkdown(doc.content);
+      if (doc.source === 'capture' && doc.captureId) {
+        wireTapToSeek(md);
+      }
       opts.body.appendChild(md);
     } else {
       const pre = document.createElement('pre');
@@ -206,6 +218,89 @@ export function createDocModule(opts: {
     },
     onSelect: () => { opts.onSelect?.(); },
   };
+}
+
+// ── Capture player strip (§3.6 — trust-but-verify playback) ───────────
+
+const PLAYBACK_RATES = [1, 1.5, 2];
+
+function audioUrlFor(doc: DocState): string {
+  // apiUrl, not a bare path — the CAP shell serves the app from its
+  // local bundle and reaches the proxy through the configured base.
+  return apiUrl(`/api/sidekick/captures/${encodeURIComponent(doc.captureId!)}/audio`);
+}
+
+function buildPlayerStrip(doc: DocState): HTMLElement {
+  const strip = document.createElement('div');
+  strip.className = 'doc-player-strip';
+
+  // Native controls carry play/pause/scrub/time — the browser's are
+  // better than anything hand-rolled at this size. Preload metadata
+  // only: the stitch is lazy server-side; don't force it until the
+  // user shows intent (metadata alone triggers it, which is the
+  // point — first tap should feel instant afterwards).
+  const audio = document.createElement('audio');
+  audio.className = 'doc-player-audio';
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = audioUrlFor(doc);
+  strip.appendChild(audio);
+
+  // Speed toggle — one button cycling 1×/1.5×/2× (review speed).
+  const rate = document.createElement('button');
+  rate.className = 'doc-player-rate';
+  rate.textContent = '1×';
+  rate.title = 'Playback speed';
+  rate.onclick = () => {
+    const next = PLAYBACK_RATES[(PLAYBACK_RATES.indexOf(audio.playbackRate) + 1) % PLAYBACK_RATES.length] ?? 1;
+    audio.playbackRate = next;
+    rate.textContent = `${next}×`;
+  };
+  strip.appendChild(rate);
+
+  // Download audio — same artifact the endpoint streams.
+  const dl = document.createElement('a');
+  dl.className = 'doc-player-download';
+  dl.href = audioUrlFor(doc);
+  dl.download = `${doc.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meeting'}.m4a`;
+  dl.title = 'Download audio';
+  dl.setAttribute('aria-label', 'Download audio');
+  dl.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8.5"/><path d="M4.5 7.5 8 11l3.5-3.5"/><path d="M2.5 13.5h11"/></svg>';
+  strip.appendChild(dl);
+
+  return strip;
+}
+
+/** Parse a transcript timestamp token — `[+M:SS]`, `[+H:MM:SS]`,
+ *  `[MARK M:SS]`, or a diarized turn's `[M:SS]` — to seconds. */
+export function parseTsToken(text: string): number | null {
+  const m = text.match(/\[(?:\+|MARK\s+)?(?:(\d+):)?(\d+):(\d{2})\]/);
+  if (!m) return null;
+  const h = m[1] ? parseInt(m[1], 10) : 0;
+  return h * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+}
+
+/** Tap a transcript line → seek the strip's audio to that moment.
+ *  The rendered markdown puts timestamps in <strong> ("**[+0:45]**");
+ *  clicks anywhere in a block resolve to the nearest timestamp at or
+ *  before it by walking previous siblings. */
+function wireTapToSeek(md: HTMLElement): void {
+  md.classList.add('doc-capture-seekable');
+  md.addEventListener('click', (ev) => {
+    const audio = md.closest('#doc-drawer-body, .pin-drawer-content')
+      ?.querySelector('.doc-player-audio') as HTMLAudioElement | null;
+    if (!audio) return;
+    let node: HTMLElement | null = (ev.target as HTMLElement).closest('p, li, h1, h2, h3, div');
+    while (node && node !== md) {
+      const t = parseTsToken(node.textContent || '');
+      if (t !== null) {
+        audio.currentTime = t;
+        void audio.play().catch(() => { /* autoplay policy — user can hit play */ });
+        return;
+      }
+      node = (node.previousElementSibling as HTMLElement | null) ?? null;
+    }
+  });
 }
 
 /** Capture docs (meeting transcripts) get the record glyph — ring +

@@ -4826,3 +4826,23 @@
   background: var(--surface-2, #232323);
   color: var(--muted, #b5b5b5);
 }
+/* ── Capture player strip (doc reader; §3.6 trust-but-verify) ── */
+.doc-player-strip {
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 12px 2px; padding: 6px 8px;
+  background: var(--surface-2, #222); border: 1px solid var(--border, #333);
+  border-radius: 10px;
+}
+.doc-player-audio { flex: 1; min-width: 0; height: 32px; }
+.doc-player-rate {
+  background: transparent; border: 1px solid var(--border, #333);
+  color: var(--muted, #aaa); border-radius: 6px; padding: 4px 7px;
+  font: 12px/1 inherit; cursor: pointer; flex: none;
+}
+.doc-player-rate:hover { color: var(--fg, #eee); }
+.doc-player-download { display: flex; color: var(--muted, #aaa); flex: none; padding: 4px; }
+.doc-player-download:hover { color: var(--fg, #eee); }
+.doc-player-download svg { width: 15px; height: 15px; }
+/* Seekable transcript: timestamp tokens read as links. */
+.doc-capture-seekable strong { cursor: pointer; }
+.doc-capture-seekable strong:hover { text-decoration: underline; }

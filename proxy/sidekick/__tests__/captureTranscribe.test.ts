@@ -272,11 +272,19 @@ test('diarize failure falls back to the stitched transcript — meeting never lo
   const m = await createCapture({ title: 'Fallback', diarize: true });
   await seg(m.id, 0, 0);
   await stopCapture(m.id);
-  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  // Wait on the ARTIFACT, not status: 'complete' lands one await
+  // before finalize's final-header re-render (flaked under suite load
+  // 2026-07-09 — same race family as the ingest-dispatch wait above).
+  await waitFor(async () => {
+    try {
+      return !/recording in progress/.test(
+        await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'));
+    } catch { return false; }
+  });
+  assert.equal((await getCapture(m.id)).status, 'complete');
   const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
   assert.match(t, /plain 0\./);                // stitched content survived
   assert.doesNotMatch(t, /diarized_/);
-  assert.doesNotMatch(t, /recording in progress/);
 });
 
 test('stitch failure (no ffmpeg / bad audio) also falls back cleanly', async () => {

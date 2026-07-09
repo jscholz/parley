@@ -1196,6 +1196,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capMark) {
       return sidekick.handleCaptureMark(req, res, capMark[1]);
     }
+    const capAudio = req.method === 'GET'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/audio(?:\?.*)?$/);
+    if (capAudio) {
+      return sidekick.handleCaptureAudio(req, res, capAudio[1]);
+    }
     const capPatch = req.method === 'PATCH'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
     if (capPatch) {

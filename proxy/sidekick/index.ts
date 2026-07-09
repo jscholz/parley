@@ -40,6 +40,7 @@ export {
   initCaptureTranscription,
   recoverPendingTranscriptions,
 } from './captureTranscribe.ts';
+export { handleCaptureAudio } from './captureAudio.ts';
 export {
   handleSidekickModelCapabilities,
   handleSidekickAuxiliaryModels,

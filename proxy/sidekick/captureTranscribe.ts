@@ -29,6 +29,7 @@ import {
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
+import { ffmpegStitch } from './captureStitch.ts';
 import { dispatchInternalMessage } from './messages.ts';
 
 export interface TranscribeConfig {
@@ -172,6 +173,8 @@ async function pushDoc(id: string, opts?: { immediate?: boolean }): Promise<void
       // the doc-shelf handler already treats pushes gently, but marking
       // capture pushes lets clients special-case later if needed.
       source: 'capture',
+      // The player strip resolves its audio URL from this (§3.6).
+      capture_id: m.id,
     } as any);
   } catch (e) {
     console.warn(`[capture-transcribe] doc push failed for ${id}: ${String(e)}`);
@@ -250,26 +253,6 @@ async function drain(id: string): Promise<void> {
 // transcript.plain.md. Any failure falls back to the stitched
 // transcript: a meeting must never be lost to diarization, and raw
 // segments keep it retro-diarizable (plan §Phase 4g).
-
-async function ffmpegStitch(segmentFiles: string[], outFile: string): Promise<string> {
-  const { execFile } = await import('node:child_process');
-  const listFile = `${outFile}.list.txt`;
-  // concat demuxer list: same-codec inputs (one recorder config), so a
-  // decode→resample pass to 16k mono wav is reliable where -c copy on
-  // mp4 parts is not.
-  await fs.writeFile(listFile, segmentFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
-  await new Promise<void>((resolve, reject) => {
-    execFile('ffmpeg', [
-      '-y', '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-ac', '1', '-ar', '16000', outFile,
-    ], { timeout: 600_000 }, (err, _out, stderr) => {
-      if (err) reject(new Error(`ffmpeg: ${String(stderr).slice(-400)}`));
-      else resolve();
-    });
-  });
-  await fs.unlink(listFile).catch(() => { /* best-effort */ });
-  return outFile;
-}
 
 function renderDiarized(
   m: CaptureManifest,
