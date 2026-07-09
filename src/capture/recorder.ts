@@ -79,8 +79,16 @@ export function getCaptureState(): CaptureUiState { return { ...state }; }
 function ensureUploader(): Uploader {
   uploader ??= createUploader({
     onDrained: () => { state.uploaderPending = 0; emit(); },
+    onDropped: () => { syncPending(); },
   });
   return uploader;
+}
+
+/** Real queue depth from the uploader (audit 2.5: the old value was
+ *  cumulative-sealed masquerading as pending). */
+function syncPending(): void {
+  state.uploaderPending = uploader?.pendingCount() ?? 0;
+  emit();
 }
 
 /** Boot-time: drain any segments a previous session left in IDB.
@@ -121,9 +129,8 @@ function startSegment(): void {
         mime: blob.type, blob,
       }).then(() => {
         state.sealedSegments += 1;
-        state.uploaderPending = state.sealedSegments;   // refined by onDrained
         ensureUploader().kick();
-        emit();
+        syncPending();
       });
     }
     // Chain the next segment while the meeting is live (a stop()
@@ -159,7 +166,16 @@ function handleInterruption(): void {
   const tryReacquire = async () => {
     if (!state.active || state.phase !== 'interrupted') return;
     try {
-      stream = await mic.acquire('meeting', MIC_CONSTRAINTS);
+      const acquired = await mic.acquire('meeting', MIC_CONSTRAINTS);
+      // Re-check AFTER the await (audit 2026-07-09 #2): a stop/cancel
+      // that landed while getUserMedia was pending already released
+      // nothing (stream was null) — holding this acquisition would
+      // leave the OS mic indicator on forever with no pill.
+      if (!state.active || state.phase !== 'interrupted') {
+        try { mic.release('meeting'); } catch { /* fine */ }
+        return;
+      }
+      stream = acquired;
       watchTracks();
       state.phase = 'recording';
       emit();
@@ -176,12 +192,25 @@ function watchTracks(): void {
   const track = stream?.getAudioTracks()[0];
   if (!track) return;
   track.addEventListener('ended', handleInterruption);
-  // iOS signals interruptions as mute/unmute on a live track.
+  // iOS signals interruptions as mute/unmute on a LIVE track (vs
+  // 'ended' when the mic is fully revoked). Flip to 'interrupted' so
+  // the seal's onstop doesn't auto-chain a new (silent) segment and
+  // the pill honestly shows the stall — the old same-phase seal
+  // restarted immediately, making the unmute guard dead code and
+  // recording silence as if all were well (audit 2026-07-09 #13).
   track.addEventListener('mute', () => {
-    if (state.active && state.phase === 'recording') { sealCurrent(); }
+    if (state.active && state.phase === 'recording') {
+      state.phase = 'interrupted';
+      emit();
+      sealCurrent();
+    }
   });
   track.addEventListener('unmute', () => {
-    if (state.active && state.phase === 'recording' && !recorder) startSegment();
+    if (state.active && state.phase === 'interrupted' && stream) {
+      state.phase = 'recording';
+      emit();
+      startSegment();
+    }
   });
 }
 
@@ -213,9 +242,12 @@ export async function startMeetingCapture(
   try {
     stream = await mic.acquire('meeting', MIC_CONSTRAINTS);
   } catch (e) {
-    // Roll the server capture back so the one-active rule isn't wedged
-    // by a mic-permission denial.
-    void fetch(apiUrl(`/api/sidekick/captures/${capture.id}/stop`), { method: 'POST' });
+    // Roll back with DELETE, not stop (audit 2026-07-09): stopping a
+    // zero-segment capture ran the whole pipeline — a minted session,
+    // a start message, then an ingest turn asking the agent to
+    // summarize an empty transcript — on the COMMON first-use
+    // mic-permission-denied path. Cancel semantics erase it entirely.
+    void fetch(apiUrl(`/api/sidekick/captures/${capture.id}`), { method: 'DELETE' });
     throw e;
   }
 
@@ -244,17 +276,31 @@ export async function stopMeetingCapture(): Promise<void> {
   try { mic.release('meeting'); } catch { /* fine */ }
   stream = null;
   // Give the final onstop → putSegment a beat, then wait for the
-  // uploader to drain before declaring stop server-side. Segments are
-  // accepted after /stop too (resumable contract), so a timeout here
-  // degrades gracefully rather than losing audio.
+  // uploader to drain BEFORE declaring stop server-side. /stop lets
+  // the pipeline finalize, and a finalized capture freezes late
+  // segments — so stopping with un-uploaded audio risked exactly the
+  // data loss the durable buffer exists to prevent (audit 2026-07-09
+  // P0#1). The pill's "finishing" state is capped at 15s for the UI,
+  // but the ACTUAL /stop defers until the drain completes in the
+  // background; the server's stale-heal completes (not fails) a
+  // segment-bearing capture if we die first.
   await new Promise((r) => setTimeout(r, 400));
-  await Promise.race([
-    ensureUploader().drained(),
-    new Promise((r) => setTimeout(r, 15_000)),
+  const postStop = async () => {
+    try {
+      await fetch(apiUrl(`/api/sidekick/captures/${captureId}/stop`), { method: 'POST' });
+    } catch { /* server unreachable — stale heal completes it server-side */ }
+  };
+  const drainP = ensureUploader().drained();
+  const drainedInTime = await Promise.race([
+    drainP.then(() => true),
+    new Promise<boolean>((r) => setTimeout(() => r(false), 15_000)),
   ]);
-  try {
-    await fetch(apiUrl(`/api/sidekick/captures/${captureId}/stop`), { method: 'POST' });
-  } catch { /* server unreachable — uploader keeps draining; stale heal covers the manifest */ }
+  if (drainedInTime) {
+    await postStop();
+  } else {
+    log(`[capture] ${captureId}: uploads still draining — stop deferred until they land`);
+    void drainP.then(postStop);
+  }
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
@@ -305,7 +351,14 @@ export function pauseMeetingCapture(): void {
 
 export async function resumeMeetingCapture(): Promise<void> {
   if (!state.active || state.phase !== 'paused') return;
-  stream = await mic.acquire('meeting', MIC_CONSTRAINTS);
+  const acquired = await mic.acquire('meeting', MIC_CONSTRAINTS);
+  // Same post-await guard as tryReacquire (audit #2): stop/cancel
+  // during the pending acquire must not strand a live mic.
+  if (!state.active || state.phase !== 'paused') {
+    try { mic.release('meeting'); } catch { /* fine */ }
+    return;
+  }
+  stream = acquired;
   watchTracks();
   state.phase = 'recording';
   emit();

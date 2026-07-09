@@ -1032,13 +1032,25 @@ sidekick.init({
 // completes immediately; retro-transcription stays possible since
 // raw segments persist). Boot recovery re-enqueues anything a restart
 // interrupted.
-sidekick.initCaptureTranscription({
-  bridgeUrl: AUDIO_BRIDGE_UPSTREAM,
-  // Same vocabulary biasing the memo/dictate paths get (§Phase 4b) —
-  // live closure so yaml config reloads apply without a restart.
-  keytermsFn: readSeedKeyterms,
-});
-void sidekick.recoverPendingTranscriptions(sidekick.listCaptures);
+// Gate on STT actually being configured (audit 2026-07-09 1.2): wiring
+// the pipeline against a dead bridge burned ~18s of retries per
+// segment, filled transcripts with failure markers, and fired spurious
+// ingest turns — while capture.ts's no-hooks path already does the
+// right thing (record + store, stop completes immediately, transcripts
+// retro-runnable once STT exists). DEEPGRAM_KEY is the honest proxy
+// for "the bridge can transcribe"; a key added later via the setup
+// wizard wires the pipeline on the next restart.
+if (DEEPGRAM_KEY) {
+  sidekick.initCaptureTranscription({
+    bridgeUrl: AUDIO_BRIDGE_UPSTREAM,
+    // Same vocabulary biasing the memo/dictate paths get (§Phase 4b) —
+    // live closure so yaml config reloads apply without a restart.
+    keytermsFn: readSeedKeyterms,
+  });
+  void sidekick.recoverPendingTranscriptions(sidekick.listCaptures);
+} else {
+  console.warn('[capture] transcription pipeline not wired (no DEEPGRAM_API_KEY) — captures record+store only');
+}
 
 // First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
 // same .env start-all loads (SIDEKICK_ENV_FILE from the npx launcher,

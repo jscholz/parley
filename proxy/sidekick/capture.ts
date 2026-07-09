@@ -84,13 +84,45 @@ export class CaptureError extends Error {
 export interface CaptureHooks {
   onCreated?(m: CaptureManifest): void;
   onSegmentStored?(m: CaptureManifest, seg: SegmentMeta): void;
-  /** Called when the user stops. Return true to CLAIM finalization —
-   *  the capture parks in 'transcribing' until the claimant calls
-   *  finalizeCapture(). Return false/undefined → immediate 'complete'. */
+  /** Claim query — called while stop is being processed, BEFORE any
+   *  state is persisted. Return true to CLAIM finalization (capture
+   *  parks in 'transcribing' until the claimant calls
+   *  finalizeCapture()); false/undefined → immediate 'complete'.
+   *  MUST NOT mutate capture state or start finalization here — that
+   *  is what onStopCommitted is for (audit 2026-07-09: a claimant that
+   *  finalized synchronously raced stopCapture's own save and could
+   *  wedge the capture in 'transcribing'). */
   onStopRequested?(m: CaptureManifest): boolean | undefined;
+  /** The stop state is durably saved — a claimant starts (or
+   *  schedules) finalization HERE. */
+  onStopCommitted?(m: CaptureManifest): void;
   /** Called after a capture is deleted (cancel mid-recording, or
    *  delete of a finished recording) — pipelines drop queued work. */
   onDeleted?(id: string): void;
+}
+
+// ── Per-capture mutation serialization ─────────────────────────────────
+//
+// Every mutator is read-manifest → mutate → save; without ordering,
+// last-writer-wins loses data (audit 2026-07-09: a mark flagged during
+// an in-flight segment POST vanished; concurrent third-party uploads
+// could drop segment entries; stop raced finalize). A per-id promise
+// chain is the proportionate fix — no locks file, no API change.
+// createCapture serializes on a global key so the one-active rule is
+// check-then-act-safe.
+const mutexTails = new Map<string, Promise<unknown>>();
+
+function withCaptureLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const tail = mutexTails.get(key) ?? Promise.resolve();
+  const next = tail.then(fn, fn);
+  // The stored tail swallows rejections (it exists only for ordering);
+  // the caller still gets them from `next`. Entry is dropped once this
+  // link settles as the current tail, so the map stays bounded.
+  const stored = next.then(() => undefined, () => undefined).then(() => {
+    if (mutexTails.get(key) === stored) mutexTails.delete(key);
+  });
+  mutexTails.set(key, stored);
+  return next;
 }
 
 let hooks: CaptureHooks | null = null;
@@ -223,14 +255,29 @@ function summarize(m: CaptureManifest): CaptureSummary {
 const STALE_RECORDING_MS = 10 * 60 * 1000;
 
 async function lastActivityMs(m: CaptureManifest): Promise<number> {
-  // Segment arrival is activity; a segment-less capture falls back to
-  // its start stamp.
-  const last = m.segments[m.segments.length - 1];
-  if (!last) return m.started_at;
-  return m.started_at + last.t0_ms;
+  // ARRIVAL clock, not meeting-relative time: manifest mtime moves on
+  // every accepted segment/mark/patch. The previous started_at+t0
+  // arithmetic made a paused meeting or an offline upload backlog look
+  // "stale" after 10 wall-clock minutes (audit 2026-07-09 #11).
+  try {
+    const st = await fs.stat(manifestPath(m.id));
+    return Math.max(st.mtimeMs, m.started_at);
+  } catch {
+    return m.started_at;
+  }
 }
 
-export async function createCapture(opts: {
+export function createCapture(opts: {
+  title?: string;
+  linkedChat?: string | null;
+  diarize?: boolean;
+}): Promise<CaptureManifest> {
+  // Global-key lock: the one-active rule is check-then-act, so two
+  // concurrent creates must serialize (audit 2026-07-09).
+  return withCaptureLock('__create__', () => createCaptureLocked(opts));
+}
+
+async function createCaptureLocked(opts: {
   title?: string;
   linkedChat?: string | null;
   diarize?: boolean;
@@ -242,7 +289,11 @@ export async function createCapture(opts: {
     if (row.status !== 'recording') continue;
     const m = await readManifest(row.id);
     if (Date.now() - await lastActivityMs(m) > STALE_RECORDING_MS) {
-      m.status = 'failed';
+      // Heal direction matters (audit): a crashed capture WITH sealed
+      // audio is a real meeting — complete it (segments + transcripts
+      // stay usable, retro-transcribable); only a segment-less husk is
+      // a failure.
+      m.status = m.segments.length ? 'complete' : 'failed';
       m.ended_at = Date.now();
       await saveManifest(m);
       continue;
@@ -269,7 +320,16 @@ export async function createCapture(opts: {
   return manifest;
 }
 
-export async function putSegment(
+export function putSegment(
+  id: string,
+  seq: number,
+  body: Buffer,
+  meta: { t0Ms: number; mime: string; sha256?: string },
+): Promise<{ manifest: CaptureManifest; duplicate: boolean }> {
+  return withCaptureLock(id, () => putSegmentLocked(id, seq, body, meta));
+}
+
+async function putSegmentLocked(
   id: string,
   seq: number,
   body: Buffer,
@@ -313,7 +373,11 @@ export async function putSegment(
   return { manifest: m, duplicate: false };
 }
 
-export async function addMark(id: string, tMs: number): Promise<CaptureManifest> {
+export function addMark(id: string, tMs: number): Promise<CaptureManifest> {
+  return withCaptureLock(id, () => addMarkLocked(id, tMs));
+}
+
+async function addMarkLocked(id: string, tMs: number): Promise<CaptureManifest> {
   const m = await readManifest(id);
   if (m.status !== 'recording') throw new CaptureError(409, `capture ${id} is not recording`);
   m.marks.push({ t_ms: Math.max(0, Math.floor(tMs || 0)) });
@@ -321,7 +385,15 @@ export async function addMark(id: string, tMs: number): Promise<CaptureManifest>
   return m;
 }
 
-export async function patchCapture(id: string, patch: {
+export function patchCapture(id: string, patch: {
+  title?: string;
+  linkedChat?: string | null;
+  diarize?: boolean;
+}): Promise<CaptureManifest> {
+  return withCaptureLock(id, () => patchCaptureLocked(id, patch));
+}
+
+async function patchCaptureLocked(id: string, patch: {
   title?: string;
   linkedChat?: string | null;
   diarize?: boolean;
@@ -341,24 +413,38 @@ export async function patchCapture(id: string, patch: {
   return m;
 }
 
-export async function stopCapture(id: string): Promise<CaptureManifest> {
+export function stopCapture(id: string): Promise<CaptureManifest> {
+  return withCaptureLock(id, () => stopCaptureLocked(id));
+}
+
+async function stopCaptureLocked(id: string): Promise<CaptureManifest> {
   const m = await readManifest(id);
   if (m.status !== 'recording') return m;   // idempotent stop
   m.ended_at = Date.now();
   // A registered pipeline (captureTranscribe) may CLAIM finalization —
   // the capture parks in 'transcribing' until finalizeCapture(). No
   // claimant (unit tests, transcription-less installs) → complete now.
+  // Claim is a pure QUERY; the claimant starts work only on
+  // onStopCommitted below, AFTER the state is durably saved —
+  // otherwise finalize raced this save (audit 2026-07-09).
   let claimed = false;
   try { claimed = hooks?.onStopRequested?.(m) === true; } catch { /* hook errors never break stop */ }
   m.status = claimed ? 'transcribing' : 'complete';
   await saveManifest(m);
   notifyChanged(m, 'stopped');
+  if (claimed) {
+    try { hooks?.onStopCommitted?.(m); } catch { /* hook errors never break stop */ }
+  }
   return m;
 }
 
 /** Pipeline hand-back: the onStopRequested claimant calls this when
  *  transcription (and, when enabled, the diarize pass) is done. */
-export async function finalizeCapture(id: string, opts?: { failed?: boolean }): Promise<CaptureManifest> {
+export function finalizeCapture(id: string, opts?: { failed?: boolean }): Promise<CaptureManifest> {
+  return withCaptureLock(id, () => finalizeCaptureLocked(id, opts));
+}
+
+async function finalizeCaptureLocked(id: string, opts?: { failed?: boolean }): Promise<CaptureManifest> {
   const m = await readManifest(id);
   if (m.status === 'complete' || m.status === 'failed') return m;
   m.status = opts?.failed ? 'failed' : 'complete';
@@ -378,19 +464,16 @@ export async function getCapture(id: string): Promise<CaptureManifest> {
  *  deliberately destructive verb in the API, so it validates the id,
  *  confirms the manifest exists (404 otherwise), and never touches
  *  anything outside the capture dir. */
-export async function deleteCapture(id: string): Promise<void> {
+export function deleteCapture(id: string): Promise<void> {
+  return withCaptureLock(id, () => deleteCaptureLocked(id));
+}
+
+async function deleteCaptureLocked(id: string): Promise<void> {
   const m = await readManifest(id);   // 404s unknown ids; validates shape
   await fs.rm(captureDir(m.id), { recursive: true, force: true });
   await rebuildIndex();
   try { hooks?.onDeleted?.(id); } catch { /* hook errors never break delete */ }
-  try {
-    pushEnvelope({
-      type: 'capture_changed',
-      kind: 'deleted',
-      chat_id: m.linked_chat || '',
-      capture: { id },
-    } as any);
-  } catch { /* fanout unavailable */ }
+  notifyChanged(m, 'deleted');
 }
 
 export async function listCaptures(): Promise<CaptureSummary[]> {
@@ -414,7 +497,7 @@ export async function listCaptures(): Promise<CaptureSummary[]> {
  *  records, list refreshes) rides the same fanout as everything else.
  *  `kind` distinguishes lifecycle steps so clients can badge/update
  *  without refetching on every segment. */
-function notifyChanged(m: CaptureManifest, kind: 'created' | 'patched' | 'stopped' | 'completed'): void {
+function notifyChanged(m: CaptureManifest, kind: 'created' | 'patched' | 'stopped' | 'completed' | 'deleted'): void {
   try {
     pushEnvelope({
       type: 'capture_changed',
@@ -427,12 +510,12 @@ function notifyChanged(m: CaptureManifest, kind: 'created' | 'patched' | 'stoppe
 
 // ── HTTP handlers (server.ts dispatch) ─────────────────────────────────
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+export function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 }
 
-function sendError(res: ServerResponse, err: unknown): void {
+export function sendError(res: ServerResponse, err: unknown): void {
   if (err instanceof CaptureError) return sendJson(res, err.status, { error: err.message });
   sendJson(res, 500, { error: String((err as Error)?.message || err) });
 }
@@ -443,7 +526,17 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
     let n = 0;
     req.on('data', (c: Buffer) => {
       n += c.length;
-      if (n > maxBytes) { req.destroy(); reject(new CaptureError(413, 'body too large')); return; }
+      if (n > maxBytes) {
+        // Reject WITHOUT destroying the socket: a destroyed request
+        // never carries the 413 back, so the client uploader read it
+        // as a network error and retried the same oversized segment
+        // forever, damming its serial queue (audit 2026-07-09 #14).
+        // The handler's 413 makes it a permanent 4xx drop instead.
+        req.removeAllListeners('data');
+        req.resume();
+        reject(new CaptureError(413, 'body too large'));
+        return;
+      }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks)));
@@ -528,19 +621,6 @@ export async function handleCapturePatch(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/diarize — retro-diarize a finished
- *  capture (plan §Phase 4g). Late import avoids a module cycle
- *  (captureTranscribe imports this file). */
-export async function handleCaptureRetroDiarize(
-  _req: IncomingMessage, res: ServerResponse, id: string,
-): Promise<void> {
-  try {
-    const { retroDiarize } = await import('./captureTranscribe.ts');
-    const ok = await retroDiarize(id);
-    sendJson(res, ok ? 200 : 502, ok ? { ok: true } : { error: 'diarize pass failed — transcript unchanged' });
-  } catch (err) { sendError(res, err); }
-}
-
 /** DELETE /api/sidekick/captures/{id} — discard (cancel or delete). */
 export async function handleCaptureDelete(
   _req: IncomingMessage, res: ServerResponse, id: string,
@@ -584,7 +664,13 @@ export async function handleCaptureGet(
 export async function handleCaptureControl(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const body = await readJson(req);
-    const action = body.action === 'stop' ? 'stop' : 'start';
+    // STRICT validation (audit 2026-07-09): defaulting unknown actions
+    // to 'start' made any malformed body a start-the-microphone
+    // broadcast — a privacy footgun on a public endpoint.
+    const action = body.action;
+    if (action !== 'start' && action !== 'stop') {
+      throw new CaptureError(400, `action must be 'start' or 'stop', got: ${JSON.stringify(action ?? null)}`);
+    }
     pushEnvelope({
       type: 'capture_control',
       action,

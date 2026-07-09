@@ -66,6 +66,10 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
   let pending = 0;
   let drainedResolvers: (() => void)[] = [];
   const attempts409 = new Map<string, number>();
+  // Frozen-capture segments: durable copy KEPT in IDB, skipped for the
+  // rest of this session so they can't dam the queue. Recoverable
+  // later (retro re-upload tooling / manual).
+  const parked = new Set<string>();
 
   function notifyDrained(): void {
     const rs = drainedResolvers;
@@ -74,7 +78,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     opts.onDrained?.();
   }
 
-  async function uploadOne(seg: PendingSegment): Promise<'acked' | 'retry' | 'dropped'> {
+  async function uploadOne(seg: PendingSegment): Promise<'acked' | 'retry' | 'dropped' | 'parked'> {
     const sha = await sha256Hex(seg.blob);
     const headers: Record<string, string> = {
       'content-type': seg.mime || 'application/octet-stream',
@@ -92,6 +96,14 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     }
     if (res.ok) return 'acked';          // includes duplicate:true re-acks
     if (res.status === 409) {
+      // Two very different 409s (audit 2026-07-09 P0#1): a FROZEN
+      // capture (finalized before this segment landed — outage at
+      // stop, stale-heal, another device) must NOT delete the durable
+      // copy; the audio exists and is recoverable. Park it instead.
+      // Corrupt-upload/divergent 409s keep the bounded-retry-then-drop
+      // policy.
+      const err = await res.json().catch(() => ({} as any));
+      if (/frozen/i.test(String(err?.error ?? ''))) return 'parked';
       const n = (attempts409.get(seg.key) ?? 0) + 1;
       attempts409.set(seg.key, n);
       return n < MAX_409_ATTEMPTS ? 'retry' : 'dropped';
@@ -105,7 +117,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     running = true;
     try {
       for (;;) {
-        const queue = await listPending();
+        const queue = (await listPending()).filter((s) => !parked.has(s.key));
         pending = queue.length;
         if (!queue.length) { notifyDrained(); if (!rerun) break; rerun = false; continue; }
         const seg = queue[0];
@@ -122,6 +134,12 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
           attempts409.delete(seg.key);
           await removeSegment(seg.key);
           opts.onDropped?.(seg, 'permanent');
+          continue;
+        }
+        if (outcome === 'parked') {
+          log(`[capture-upload] parking segment ${seg.key} (capture frozen — durable copy kept)`);
+          parked.add(seg.key);
+          opts.onDropped?.(seg, 'frozen');
           continue;
         }
         // retry: back off, then loop re-lists (picks up new segments too)

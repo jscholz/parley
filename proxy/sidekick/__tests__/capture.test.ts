@@ -103,15 +103,20 @@ test('one active capture at a time; stale recording auto-heals', async () => {
   await assert.rejects(() => createCapture({ title: 'B' }),
     (e: CaptureError) => e.status === 409);
 
-  // Age the active capture past the stale window by rewriting its
-  // start stamp (no segments → activity = started_at).
+  // Age the active capture past the stale window: the activity clock
+  // is the manifest FILE MTIME (arrival time — audit 2026-07-09 #11),
+  // so backdate both the stamp and the mtime.
   const manifestPath = path.join(dir, a.id, 'manifest.json');
   const m = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
   m.started_at = Date.now() - 11 * 60 * 1000;
   await fs.writeFile(manifestPath, JSON.stringify(m));
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  await fs.utimes(manifestPath, old, old);
 
   const b = await createCapture({ title: 'B' });   // heals A, starts B
   assert.equal(b.status, 'recording');
+  // Segment-less husk → 'failed' (a capture WITH audio heals to
+  // 'complete' instead — see the dedicated test below).
   assert.equal((await getCapture(a.id)).status, 'failed');
 });
 
@@ -187,4 +192,72 @@ test('deleteCapture: whole dir gone, index rebuilt, later ops 404', async () => 
   const rows = await listCaptures();
   assert.deepEqual(rows.map((r) => r.title), ['Keep']);
   await assert.rejects(() => fs.access(path.join(dir, b.id)), 'directory must be gone');
+});
+
+// ── Audit 2026-07-09 regressions ───────────────────────────────────────
+
+test('concurrent putSegment: every segment lands in the manifest (per-id lock)', async () => {
+  const m = await createCapture({ title: 'Parallel' });
+  // Five parallel uploads — pre-lock, read-modify-write lost entries.
+  await Promise.all([0, 1, 2, 3, 4].map((seq) =>
+    putSegment(m.id, seq, Buffer.from(`bytes-${seq}`), { t0Ms: seq * 45_000, mime: 'audio/mp4' })));
+  const after = await getCapture(m.id);
+  assert.deepEqual(after.segments.map((s) => s.seq), [0, 1, 2, 3, 4]);
+});
+
+test('concurrent createCapture: one-active rule holds (global lock)', async () => {
+  const results = await Promise.allSettled([
+    createCapture({ title: 'X' }), createCapture({ title: 'Y' }),
+  ]);
+  const ok = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+  assert.equal(ok.length, 1);
+  assert.equal(rejected.length, 1);
+});
+
+test('stale heal COMPLETES a segment-bearing capture (audio is a meeting, not a failure)', async () => {
+  const a = await createCapture({ title: 'CrashMid' });
+  await putSegment(a.id, 0, Buffer.from('real audio'), { t0Ms: 0, mime: 'audio/mp4' });
+  // Age it: stale-heal reads the manifest mtime, so backdate the file.
+  const mp = path.join(dir, a.id, 'manifest.json');
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  await fs.utimes(mp, old, old);
+  const raw = JSON.parse(await fs.readFile(mp, 'utf8'));
+  raw.started_at = Date.now() - 12 * 60 * 1000;
+  await fs.writeFile(mp, JSON.stringify(raw));
+  await fs.utimes(mp, old, old);
+
+  const b = await createCapture({ title: 'Next' });
+  assert.equal(b.status, 'recording');
+  assert.equal((await getCapture(a.id)).status, 'complete');   // NOT 'failed'
+});
+
+test('capture_control rejects unknown actions with 400 (no default-to-start)', async () => {
+  const { handleCaptureControl } = await import('../capture.ts');
+  const { Readable } = await import('node:stream');
+  const mkReq = (body: string) => {
+    const r: any = Readable.from([Buffer.from(body)]);
+    r.headers = {};
+    return r;
+  };
+  const mkRes = () => {
+    let status = 0; let payload = '';
+    return {
+      writeHead(code: number) { status = code; return this; },
+      end(b?: string) { payload = b || ''; },
+      get status() { return status; },
+      get body() { return payload; },
+    } as any;
+  };
+  const bad = mkRes();
+  await handleCaptureControl(mkReq('{}'), bad);
+  assert.equal(bad.status, 400);
+
+  const typo = mkRes();
+  await handleCaptureControl(mkReq('{"action":"begin"}'), typo);
+  assert.equal(typo.status, 400);
+
+  const good = mkRes();
+  await handleCaptureControl(mkReq('{"action":"stop"}'), good);
+  assert.equal(good.status, 202);
 });

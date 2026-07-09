@@ -32,7 +32,17 @@ const inflight = new Map<string, Promise<string>>();
 async function ensurePlaybackFile(id: string): Promise<string> {
   const m = await getCapture(id);
   if (!m.segments.length) throw new CaptureError(404, 'capture has no audio segments');
-  const out = path.join(captureDirPath(id), 'audio.play.m4a');
+  // Terminal captures only (audit 2026-07-09): a stitch taken while
+  // recording/transcribing — or before post-stop tail segments land —
+  // would cache a TRUNCATED file forever. The live meeting's playback
+  // story is the live transcript, not audio scrubbing.
+  if (m.status !== 'complete' && m.status !== 'failed') {
+    throw new CaptureError(409, `capture is ${m.status}; playback is available once it completes`);
+  }
+  // Cache key includes the segment COUNT, so a retro-arriving segment
+  // (or retro re-anything) naturally invalidates by pointing at a new
+  // name. The diarize pass pre-warms this exact file.
+  const out = path.join(captureDirPath(id), `audio.play.${m.segments.length}.m4a`);
   try {
     await fs.access(out);
     return out;                       // cached from a previous request

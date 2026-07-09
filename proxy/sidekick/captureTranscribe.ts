@@ -24,8 +24,11 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
+import type { IncomingMessage, ServerResponse } from 'node:http';
+
 import {
   getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath,
+  sendJson, sendError,
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
@@ -50,10 +53,10 @@ export interface TranscribeConfig {
   /** Message dispatch seam — production default is messages.ts
    *  dispatchInternalMessage; tests inject a recorder. */
   dispatchFn?: (chatId: string, text: string) => boolean;
-  /** Segment-stitch seam — production default runs ffmpeg (concat
-   *  demuxer → 16k mono wav); tests inject a stub. Returns the path
-   *  of the stitched file. */
-  stitchFn?: (segmentFiles: string[], outFile: string) => Promise<string>;
+  /** Segment-stitch seam — production default is captureStitch.ts's
+   *  ffmpeg (format passed EXPLICITLY at every call site; audit 2.3).
+   *  Tests inject a stub. Returns the stitched file's path. */
+  stitchFn?: typeof ffmpegStitch;
   /** STT vocabulary biasing (capture plan §Phase 4b): terms appended
    *  as repeated ?keyterms= on BOTH bridge calls — same biasing the
    *  memo/dictate paths get. server.ts wires its config seed list;
@@ -71,17 +74,23 @@ interface CaptureJob {
   queue: SegmentMeta[];
   running: boolean;
   stopped: boolean;          // user stopped; finalize when queue drains
+  /** finalize() single-run latch — a tail segment arriving during the
+   *  minutes-long diarize pass re-enters drain() and must not start a
+   *  SECOND finalize (double stitch + duplicate ingest turn; audit
+   *  2026-07-09 #3). */
+  finalizing: boolean;
   pushTimer: ReturnType<typeof setTimeout> | null;
   lastPushAt: number;
 }
 
 let cfg: TranscribeConfig | null = null;
+let tmpCounter = 0;   // unique tmp names — concurrent writers must never share one
 const jobs = new Map<string, CaptureJob>();
 
 function job(id: string): CaptureJob {
   let j = jobs.get(id);
   if (!j) {
-    j = { queue: [], running: false, stopped: false, pushTimer: null, lastPushAt: 0 };
+    j = { queue: [], running: false, stopped: false, finalizing: false, pushTimer: null, lastPushAt: 0 };
     jobs.set(id, j);
   }
   return j;
@@ -142,7 +151,7 @@ export async function rebuildTranscript(id: string): Promise<string> {
   }
   const body = lines.join('\n');
   const file = transcriptPath(m);
-  const tmp = `${file}.tmp-${process.pid}`;
+  const tmp = `${file}.tmp-${process.pid}-${tmpCounter++}`;
   await fs.writeFile(tmp, body);
   await fs.rename(tmp, file);
   return body;
@@ -244,7 +253,7 @@ async function drain(id: string): Promise<void> {
       await rebuildTranscript(id);
       void pushDoc(id);
     }
-    if (j.stopped) await finalize(id);
+    if (j.stopped && !j.finalizing) await finalize(id);
   } catch (e) {
     console.error(`[capture-transcribe] drain error for ${id}: ${String(e)}`);
   } finally {
@@ -312,15 +321,22 @@ async function runDiarizePass(id: string): Promise<boolean> {
   if (!m.segments.length) return false;
   try {
     const stitch = cfg.stitchFn ?? ffmpegStitch;
-    const wav = await stitch(
+    // m4a, not wav (audit 2026-07-09 #5): 16k mono wav is ~115MB/hour
+    // — over the bridge's body cap for any meeting >13min, so
+    // diarization silently fell back on exactly the meetings it exists
+    // for. Mono AAC is ~22MB/hour and Deepgram ingests it natively.
+    // Same file the playback endpoint serves (segment-count-keyed), so
+    // the first play after a meeting is pre-warmed.
+    const out = await stitch(
       m.segments.map((s) => segmentPath(m.id, s)),
-      path.join(captureDirPath(m.id), 'audio.full.wav'),
+      path.join(captureDirPath(m.id), `audio.play.${m.segments.length}.m4a`),
+      'm4a',
     );
-    const audio = await fs.readFile(wav);
+    const audio = await fs.readFile(out);
     const fetchFn = cfg.fetchFn ?? fetch;
     const res = await fetchFn(new URL('/v1/transcribe-diarized' + keytermsQuery(), cfg.bridgeUrl).toString(), {
       method: 'POST',
-      headers: { 'content-type': 'audio/wav' },
+      headers: { 'content-type': 'audio/mp4' },
       body: audio,
       signal: AbortSignal.timeout(900_000),
     });
@@ -334,7 +350,7 @@ async function runDiarizePass(id: string): Promise<boolean> {
     const file = transcriptPath(m);
     await fs.copyFile(file, path.join(captureDirPath(m.id), 'transcript.plain.md')).catch(() => { /* first render may not exist */ });
     const body = renderDiarized(m, utterances);
-    const tmp = `${file}.tmp-${process.pid}`;
+    const tmp = `${file}.tmp-${process.pid}-${tmpCounter++}`;
     await fs.writeFile(tmp, body);
     await fs.rename(tmp, file);
     return true;
@@ -345,11 +361,22 @@ async function runDiarizePass(id: string): Promise<boolean> {
 }
 
 async function finalize(id: string): Promise<void> {
+  const j = job(id);
+  if (j.finalizing) return;   // single-run latch (audit #3)
+  j.finalizing = true;
+  try {
+    await finalizeInner(id);
+  } finally {
+    j.finalizing = false;
+  }
+}
+
+async function finalizeInner(id: string): Promise<void> {
   const m = await getCapture(id);
   if (m.status === 'complete' || m.status === 'failed') return;
   await rebuildTranscript(id);
   let diarized = false;
-  if (m.diarize) diarized = await runDiarizePass(id);
+  if (m.diarize && m.segments.length) diarized = await runDiarizePass(id);
   await finalizeCapture(id);
   // Final-header re-render — ONLY for the stitched path: a diarized
   // pass already replaced transcript.md and a rebuild here would
@@ -357,7 +384,7 @@ async function finalize(id: string): Promise<void> {
   if (!diarized) await rebuildTranscript(id);
   await pushDoc(id, { immediate: true });
   const done = await getCapture(id);
-  if ((cfg?.autoIngest ?? true) && done.linked_chat) {
+  if ((cfg?.autoIngest ?? true) && done.linked_chat && done.segments.length > 0) {
     const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
       done.linked_chat,
       `📼 Recording "${done.title}" finished (${fmtOffset((done.ended_at ?? done.started_at) - done.started_at)}, `
@@ -388,12 +415,17 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
       void drain(m.id);
     },
     onStopRequested(m) {
-      const j = job(m.id);
-      j.stopped = true;
-      // Claim finalization; drain() finalizes when the queue empties
-      // (immediately, if transcription already caught up).
-      if (!j.running && !j.queue.length) void finalize(m.id);
+      // Pure claim — no work here; the stop state isn't saved yet
+      // (audit 2026-07-09: finalizing from the claim raced
+      // stopCapture's own save and could wedge 'transcribing').
+      job(m.id).stopped = true;
       return true;
+    },
+    onStopCommitted(m) {
+      const j = job(m.id);
+      // Finalize now if transcription already caught up; otherwise
+      // drain() finalizes when the queue empties.
+      if (!j.running && !j.queue.length && !j.finalizing) void finalize(m.id);
     },
     onDeleted(id) {
       // Cancel/delete: drop queued work; an in-flight transcribe of a
@@ -417,6 +449,18 @@ export async function retroDiarize(id: string): Promise<boolean> {
   const ok = await runDiarizePass(id);
   if (ok) await pushDoc(id, { immediate: true });
   return ok;
+}
+
+/** POST /api/sidekick/captures/{id}/diarize — HTTP face of
+ *  retroDiarize. Lives HERE, not in capture.ts (audit 2.2): the
+ *  storage module must not reach into the pipeline. */
+export async function handleCaptureRetroDiarize(
+  _req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try {
+    const ok = await retroDiarize(id);
+    sendJson(res, ok ? 200 : 502, ok ? { ok: true } : { error: 'diarize pass failed — transcript unchanged' });
+  } catch (err) { sendError(res, err); }
 }
 
 /** Boot recovery: any capture parked in recording/transcribing with

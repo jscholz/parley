@@ -99,3 +99,27 @@ test('boot resume: segments left by a previous session drain on first kick', asy
   assert.deepEqual(calls.map((c) => c.seq), [7]);
   assert.equal((await listPending()).length, 0);
 });
+
+test('frozen-capture 409 PARKS the segment — durable copy kept, queue drains (audit P0#1)', async () => {
+  await putSegment({ captureId: 'cap_7_aaaaaa', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: blobOf('precious') });
+  await putSegment({ captureId: 'cap_7_aaaaaa', seq: 1, t0Ms: 45_000, mime: 'audio/mp4', blob: blobOf('fine') });
+  const dropped: [number, string][] = [];
+  let n = 0;
+  const fn = (async (url: any) => {
+    n += 1;
+    const seq = Number(String(url).match(/segments\/(\d+)$/)?.[1] ?? -1);
+    if (seq === 0) {
+      return new Response(JSON.stringify({ error: 'capture cap_7_aaaaaa is complete; segments are frozen' }), { status: 409 });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const up = createUploader({
+    fetchFn: fn, baseDelayMs: 1,
+    onDropped: (seg, reason) => dropped.push([seg.seq, reason]),
+  });
+  await up.drained();
+  // Frozen segment: reported as 'frozen', NOT removed from the store.
+  assert.deepEqual(dropped, [[0, 'frozen']]);
+  const left = await listPending();
+  assert.deepEqual(left.map((s) => s.seq), [0]);   // durable copy survives
+});

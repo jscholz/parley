@@ -28,12 +28,21 @@ export async function ffmpegStitch(
   if (format === 'wav16k') args.push('-ac', '1', '-ar', '16000');
   else args.push('-ac', '1', '-c:a', 'aac', '-b:a', '48k');
   args.push(outFile);
-  await new Promise<void>((resolve, reject) => {
-    execFile('ffmpeg', args, { timeout: 600_000 }, (err, _out, stderr) => {
-      if (err) reject(new Error(`ffmpeg: ${String(stderr).slice(-400)}`));
-      else resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile('ffmpeg', args, { timeout: 600_000 }, (err, _out, stderr) => {
+        if (err) reject(new Error(`ffmpeg: ${String(stderr).slice(-400)}`));
+        else resolve();
+      });
     });
-  });
+  } catch (err) {
+    // A killed/failed ffmpeg leaves a PARTIAL outFile — existence is
+    // the playback endpoint's cache key, so a torn file would be
+    // served forever (audit 2026-07-09 #8). Remove both artifacts.
+    await fs.unlink(outFile).catch(() => { /* never written */ });
+    await fs.unlink(listFile).catch(() => { /* best-effort */ });
+    throw err;
+  }
   await fs.unlink(listFile).catch(() => { /* best-effort */ });
   return outFile;
 }

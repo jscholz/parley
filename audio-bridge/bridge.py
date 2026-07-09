@@ -100,12 +100,16 @@ def main() -> None:
         )
 
     # aiohttp's default body limit is 1MB. /v1/transcribe receives raw
-    # webm blobs from the PWA via the sidekick proxy — a 3-minute memo
-    # is ~6MB, easily exceeding the default. Match the proxy's 25MB
-    # ceiling (server.ts handleTranscribe) so the bridge accepts
-    # whatever the proxy passes through. WebRTC SDP offers/ICE
-    # candidates are tiny so this only affects the transcribe path.
-    app = web.Application(client_max_size=25 * 1024 * 1024)
+    # webm blobs from the PWA via the sidekick proxy (a 3-minute memo is
+    # ~6MB), and /v1/transcribe-diarized receives a WHOLE MEETING's
+    # stitched mono AAC from the capture pipeline — ~22MB/hour, so a
+    # 3-hour meeting is ~65MB. The old 25MB cap silently rejected the
+    # diarize pass for any long meeting (capture audit 2026-07-09 #5:
+    # 413 before the handler ran, silent fallback to the plain
+    # transcript — short test recordings hid it). 256MB gives 10+ hours
+    # of headroom; this is a loopback single-user service, not an
+    # internet edge.
+    app = web.Application(client_max_size=256 * 1024 * 1024)
     register_routes(app, voice_config=voice_config, proxy_url=proxy_url, backend=backend)
 
     logging.getLogger(__name__).info(

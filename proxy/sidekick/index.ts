@@ -33,13 +33,13 @@ export {
   handleCaptureList,
   handleCaptureGet,
   handleCaptureDelete,
-  handleCaptureRetroDiarize,
   handleCaptureControl,
   listCaptures,
 } from './capture.ts';
 export {
   initCaptureTranscription,
   recoverPendingTranscriptions,
+  handleCaptureRetroDiarize,
 } from './captureTranscribe.ts';
 export { handleCaptureAudio } from './captureAudio.ts';
 export {
