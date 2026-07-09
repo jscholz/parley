@@ -32,6 +32,7 @@ const inflight = new Map<string, Promise<string>>();
 async function ensurePlaybackFile(id: string): Promise<string> {
   const m = await getCapture(id);
   if (!m.segments.length) throw new CaptureError(404, 'capture has no audio segments');
+  if (m.audio_purged) throw new CaptureError(410, 'audio was purged for this capture (transcript retained)');
   // Terminal captures only (audit 2026-07-09): a stitch taken while
   // recording/transcribing — or before post-stop tail segments land —
   // would cache a TRUNCATED file forever. The live meeting's playback

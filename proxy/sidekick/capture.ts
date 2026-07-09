@@ -48,6 +48,12 @@ export interface CaptureManifest {
    *  time and gets a freshly minted session id back. */
   linked_chat: string | null;
   diarize: boolean;
+  /** Per-capture override of the pipeline's auto-ingest (Settings →
+   *  Meetings). Absent = pipeline default. */
+  auto_ingest?: boolean;
+  /** Raw audio was purged (storage hygiene — transcript retained).
+   *  Playback + retro-diarize become unavailable. */
+  audio_purged?: boolean;
   status: 'recording' | 'transcribing' | 'complete' | 'failed';
   started_at: number;          // epoch ms, server clock
   ended_at: number | null;
@@ -220,6 +226,12 @@ export interface CaptureSummary {
   title: string;
   linked_chat: string | null;
   diarize: boolean;
+  /** Per-capture override of the pipeline's auto-ingest (Settings →
+   *  Meetings). Absent = pipeline default. */
+  auto_ingest?: boolean;
+  /** Raw audio was purged (storage hygiene — transcript retained).
+   *  Playback + retro-diarize become unavailable. */
+  audio_purged?: boolean;
   status: CaptureManifest['status'];
   started_at: number;
   ended_at: number | null;
@@ -271,6 +283,7 @@ export function createCapture(opts: {
   title?: string;
   linkedChat?: string | null;
   diarize?: boolean;
+  autoIngest?: boolean;
 }): Promise<CaptureManifest> {
   // Global-key lock: the one-active rule is check-then-act, so two
   // concurrent creates must serialize (audit 2026-07-09).
@@ -281,6 +294,7 @@ async function createCaptureLocked(opts: {
   title?: string;
   linkedChat?: string | null;
   diarize?: boolean;
+  autoIngest?: boolean;
 }): Promise<CaptureManifest> {
   await fs.mkdir(capturesDir(), { recursive: true });
   // One active capture at a time (plan §3.1, v1) — with the stale
@@ -306,6 +320,7 @@ async function createCaptureLocked(opts: {
     title: opts.title?.trim() || `Meeting ${new Date().toISOString().slice(0, 10)}`,
     linked_chat: opts.linkedChat ?? null,
     diarize: opts.diarize !== false,   // default ON for meetings (plan §1.5)
+    ...(typeof opts.autoIngest === 'boolean' ? { auto_ingest: opts.autoIngest } : {}),
     status: 'recording',
     started_at: Date.now(),
     ended_at: null,
@@ -464,6 +479,42 @@ export async function getCapture(id: string): Promise<CaptureManifest> {
  *  deliberately destructive verb in the API, so it validates the id,
  *  confirms the manifest exists (404 otherwise), and never touches
  *  anything outside the capture dir. */
+/** Storage hygiene (field 2026-07-09 #7): delete the AUDIO, keep the
+ *  transcript(s) + per-segment text. Audio is the only thing that
+ *  meaningfully eats disk (~22MB/h stitched + raw segments); the words
+ *  keep their value forever. Irreversible: playback and retro-diarize
+ *  are gone for this capture afterwards. */
+export function purgeCaptureAudio(id: string): Promise<CaptureManifest> {
+  return withCaptureLock(id, () => purgeCaptureAudioLocked(id));
+}
+
+async function purgeCaptureAudioLocked(id: string): Promise<CaptureManifest> {
+  const m = await readManifest(id);
+  if (m.status !== 'complete' && m.status !== 'failed') {
+    throw new CaptureError(409, `capture is ${m.status}; purge audio after it finishes`);
+  }
+  const dir = captureDir(id);
+  const segDir = path.join(dir, 'seg');
+  for (const f of await fs.readdir(segDir).catch(() => [] as string[])) {
+    if (/\.(m4a|webm|wav|bin)$/.test(f)) await fs.unlink(path.join(segDir, f)).catch(() => { /* best-effort */ });
+  }
+  for (const f of await fs.readdir(dir).catch(() => [] as string[])) {
+    if (/^audio\./.test(f)) await fs.unlink(path.join(dir, f)).catch(() => { /* best-effort */ });
+  }
+  m.audio_purged = true;
+  await saveManifest(m);
+  notifyChanged(m, 'patched');
+  return m;
+}
+
+/** POST /api/sidekick/captures/{id}/purge-audio */
+export async function handleCapturePurgeAudio(
+  _req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try { sendJson(res, 200, { ok: true, capture: await purgeCaptureAudio(id) }); }
+  catch (err) { sendError(res, err); }
+}
+
 export function deleteCapture(id: string): Promise<void> {
   return withCaptureLock(id, () => deleteCaptureLocked(id));
 }
@@ -572,6 +623,7 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
       title: typeof body.title === 'string' ? body.title : undefined,
       linkedChat,
       diarize: typeof body.diarize === 'boolean' ? body.diarize : undefined,
+      autoIngest: typeof body.auto_ingest === 'boolean' ? body.auto_ingest : undefined,
     });
     sendJson(res, 201, { capture: manifest });
   } catch (err) { sendError(res, err); }

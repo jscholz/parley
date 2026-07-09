@@ -24,6 +24,7 @@ import * as sessionCache from './sessionCache.ts';
 import { log, diag } from './util/log.ts';
 import * as status from './status.ts';
 import { parseQuery, applyFilter } from './sessionFilter.ts';
+import { meetingCountFor, hasMeetings } from './capture/meetingsIndex.ts';
 import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter as clearStoredFilter } from './util/filterStore.ts';
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
 import { markRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize } from './sessionOps.ts';
@@ -452,6 +453,11 @@ function mergePending(base: any[]): any[] {
 /** Current filter input value. Empty = no filter. Persisted to IDB so a
  *  page reload restores the same filter. */
 let currentFilter: string = '';
+
+/** Meetings-only view (field 2026-07-09 #7): the ◉ toggle beside the
+ *  filter input narrows the list to sessions with recordings attached.
+ *  Session-local (not persisted) — it's a lens, not a mode. */
+let meetingsOnly = false;
 
 /** Debounce handles for the filter input. Render: 100ms (instant client-side
  *  re-render over the cached list). Persist: 500ms (IDB). Server: 250ms
@@ -1011,12 +1017,20 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   // stays visible across session-switch even when cachedSessions gets
   // overwritten by the server fetch.
   const merged = mergePending(base);
-  const filtered = currentFilter
+  const textFiltered = currentFilter
     ? applyFilter(merged, parseQuery(currentFilter))
     : merged;
+  // Meetings lens stacks on top of the text filter.
+  const filtered = meetingsOnly
+    ? textFiltered.filter((row: any) => hasMeetings(row.id))
+    : textFiltered;
   // Empty list under a non-empty filter shows "No matches." instead of
   // the generic "No past sessions yet." so the user knows it's the filter
   // (not an empty server) hiding everything.
+  if (filtered.length === 0 && meetingsOnly && merged.length > 0) {
+    listEl.innerHTML = '<li class="sess-empty">No sessions with recordings yet.</li>';
+    return;
+  }
   if (filtered.length === 0 && currentFilter && merged.length > 0) {
     listEl.innerHTML = '<li class="sess-empty">No matches.</li>';
     return;
@@ -1169,6 +1183,11 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
   // target rows without depending on title/snippet text (which may be
   // a placeholder until hermes generates the title).
   li.dataset.chatId = s.id;
+  // Meeting badge (field 2026-07-09 #7): sessions with recordings get
+  // the record glyph; a count when several meetings share the session
+  // (the entity model allows it — captures link BY REFERENCE).
+  const meetings = meetingCountFor(s.id);
+  if (meetings > 0) li.dataset.meetings = String(meetings);
 
   const row = document.createElement('div');
   row.className = 'sess-row';
@@ -1222,7 +1241,16 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
   const countLabel = (typeof tCount === 'number' && typeof toolCount === 'number')
     ? (toolCount > 0 ? `${tCount} turns · ${toolCount} tools` : `${tCount} turns`)
     : `${s.messageCount || 0} msgs`;
+  // Meeting glyph leads the meta row — the record mark identifies the
+  // feature everywhere (icon-language rule 2026-07-09); count when a
+  // session hosts several meetings.
+  const meetingBadge = meetings > 0
+    ? `<span class="sess-meeting-badge" title="${meetings} recording${meetings > 1 ? 's' : ''} attached">`
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>'
+      + (meetings > 1 ? `${meetings}` : '') + '</span>'
+    : '';
   meta.innerHTML =
+    meetingBadge +
     `<span>${fmtRelativeTime(s.lastMessageAt)}</span>` +
     `<span>${countLabel}</span>` +
     sourceBadge;
@@ -1910,6 +1938,32 @@ function ensureFilterInput(): HTMLInputElement | null {
   clearBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="4" y1="4" x2="12" y2="12"/><line x1="12" y1="4" x2="4" y2="12"/></svg>`;
   clearBtn.hidden = !input.value;
   header.appendChild(clearBtn);
+
+  // Meetings lens toggle (field 2026-07-09 #7): the record glyph next
+  // to the filter — press to show only sessions with recordings.
+  const meetBtn = document.createElement('button');
+  meetBtn.type = 'button';
+  meetBtn.id = 'sess-meetings-toggle';
+  meetBtn.className = 'sess-meetings-toggle';
+  meetBtn.setAttribute('aria-label', 'Show only sessions with recordings');
+  meetBtn.setAttribute('aria-pressed', 'false');
+  meetBtn.title = 'Meetings — show only sessions with recordings';
+  meetBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>';
+  const rerenderRows = () => {
+    const listEl = document.getElementById('sessions-list');
+    if (listEl) renderListFiltered(listEl, activeRowId());
+  };
+  meetBtn.onclick = () => {
+    meetingsOnly = !meetingsOnly;
+    meetBtn.classList.toggle('active', meetingsOnly);
+    meetBtn.setAttribute('aria-pressed', String(meetingsOnly));
+    rerenderRows();
+  };
+  header.appendChild(meetBtn);
+
+  // Re-render rows when the meetings index refreshes (boot fetch or a
+  // capture_changed envelope) so badges + the lens stay live.
+  window.addEventListener('sidekick:meetings-changed', rerenderRows);
   const updateClearVisibility = () => { clearBtn.hidden = !input!.value; };
   const clearFilter = () => {
     input!.value = '';

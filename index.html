@@ -348,6 +348,7 @@
       <button type="button" class="settings-nav-btn" data-target="voice-output">Voice output</button>
       <button type="button" class="settings-nav-btn" data-target="voice-phrases">Voice phrases</button>
       <button type="button" class="settings-nav-btn" data-target="interaction">Interaction</button>
+      <button type="button" class="settings-nav-btn" data-target="meetings">Meetings</button>
     </nav>
     <div class="settings-content">
   <!-- Notifications + Display moved to top of the group list so the
@@ -583,6 +584,24 @@
     </div>
   </div>
 
+  <!-- Meetings — capture defaults (field ask 2026-07-09 #9). The
+       toggles feed the CREATE call, so they're defaults for the NEXT
+       recording; a live capture's diarize can still be flipped from
+       its PATCH surface. -->
+  <div class="settings-group" data-section="meetings" hidden>
+    <div class="group-label">Meetings</div>
+    <div class="row">
+      <label for="set-capture-diarize">Speaker labels</label>
+      <input type="checkbox" id="set-capture-diarize" checked>
+      <span class="hint">identify speakers when the recording stops (adds a full-audio pass)</span>
+    </div>
+    <div class="row">
+      <label for="set-capture-autoingest">Auto-ingest</label>
+      <input type="checkbox" id="set-capture-autoingest" checked>
+      <span class="hint">hand the transcript to the agent when the recording stops</span>
+    </div>
+  </div>
+
   <div class="settings-group" data-section="interaction" hidden>
     <div class="group-label">Interaction</div>
     <!-- Barge moved to the call-mode menu (chevron next to btn-call).
@@ -781,7 +800,7 @@
                      here; red is reserved for a LIVE mic (the pill's
                      pulsing dot is this same glyph in its live state). -->
                 <span class="mic-menu-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg></span>
-                <span class="mic-toggle-label">Record meeting here</span>
+                <span class="mic-toggle-label">Record meeting</span>
               </button>
             </div>
           </div>

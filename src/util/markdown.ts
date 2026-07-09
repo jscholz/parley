@@ -280,3 +280,19 @@ function buildTableHtml(header, aligns, body) {
   ).join('');
   return `<table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table>`;
 }
+
+/** Wrap meeting-capture transcript paths in doc-open links (field ask
+ *  2026-07-09 #6). Narrow by design: only paths of the capture layout
+ *  (…/cap_<ms>_<hex>/transcript[.plain].md) — a GENERAL local-path
+ *  linkifier needs a file-serving story the docs shelf doesn't have
+ *  (shelf docs are pushed, not fetched). Runs on RENDERED html (both
+ *  miniMarkdown and renderUserText escape first; path characters
+ *  survive escaping verbatim). The #doc: click route lives in
+ *  pins/drawer.ts.
+ */
+export function linkifyCaptureDocs(html) {
+  return html.replace(
+    /(?:\/[\w.\-]+)*\/(cap_\d+_[0-9a-f]{6})\/transcript(?:\.plain)?\.md/g,
+    (m, id) => `<a class="doc-open-link" href="#doc:${id}">${m}</a>`,
+  );
+}

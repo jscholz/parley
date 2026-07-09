@@ -39,8 +39,18 @@ function render(state: CaptureUiState): void {
   const timer = document.getElementById('capture-pill-timer');
   const show = state.active || state.phase === 'finishing';
   pill.hidden = !show;
-  document.getElementById('btn-capture-header')?.classList.toggle(
-    'recording', state.active && state.phase === 'recording');
+  const headerBtn = document.getElementById('btn-capture-header');
+  if (headerBtn) {
+    // Red whenever a capture is live in ANY phase; pulse only while
+    // actively recording (paused/interrupted hold steady red).
+    headerBtn.classList.toggle('active-capture', state.active);
+    headerBtn.classList.toggle('recording', state.active && state.phase === 'recording');
+    const title = state.active
+      ? 'Stop recording — save and hand to the agent'
+      : 'Record meeting (new session)';
+    headerBtn.setAttribute('title', title);
+    headerBtn.setAttribute('aria-label', title);
+  }
   pill.classList.toggle('interrupted', state.phase === 'interrupted');
   pill.classList.toggle('paused', state.phase === 'paused');
   pill.classList.toggle('finishing', state.phase === 'finishing');
@@ -144,16 +154,14 @@ export function initCapturePill(): void {
     // Composer placement → this chat ("Record meeting here").
     void startFromUi(switchCtl.viewedId() || undefined);
   });
-  // App-level header button → new dedicated session; the glyph turns
-  // red while a capture is live (same color rule as everywhere: red =
-  // live mic). Tapping while recording focuses attention on the pill
-  // rather than double-starting.
+  // App-level header button: start ↔ STOP toggle (field 2026-07-09 #2
+  // — while a meeting records, its semantics flip to "stop the
+  // meeting" and the hover copy says so; render() keeps the title in
+  // sync). Stop is the save-everything verb, so no confirm; discard
+  // lives on the pill's ✕ behind one.
   document.getElementById('btn-capture-header')?.addEventListener('click', () => {
-    if (getCaptureState().active) {
-      document.getElementById('capture-pill')?.scrollIntoView({ block: 'nearest' });
-      return;
-    }
-    void startFromUi();
+    if (getCaptureState().active) void stopMeetingCapture();
+    else void startFromUi();
   });
   // Cancel = discard, the inverse promise of stop — confirm before
   // throwing audio away.

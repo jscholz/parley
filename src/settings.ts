@@ -266,7 +266,10 @@ const DEFAULTS = {
   bargeVadThreshold: 0.5,
   contentSize: 15,
   transcriptGutter: 12,  // per-side empty margin of the chat column, in %; lower = wider transcript
-  panelMaxWidthPct: 60,  // desktop only: max % of the window width a side panel (sidebar / pin+docs drawer) can be dragged to. Phones use a separate full-width overlay layout, so this is inert there.
+  panelMaxWidthPct: 60,
+  // Meeting-capture defaults (fed into POST /captures at start time).
+  captureDiarize: true,
+  captureAutoIngest: true,  // desktop only: max % of the window width a side panel (sidebar / pin+docs drawer) can be dragged to. Phones use a separate full-width overlay layout, so this is inert there.
   audioFeedbackVolume: 0.85,  // 2026-05-09: 0.5 → 0.85 for bike/walk audibility (BT-headset wind noise was burying chimes)
   theme: 'dark',
   // Mic-button mode: gesture-driven (tap = live dictation to composer
@@ -351,6 +354,8 @@ const PER_DEVICE_KEYS = new Set<string>([
   // desktop side-panel drag ceiling — phones override panels to a full-width
   // overlay — so a laptop and a 4K external monitor each want their own value.
   'panelMaxWidthPct',
+  'captureDiarize',
+  'captureAutoIngest',
 ]);
 
 /** The synced settings — every DEFAULTS key that isn't per-device. These
@@ -806,6 +811,16 @@ export function hydrate(handlers: {
     if (setFontSizeVal) setFontSizeVal.textContent = `${current.contentSize}px`;
     if (setGutter) setGutter.value = String(current.transcriptGutter);
     if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
+    const setCapDiar = document.getElementById('set-capture-diarize') as HTMLInputElement | null;
+    if (setCapDiar) {
+      setCapDiar.checked = current.captureDiarize;
+      setCapDiar.onchange = () => { set('captureDiarize', setCapDiar.checked); };
+    }
+    const setCapIngest = document.getElementById('set-capture-autoingest') as HTMLInputElement | null;
+    if (setCapIngest) {
+      setCapIngest.checked = current.captureAutoIngest;
+      setCapIngest.onchange = () => { set('captureAutoIngest', setCapIngest.checked); };
+    }
     if (setPanelWidth) setPanelWidth.value = String(current.panelMaxWidthPct);
     if (setPanelWidthVal) setPanelWidthVal.textContent = `${current.panelMaxWidthPct}%`;
     if (setTheme) setTheme.value = current.theme;

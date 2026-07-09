@@ -1218,6 +1218,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capAudio) {
       return sidekick.handleCaptureAudio(req, res, capAudio[1]);
     }
+    const capPurge = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/purge-audio$/);
+    if (capPurge) {
+      return sidekick.handleCapturePurgeAudio(req, res, capPurge[1]);
+    }
     const capRediarize = req.method === 'POST'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/diarize$/);
     if (capRediarize) {

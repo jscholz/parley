@@ -4806,9 +4806,13 @@
 .capture-pill-btn svg[hidden] { display: none; }
 /* App-level record button (right rail): neutral glyph at rest, red
    while a capture is live — same color rule as the shelf + pill. */
-.capture-rail-btn.recording { color: #e5484d; }
+.capture-rail-btn.active-capture { color: #e5484d; }
 .capture-rail-btn.recording svg circle:last-child {
   animation: capture-pill-pulse 1.6s ease-in-out infinite;
+  /* SVG transforms pivot on the viewBox origin unless the box is the
+     element itself — without this the scale() pulse was invisible
+     (field 2026-07-09 #1). */
+  transform-box: fill-box;
   transform-origin: center;
 }
 /* Floating status bubble (field nit 2026-07-09: the in-flow banner
@@ -4846,3 +4850,22 @@
 /* Seekable transcript: timestamp tokens read as links. */
 .doc-capture-seekable strong { cursor: pointer; }
 .doc-capture-seekable strong:hover { text-decoration: underline; }
+
+/* Session-row meeting badge + the meetings lens toggle (field
+   2026-07-09 #7). Same ring+dot record glyph as everywhere. */
+.sess-meeting-badge { display: inline-flex; align-items: center; gap: 2px; color: var(--muted, #9a9a9a); }
+.sess-meeting-badge svg { width: 11px; height: 11px; }
+.sess-meetings-toggle {
+  background: transparent; border: none; color: var(--muted, #8a8a8a);
+  padding: 4px; border-radius: 6px; cursor: pointer; flex: none;
+  display: inline-flex; align-items: center;
+}
+.sess-meetings-toggle svg { width: 15px; height: 15px; }
+.sess-meetings-toggle:hover { color: var(--fg, #eee); }
+.sess-meetings-toggle.active { color: #e5484d; background: rgba(229, 72, 77, 0.12); }
+.doc-player-purge {
+  display: flex; color: var(--muted, #aaa); flex: none; padding: 4px;
+  background: transparent; border: none; cursor: pointer;
+}
+.doc-player-purge:hover { color: #e5484d; }
+.doc-player-purge svg { width: 15px; height: 15px; }

@@ -384,7 +384,8 @@ async function finalizeInner(id: string): Promise<void> {
   if (!diarized) await rebuildTranscript(id);
   await pushDoc(id, { immediate: true });
   const done = await getCapture(id);
-  if ((cfg?.autoIngest ?? true) && done.linked_chat && done.segments.length > 0) {
+  const wantIngest = done.auto_ingest ?? cfg?.autoIngest ?? true;   // per-capture setting wins
+  if (wantIngest && done.linked_chat && done.segments.length > 0) {
     const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
       done.linked_chat,
       `📼 Recording "${done.title}" finished (${fmtOffset((done.ended_at ?? done.started_at) - done.started_at)}, `

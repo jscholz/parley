@@ -3,7 +3,7 @@
  */
 
 import { escapeHtml } from './util/dom.ts';
-import { miniMarkdown, renderUserText } from './util/markdown.ts';
+import { miniMarkdown, renderUserText, linkifyCaptureDocs } from './util/markdown.ts';
 import { diag, log, isDebugEnabled } from './util/log.ts';
 import {
   ensureSchemaFresh,
@@ -1037,9 +1037,12 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   // converts remaining newlines to <br>, so a quoted reply shows indented
   // while everything else the user typed stays literal. Without the <br>
   // handling, long multi-paragraph prompts collapse into a wall of text.
-  const rendered = opts.markdown
+  // Capture transcript paths become doc-open links in BOTH bubble
+  // kinds — the "Recording started" line is a user-side message, so
+  // markdown-only linkification would miss it (field 2026-07-09 #6).
+  const rendered = linkifyCaptureDocs(opts.markdown
     ? miniMarkdown(text)
-    : renderUserText(text);
+    : renderUserText(text));
   div.innerHTML = speakerSpan + `<span class="text">${rendered}</span>`;
 
   // Timestamp — top-right, left of the copy icon

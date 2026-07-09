@@ -23,6 +23,7 @@ import { putSegment, clearCapture } from './segmentStore.ts';
 import { createUploader, type Uploader } from './uploader.ts';
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
+import * as settings from '../settings.ts';
 
 export interface CaptureUiState {
   active: boolean;
@@ -67,6 +68,8 @@ let segStartMs = 0;          // capture-relative t0 of the running segment
 let mimeType = '';
 let uploader: Uploader | null = null;
 let reacquireTimer: number | null = null;
+let watchdogTimer: number | null = null;
+let lastChunkAt = 0;         // epoch ms of the last dataavailable
 
 function emit(): void {
   try {
@@ -118,7 +121,16 @@ function startSegment(): void {
     mimeType ? { mimeType, audioBitsPerSecond: 32_000 } : { audioBitsPerSecond: 32_000 },
   );
   recorder = rec;
-  rec.ondataavailable = (ev: BlobEvent) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+  rec.ondataavailable = (ev: BlobEvent) => {
+    lastChunkAt = Date.now();
+    if (ev.data && ev.data.size) chunks.push(ev.data);
+  };
+  // A recorder error is a dead segment chain unless handled — route it
+  // through the interruption path (seal what we have, re-acquire).
+  rec.onerror = () => {
+    log('[capture] recorder error — treating as interruption');
+    handleInterruption();
+  };
   rec.onstop = () => {
     if (recorder === rec) recorder = null;
     const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
@@ -140,7 +152,19 @@ function startSegment(): void {
   // 1s timeslice (memo.ts prior art): steady dataavailable cadence and
   // size-agnostic chunk handling (Safari can flush oversized chunks
   // after OS-level interruptions — plan finding #2).
-  rec.start(1000);
+  try {
+    rec.start(1000);
+  } catch (e) {
+    // start() throws when the stream died without an 'ended' event
+    // (route change, device unplug). The old code let the chain die
+    // silently — a live pill over a stopped recording (field wedge
+    // 2026-07-09 #5). Interruption path re-acquires + resumes.
+    log(`[capture] recorder start failed (${String(e)}) — treating as interruption`);
+    if (recorder === rec) recorder = null;
+    handleInterruption();
+    return;
+  }
+  lastChunkAt = Date.now();
   if (segTimer != null) window.clearTimeout(segTimer);
   segTimer = window.setTimeout(() => {
     try { if (rec.state !== 'inactive') rec.stop(); } catch { /* sealed */ }
@@ -214,6 +238,27 @@ function watchTracks(): void {
   });
 }
 
+function startWatchdog(): void {
+  if (watchdogTimer != null) return;
+  watchdogTimer = window.setInterval(() => {
+    if (!state.active) return;
+    if (state.phase !== 'recording') return;   // paused/interrupted have their own flows
+    const silentFor = Date.now() - lastChunkAt;
+    // Timeslice is 1s — 20s of silence means the chain is dead in a
+    // way NO event reported (the exact field wedge 2026-07-09 #5:
+    // pill alive, seg/6 never arrived). Recover via the interruption
+    // path: seal whatever exists, release, re-acquire, resume.
+    if (lastChunkAt > 0 && silentFor > 20_000) {
+      log(`[capture] watchdog: no audio chunks for ${Math.round(silentFor / 1000)}s — forcing recovery`);
+      handleInterruption();
+    }
+  }, 5000);
+}
+
+function stopWatchdog(): void {
+  if (watchdogTimer != null) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
+}
+
 export async function startMeetingCapture(
   opts: { title?: string; linkedChat?: string } = {},
 ): Promise<CaptureUiState> {
@@ -230,7 +275,10 @@ export async function startMeetingCapture(
     body: JSON.stringify({
       title: opts.title || undefined,
       linked_chat: opts.linkedChat || 'new',
-      diarize: true,
+      // Settings → Meetings defaults (field 2026-07-09 #9); the pill
+      // sheet's PATCH can still flip diarize mid-recording.
+      diarize: settings.get().captureDiarize,
+      auto_ingest: settings.get().captureAutoIngest,
     }),
   });
   if (!res.ok) {
@@ -260,6 +308,7 @@ export async function startMeetingCapture(
   };
   watchTracks();
   startSegment();
+  startWatchdog();
   emit();
   log(`[capture] started ${capture.id} ("${capture.title}") chat=${capture.linked_chat}`);
   return getCaptureState();
@@ -271,6 +320,7 @@ export async function stopMeetingCapture(): Promise<void> {
   state.active = false;
   state.phase = 'finishing';
   emit();
+  stopWatchdog();
   if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
   sealCurrent();
   try { mic.release('meeting'); } catch { /* fine */ }
@@ -323,6 +373,7 @@ export async function cancelMeetingCapture(): Promise<void> {
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
   };
   emit();
+  stopWatchdog();
   if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
   sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
   try { mic.release('meeting'); } catch { /* fine */ }

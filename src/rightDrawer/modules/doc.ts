@@ -258,6 +258,23 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
   };
   strip.appendChild(rate);
 
+  // Delete audio (storage hygiene, field 2026-07-09 #7): audio is the
+  // only real disk cost; the transcript keeps its value. Irreversible
+  // (playback + retro-diarize gone) → confirm.
+  const purge = document.createElement('button');
+  purge.className = 'doc-player-purge';
+  purge.title = 'Delete audio — keep the transcript';
+  purge.setAttribute('aria-label', 'Delete audio, keep transcript');
+  purge.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M6.5 4.5V3h3v1.5M4 4.5l.7 9h6.6l.7-9"/></svg>';
+  purge.onclick = async () => {
+    if (!window.confirm('Delete the audio for this recording? The transcript stays; playback and re-diarization will no longer be possible.')) return;
+    try {
+      const res = await fetch(apiUrl(`/api/sidekick/captures/${encodeURIComponent(doc.captureId!)}/purge-audio`), { method: 'POST' });
+      if (res.ok) strip.remove();
+    } catch { /* strip stays; user can retry */ }
+  };
+  strip.appendChild(purge);
+
   // Download audio — same artifact the endpoint streams.
   const dl = document.createElement('a');
   dl.className = 'doc-player-download';

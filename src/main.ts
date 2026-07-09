@@ -57,6 +57,7 @@ import * as cmdkPalette from './cmdkPalette.ts';
 import * as hotkeysHelp from './hotkeysHelp.ts';
 import { initPinDrawer } from './pins/drawer.ts';
 import { initCapturePill } from './capture/pill.ts';
+import { initMeetingsIndex } from './capture/meetingsIndex.ts';
 import { initTranscriptHighlight } from './transcriptHighlight.ts';
 import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as activityStore from './notifications/activityStore.ts';
@@ -879,6 +880,7 @@ async function boot() {
   // capture_control envelopes) — app-global chrome, survives session
   // switches by construction (capture plan §3.4/§3.6).
   initCapturePill();
+  initMeetingsIndex();
   // #243 — warm each pinned message's deep around-window into
   // drillWindowCache in the background so the FIRST click on a pin is a
   // cache hit instead of paying the cold ?around= round trip (the

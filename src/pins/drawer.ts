@@ -10,7 +10,7 @@ import { hydrate as hydrateActivity, unresolvedApprovalCount, unreadActivityCoun
 import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHandler } from '../rightDrawer/modules/activity.ts';
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule } from '../rightDrawer/modules/doc.ts';
-import { hydrateDoc } from '../rightDrawer/docStore.ts';
+import { hydrateDoc, listDocs, selectDoc } from '../rightDrawer/docStore.ts';
 import * as settings from '../settings.ts';
 
 let drawerEl: HTMLElement | null = null;
@@ -235,6 +235,23 @@ export function initPinDrawer(opts: {
     const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
     // info, not error: closing a doc is benign (red implied breakage).
     showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`, 'info');
+  });
+
+  // #doc: links (capture transcript paths linkified in bubbles —
+  // util/markdown.ts linkifyCaptureDocs) open the Docs tab on the
+  // matching shelf entry.
+  document.addEventListener('click', (ev) => {
+    const a = (ev.target as HTMLElement | null)?.closest?.('a[href^="#doc:"]');
+    if (!a) return;
+    ev.preventDefault();
+    const captureId = (a.getAttribute('href') || '').slice(5);
+    const doc = listDocs().find((d) => d.captureId === captureId);
+    if (doc) {
+      selectDoc(doc.id);
+      drawerHost?.select('doc', { open: true });
+    } else {
+      showPinStatus('That transcript isn\'t on the shelf yet — it appears within a minute of the recording starting.', 'info');
+    }
   });
 
   // Header drawer-toggle (mobile consolidation 2026-07-09): one button

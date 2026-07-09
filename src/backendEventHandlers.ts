@@ -400,9 +400,13 @@ export function handleToolEvent({ kind, payload, conversation, isReplay }: any) 
     return;
   }
   if (kind === 'capture.changed') {
-    // Cross-device lifecycle state — reserved for the passive
-    // "recording on iPhone" pill (Phase 4). Consumed here so it never
-    // falls through to the viewed-session gate below.
+    // Cross-device lifecycle: refresh the session↔meetings index so
+    // sidebar badges/filtering track creates/stops/deletes live.
+    try {
+      window.dispatchEvent(new CustomEvent('sidekick:capture-changed-remote', {
+        detail: { kind: payload?.captureKind, capture: payload?.capture },
+      }));
+    } catch { /* non-browser */ }
     return;
   }
   if (kind === 'doc.show' && payload) {
