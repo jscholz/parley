@@ -196,6 +196,19 @@ export function initPinDrawer(opts: {
     ],
     bodyClass: 'pin-drawer-open',
     prefKey: 'sidekick.pin-drawer.expanded',
+    // Header drawer-toggle (mobile consolidation 2026-07-09): one button
+    // opens/closes the right drawer at its last-active tab; the per-tab
+    // pin + bell header buttons are gone (tabs live inside the drawer).
+    // Registered as CHROME toggle (not an ad-hoc listener) so Drawer.ts
+    // stopPropagation()s the tap and the drawers registry exempts it
+    // from click-outside handlers. The ad-hoc listener it replaces had
+    // two bugs on mobile: (1) with the drawer OPEN, the drawer's own
+    // capture-phase click-outside closed it before the bubble-phase
+    // listener re-opened it — the button could never close the drawer;
+    // (2) with the SIDEBAR open, the sidebar's click-outside counted
+    // the tap as "outside" and closed the sidebar out from under the
+    // user (mobile-drawer-swipes phase-3 regression).
+    chromeToggleIds: ['btn-right-drawer'],
     excludeSwipeWhenTargetIn: ['#sidebar'],
     resizer: {
       handleId: 'pin-drawer-resizer',
@@ -263,14 +276,6 @@ export function initPinDrawer(opts: {
     } else {
       showPinStatus('That transcript isn\'t on the shelf yet — it appears within a minute of the recording starting.', 'info');
     }
-  });
-
-  // Header drawer-toggle (mobile consolidation 2026-07-09): one button
-  // opens/closes the right drawer at its last-active tab; the per-tab
-  // pin + bell header buttons are gone (tabs live inside the drawer).
-  document.getElementById('btn-right-drawer')?.addEventListener('click', () => {
-    if (drawerHost?.isOpen()) drawerHost.close();
-    else drawerHost?.open();
   });
 
   refreshCountBanner();

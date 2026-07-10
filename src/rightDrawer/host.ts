@@ -26,6 +26,16 @@ export interface RightDrawerHostOptions {
   modules: RightDrawerModule[];
   bodyClass: string;
   prefKey: string;
+  /** Plain open/close toggles for the drawer CHROME (e.g. the mobile
+   *  toolbar's #btn-right-drawer) — no module-switch semantics; the
+   *  drawer opens at its last-active tab. Routed into createDrawer's
+   *  toggleIds so Drawer.ts owns the wiring: its listener
+   *  stopPropagation()s (the tap can't be counted as "outside" and
+   *  close-then-reopen the drawer) and registers the id in the drawers
+   *  registry, so SIBLING drawers' click-outside handlers exempt it
+   *  too (tapping it while the sidebar is open must not auto-close
+   *  the sidebar — see the registry comment in Drawer.ts). */
+  chromeToggleIds?: string[];
   excludeSwipeWhenTargetIn?: string[];
   resizer?: {
     handleId: string;
@@ -97,7 +107,14 @@ export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawer
     side: 'right',
     bodyClass: opts.bodyClass,
     prefKey: opts.prefKey,
-    toggleIds: opts.modules.flatMap((m) => m.toggleIds),
+    // Module toggles get capture-phase switch semantics below; chrome
+    // toggles keep Drawer.ts's generic open/close-at-last-active-tab.
+    // Both lists must be in createDrawer's toggleIds for the
+    // click-outside exemptions (ours AND sibling drawers').
+    toggleIds: [
+      ...opts.modules.flatMap((m) => m.toggleIds),
+      ...(opts.chromeToggleIds || []),
+    ],
     excludeSwipeWhenTargetIn: opts.excludeSwipeWhenTargetIn || [],
     resizer: opts.resizer,
     onOpen: () => host.render(),

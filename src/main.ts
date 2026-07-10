@@ -4081,17 +4081,18 @@ async function boot() {
     }
     if (matches('Cmd+Shift+P')) {
       claim();
-      // Toggle the right-side pin drawer. Synthesize a click on the
-      // toolbar pin-drawer button so the same open/close path the
-      // mouse exercises runs (handles count-banner refresh + body
-      // class for the desktop push layout).
-      const btn = document.getElementById('btn-pin-drawer') as HTMLButtonElement | null;
+      // Toggle the right drawer on its Pins tab. The per-tab header
+      // buttons were removed in the 2026-07-09 consolidation (these
+      // hotkeys no-op'd against the dead ids until the CAP-rail
+      // subagent flagged it) — the rail tab buttons are the stable
+      // click targets on every breakpoint.
+      const btn = document.getElementById('btn-pin-drawer-rail') as HTMLButtonElement | null;
       btn?.click();
       return;
     }
     if (matches('Cmd+Shift+A')) {
       claim();
-      const btn = document.getElementById('btn-activity-drawer') as HTMLButtonElement | null;
+      const btn = document.getElementById('btn-activity-drawer-rail') as HTMLButtonElement | null;
       btn?.click();
       return;
     }

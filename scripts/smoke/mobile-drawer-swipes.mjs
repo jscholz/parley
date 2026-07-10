@@ -85,9 +85,13 @@ async function closeSidebarViaSwipe(page) {
 }
 
 async function openPinDrawerViaToggle(page) {
-  // The toolbar pin-drawer toggle is .mobile-only; tap it.
+  // The toolbar right-drawer toggle is .mobile-only; tap it. (Was
+  // #btn-pin-drawer until the 2026-07-09 mobile header consolidation
+  // merged the per-tab pin + bell buttons into one #btn-right-drawer
+  // that opens the drawer at its last-active tab — pins by default.
+  // See src/pins/drawer.ts "Header drawer-toggle" wiring.)
   await page.evaluate(() => {
-    document.getElementById('btn-pin-drawer')?.dispatchEvent(
+    document.getElementById('btn-right-drawer')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     );
   });

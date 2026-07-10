@@ -2259,7 +2259,20 @@
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    padding-top: 6px;
+    /* 6px below the drawer's top edge — plus the top safe-area inset
+     * where the page is full-bleed (Cap shell's viewport-fit=cover).
+     * The rail column is absolutely positioned (top:0) so it does NOT
+     * inherit .pin-drawer-top's safe-area padding; without this the
+     * activity bell drew ~6px from the physical screen top in the Cap
+     * shell, under the iOS status-bar clock. Everywhere the viewport
+     * already starts below the status bar (browser tab, iOS PWA
+     * standalone, desktop) env() is 0 and this resolves to the same
+     * 6px as before — same degrade-cleanly pattern as .pin-drawer-top
+     * / .pin-drawer-bottom above and below. The strip's background
+     * still runs to top:0, so the full-bleed shell keeps an unbroken
+     * rail surface behind the status bar (mirror of how .header
+     * paints under it). */
+    padding-top: calc(env(safe-area-inset-top, 0px) + 6px);
     border-left: 1px solid var(--border);
     background: var(--surface);
   }
