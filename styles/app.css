@@ -4906,3 +4906,31 @@
   min-width: 9px; width: 9px; height: 9px; padding: 0;
   border-radius: 50%;
 }
+
+/* Custom capture player (2026-07-10: native <audio controls> renders a
+   scrubber-less blob on iOS at strip size). Mirrors the reply-TTS
+   player idiom: round play button, thin track + primary played fill,
+   generous scrub hit area. */
+.doc-player-play {
+  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  border: none; cursor: pointer;
+  background: var(--primary, #7fa86f); color: var(--primary-fg, #10140e);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.doc-player-play svg { width: 14px; height: 14px; display: block; }
+.doc-player-play svg[hidden] { display: none; }
+.doc-player-bar {
+  position: relative; flex: 1; min-width: 0; height: 24px;
+  cursor: pointer; touch-action: none;
+  -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.doc-player-bar-track, .doc-player-bar-played {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  height: 3px; border-radius: 2px; pointer-events: none;
+}
+.doc-player-bar-track { right: 0; background: var(--border-strong, #3a3a3a); }
+.doc-player-bar-played { width: 0; background: var(--primary, #7fa86f); transition: width 0.12s linear; }
+.doc-player-time {
+  font-variant-numeric: tabular-nums; font-size: 11px;
+  color: var(--muted, #9a9a9a); flex: none;
+}

@@ -880,8 +880,12 @@ async function boot() {
   });
   // Meeting-capture pill + entry points (mic menu item, ?capture=start,
   // capture_control envelopes) — app-global chrome, survives session
-  // switches by construction (capture plan §3.4/§3.6).
-  initCapturePill();
+  // switches by construction (capture plan §3.4/§3.6). openChat routes
+  // through the same drill path pins use, so an app-level start lands
+  // the user IN the freshly minted meeting session.
+  initCapturePill({
+    openChat: (chatId) => { void drillToChatMessage(chatId, null); },
+  });
   initMeetingsIndex();
   // #243 — warm each pinned message's deep around-window into
   // drillWindowCache in the background so the FIRST click on a pin is a

@@ -240,21 +240,96 @@ function audioUrlFor(doc: DocState): string {
   return apiUrl(`/api/sidekick/captures/${encodeURIComponent(doc.captureId!)}/audio`);
 }
 
+function fmtClock(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '–:––';
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
+}
+
 function buildPlayerStrip(doc: DocState): HTMLElement {
   const strip = document.createElement('div');
   strip.className = 'doc-player-strip';
 
-  // Native controls carry play/pause/scrub/time — the browser's are
-  // better than anything hand-rolled at this size. Preload metadata
-  // only: the stitch is lazy server-side; don't force it until the
-  // user shows intent (metadata alone triggers it, which is the
-  // point — first tap should feel instant afterwards).
+  // Hidden engine — the visible controls are ours. Native <audio
+  // controls> on iOS renders a scrubber-less blob at this size (field
+  // 2026-07-10); the custom strip mirrors the reply-TTS player's
+  // visual language (play button + progress bar + tap/drag scrub —
+  // replyPlayer.ts), which is the player this app already taught
+  // users to expect. preload=none keeps the server's lazy stitch
+  // untriggered until first intent.
   const audio = document.createElement('audio');
   audio.className = 'doc-player-audio';
-  audio.controls = true;
   audio.preload = 'none';
   audio.src = audioUrlFor(doc);
   strip.appendChild(audio);
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'doc-player-play';
+  playBtn.setAttribute('aria-label', 'Play recording');
+  playBtn.innerHTML =
+    '<svg data-icon="play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="7 4 20 12 7 20 7 4"/></svg>'
+    + '<svg data-icon="pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+  playBtn.onclick = () => {
+    if (audio.paused) void audio.play().catch(() => { /* endpoint 4xx — strip stays inert */ });
+    else audio.pause();
+  };
+  strip.appendChild(playBtn);
+
+  // Scrub bar: generous hit area, thin track, played fill — the
+  // reply-player bar idiom. Seeks on tap and on drag (pointer capture).
+  const bar = document.createElement('div');
+  bar.className = 'doc-player-bar';
+  bar.innerHTML = '<div class="doc-player-bar-track"></div><div class="doc-player-bar-played"></div>';
+  const played = bar.querySelector('.doc-player-bar-played') as HTMLElement;
+  const seekTo = (clientX: number) => {
+    const r = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    if (Number.isFinite(audio.duration) && audio.duration > 0) {
+      audio.currentTime = ratio * audio.duration;
+    } else {
+      // Duration unknown (nothing loaded yet): start playback, then
+      // seek once metadata lands.
+      void audio.play().catch(() => { /* inert */ });
+      audio.addEventListener('loadedmetadata', () => {
+        audio.currentTime = ratio * audio.duration;
+      }, { once: true });
+    }
+  };
+  bar.addEventListener('pointerdown', (ev) => {
+    bar.setPointerCapture(ev.pointerId);
+    seekTo(ev.clientX);
+    const move = (mv: PointerEvent) => seekTo(mv.clientX);
+    const up = () => {
+      bar.removeEventListener('pointermove', move);
+      bar.removeEventListener('pointerup', up);
+    };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+  });
+  strip.appendChild(bar);
+
+  const time = document.createElement('span');
+  time.className = 'doc-player-time';
+  time.textContent = '–:––';
+  strip.appendChild(time);
+
+  const sync = () => {
+    const dur = audio.duration;
+    if (Number.isFinite(dur) && dur > 0) {
+      played.style.width = `${(audio.currentTime / dur) * 100}%`;
+      time.textContent = `${fmtClock(audio.currentTime)} / ${fmtClock(dur)}`;
+    }
+    const paused = audio.paused;
+    playBtn.querySelector('[data-icon="play"]')?.toggleAttribute('hidden', !paused);
+    playBtn.querySelector('[data-icon="pause"]')?.toggleAttribute('hidden', paused);
+    playBtn.setAttribute('aria-label', paused ? 'Play recording' : 'Pause recording');
+  };
+  for (const ev of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended']) {
+    audio.addEventListener(ev, sync);
+  }
 
   // Speed toggle — one button cycling 1×/1.5×/2× (review speed).
   const rate = document.createElement('button');

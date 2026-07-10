@@ -105,9 +105,18 @@ function toast(message: string): void {
  *  linkedChat → new dedicated session; the composer mic-menu passes
  *  the viewed chat so the meeting lands where the user is standing —
  *  matching what each button's LOCATION already implies. */
+let openChatCb: ((chatId: string) => void) | null = null;
+
 async function startFromUi(linkedChat?: string): Promise<void> {
   try {
-    await startMeetingCapture({ linkedChat });
+    const st = await startMeetingCapture({ linkedChat });
+    // App-level start mints a NEW session — switch the view to it
+    // (field walking-test 2026-07-10: "it didn't switch sessions when
+    // I pressed the button… I had to switch to it manually"). The
+    // composer-menu start is already IN its session, so no jump there.
+    if (!linkedChat && st.chatId && openChatCb) {
+      try { openChatCb(st.chatId); } catch { /* view stays put — recording unaffected */ }
+    }
     // First-use consent hint (plan finding #9, Granola convention):
     // no auto-announcements — the visible pill is the on-device state,
     // and disclosure to participants is the human's obligation. Say it
@@ -127,7 +136,8 @@ async function startFromUi(linkedChat?: string): Promise<void> {
   }
 }
 
-export function initCapturePill(): void {
+export function initCapturePill(opts: { openChat?: (chatId: string) => void } = {}): void {
+  openChatCb = opts.openChat ?? null;
   window.addEventListener('sidekick:capture-state', (ev) => {
     render((ev as CustomEvent<CaptureUiState>).detail);
   });
