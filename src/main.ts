@@ -880,12 +880,43 @@ async function boot() {
   });
   // Meeting-capture pill + entry points (mic menu item, ?capture=start,
   // capture_control envelopes) — app-global chrome, survives session
-  // switches by construction (capture plan §3.4/§3.6). openChat routes
-  // through the same drill path pins use, so an app-level start lands
-  // the user IN the freshly minted meeting session.
-  initCapturePill({
-    openChat: (chatId) => { void drillToChatMessage(chatId, null); },
-  });
+  // switches by construction (capture plan §3.4/§3.6).
+  //
+  // openChat is a purpose-built OPTIMISTIC landing (walking-test spec
+  // 2026-07-10): the minted meeting session is EMPTY by construction,
+  // so fetch-first paths (drill/resume spinners) are pure friction.
+  // Paint the clean shell instantly — status line, focused composer,
+  // zero spinners — and let the start-message arrive via SSE like any
+  // live envelope. backend.resumeSession is fired in the BACKGROUND
+  // purely to flip the adapter's active-chat send pointer (it does so
+  // synchronously at call, before its fetch — proxyClient.ts) and to
+  // reconcile anything that raced ahead.
+  const openMeetingSession = (chatId: string) => {
+    // Supersede any in-flight switch/resume so its continuation can't
+    // repaint the prior chat over the fresh shell (same discipline as
+    // the new-chat handler above).
+    switchCtl.invalidate();
+    switchCtl.setOptimistic(null);
+    const prev = switchCtl.viewedId();
+    if (prev && prev !== chatId) {
+      chat.saveCurrentScrollPosition();
+      flushScrollPosition(prev);
+      chat.trackViewedSession(null);
+    }
+    // Pointer flip + background reconcile (no await — see above).
+    void backend.resumeSession?.(chatId).catch(() => { /* SSE covers the rows */ });
+    const transcriptEl = document.getElementById('transcript');
+    if (transcriptEl) {
+      transcriptEl.querySelectorAll('.line.system').forEach((el) => el.remove());
+      transcriptEl.classList.remove('transcript-loading');
+      chat.clearEdgeLoader();
+    }
+    sessionDrawer.setViewed(chatId);
+    chat.trackViewedSession(chatId);
+    chat.addSystemLine('Recording started — the live transcript lands in Docs; ask anything here.');
+    composerInput.focus();
+  };
+  initCapturePill({ openChat: openMeetingSession });
   initMeetingsIndex();
   // #243 — warm each pinned message's deep around-window into
   // drillWindowCache in the background so the FIRST click on a pin is a

@@ -283,6 +283,12 @@ export function noteLiveMessage(chatId: string | null | undefined, messageId: st
  *  feedback. Lazily created; CSS delays the fade-in ~150ms so an instant
  *  cache hit never flashes a spinner. */
 let edgeLoaderEl: HTMLDivElement | null = null;
+/** Session switches must drop a stale edge spinner: the pagination
+ *  loader belongs to the chat that was scrolling, and left visible it
+ *  stacks with the incoming chat's .transcript-loading — the exact
+ *  duplicate-spinner case from the 2026-07-10 walking-test report. */
+export function clearEdgeLoader(): void { setEdgeLoading(null); }
+
 function setEdgeLoading(dir: 'earlier' | 'later' | null): void {
   const parent = transcriptEl?.parentElement;
   if (!parent) return;

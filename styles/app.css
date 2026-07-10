@@ -4934,3 +4934,10 @@
   font-variant-numeric: tabular-nums; font-size: 11px;
   color: var(--muted, #9a9a9a); flex: none;
 }
+
+/* Duplicate-spinner guard (2026-07-10 walking-test report): while the
+   full-area switch spinner (.transcript-loading) is armed, the edge
+   pagination loader must not stack on top — one loading signal at a
+   time. Sibling selector works because the edge loader is appended to
+   the transcript's parent AFTER it. */
+.transcript.transcript-loading ~ .transcript-edge-loader { visibility: hidden; }

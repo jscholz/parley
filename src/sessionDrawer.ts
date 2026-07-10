@@ -34,6 +34,7 @@ import { reportChatSwitch } from './notifications/visibility.ts';
 import { unreadFor } from './notifications/badge.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { showTranscriptLoading } from './transcript/index.ts';
+import { clearEdgeLoader } from './chat.ts';
 import * as transcriptStore from './transcript/store.ts';
 import * as switchCtl from './switchController.ts';
 import type { SwitchToken } from './switchController.ts';
@@ -1777,6 +1778,11 @@ async function resume(id: string, targetMessageId?: string) {
       memRendered = true;
       t?.trace('mem-render', `n=${memState.durable.length}`);
     } else {
+      // One loading signal at a time (2026-07-10 walking-test report:
+      // duplicate spinners on switch): a stale edge-pagination loader
+      // from the LEAVING chat must not stack under the incoming
+      // full-area spinner.
+      clearEdgeLoader();
       showTranscriptLoading();
       t?.trace('transcript-cleared');
     }

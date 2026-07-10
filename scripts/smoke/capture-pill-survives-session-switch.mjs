@@ -106,4 +106,34 @@ export default async function run({ page, log, mock }) {
   if (cap.status !== 'complete') throw new Error(`capture should be complete, got ${cap.status}`);
   if (!cap.segments.length) throw new Error('no segments were uploaded — fake mic should produce chunks');
   log(`stop: capture complete with ${cap.segments.length} uploaded segment(s)`);
+
+  // 5. APP-LEVEL start (header button): mints a new session and lands
+  //    the user IN it instantly — optimistic shell, status line,
+  //    focused composer, zero spinners (walking-test spec 2026-07-10).
+  await page.click('#btn-capture-header');
+  await page.waitForFunction(
+    () => !document.getElementById('capture-pill').hidden,
+    null, { timeout: 8000, polling: 50 },
+  );
+  await page.waitForFunction(
+    () => (document.getElementById('transcript')?.textContent || '').includes('Recording started'),
+    null, { timeout: 4000, polling: 50 },
+  );
+  const landing = await page.evaluate(() => ({
+    spinner: document.getElementById('transcript')?.classList.contains('transcript-loading') ?? false,
+    focused: document.activeElement?.id || document.activeElement?.tagName,
+  }));
+  const linked2 = mock.getCaptures()[1]?.linked_chat || '';
+  if (!linked2.startsWith('sidekick:mock-capture-')) {
+    throw new Error(`app-level start must mint a new session, got: ${linked2}`);
+  }
+  if (landing.spinner) throw new Error('optimistic landing must not show the switch spinner');
+  log(`app-level start landed in minted session (${linked2}); shell painted, no spinner (focus: ${landing.focused})`);
+  // Wrap up: stop the second capture so the smoke leaves clean state.
+  page.on('dialog', (d) => d.accept());
+  await page.click('#capture-pill-stop');
+  await page.waitForFunction(
+    () => document.getElementById('capture-pill').hidden,
+    null, { timeout: 20_000, polling: 100 },
+  );
 }
