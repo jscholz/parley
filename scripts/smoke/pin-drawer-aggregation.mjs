@@ -98,10 +98,14 @@ export default async function run({ page, log }) {
   await page.waitForTimeout(150);
   log(`pinned B msg ${msgB}`);
 
-  // ── Toolbar banner should show 2 ─────────────────────────────────
-  const banner = await bannerCount(page);
-  assert(banner === 2, `toolbar pin count should be 2, got ${banner}`);
-  log(`toolbar count banner = 2 ✓`);
+  // ── One-number rule (2026-07-10): pins carry NO numeric badge ────
+  const bannerHidden = await page.evaluate(() =>
+    ['pin-drawer-count', 'pin-drawer-count-rail']
+      .map((id) => document.getElementById(id))
+      .filter(Boolean)
+      .every((el) => el.hidden));
+  assert(bannerHidden, 'pin numeric badge is retired (one-number rule) and must stay hidden');
+  log('pin numeric badge stays hidden (one-number rule) ✓');
 
   // ── Open the drawer ──────────────────────────────────────────────
   await openPinDrawer(page);

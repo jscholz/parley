@@ -34,13 +34,17 @@ export function MOCK_SETUP(mock) {
   }
 }
 
-async function waitForActivityBadge(page, count) {
+// One-number rule (2026-07-10): mere unread tray items show a DOT on
+// the bell, not a number — numbers on the bell are reserved for
+// pending approvals. This helper asserts the dot state.
+async function waitForActivityDot(page, visible) {
   await page.waitForFunction(
-    (n) => {
+    (v) => {
       const badge = document.getElementById('activity-drawer-count-rail');
-      return !!badge && !badge.hidden && (badge.textContent || '').trim() === String(n);
+      const shown = !!badge && !badge.hidden && badge.classList.contains('dot-only');
+      return v ? shown : !shown;
     },
-    count,
+    visible,
     { timeout: 3_000, polling: 50 },
   );
 }
@@ -65,8 +69,8 @@ export default async function run({ page, log, mock }) {
     message_id: 'msg_activity_agent_reply_1',
     text: 'Weather check complete: London is overcast and mild.',
   });
-  await waitForActivityBadge(page, 1);
-  log('off-screen reply_final created Activity badge ✓');
+  await waitForActivityDot(page, true);
+  log('off-screen reply_final lit the Activity dot ✓');
 
   mock.pushEnvelope({
     type: 'notification',
@@ -80,8 +84,8 @@ export default async function run({ page, log, mock }) {
       'To stop or manage this job, open Sidekick.',
     sidekick_id: 'notif_activity_cron_1',
   });
-  await waitForActivityBadge(page, 2);
-  log('cron notification created Activity badge ✓');
+  await waitForActivityDot(page, true);
+  log('cron notification keeps the Activity dot lit ✓');
 
   await clickRow(page, REPLY_CHAT);
   await page.waitForFunction(
@@ -89,7 +93,7 @@ export default async function run({ page, log, mock }) {
     null,
     { timeout: 4_000, polling: 50 },
   );
-  await waitForActivityBadge(page, 1);
+  await waitForActivityDot(page, true);   // cron item still unread → dot stays
   const readState = mock.activityItems().find((item) => item.id === 'msg_activity_agent_reply_1');
   assert(readState?.read === true, 'opening reply chat did not mark its Activity item read on the server');
   log('opening a chat clears matching Activity unread across the server store ✓');

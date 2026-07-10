@@ -366,6 +366,12 @@ async function finalize(id: string): Promise<void> {
   j.finalizing = true;
   try {
     await finalizeInner(id);
+  } catch (e) {
+    // Every call site is fire-and-forget (`void finalize(id)`), so a
+    // throw here becomes an unhandledRejection — surfaced by the test
+    // runner 2026-07-10 (post-completion rebuild raced a temp-dir
+    // teardown). Log; the capture's own state is already durable.
+    console.error(`[capture-transcribe] finalize tail failed for ${id}: ${String(e)}`);
   } finally {
     j.finalizing = false;
   }

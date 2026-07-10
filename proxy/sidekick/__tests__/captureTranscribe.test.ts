@@ -202,7 +202,15 @@ test('rebuildTranscript is idempotent and skips missing tails', async () => {
   const b = await rebuildTranscript(m.id);
   assert.equal(a, b);
   await stopCapture(m.id);
-  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  // Wait on the ARTIFACT (final header), not status: finalize's tail
+  // rebuild runs after 'complete' lands, and a test ending mid-tail
+  // races the next test's tmpdir (unhandledRejection flake 2026-07-10).
+  await waitFor(async () => {
+    try {
+      return !/recording in progress/.test(
+        await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'));
+    } catch { return false; }
+  });
 });
 
 // ── Phase 3: diarize pass ──────────────────────────────────────────────

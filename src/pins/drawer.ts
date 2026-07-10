@@ -11,6 +11,7 @@ import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHand
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule } from '../rightDrawer/modules/doc.ts';
 import { hydrateDoc, listDocs, selectDoc } from '../rightDrawer/docStore.ts';
+import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
 
 let drawerEl: HTMLElement | null = null;
@@ -39,26 +40,31 @@ function maxDrawerWidthPx(): number {
 function isOpen(): boolean { return !!drawerHost?.isOpen(); }
 function openDrawer(): void { drawerHost?.open(); }
 
+/** ONE-NUMBER RULE (field escalation 2026-07-10, "all 3 diverge"):
+ *  every NUMERIC badge in the app shows the same quantity — N = chat
+ *  unreads from the server (the number the OS dock badge and the
+ *  session chips already derive from). Everything else demotes:
+ *    pins      → no numeric badge (inventory, not attention — the
+ *                count is visible inside the tab)
+ *    activity  → number ONLY for pending approvals (a blocking alarm,
+ *                urgent-styled, semantically unmistakable); mere
+ *                unread tray items show a DOT, not a number
+ *    drawer-toggle (mobile header) → N, urgent-styled when approvals
+ *                pend (replaces the pins+activity sum, which was a
+ *                third quantity wearing the same badge costume)
+ *  Divergent-looking numbers are now impossible: there is only one
+ *  number, sourced from one accessor (badge.ts). */
 function refreshCountBanner(): void {
-  const n = totalPinCount();
-  const txt = n > 99 ? '99+' : String(n);
-  for (const banner of countBanners) {
-    if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
-    else { banner.hidden = false; banner.textContent = txt; }
-  }
+  // Pins: numeric badge retired under the one-number rule.
+  for (const banner of countBanners) { banner.hidden = true; }
   refreshCombinedBanner();
 }
 
-/** The header's single drawer-toggle badge (mobile header consolidation
- *  2026-07-09: lock · record · drawer-toggle replaced the per-tab pin +
- *  bell buttons). Aggregates pins + activity; urgent styling when an
- *  approval is pending — the one signal that must not be missed. */
 function refreshCombinedBanner(): void {
   const banner = document.getElementById('right-drawer-count');
   if (!banner) return;
-  const urgent = unresolvedApprovalCount();
-  const n = totalPinCount() + (urgent || unreadActivityCount());
-  banner.classList.toggle('urgent', urgent > 0);
+  const n = totalUnreadCount();
+  banner.classList.toggle('urgent', unresolvedApprovalCount() > 0);
   if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
   else { banner.hidden = false; banner.textContent = n > 99 ? '99+' : String(n); }
 }
@@ -66,18 +72,22 @@ function refreshCombinedBanner(): void {
 function refreshActivityCountBanner(): void {
   const urgent = unresolvedApprovalCount();
   const unread = unreadActivityCount();
-  const n = urgent || unread;
-  const txt = n > 99 ? '99+' : String(n);
   for (const banner of activityCountBanners) {
-    // Always toggle .urgent so it clears when an approval resolves (the
-    // pre-2026-05-28 model deleted the row on action, so urgent dropping
-    // to 0 was always paired with n=0 hiding the banner — the urgent
-    // class never had to be explicitly removed. Now approvals stay in the
-    // tray as resolved, so urgent can fall to 0 while unread is still >0
-    // — and the badge must reflect that.)
     banner.classList.toggle('urgent', urgent > 0);
-    if (n === 0) { banner.hidden = true; banner.textContent = '0'; }
-    else { banner.hidden = false; banner.textContent = txt; }
+    // One-number rule: a NUMBER here means pending approvals (a
+    // blocking alarm). Unread tray items are a DOT — new-activity
+    // hint, not a count competing with the app's one number.
+    banner.classList.toggle('dot-only', urgent === 0 && unread > 0);
+    if (urgent > 0) {
+      banner.hidden = false;
+      banner.textContent = urgent > 99 ? '99+' : String(urgent);
+    } else if (unread > 0) {
+      banner.hidden = false;
+      banner.textContent = '';
+    } else {
+      banner.hidden = true;
+      banner.textContent = '0';
+    }
   }
   refreshCombinedBanner();
 }
@@ -197,6 +207,7 @@ export function initPinDrawer(opts: {
     },
   });
 
+  window.addEventListener('sidekick:unread-changed', () => refreshCombinedBanner());
   window.addEventListener('sidekick:pins-changed', () => {
     refreshCountBanner();
     if (isOpen() && activePanel === 'pins') drawerHost?.render();

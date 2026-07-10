@@ -4886,3 +4886,10 @@
 }
 .doc-player-purge:hover { color: #e5484d; }
 .doc-player-purge svg { width: 15px; height: 15px; }
+/* One-number rule (2026-07-10): the bell's badge is a NUMBER only for
+   pending approvals; unread tray items render as this dot instead —
+   a hint, not a count competing with the app's one number. */
+.pin-count-banner.dot-only {
+  min-width: 9px; width: 9px; height: 9px; padding: 0;
+  border-radius: 50%;
+}

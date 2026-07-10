@@ -245,4 +245,7 @@ if (typeof window !== 'undefined') {
   document?.addEventListener?.('visibilitychange', () => {
     if (document.visibilityState === 'visible') requestRefresh();
   });
+  // macOS PWA windows can be visible-but-unfocused for hours; refresh
+  // on focus so the dock number catches up with reads made elsewhere.
+  window.addEventListener('focus', () => requestRefresh());
 }

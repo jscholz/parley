@@ -89,17 +89,21 @@ export default async function run({ page, log }) {
   const emptyVisible = await page.evaluate(() => !document.getElementById('pin-drawer-empty')?.hidden);
   assert(!emptyVisible, 'pin-drawer empty state must be hidden when rows are present');
 
+  // One-number rule (2026-07-10): the pins NUMERIC badge is retired —
+  // pins are inventory, not attention; the only number in the app is
+  // the chat-unread total. The banner elements must stay hidden even
+  // with pins present.
   const banner = await page.evaluate(() => {
     const els = ['pin-drawer-count', 'pin-drawer-count-rail']
       .map((id) => document.getElementById(id))
       .filter(Boolean);
-    return els.map((el) => ({ hidden: el.hidden, text: el.textContent }));
+    return els.map((el) => ({ hidden: el.hidden }));
   });
   assert(banner.length > 0, 'expected at least one pin count banner element');
   for (const b of banner) {
-    assert(!b.hidden && b.text === '2', `count banner must show 2 on boot without a toggle, got ${JSON.stringify(banner)}`);
+    assert(b.hidden, `pin numeric badge is retired (one-number rule) and must stay hidden, got ${JSON.stringify(banner)}`);
   }
-  log('count banner shows 2 ✓');
+  log('pin numeric badge stays hidden (one-number rule) ✓');
 
   // Belt-and-suspenders: the in-memory store really has the pins (i.e.
   // rows came from hydrated state, not stale DOM).
