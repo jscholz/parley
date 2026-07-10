@@ -588,11 +588,28 @@ function repaintUnreadIndicators(): void {
 }
 
 let unreadListenerWired = false;
+/** Full (fingerprint-gated) list re-render on unread changes — the
+ *  in-place chip repaint above CANNOT reorder rows, and unread-first
+ *  ordering depends on unread state that hydrates ASYNC after the
+ *  first paint (field bug 2026-07-10: the boot render froze recency
+ *  order before /unread arrived, so an unread chat deep in the list
+ *  got its chip painted at position ~70 — counted by the OS badge,
+ *  invisible in the sidebar, AGAIN). renderListFiltered re-sorts; its
+ *  fingerprint check makes the no-order-change case a cheap no-op. */
+function resortOnUnreadChange(): void {
+  const listEl = document.getElementById('sessions-list');
+  if (!listEl) return;
+  renderListFiltered(listEl, activeRowId());
+}
+
 function setupUnreadListener(): void {
   if (unreadListenerWired) return;
   unreadListenerWired = true;
   if (typeof window === 'undefined') return;
-  window.addEventListener('sidekick:unread-changed', repaintUnreadIndicators);
+  window.addEventListener('sidekick:unread-changed', () => {
+    repaintUnreadIndicators();   // instant chip paint (no fetch)
+    resortOnUnreadChange();      // ordering catches up (fingerprint-gated)
+  });
   // Cross-device delete sync — proxyClient already wiped the IDB row
   // and broadcast this event. Schedule a sidebar refresh so the DOM
   // row drops. Without this, a cross-device delete leaves a straggler
