@@ -29,6 +29,8 @@ import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
 import { markRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize } from './sessionOps.ts';
 import * as badge from './notifications/badge.ts';
+import * as composerDrafts from './composerDrafts.ts';
+import { escapeHtml } from './util/dom.ts';
 import { isMuted as isChatMuted, setMuted as setChatMuted } from './notifications/mutes.ts';
 import { reportChatSwitch } from './notifications/visibility.ts';
 import { unreadFor } from './notifications/badge.ts';
@@ -536,6 +538,11 @@ function applyViewChangedEffects(prev: string | null, id: string | null): void {
   if (prev !== id) {
     void import('./transcriptHighlight.ts').then((m) => m.clearHighlight?.());
   }
+  // Per-chat composer drafts ride the same view-commit seam: save the
+  // outgoing chat's text, restore the incoming chat's draft. Internally
+  // bound-chat-guarded, so same-chat repaints (view-token resumes) are
+  // free.
+  composerDrafts.switchTo(id);
 }
 
 /** The id refresh()/renderList should paint as `.active`: optimistic
@@ -635,6 +642,10 @@ function setupUnreadListener(): void {
   // row drops. Without this, a cross-device delete leaves a straggler
   // row in the sidebar until the next poll.
   window.addEventListener('sidekick:server-conversation-deleted', () => scheduleRefresh());
+  // Draft snippet tracking: composerDrafts debounces this broadcast;
+  // the row fingerprint carries draft state, so the refresh no-ops
+  // when nothing visible changed.
+  window.addEventListener('sidekick:draft-changed', () => scheduleRefresh());
   // Pin/unpin/reorder repaints the drawer so the pinned region at the
   // top reflects the new set + order. sessionPins emits this after it
   // updates its in-memory order (the PUT to the synced setting is
@@ -1109,7 +1120,11 @@ let lastRenderFingerprint: string | null = null;
  *  still trigger a rebuild. */
 function renderListFingerprint(sessions: any[], activeId: string, showPlaceholder: boolean, pinnedOrder: string[]): string {
   const rows = sessions.map(s =>
-    `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`,
+    `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`
+    // Draft snippet state: appearance/disappearance/edit of a row's
+    // "Draft:" line must defeat the diff-bypass (bound chat contributes
+    // '' — its row hides the snippet).
+    + `|${composerDrafts.boundTo() !== s.id ? composerDrafts.getDraft(s.id).slice(0, 60) : ''}`,
   ).join('\n');
   // Fold the pinned set + order in: a pin/unpin/reorder doesn't change
   // any row's fields or the incoming recency order, so without this the
@@ -1295,11 +1310,20 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
       + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>'
       + (meetings > 1 ? `${meetings}` : '') + '</span>'
     : '';
-  meta.innerHTML =
-    meetingBadge +
-    `<span>${fmtRelativeTime(s.lastMessageAt)}</span>` +
-    `<span>${countLabel}</span>` +
-    sourceBadge;
+  // WhatsApp-style draft snippet (per-chat drafts, 2026-07-12): a chat
+  // holding an unsent draft shows "Draft: <text>" in place of the count
+  // label so it's findable from the list. Hidden for the BOUND chat —
+  // its draft is sitting in the composer, the row would just echo it.
+  const draftText = composerDrafts.boundTo() !== s.id ? composerDrafts.getDraft(s.id) : '';
+  meta.innerHTML = draftText
+    ? meetingBadge
+      + `<span>${fmtRelativeTime(s.lastMessageAt)}</span>`
+      + `<span class="sess-draft-badge" title="${escapeHtml(draftText.slice(0, 300))}">`
+      + `Draft: ${escapeHtml(draftText.slice(0, 60))}</span>`
+    : meetingBadge
+      + `<span>${fmtRelativeTime(s.lastMessageAt)}</span>`
+      + `<span>${countLabel}</span>`
+      + sourceBadge;
 
   body.appendChild(snippet);
   body.appendChild(meta);

@@ -90,6 +90,7 @@ import * as memoCard from './memoCard.ts';
 import * as attachments from './attachments.ts';
 import * as draft from './draft.ts';
 import * as composer from './composer.ts';
+import * as composerDrafts from './composerDrafts.ts';
 import * as selectToQuote from './selectToQuote.ts';
 import * as docStore from './rightDrawer/docStore.ts';
 import * as slashCommands from './slashCommands.ts';
@@ -1880,6 +1881,17 @@ async function boot() {
   const composerInput = document.getElementById('composer-input') as HTMLTextAreaElement;
   const composerSend = document.getElementById('composer-send') as HTMLButtonElement;
 
+  // Per-chat drafts: keystrokes save to the chat the text is BOUND to;
+  // the view-commit seam (sessionDrawer.applyViewChangedEffects) swaps
+  // drafts on switch. onRestored re-runs the chrome a real keystroke
+  // would have (autoResize/updateSendButtonState are hoisted function
+  // declarations — defined below, callable from this callback).
+  composerDrafts.init({
+    textarea: composerInput,
+    onRestored: () => { autoResize(); updateSendButtonState(); },
+  });
+  void composerDrafts.hydrateDrafts();
+
   // Keyboard-driven transcript highlight mode (Slack-style):
   //   Empty composer + ↑ → highlight most recent bubble; ↑/↓
   //   navigates; ↓ past most recent returns to composer; p pins;
@@ -2154,6 +2166,9 @@ async function boot() {
       attachments.clear();
       playFeedback('send');
       composerInput.value = '';
+      // The ADDRESSED chat's draft is spent (send committed — a failure
+      // comes back through Retry, which restores the text).
+      composerDrafts.clearDraft(sendChatId);
       autoResize();
       updateSendButtonState();
     } else if (draft.hasContent()) {
@@ -2297,6 +2312,7 @@ async function boot() {
       attachments.clear();
       playFeedback('send');
       composerInput.value = '';
+      composerDrafts.clearDraft(sendChatId);
       autoResize();
       updateSendButtonState();
     },
@@ -2575,11 +2591,14 @@ async function boot() {
       }
       draft.dismiss();
       voiceMemos.clearAll().catch(() => {});
-      // Clear remaining input surfaces atomically. Without this,
-      // typed-but-unsent text survives the new-chat click and
-      // prepends to the next typed message. Synthetic `input` event
-      // re-runs autoResize + updateSendButtonState in one go.
-      composerInput.value = '';
+      // Blank the input surfaces atomically — but PRESERVE typed text
+      // as the leaving chat's draft (per-chat drafts, 2026-07-12; the
+      // old bare `value = ''` destroyed it). Synthetic `input` event
+      // re-runs autoResize + updateSendButtonState in one go; it's
+      // dispatched after the stash, when no chat is bound, so the
+      // draft listener ignores it. The minted chat binds via the
+      // setViewed → view-commit seam below.
+      composerDrafts.stashAndClear();
       composerInput.dispatchEvent(new Event('input'));
       attachments.clear();
       historyLoaded = false;

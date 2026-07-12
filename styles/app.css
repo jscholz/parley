@@ -611,6 +611,14 @@
     font-size: 11px; color: var(--muted); margin-top: 4px;
     display: flex; gap: 10px;
   }
+  /* WhatsApp-style unsent-draft snippet — replaces the count label on
+     rows holding a draft. Accent + italic reads as "yours, unsent";
+     ellipsis keeps the single-line row height stable. */
+  .sessions-list .sess-draft-badge {
+    color: var(--primary); font-style: italic;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; flex: 1;
+  }
   .sessions-list .sess-empty {
     font-size: 13px; color: var(--muted); font-style: italic; padding: 20px 0;
     text-align: center;
