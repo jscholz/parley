@@ -57,11 +57,31 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
   // is now the sole owner of transcript content; wipe them so they
   // don't ghost alongside the projection output.
   //
-  // EXCEPTION: keyless `.line.system` rows are orthogonal markers (e.g.
-  // the "Use the New Chat button…" hint dropped when the user types
-  // /new, "New chat started" lines, model-switch system lines) — they're
-  // appended directly to #transcript by code that bypasses the
-  // projection model and lack a data-key, but shouldn't be removed when
+  // ── TRANSCRIPT OWNERSHIP CONTRACT (hardening phase 4/5) ───────────
+  // Every child of #transcript is one of exactly three things:
+  //   1. MODEL-OWNED (has data-key): created/updated/removed by this
+  //      reconciler from BubbleSpecs — bubbles, activity rows, gaps,
+  //      notifications, and (since phase 4) system-line decorations.
+  //   2. OWNER-SCOPED, self-healing (keyless, non-`system`): the boot
+  //      HTML-snapshot restore and the draft block. These are wiped as
+  //      stale by the next reconcile BY DESIGN — the snapshot is a
+  //      pre-pipeline boot paint replaced by the first real render;
+  //      the draft block re-creates itself via ensureBlock() on every
+  //      write (its contentEditable mid-edit state cannot round-trip
+  //      through spec-driven re-render, which is WHY it stays outside
+  //      the model — deliberate phase-4 disposition, not an oversight).
+  //   3. LEGACY keyless `.line.system` rows — preserved by the
+  //      exception below. Post-phase-4 these can only come from a boot
+  //      HTML-snapshot restore (addSystemLine now writes keyed
+  //      decorations); the new-chat handler sweeps them
+  //      (`.line.system:not([data-key])`) so they can't stack over a
+  //      fresh chat.
+  // Anything else appended to #transcript will be wiped on the next
+  // reconcile — that's the contract, not a bug.
+  //
+  // EXCEPTION (case 3 above): keyless `.line.system` rows are orthogonal
+  // markers — appended directly to #transcript by the boot-snapshot
+  // restore and lack a data-key, but shouldn't be removed when
   // a sibling bubble reconciles. chat.clear() still wipes them on chat
   // switch via innerHTML='', so they don't leak between chats. NOTE:
   // notification bubbles ALSO carry class `system` (plus `notification`)

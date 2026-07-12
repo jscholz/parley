@@ -163,12 +163,14 @@ function schedulePostFinalDurableRefresh(
       try {
         const result: any = await backend.fetchSessionMessages(chatId);
         if (postFinalRefreshSeq.get(chatId) !== seq) return;
-        if (switchCtl.viewedId() !== chatId) return;
-        // View token: post-final durable refresh repaints the on-screen
-        // chat; if the user navigated away during the fetch, the paint
-        // refuses (the viewedId checks above cover the awaits here, the
-        // token covers everything downstream).
-        replaySessionMessages(
+        // No post-fetch focus re-check (phase-5 guard cleanup): the
+        // view token below IS the gate — replaySessionMessages refuses
+        // when focus has moved, and unlike the old viewedId() check it
+        // also refuses during an in-flight switch AWAY (viewed lags
+        // until the incoming chat commits; focus doesn't). The
+        // follow-up store/cache effects chain on the paint having
+        // actually happened.
+        const painted = replaySessionMessages(
           switchCtl.viewTokenFor(chatId),
           result.messages || [],
           { firstId: result.firstId ?? null, hasMore: !!result.hasMore },
@@ -176,6 +178,7 @@ function schedulePostFinalDurableRefresh(
           result.inflight,
           { preserveScrollIfLive: true },
         );
+        if (!painted) return;
         if (
           messageId &&
           durableHasReply(result.messages || [], beforeDurableIds, messageId, finalText || null)

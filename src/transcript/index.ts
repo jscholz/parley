@@ -56,7 +56,14 @@ export function bindTranscriptPipeline(opts: BindOpts): () => void {
  *  from any IDB persistence: the click handler calls this synchronously,
  *  and "which session is viewed" stays on its existing async path. This
  *  is why it can't reintroduce the IDB-pagehide race that reverted the
- *  prior attempt — nothing here writes to (or awaits) IndexedDB. */
+ *  prior attempt — nothing here writes to (or awaits) IndexedDB.
+ *
+ *  OWNER-ONLY (hardening invariant #4, one loading signal): the sole
+ *  legal caller is sessionDrawer.resume()'s mem-gate fall-through — the
+ *  rung that has verified we hold NO paintable bytes in memory. Do not
+ *  add call sites; a spinner armed anywhere else will fight the paint
+ *  ladder (stale-paint-then-reconcile paints CONTENT on every rung that
+ *  has any). */
 export function showTranscriptLoading(): void {
   const el = getTranscriptEl();
   if (!el) return;

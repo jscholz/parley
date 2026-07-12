@@ -116,7 +116,11 @@ export function initSessionResume(opts: {
  *  continuations can hold a stale closure safely: their paint is a
  *  no-op, not a hijack. Callers switching TO a chat pass the resume's
  *  SwitchToken (or mint one via switchCtl.begin); callers repainting
- *  the chat already on screen pass switchCtl.viewTokenFor(id). */
+ *  the chat already on screen pass switchCtl.viewTokenFor(id).
+ *
+ *  Returns whether the paint HAPPENED — callers with paint-dependent
+ *  follow-up effects (store promotion, cache write-through) chain on
+ *  it instead of hand-rolling their own focus re-checks. */
 export function replaySessionMessages(
   tok: switchCtl.PaintToken,
   messages: any[],
@@ -124,7 +128,7 @@ export function replaySessionMessages(
   targetMessageId?: string,
   inflight?: any[],
   opts?: { preserveScrollIfLive?: boolean },
-): void {
+): boolean {
   const id = tok.id;
   if (!switchCtl.canPaint(tok)) {
     diag(
@@ -132,7 +136,7 @@ export function replaySessionMessages(
       `(${'gen' in tok ? `switch gen=${tok.gen}` : 'view token'}, ` +
       `focused=${switchCtl.focusedId() ?? ''} viewed=${switchCtl.viewedId() ?? ''})`,
     );
-    return;
+    return false;
   }
   const viewed = switchCtl.viewedId();
   const sameSession = viewed === id;
@@ -288,7 +292,7 @@ export function replaySessionMessages(
       target.classList.add('search-target-flash');
       const flashTarget = target;
       setTimeout(() => flashTarget.classList.remove('search-target-flash'), 1500);
-      return;
+      return true;   // painted (drill-flash path skips only the scroll-restore below)
     }
     // Target ISN'T in the initial replay window — drive load-earlier
     // pages until we find it or run out. Async / fire-and-forget.
@@ -412,6 +416,7 @@ export function replaySessionMessages(
     chat.forceScrollToBottom();
     scheduleAtBottomRepin();
   }
+  return true;
 }
 
 /** Re-pin to the bottom of the transcript whenever scrollHeight grows
