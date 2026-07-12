@@ -2594,6 +2594,10 @@ async function boot() {
       // New chat is always sidekick-source; ensure composer is enabled
       // (in case user just rotated away from a non-sidekick chat).
       setComposerReadOnly(false);
+      // Typeable immediately, no second tap (walking-test spec 2026-07-10;
+      // the meeting-capture landing already does this — plain new-chat
+      // left focus on BODY, caught by the session-budgets carve).
+      composerInput.focus();
       // Re-render the session list so the old session row loses its
       // active highlight (new one isn't in response_store.db yet —
       // the optimistic placeholder row covers it).

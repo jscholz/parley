@@ -1,18 +1,22 @@
-// Regression guard for the iOS activity-badge mispositioning bug:
-// the green unread "N" chip on the
-// mobile Activity toolbar button rendered floating at the viewport's
-// top-right corner instead of pinned to the bell icon.
+// Regression guard for the iOS unread-badge mispositioning bug: the
+// unread "N" chip on the mobile toolbar button rendered floating at
+// the viewport's top-right corner instead of pinned to its icon.
 //
-// Root cause: `.pin-count-banner` is `position:absolute; top:-2px;
-// right:-2px`, so it positions against its nearest positioned ancestor.
-// The CSS only set `position:relative` on `#btn-pin-drawer`, not on
-// `#btn-activity-drawer` — so the activity badge had NO positioned
-// ancestor and escaped to the initial containing block (the viewport).
-// Fix (604b63a): add `#btn-activity-drawer` to the position:relative rule.
+// Root cause class: `.pin-count-banner` is `position:absolute;
+// top:-2px; right:-2px`, so it positions against its nearest positioned
+// ancestor — and the position:relative rule has TWICE been left naming
+// buttons that no longer exist (604b63a: #btn-pin-drawer only;
+// field 2026-07-11: the rule still named the REMOVED pin/bell header
+// buttons after the header consolidation, so the consolidated
+// #btn-right-drawer badge escaped to the viewport again). This smoke
+// pins the CURRENT host pair (#btn-right-drawer / #right-drawer-count);
+// when chrome buttons get renamed, this smoke failing at setup is the
+// signal to re-point it — that's by design, it guards the pair that
+// actually renders.
 //
 // This smoke shows the badge (the CSS position is structural and
-// independent of the count logic, which notifications-badge-tracking
-// already covers) and asserts its rect is anchored to the button's
+// independent of the count logic, which unread-badges-single-source
+// covers) and asserts its rect is anchored to the button's
 // top-right corner — NOT escaped to the viewport. The pre-fix CSS puts
 // the badge's top at ~-2px (above the toolbar) while the button sits
 // well below the top edge, so the top-alignment check is the
@@ -24,7 +28,7 @@
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'badge-geometry';
-export const DESCRIPTION = 'activity drawer count badge stays pinned to its toolbar button (not floating at viewport top-right) on mobile';
+export const DESCRIPTION = 'right-drawer unread badge stays pinned to its toolbar button (not floating at viewport top-right) on mobile';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = true;
@@ -36,10 +40,10 @@ export default async function run({ page, log }) {
   // directly rather than driving the unread-count path because the CSS
   // position rule is what we're pinning, not the count wiring.
   const geo = await page.evaluate(() => {
-    const btn = document.getElementById('btn-activity-drawer');
-    const badge = document.getElementById('activity-drawer-count');
-    if (!btn) return { err: 'btn-activity-drawer not found' };
-    if (!badge) return { err: 'activity-drawer-count not found' };
+    const btn = document.getElementById('btn-right-drawer');
+    const badge = document.getElementById('right-drawer-count');
+    if (!btn) return { err: 'btn-right-drawer not found' };
+    if (!badge) return { err: 'right-drawer-count not found' };
     badge.hidden = false;
     badge.textContent = '2';
     const b = btn.getBoundingClientRect();
@@ -56,7 +60,7 @@ export default async function run({ page, log }) {
 
   // The toolbar button must actually be laid out (mobile-only display:flex).
   assert(geo.btn.w > 0 && geo.btn.h > 0,
-    `activity button not laid out (rect ${JSON.stringify(geo.btn)}) — is the mobile toolbar rendered?`);
+    `right-drawer button not laid out (rect ${JSON.stringify(geo.btn)}) — is the mobile toolbar rendered?`);
   assert(geo.badge.w > 0 && geo.badge.h > 0,
     `badge not laid out (rect ${JSON.stringify(geo.badge)})`);
 
@@ -78,5 +82,5 @@ export default async function run({ page, log }) {
     `badge escaped horizontally: badge.right=${geo.badge.right.toFixed(1)} vs button.right=${geo.btn.right.toFixed(1)} ` +
     `(Δ${dRight.toFixed(1)}px > ${TOL}px).`);
 
-  log('PASS: activity badge anchored to its toolbar button.');
+  log('PASS: unread badge anchored to its toolbar button.');
 }
