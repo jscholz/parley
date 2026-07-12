@@ -423,6 +423,14 @@ export function project(state: ChatState): BubbleSpec[] {
     }
   }
 
+  // ── 3.6 Owner-scoped decorations (hardening phase 4): system lines
+  // ride the same sorted list as everything else — keyed, per-chat,
+  // reconciler-owned. Client-only, so no dedup axis against durable /
+  // inflight is needed.
+  for (const deco of state.decorations) {
+    specs.push({ kind: 'systemLine', key: deco.key, text: deco.text, timestamp: deco.timestamp });
+  }
+
   // ── 4. Stable sort: timestamp asc, then kind tiebreak.
   // Tiebreak: user (0) < activityRow (1) < assistant (2) < notification (3)
   // — so within a single ms, the turn renders user prompt → tool row →
@@ -585,6 +593,9 @@ function kindOrder(s: BubbleSpec): number {
     case 'assistant': return 2;
     case 'notification': return 3;
     case 'gap': return 4;
+    // System lines annotate what just happened — same-ms ties render
+    // them after the conversation rows they comment on.
+    case 'systemLine': return 5;
   }
 }
 

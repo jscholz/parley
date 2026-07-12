@@ -24,6 +24,7 @@ import { toast } from './toast.ts';
 import * as backend from './backend.ts';
 import { rerenderActive } from './transcript/index.ts';
 import * as transcriptStore from './transcript/store.ts';
+import * as switchCtl from './switchController.ts';
 
 let transcriptEl: HTMLElement | null = null;
 
@@ -1507,8 +1508,28 @@ function openLightbox(src: string): void {
 
 /** Render a muted, italic, centered "system" line — for session events
  *  like model changes or new-chat resets. Distinct visually from regular
- *  agent/user messages. */
+ *  agent/user messages.
+ *
+ *  Hardening phase 4: routed through the transcript MODEL as an
+ *  owner-scoped decoration — keyed, per-chat, rendered by the
+ *  reconciler like everything else. Replays can't stack duplicates and
+ *  a repaint can't orphan it; the line lives with ITS chat (a model
+ *  note stays in the chat where it was issued) instead of floating on
+ *  whatever transcript is on screen. The legacy keyless DOM append
+ *  survives only as the no-chat fallback (fresh boot before any chat
+ *  exists), where there is no model to write into. */
 export function addSystemLine(text: string): HTMLElement | null {
+  const chatId = switchCtl.focusedId() ?? viewedSessionIdRef;
+  if (chatId) {
+    transcriptStore.addDecoration(chatId, {
+      key: `deco_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'system',
+      text,
+      timestamp: Date.now(),
+    });
+    autoScroll();
+    return null;
+  }
   const target = contentTarget();
   if (!target) return null;
   const div = document.createElement('div');

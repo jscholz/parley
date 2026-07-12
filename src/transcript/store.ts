@@ -19,6 +19,7 @@
 import type {
   ChatState,
   ConversationItem,
+  Decoration,
   PendingSend,
   SidekickEnvelope,
 } from './types.ts';
@@ -32,6 +33,7 @@ function emptyChatState(): ChatState {
     inflight: [],
     pendingSends: [],
     pagination: { firstId: null, hasMore: false, lastId: null, hasMoreNewer: false },
+    decorations: [],
   };
 }
 
@@ -528,6 +530,16 @@ export function clearPendingSend(chatId: string, messageId: string): void {
 }
 
 /** Drop all state for a chat. Used on session deletion. */
+/** Append an owner-scoped decoration (system line). Keyed — a replay
+ *  can't duplicate it, a repaint can't orphan it (hardening phase 4;
+ *  previously these were keyless DOM appends the reconciler had to
+ *  preserve by exception). */
+export function addDecoration(chatId: string, deco: Decoration): void {
+  const s = getState(chatId);
+  s.decorations = [...s.decorations, deco];
+  notify(chatId);
+}
+
 export function clearAll(chatId: string): void {
   states.delete(chatId);
   notify(chatId);

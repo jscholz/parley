@@ -30,7 +30,7 @@ import * as settings from '../settings.ts';
 import { getAgentLabel } from '../config.ts';
 import { applyBubbleState as applyReplyPlayerState } from '../audio/turn-based/replyPlayer.ts';
 import { rehydrateCards } from '../cards/attach.ts';
-import type { ActivityRowSpec, ActivityTool, AssistantBubbleSpec, BubbleSpec, GapBubbleSpec, NotificationBubbleSpec, UserBubbleSpec } from './types.ts';
+import type { ActivityRowSpec, ActivityTool, AssistantBubbleSpec, BubbleSpec, GapBubbleSpec, NotificationBubbleSpec, SystemLineSpec, UserBubbleSpec } from './types.ts';
 
 const KEY_ATTR = 'data-key';
 
@@ -157,7 +157,21 @@ function createForSpec(spec: BubbleSpec, batch: boolean): HTMLElement | null {
     case 'notification': return createNotification(spec, batch);
     case 'activityRow': return createActivityRow(spec);
     case 'gap':        return createGap(spec);
+    case 'systemLine': return createSystemLine(spec);
   }
+}
+
+/** Reconciler-owned system line (hardening phase 4). Same DOM shape as
+ *  the legacy keyless chat.addSystemLine rows — `.line.system`,
+ *  plain text — but keyed, so replays dedupe instead of stacking and
+ *  the keyless-preservation exception below is no longer load-bearing
+ *  for these (it stays for the boot HTML-snapshot rows until that
+ *  writer migrates). */
+function createSystemLine(spec: SystemLineSpec): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'line system';
+  div.textContent = spec.text;
+  return div;
 }
 
 function createUser(spec: UserBubbleSpec, batch: boolean): HTMLElement | null {
@@ -286,6 +300,9 @@ function updateForSpec(el: HTMLElement, spec: BubbleSpec): void {
     case 'notification': return updateNotification(el, spec);
     case 'activityRow': return updateActivityRow(el, spec);
     case 'gap':        return updateGap(el, spec);
+    case 'systemLine':
+      if (el.textContent !== spec.text) el.textContent = spec.text;
+      return;
   }
 }
 

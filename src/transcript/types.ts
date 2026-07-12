@@ -57,6 +57,26 @@ export interface ChatState {
    *  connected to the live tail; on a normal tail-anchored resume it's
    *  false (the loaded run already reaches the tail). */
   pagination: { firstId: number | null; hasMore: boolean; lastId: number | null; hasMoreNewer: boolean };
+  /** Owner-scoped decorations (hardening phase 4): client-only rows
+   *  that annotate the transcript without existing server-side —
+   *  system lines ("New chat started", model-switch notes). Keyed +
+   *  timestamped so the projection interleaves them and the reconciler
+   *  owns their DOM (previously keyless DOM appends the reconciler had
+   *  to tiptoe around). A separate bucket, untouched by durable /
+   *  inflight mutations — the same "orthogonal markers" semantics the
+   *  old DOM rows had, now per-chat and replay-safe. */
+  decorations: Decoration[];
+}
+
+export interface Decoration {
+  /** Stable reconcile key: `deco_${ts}_${rand}`. */
+  key: string;
+  /** v1: system lines only. Draft blocks / memo cards may migrate
+   *  here in later phase-4 commits. */
+  kind: 'system';
+  text: string;
+  /** Wall-clock ms — sorts the row into the transcript. */
+  timestamp: number;
 }
 
 export interface PendingSend {
@@ -139,7 +159,18 @@ export type BubbleSpec =
   | AssistantBubbleSpec
   | NotificationBubbleSpec
   | ActivityRowSpec
-  | GapBubbleSpec;
+  | GapBubbleSpec
+  | SystemLineSpec;
+
+/** A client-only system line ("New chat started", "Model: …"). Derived
+ *  from ChatState.decorations — reconciler-owned DOM, unlike the legacy
+ *  keyless `.line.system` appends it replaces (hardening phase 4). */
+export interface SystemLineSpec {
+  kind: 'systemLine';
+  key: string;
+  text: string;
+  timestamp: number;
+}
 
 /**
  * A discontinuity marker between two non-contiguous runs of durable

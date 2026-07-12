@@ -2612,26 +2612,31 @@ async function boot() {
       // Hard-reset the on-screen transcript before painting the blank chat.
       // transcriptStore.clearAll above drops the projection BUBBLES, but two
       // DOM artifacts survive it (field bug 2026-06-16):
-      //   - addSystemLine writes KEYLESS `.line.system` rows that the
-      //     reconciler deliberately PRESERVES (orthogonal markers, only
-      //     chat.clear()/innerHTML='' wipes them). A prior "New chat started"
-      //     would survive and we'd stack a second one on top (symptom 2).
+      //   - KEYLESS `.line.system` rows the reconciler deliberately
+      //     PRESERVES. Post-phase-4 these come only from the boot
+      //     HTML-snapshot restore (addSystemLine now writes keyed
+      //     decorations the reconciler owns) — sweep the keyless ones
+      //     so snapshot leftovers can't linger over the fresh chat;
+      //     model-owned rows (data-key) belong to their chat's state
+      //     and are cleaned up by the reconciler itself.
       //   - a cold session-switch resume that was mid-flight already armed
       //     `.transcript-loading`; new-chat supersedes that resume
       //     (invalidate above) so its continuation bails before reaching the
-      //     class-clear in sessionResume — and addSystemLine bypasses
-      //     rerenderInto (the only other thing that strips it) → the spinner
-      //     spins forever over the fresh blank chat (symptom 3).
+      //     class-clear in sessionResume → the spinner would spin forever
+      //     over the fresh blank chat (symptom 3).
       // Sweep both here, in the DOM, AFTER the scroll-save dance above so the
       // leaving chat's scrollTop is already captured against its real height.
       if (transcriptEl) {
-        transcriptEl.querySelectorAll('.line.system').forEach((el) => el.remove());
+        transcriptEl.querySelectorAll('.line.system:not([data-key])').forEach((el) => el.remove());
         transcriptEl.classList.remove('transcript-loading');
       }
-      chat.addSystemLine('New chat started');
-      // Pin the viewed-session to the freshly-rotated chat_id. Invariant:
-      // getViewed() mirrors the session on screen so handleReplyDelta /
-      // handleReplyFinal don't drop incoming envelopes for it.
+      // Pin the viewed-session to the freshly-rotated chat_id BEFORE the
+      // system line: addSystemLine writes a decoration into the FOCUSED
+      // chat's state (phase 4), so the view must already point at the
+      // minted chat or the line would fall to the no-chat DOM fallback.
+      // Invariant: getViewed() mirrors the session on screen so
+      // handleReplyDelta / handleReplyFinal don't drop incoming
+      // envelopes for it.
       const newChatId = backend.getCurrentSessionId?.() || null;
       sessionDrawer.setViewed(newChatId);
       // Mirror into chat.viewedSessionIdRef so subsequent in-bubble
@@ -2640,6 +2645,7 @@ async function boot() {
       // the chatId to whatever the prior viewed was (smoke
       // `pin-drawer-jump` regression).
       chat.trackViewedSession(newChatId);
+      chat.addSystemLine('New chat started');
       // New chat is always sidekick-source; ensure composer is enabled
       // (in case user just rotated away from a non-sidekick chat).
       setComposerReadOnly(false);

@@ -17,6 +17,7 @@ function state(partial: Partial<ChatState>): ChatState {
     inflight: [],
     pendingSends: [],
     pagination: { firstId: null, hasMore: false, lastId: null, hasMoreNewer: false },
+    decorations: [],
     ...partial,
   };
 }
@@ -656,5 +657,40 @@ describe('project: gap (discontinuity placeholder)', () => {
   it('no gap row → no gap spec (inert for the normal contiguous transcript)', () => {
     const s = state({ durable: [u('umsg_1', 'q', T0), a('msg_1', 'a', T0 + 1)] });
     assert.equal(project(s).some(x => x.kind === 'gap'), false);
+  });
+});
+
+describe('decorations (owner-scoped system lines, hardening phase 4)', () => {
+  it('projects decorations as keyed systemLine specs interleaved by timestamp', () => {
+    const s = state({
+      durable: [u('umsg_1', 'question', T0), a('msg_1', 'answer', T0 + 2000)],
+      decorations: [{ key: 'deco_1', kind: 'system', text: 'Model: gpt-5.5', timestamp: T0 + 1000 }],
+    });
+    const specs = project(s);
+    const kinds = specs.map(x => x.kind);
+    assert.deepEqual(kinds, ['user', 'systemLine', 'assistant'], 'system line slots between the rows by timestamp');
+    const line = specs[1];
+    assert.equal(line.kind, 'systemLine');
+    assert.equal(line.key, 'deco_1', 'stable reconcile key rides through');
+    assert.equal((line as any).text, 'Model: gpt-5.5');
+  });
+
+  it('same-ms ties render the system line AFTER the row it annotates', () => {
+    const s = state({
+      durable: [u('umsg_1', 'q', T0)],
+      decorations: [{ key: 'deco_2', kind: 'system', text: 'New chat started', timestamp: T0 }],
+    });
+    const kinds = project(s).map(x => x.kind);
+    assert.deepEqual(kinds, ['user', 'systemLine']);
+  });
+
+  it('decorations survive a durable replace (setDurable-shape input)', () => {
+    // The bucket is orthogonal: projecting with fresh durable rows and
+    // the SAME decorations still yields the line exactly once.
+    const deco = [{ key: 'deco_3', kind: 'system' as const, text: 'note', timestamp: T0 + 10 }];
+    const before = project(state({ durable: [u('umsg_1', 'q', T0)], decorations: deco }));
+    const after = project(state({ durable: [u('umsg_1', 'q', T0), a('msg_2', 'a', T0 + 5000)], decorations: deco }));
+    assert.equal(before.filter(x => x.kind === 'systemLine').length, 1);
+    assert.equal(after.filter(x => x.kind === 'systemLine').length, 1);
   });
 });
