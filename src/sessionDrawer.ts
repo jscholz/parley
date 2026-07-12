@@ -44,7 +44,7 @@ import * as sessionAnnounce from './sessionAnnounce.ts';
 import * as settings from './settings.ts';
 import { AURA_VOICES, voiceLabel } from './voices.ts';
 
-let onResumeCb: ((id: string, messages: any[], pagination?: { firstId: number | null; hasMore: boolean }, inflight?: any[], targetMessageId?: string) => void) | null = null;
+let onResumeCb: ((tok: switchCtl.SwitchToken, messages: any[], pagination?: { firstId: number | null; hasMore: boolean }, inflight?: any[], targetMessageId?: string) => void) | null = null;
 
 /** Sidebar multi-selection — chat_ids the user has selected via
  *  shift-click (range) or ctrl/cmd-click (toggle). When `size >= 2`
@@ -499,6 +499,25 @@ let filterServerAbort: AbortController | null = null;
 export function setViewed(id: string | null) {
   const prev = switchCtl.viewedId();
   switchCtl.setViewed(id);
+  applyViewChangedEffects(prev, id);
+}
+
+/** Promote a switch token to the committed view WITH the view-changed
+ *  side effects — the side-effecting twin of switchCtl.commit (adopted
+ *  by hardening Phase 1). Captures `prev` BEFORE the promotion so
+ *  prev-sensitive effects (highlight-chip cleanup) still see the chat
+ *  being left; a bare commit()-then-setViewed sequence loses it
+ *  (setViewed would read the already-promoted pointer — the
+ *  highlight-chip regression the Phase-1 suite run caught). Returns
+ *  false without side effects when the token is superseded. */
+export function commitView(tok: switchCtl.SwitchToken): boolean {
+  const prev = switchCtl.viewedId();
+  if (!switchCtl.commit(tok)) return false;
+  applyViewChangedEffects(prev, tok.id);
+  return true;
+}
+
+function applyViewChangedEffects(prev: string | null, id: string | null): void {
   // Switching INTO a chat is the canonical "user has now seen this"
   // signal — clear its unread badge.
   if (id) {
@@ -1774,7 +1793,7 @@ async function resume(id: string, targetMessageId?: string) {
       // spinner. Pass inflight=undefined to PRESERVE live inflight (same
       // contract as the cache-render path). setViewed/render run inside
       // replaySessionMessages, which also clears any stale .transcript-loading.
-      onResumeCb?.(id, memState.durable, memState.pagination, undefined, targetMessageId);
+      onResumeCb?.(tok, memState.durable, memState.pagination, undefined, targetMessageId);
       memRendered = true;
       t?.trace('mem-render', `n=${memState.durable.length}`);
     } else {
@@ -1812,7 +1831,7 @@ async function resume(id: string, targetMessageId?: string) {
         // that accumulated in transcriptStore while another chat was
         // viewed — passing [] would wipe in-flight bubbles for the
         // chat we're returning to.
-        onResumeCb?.(id, cached.messages, cached.pagination, undefined, targetMessageId);
+        onResumeCb?.(tok, cached.messages, cached.pagination, undefined, targetMessageId);
         // The fresh IDB cache just repopulated the in-memory buffer via
         // replaySessionMessages → setDurable; it's current again.
         memStaleChats.delete(id);
@@ -1837,7 +1856,7 @@ async function resume(id: string, targetMessageId?: string) {
           : 'Could not load session — reconnecting…';
         status.setStatus(msg, 'err');
         if (!cacheRendered) {
-          onResumeCb?.(id, [], { firstId: null, hasMore: false }, []);
+          onResumeCb?.(tok, [], { firstId: null, hasMore: false }, []);
         }
         scheduleRefresh();
         return;
@@ -1899,7 +1918,7 @@ async function resume(id: string, targetMessageId?: string) {
       t?.trace('server-render-start');
       const inflight = Array.isArray(result.inflight) ? result.inflight : [];
       log(`sessionDrawer: resumed ${id} (${capped.messages.length} messages, ${inflight.length} inflight, hasMore=${capped.pagination.hasMore})`);
-      onResumeCb?.(id, capped.messages, capped.pagination, inflight, targetMessageId);
+      onResumeCb?.(tok, capped.messages, capped.pagination, inflight, targetMessageId);
       // In-memory buffer is now reconciled to the server tail.
       memStaleChats.delete(id);
       t?.trace('server-render-end');
@@ -2179,7 +2198,11 @@ export function focusFilter() {
 }
 
 export function init(opts: {
-  onResume: (id: string, messages: any[]) => void;
+  /** Render callback for every resume rung (mem/cache/server). Receives
+   *  the switch's PaintToken — the chat id rides on it (tok.id) and the
+   *  token authorizes the paint downstream (replaySessionMessages
+   *  refuses a dead one). */
+  onResume: (tok: switchCtl.SwitchToken, messages: any[], pagination?: { firstId: number | null; hasMore: boolean }, inflight?: any[], targetMessageId?: string) => void;
   /** Called once at the moment a row click triggers a chat switch,
    *  with the ID of the chat being navigated AWAY from (null on
    *  first activation). Lets the shell drop empty/abandoned chats

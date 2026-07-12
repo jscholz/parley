@@ -164,8 +164,12 @@ function schedulePostFinalDurableRefresh(
         const result: any = await backend.fetchSessionMessages(chatId);
         if (postFinalRefreshSeq.get(chatId) !== seq) return;
         if (switchCtl.viewedId() !== chatId) return;
+        // View token: post-final durable refresh repaints the on-screen
+        // chat; if the user navigated away during the fetch, the paint
+        // refuses (the viewedId checks above cover the awaits here, the
+        // token covers everything downstream).
         replaySessionMessages(
-          chatId,
+          switchCtl.viewTokenFor(chatId),
           result.messages || [],
           { firstId: result.firstId ?? null, hasMore: !!result.hasMore },
           undefined,

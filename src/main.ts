@@ -684,8 +684,10 @@ async function boot() {
     // sessionDrawer's onResumeCb passes inflight as the 4th arg and (for
     // drill navigations) targetMessageId as the 5th; replaySessionMessages
     // orders targetMessageId before inflight, so adapt the slots here.
-    onResume: (id: string, messages: any[], pagination?: any, inflight?: any[], targetMessageId?: string) =>
-      replaySessionMessages(id, messages, pagination, targetMessageId, inflight),
+    // The switch token rides through — replaySessionMessages refuses to
+    // paint if it has been superseded (invariant #1).
+    onResume: (tok: switchCtl.SwitchToken, messages: any[], pagination?: any, inflight?: any[], targetMessageId?: string) =>
+      replaySessionMessages(tok, messages, pagination, targetMessageId, inflight),
     onBeforeSwitch: cleanupAbandonedChat,
     onMultiSelectChange: (ids: string[]) => multiSelect.update(ids),
     // Stale-foreground recovery: if the session the user is currently
@@ -1422,6 +1424,10 @@ async function boot() {
               sessionDrawer.setViewed(restoredSid);
             }
             try {
+              // Boot restore is a switch (from nothing) — mint a real
+              // switch token so a user click landing DURING the slow
+              // boot fetch supersedes it and this paint refuses.
+              const bootTok = switchCtl.begin(sid, urlMsgId ?? undefined);
               const result: any = await resumeWithRetry(sid);
               const messages = result.messages || [];
               if (messages.length) {
@@ -1432,13 +1438,17 @@ async function boot() {
                 // If the target isn't in the initial page,
                 // drillToOlderMessage paginates back until found.
                 replaySessionMessages(
-                  sid, messages,
+                  bootTok, messages,
                   { firstId: result.firstId ?? null, hasMore: !!result.hasMore },
                   urlMsgId ?? undefined,
                   result.inflight,
                 );
                 bootRendered = true;
               }
+              // Release the optimistic claim (mirrors resume()'s finally):
+              // the paint committed viewed; leaving optimistic set would
+              // just be a stale pointer for the next click to overwrite.
+              switchCtl.clearOptimisticIfCurrent(bootTok);
             } catch (e: any) {
               diag(`boot: resume ${sid} failed: ${e.message}`);
             }
@@ -1478,14 +1488,16 @@ async function boot() {
                 diag(chosen
                   ? `boot: empty resume, staying on deliberate target: ${target.id}`
                   : `boot: no rendered session, picking most recent: ${target.id}`);
+                const fallbackTok = switchCtl.begin(target.id);
                 const result: any = await resumeWithRetry(target.id);
                 replaySessionMessages(
-                  target.id,
+                  fallbackTok,
                   result.messages || [],
                   { firstId: result.firstId ?? null, hasMore: !!result.hasMore },
                   undefined,
                   result.inflight,
                 );
+                switchCtl.clearOptimisticIfCurrent(fallbackTok);
               }
             } catch (e: any) {
               diag(`boot: most-recent fallback failed: ${e.message}`);
@@ -1572,7 +1584,10 @@ async function boot() {
         firstId: e.firstId ?? null,
         hasMore: !!e.hasMore,
       };
-      replaySessionMessages(e.conversation, messages, pagination, undefined, undefined, { preserveScrollIfLive: true });
+      // View token, not a switch: this repaints the chat already on
+      // screen and must lose to any user navigation that lands between
+      // here and the paint (replaySessionMessages re-checks).
+      replaySessionMessages(switchCtl.viewTokenFor(e.conversation), messages, pagination, undefined, undefined, { preserveScrollIfLive: true });
     },
     // Adapter-relayed new-session announcement. The legacy hermes adapter
     // surfaces these from the proxy's drawer-events SSE; other adapters

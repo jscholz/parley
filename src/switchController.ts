@@ -45,6 +45,40 @@ export interface SwitchToken {
   readonly targetMessageId?: string;
 }
 
+/** Paint authority for a chat that is ALREADY focused — background
+ *  reconciles (foreground resume, post-final durable refresh) that
+ *  repaint what's on screen rather than switching to something new.
+ *  Dies the moment focus moves: focus flips synchronously at click
+ *  (setOptimistic), so a continuation holding a ViewToken for the old
+ *  chat can never paint over the new one. Distinguished from
+ *  SwitchToken by the absence of `gen`. */
+export interface ViewToken {
+  readonly view: true;
+  readonly id: string;
+}
+
+/** What paint paths accept: a supersedable switch (authorizes TAKING
+ *  OVER the pane) or a view token (authorizes REPAINTING the focused
+ *  chat). Checked by canPaint at paint time, not mint time. */
+export type PaintToken = SwitchToken | ViewToken;
+
+/** Mint a view token for a chat believed to be on screen. Cheap and
+ *  unconditional — validity is evaluated by canPaint() when the paint
+ *  actually happens, which is what makes late continuations safe. */
+export function viewTokenFor(id: string): ViewToken {
+  return { view: true, id };
+}
+
+/** THE paint gate (hardening invariant #1): may `tok` write the
+ *  transcript pane right now? Switch tokens paint while their epoch is
+ *  live; view tokens paint while their chat is still the focused one.
+ *  Every replay/resume render funnels through this via
+ *  replaySessionMessages — call sites don't hand-roll epoch checks. */
+export function canPaint(tok: PaintToken): boolean {
+  if ('gen' in tok) return tok.gen === gen;
+  return focusedId() === tok.id;
+}
+
 let gen = 0;
 let optimistic: string | null = null;
 let viewed: string | null = null;

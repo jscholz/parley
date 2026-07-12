@@ -107,15 +107,33 @@ export function initSessionResume(opts: {
  *  can reconcile in place without the blank-and-repaint flicker.
  *  resume() can fire onResumeCb multiple times for the same id (cache-
  *  cb + server-cb when results match); when the viewed id is unchanged
- *  we skip the clear to avoid double-append. */
+ *  we skip the clear to avoid double-append.
+ *
+ *  Token-required paint (hardening invariant #1): the first argument is
+ *  a PaintToken and the chat id comes FROM it — there is no way to call
+ *  this with an id/authority mismatch. A dead token (superseded switch,
+ *  view token for a chat the user has left) refuses up front, so late
+ *  continuations can hold a stale closure safely: their paint is a
+ *  no-op, not a hijack. Callers switching TO a chat pass the resume's
+ *  SwitchToken (or mint one via switchCtl.begin); callers repainting
+ *  the chat already on screen pass switchCtl.viewTokenFor(id). */
 export function replaySessionMessages(
-  id: string,
+  tok: switchCtl.PaintToken,
   messages: any[],
   pagination?: { firstId: number | null; hasMore: boolean },
   targetMessageId?: string,
   inflight?: any[],
   opts?: { preserveScrollIfLive?: boolean },
 ): void {
+  const id = tok.id;
+  if (!switchCtl.canPaint(tok)) {
+    diag(
+      `[chat-resume] REFUSED chat_id=${id} — paint token dead ` +
+      `(${'gen' in tok ? `switch gen=${tok.gen}` : 'view token'}, ` +
+      `focused=${switchCtl.focusedId() ?? ''} viewed=${switchCtl.viewedId() ?? ''})`,
+    );
+    return;
+  }
   const viewed = switchCtl.viewedId();
   const sameSession = viewed === id;
   diag(
@@ -138,10 +156,17 @@ export function replaySessionMessages(
   // get overwritten by the post-restore scroll(saved). No suppression.
   const saved = !targetMessageId ? getScrollPosition(id) : null;
 
-  // setViewed must run BEFORE the store mutates so the reconciler
-  // subscription sees the new active chat. The reconciler skips
-  // re-renders for non-active chats; we'd lose this render otherwise.
-  sessionDrawer.setViewed(id);
+  // Promotion is atomic with the paint and must run BEFORE the store
+  // mutates so the reconciler subscription sees the new active chat
+  // (it skips re-renders for non-active chats; we'd lose this render
+  // otherwise). Switch tokens promote through the state machine's
+  // commit (side-effecting twin in sessionDrawer, adopted by hardening
+  // Phase 1); canPaint passed above and this function is synchronous
+  // through the render, so the commit cannot fail nor be superseded
+  // before the DOM lands. View tokens repaint an already-committed
+  // view — setViewed re-runs the seen/engagement effects as before.
+  if ('gen' in tok) sessionDrawer.commitView(tok);
+  else sessionDrawer.setViewed(id);
 
   // Composer read-only when viewing a non-sidekick chat.
   const source = sessionDrawer.getSourceForChat(id);

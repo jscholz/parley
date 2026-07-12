@@ -17,6 +17,7 @@
 
 import * as backend from './backend.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
+import * as switchCtl from './switchController.ts';
 import { parseQuery, applyFilter } from './sessionFilter.ts';
 import type { SearchMessageHit as ServerMessageHit } from './proxyClientTypes.ts';
 import { diag } from './util/log.ts';
@@ -56,7 +57,7 @@ let messagesAbortCtl: AbortController | null = null;
  *  specific message target) funnel through this so we don't have to
  *  re-implement replaySessionMessages here. Message-hit activations
  *  go through ``onDrillToMessage`` instead (see below). */
-let onResumeCb: ((id: string, messages: any[], pagination?: any, targetMessageId?: string) => void) | null = null;
+let onResumeCb: ((tok: switchCtl.SwitchToken, messages: any[], pagination?: any, targetMessageId?: string) => void) | null = null;
 let onBeforeSwitchCb: ((leavingId: string | null) => void) | null = null;
 /** Drill-to-message callback for message hits. Routes through the
  *  same path pin clicks + activity opens use (main.ts drillToChatMessage),
@@ -75,7 +76,7 @@ let onBeforeSwitchCb: ((leavingId: string | null) => void) | null = null;
 let onDrillToMessageCb: ((chatId: string, msgId: string) => Promise<boolean>) | null = null;
 
 export function init(opts: {
-  onResume: (id: string, messages: any[], pagination?: any, targetMessageId?: string) => void;
+  onResume: (tok: switchCtl.SwitchToken, messages: any[], pagination?: any, targetMessageId?: string) => void;
   /** Same hook as sessionDrawer.init's onBeforeSwitch — fires with the
    *  chat being navigated AWAY from at the moment a palette hit
    *  activates. Lets the shell drop empty/abandoned chats. */
@@ -490,15 +491,20 @@ async function activate(hit: Hit) {
     return;
   }
   // Session-hit path (or message-hit when no drill callback wired —
-  // legacy/test rigs).
+  // legacy/test rigs). Mint the switch token BEFORE the fetch: the
+  // optimistic highlight flips now, and a drawer click landing during
+  // the await supersedes this — the paint below then refuses.
+  const targetMessageId = hit.kind === 'message' ? String(hit.message_id) : undefined;
+  const tok = switchCtl.begin(id, targetMessageId);
   try {
     const result: any = await backend.resumeSession(id);
     const messages = result.messages || [];
     const pagination = { firstId: result.firstId ?? null, hasMore: !!result.hasMore };
-    const targetMessageId = hit.kind === 'message' ? String(hit.message_id) : undefined;
-    onResumeCb?.(id, messages, pagination, targetMessageId);
+    onResumeCb?.(tok, messages, pagination, targetMessageId);
   } catch (e: any) {
     diag(`cmdk: resume ${id} failed: ${e?.message || e}`);
+  } finally {
+    switchCtl.clearOptimisticIfCurrent(tok);
   }
 }
 
