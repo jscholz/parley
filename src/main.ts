@@ -1207,7 +1207,9 @@ async function boot() {
           messageId: userMessageId, text, source: 'voice', sentAt: Date.now(),
         });
       }
-      backend.sendMessage(text, { voice: true, userMessageId });
+      backend.sendMessage(text, chatId
+        ? { voice: true, userMessageId, chatId }
+        : { voice: true, userMessageId });
       playFeedback('send');
     },
   });
@@ -1720,7 +1722,15 @@ async function boot() {
   let dcUserMessageId: string | null = null;
   let dcUserBufferedFinals = '';
   function currentChatId(): string | null {
-    return backend.getCurrentSessionId?.() ?? switchCtl.viewedId() ?? null;
+    // View state FIRST (hardening invariant #3: sends are addressed,
+    // not pointed). focusedId() flips synchronously at the row click;
+    // the adapter's pointer only re-aims when the switch's server
+    // fetch starts, so a send committed in the click's own task read
+    // the OLD chat from the pointer (same-tick variant of the
+    // /approve-into-wrong-session class — pinned by send-during-switch
+    // variant 2). The pointer remains as the fallback for surfaces
+    // with no view state (fresh boot, stub backend without browsing).
+    return switchCtl.focusedId() ?? backend.getCurrentSessionId?.() ?? null;
   }
   /** Resolve the chatId for a fresh send. On a fresh PWA the user's
    *  first action (typed send, voice send, slash command) lands BEFORE
@@ -2091,7 +2101,11 @@ async function boot() {
           started_at: new Date().toISOString(),
         });
       }
+      // Explicit address (invariant #3): the same chatId the optimistic
+      // bubble was filed under is what the POST carries — the adapter's
+      // mutable pointer is out of the loop for composer sends.
       const sendOpts: Record<string, any> = { userMessageId };
+      if (sendChatId) sendOpts.chatId = sendChatId;
       // sendMessage is async (POST + await !res.ok rejection), so a
       // sync try/catch only catches the !connected synchronous throw.
       // Capture both via the promise's .catch — flips bubble → failed
@@ -2259,6 +2273,7 @@ async function boot() {
         });
       }
       const opts: Record<string, any> = { userMessageId };
+      if (sendChatId) opts.chatId = sendChatId;
       const slashFail = (e: any) => {
         const msg = e?.message || String(e);
         diag(`slash sendMessage failed: ${msg}`);

@@ -128,7 +128,11 @@ export async function flushOutbox() {
         routeListenTurnText(text, item);
         return;
       }
-      backend.sendMessage(text);
+      // Address the send to the chat the memo was RECORDED in (queued
+      // items carry it) — a drain after the user moved chats must not
+      // deliver into wherever they are now. Legacy items without a
+      // chatId fall back to the pointer as before.
+      backend.sendMessage(text, item?.chatId ? { chatId: item.chatId } : undefined);
     },
     async (blob, mimeType, id, autoSend, toComposer, durationMs, item) => {
       const listenTurn = !!(item && item.listenTurn);

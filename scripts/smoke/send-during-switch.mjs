@@ -78,4 +78,37 @@ export default async function run({ page, log, mock }) {
   if (final.text.includes('SDS-A-SEED')) throw new Error('foreign content: A\'s transcript painted into B');
   if (final.loading) throw new Error('spinner left armed after everything settled');
   log('bubble visible in B after the delayed history landed — send routed and survived');
+
+  // ── Variant 2: send in the SAME TICK as the row click ─────────────
+  // The adapter's send pointer only re-aims when the switch's server
+  // fetch starts (an await or two after the click), so a send committed
+  // in the click's own task hits the ~40ms window where the pointer
+  // still names the chat being LEFT. The view state (focusedId) flips
+  // synchronously at click — sends addressed from it route correctly
+  // (invariant #3). Click + send inside one page.evaluate so no
+  // Playwright round-trip can widen the window.
+  await waitForDrawerQuiet(page);
+  await openSidebar(page);
+  await clickRow(page, CHAT_A);
+  await page.waitForFunction(
+    () => (document.getElementById('transcript')?.textContent || '').includes('SDS-A-SEED'),
+    null, { timeout: 5000, polling: 50 },
+  );
+  await waitForDrawerQuiet(page);
+  mock.setMessageDelay(CHAT_B, 1500);
+  const MARKER2 = 'SDS-SAMETICK-SEND';
+  await page.evaluate(({ target, marker }) => {
+    const row = document.querySelector(`#sessions-list li[data-chat-id="${target}"] .sess-body`);
+    row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const input = document.getElementById('composer-input');
+    input.value = marker;
+    input.dispatchEvent(new Event('input'));
+    document.getElementById('composer-send').click();
+  }, { target: CHAT_B, marker: MARKER2 });
+  await new Promise((r) => setTimeout(r, 800));
+  const inA2 = mock.getChat(CHAT_A)?.messages.some((m) => (m.content || '').includes(MARKER2)) ?? false;
+  const inB2 = mock.getChat(CHAT_B)?.messages.some((m) => (m.content || '').includes(MARKER2)) ?? false;
+  if (inA2) throw new Error('same-tick send landed in the chat the user LEFT — send pointer read before the switch re-aimed it');
+  if (!inB2) throw new Error('same-tick send never reached the clicked chat server-side');
+  log('same-tick send routed to the clicked chat — addressed from view state, not the pointer');
 }
