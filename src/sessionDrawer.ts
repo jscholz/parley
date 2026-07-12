@@ -1758,6 +1758,10 @@ async function resume(id: string, targetMessageId?: string) {
   // spinner + IDB-tail path. memRendered suppresses the now-redundant IDB
   // cache re-render in the reconcile IIFE (server pass still runs).
   let memRendered = false;
+  // True when the synchronous mem paint below rendered a TFC-B-flagged
+  // (stale) buffer — the IDB rung then re-renders the fresher cached
+  // tail behind it instead of skipping (phase-3 stale-paint).
+  let memWasStale = false;
   // Capture the prior viewed id for the shell's onBeforeSwitch hook so it
   // can clean up empty/abandoned chats (the "New chat / 0 msgs" pollution
   // case). Skip when "navigating" to the same chat — that's a refresh,
@@ -1798,7 +1802,7 @@ async function resume(id: string, targetMessageId?: string) {
     // it, but only AFTER the clear+render — too late to stop the wake.
     cancelAtBottomRepin();
     const memState = transcriptStore.getState(id);
-    // Gate the synchronous mem paint on three conditions:
+    // Gate the synchronous mem paint on two STRUCTURAL conditions:
     //   1. durable non-empty AND tail-anchored (!hasMoreNewer) — a floating
     //      drill window must not go through replaySessionMessages (flattens
     //      the newer cursor → TFC-A / #223-class hole).
@@ -1807,11 +1811,16 @@ async function resume(id: string, targetMessageId?: string) {
     //      keep the drilled window resident, but the canonical IDB snapshot
     //      is tail-anchored; let those fall back to the IDB-tail paint so a
     //      revisit lands at the tail (drill-window-cache contract).
-    //   3. not mem-stale — the TFC-B sweep refreshed this chat's IDB tail
-    //      but not its in-memory buffer; paint from the fresh cache instead.
+    // Mem-STALENESS deliberately does NOT gate the paint (hardening
+    // phase 3, decision #2: WhatsApp stale-paint-then-reconcile). A
+    // TFC-B-flagged buffer is old but CORRECT content — paint it now
+    // with zero blank frames; memWasStale below forces the IDB rung to
+    // re-render the fresh tail in place behind it (same-session upsert,
+    // no clear, no flicker).
     const memHasGap = memState.durable.some(it => it.role === 'gap');
+    memWasStale = memStaleChats.has(id);
     if (memState.durable.length > 0 && !memState.pagination.hasMoreNewer
-        && !memHasGap && !memStaleChats.has(id)
+        && !memHasGap
         && switchCtl.isCurrent(tok)) {
       // Synchronous repaint from the in-memory model — no blank frame, no
       // spinner. Pass inflight=undefined to PRESERVE live inflight (same
@@ -1819,7 +1828,7 @@ async function resume(id: string, targetMessageId?: string) {
       // replaySessionMessages, which also clears any stale .transcript-loading.
       onResumeCb?.(tok, memState.durable, memState.pagination, undefined, targetMessageId);
       memRendered = true;
-      t?.trace('mem-render', `n=${memState.durable.length}`);
+      t?.trace('mem-render', `n=${memState.durable.length}${memWasStale ? ' stale' : ''}`);
     } else {
       // One loading signal at a time (2026-07-10 walking-test report:
       // duplicate spinners on switch): a stale edge-pagination loader
@@ -1842,8 +1851,15 @@ async function resume(id: string, targetMessageId?: string) {
     // IDB re-render below (the bytes are already on screen). We STILL read
     // the IDB `cached` above so the cache-fuller merge can recover deep
     // scrollback the in-memory tail may not hold.
-    let cacheRendered = memRendered;
-    if (!memRendered && cached?.messages?.length) {
+    //
+    // EXCEPT when the mem paint was STALE (phase-3 stale-paint): the
+    // IDB tail is the fresher one (TFC-B refreshed it behind the
+    // resident buffer) — let this rung re-render it. Same-session at
+    // this point (the mem paint committed the view), so the replay
+    // upserts in place: no clear, no flicker, just the new tail rows
+    // landing.
+    let cacheRendered = memRendered && !memWasStale;
+    if (!cacheRendered && cached?.messages?.length) {
       if (switchCtl.isCurrent(tok)) {
         t?.trace('cache-render-start');
         log(`sessionDrawer: resumed ${id} from cache (${cached.messages.length} messages)`);
