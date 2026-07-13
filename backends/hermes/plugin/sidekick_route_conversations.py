@@ -182,19 +182,36 @@ def _summaries_by_user_id(
     # and just happen to share parent_session_id). Without this
     # gate the CTE over-includes delegate sub-task sessions that
     # share parent_session_id but use the default system_prompt.
+    # PERF (2026-07-13, hermes-0.18.2 field regression — 7-10s drawer
+    # lists, and the sync sqlite work blocked the gateway event loop
+    # for the duration; measured back to 135ms after this rewrite):
+    #  1. Carry only the 200-char prompt HEAD + length through the
+    #     recursion, not the full system_prompt. Prompts average ~21KB
+    #     (some 100KB+); dragging them through every recursion row and
+    #     SUBSTR-ing per candidate burned CPU + overflow-page I/O.
+    #     Semantics identical: the original also compared only the
+    #     first 200 chars of the ROOT's prompt (propagated unchanged).
+    #  2. CROSS JOIN pins the recursive step's join order to
+    #     queue-row → children-by-parent (idx_sessions_parent). The
+    #     planner otherwise drove from `user_id IS NULL` (hundreds of
+    #     rows) and re-scanned the whole accumulated queue per
+    #     candidate — quadratic. Worse, SQLite re-evaluates the CTE
+    #     co-routine for EACH of the 3 references below (sr/sr2/sr3),
+    #     so the quadratic step was paid three times per request.
     sql = f"""
-        WITH RECURSIVE session_root(id, root_user_id, root_source, root_system_prompt) AS (
-            SELECT id, user_id, source, system_prompt
+        WITH RECURSIVE session_root(id, root_user_id, root_source, prompt_head, prompt_len) AS (
+            SELECT id, user_id, source,
+                   SUBSTR(COALESCE(system_prompt, ''), 1, 200),
+                   LENGTH(COALESCE(system_prompt, ''))
               FROM sessions
              WHERE user_id IS NOT NULL
             UNION ALL
-            SELECT s.id, sr.root_user_id, sr.root_source, sr.root_system_prompt
-              FROM sessions s
-              JOIN session_root sr ON s.parent_session_id = sr.id
-             WHERE s.user_id IS NULL
-               AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
-               AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
-                   = SUBSTR(sr.root_system_prompt, 1, 200)
+            SELECT s.id, sr.root_user_id, sr.root_source, sr.prompt_head, sr.prompt_len
+              FROM session_root sr CROSS JOIN sessions s
+             WHERE s.parent_session_id = sr.id
+               AND s.user_id IS NULL
+               AND sr.prompt_len >= 200
+               AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200) = sr.prompt_head
         )
         SELECT
             sr.root_user_id AS user_id,
