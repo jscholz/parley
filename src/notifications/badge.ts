@@ -156,44 +156,67 @@ export function incrementUnread(_chatId: string, _delta: number = 1): void {
   requestRefresh();
 }
 
-/** User opened the chat — mark it seen on the server. The server
- *  broadcasts unread_changed, which triggers a fresh fetch via
- *  the SSE listener; we also kick a local refresh so the same
- *  device sees the update without waiting for the round-trip. */
+/** LOCAL-FIRST mutation (latency audit A4, 2026-07-13): flip the
+ *  in-memory unread state + notify every badge surface NOW; the server
+ *  POST settles behind and refreshFromServer reconciles the canonical
+ *  truth (including any divergence — the single-accessor architecture
+ *  means one notify repaints chips, dock badge, and sort order
+ *  together). Before this, both the clear-on-switch AND mark-unread
+ *  paths awaited the POST + a full refetch before any repaint — the
+ *  chip visibly lagged the interaction (his field addendum). */
+function applyLocal(chatId: string, mutate: () => void): void {
+  mutate();
+  void syncBadge();
+  notifyChange();
+}
+
+/** User opened the chat — clear locally now, mark seen on the server
+ *  behind. The server broadcasts unread_changed; refreshFromServer
+ *  reconciles this and other devices. */
 export async function clearUnread(chatId: string): Promise<void> {
   if (!chatId) return;
+  if (unreadFor(chatId) > 0) {
+    applyLocal(chatId, () => {
+      unreadByChat.delete(chatId);
+      markedUnread.delete(chatId);
+    });
+  }
   try {
     await fetch(apiUrl('/api/sidekick/notifications/seen'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId }),
     });
-  } catch { /* swallow */ }
+  } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
 }
 
 export async function markUnread(chatId: string): Promise<void> {
   if (!chatId || markedUnread.has(chatId)) return;
+  applyLocal(chatId, () => { markedUnread.add(chatId); });
   try {
     await fetch(apiUrl('/api/sidekick/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: true }),
     });
-  } catch { /* swallow */ }
+  } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
   log(`[badge] markUnread chat=${chatId}`);
 }
 
 export async function unmarkUnread(chatId: string): Promise<void> {
   if (!chatId) return;
+  if (markedUnread.has(chatId)) {
+    applyLocal(chatId, () => { markedUnread.delete(chatId); });
+  }
   try {
     await fetch(apiUrl('/api/sidekick/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: false }),
     });
-  } catch { /* swallow */ }
+  } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
   log(`[badge] unmarkUnread chat=${chatId}`);
 }

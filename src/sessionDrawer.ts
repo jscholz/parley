@@ -1703,12 +1703,29 @@ async function promptRename(s: any) {
   const current = s.title || s.snippet?.slice(0, 80) || '';
   const title = prompt('New title for this session:', current);
   if (!title || title === current) return;
+  // OPTIMISTIC (latency audit A3): the row shows the new title NOW —
+  // derived-view repaint from the patched in-memory list; the server
+  // rename settles behind, and a failure rolls the title back with a
+  // visible toast.
+  const prevTitle = s.title;
+  const row = cachedSessions.find((c: any) => c.id === s.id);
+  if (row) row.title = title;
+  {
+    const listEl = document.getElementById('sessions-list');
+    if (listEl) renderListFiltered(listEl, activeRowId());
+  }
   try {
     await backend.renameSession(s.id, title);
     refresh();
   } catch (e: any) {
     diag(`sessionDrawer: rename failed: ${e.message}`);
-    alert(`Rename failed: ${e.message}`);
+    const rowBack = cachedSessions.find((c: any) => c.id === s.id);
+    if (rowBack) rowBack.title = prevTitle;
+    {
+      const listEl = document.getElementById('sessions-list');
+      if (listEl) renderListFiltered(listEl, activeRowId());
+    }
+    toast(`Rename failed — title restored (${e?.message || e})`, 'err', 6000);
   }
 }
 
