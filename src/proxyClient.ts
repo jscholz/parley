@@ -654,7 +654,18 @@ const CROSS_DEVICE_SYNC: Record<CrossDeviceSyncType, {
   activity_changed:      { eventName: 'sidekick:server-activity-changed' },
   conversation_deleted:  {
     eventName: 'sidekick:server-conversation-deleted',
-    sideEffect: (chatId) => { conversations.remove(chatId).catch(() => {}); },
+    sideEffect: (chatId) => {
+      conversations.remove(chatId).catch(() => {});
+      // Close shelf docs owned by the deleted chat (meeting transcripts
+      // etc. — "delete means gone", 2026-07-13). Rides the envelope so
+      // one hook covers local deletes (the plugin echoes the envelope
+      // back) AND cross-device ones; a FAILED delete emits no envelope,
+      // so the rollback keeps its docs. View-layer only — files on
+      // disk follow the capture's own lifecycle.
+      void import('./rightDrawer/docStore.ts')
+        .then((m) => m.removeDocsFor({ chatId }))
+        .catch(() => {});
+    },
   },
 };
 function dispatchCrossDeviceSync(type: CrossDeviceSyncType, env: any, chatId: string): void {
@@ -794,6 +805,19 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       // Ring replays must never re-trigger a start/stop — a stale
       // 'start' replayed on boot would grab the mic unprompted.
       if (env?._replay === true) return;
+      // A deleted capture takes its shelf docs with it (2026-07-13
+      // nit — same "delete means gone" contract as chats). The proxy's
+      // notifyChanged carries the lifecycle stage in `kind`
+      // (created/patched/stopped/completed/deleted).
+      if (env?.kind === 'deleted') {
+        const capId = typeof env?.capture?.id === 'string' ? env.capture.id
+          : (typeof env?.capture_id === 'string' ? env.capture_id : null);
+        if (capId) {
+          void import('./rightDrawer/docStore.ts')
+            .then((m) => m.removeDocsFor({ captureId: capId }))
+            .catch(() => {});
+        }
+      }
       subs?.onToolEvent?.({
         kind: env.type === 'capture_control' ? 'capture.control' : 'capture.changed',
         payload: {

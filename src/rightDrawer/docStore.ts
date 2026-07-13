@@ -211,6 +211,24 @@ export function removeDoc(id: string): void {
   notify(false);
 }
 
+/** Close every doc owned by a deleted chat or capture (2026-07-13,
+ *  Jonathan's nit: deleting a meeting / a session containing one should
+ *  take its shelf docs with it — "delete means gone"). View-layer only:
+ *  the transcript FILES on disk live with the capture's own lifecycle;
+ *  this just stops the shelf pointing at content the user removed. */
+export function removeDocsFor(match: { chatId?: string; captureId?: string }): number {
+  const had = docs.length;
+  docs = docs.filter(d =>
+    !((match.chatId && d.chatId === match.chatId)
+      || (match.captureId && d.captureId === match.captureId)));
+  const removed = had - docs.length;
+  if (!removed) return 0;
+  if (activeId && !docs.some(d => d.id === activeId)) activeId = docs[0]?.id ?? null;
+  persist();
+  notify(false);
+  return removed;
+}
+
 /** Clear-all (list view header action). */
 export function clearDocs(): void {
   docs = [];

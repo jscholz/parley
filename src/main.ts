@@ -928,6 +928,10 @@ async function boot() {
     }
     sessionDrawer.setViewed(chatId);
     chat.trackViewedSession(chatId);
+    // Same pagination-leak fix as new-chat: the minted meeting session
+    // has no history — stale hasMore/cursors from the previous chat
+    // would arm a bogus top edge loader on the fresh shell.
+    chat.setPaginationState(null, false, null, false);
     chat.addSystemLine('Recording started — the live transcript lands in Docs; ask anything here.');
     composerInput.focus();
   };
@@ -2675,6 +2679,14 @@ async function boot() {
       // the chatId to whatever the prior viewed was (smoke
       // `pin-drawer-jump` regression).
       chat.trackViewedSession(newChatId);
+      // Reset pagination to the fresh chat's reality: NO history, no
+      // cursors. Without this, the previous chat's hasMore/oldest-id
+      // leak across the rotation — the empty chat sits at scrollTop=0,
+      // maybeLoadEarlier sees the stale hasMore and fires a bogus
+      // load-earlier for the chat we just LEFT (top edge spinner over
+      // a brand-new chat + a wasted fetch whose paint gets refused
+      // downstream; field nit 2026-07-13).
+      chat.setPaginationState(null, false, null, false);
       chat.addSystemLine('New chat started');
       // New chat is always sidekick-source; ensure composer is enabled
       // (in case user just rotated away from a non-sidekick chat).
