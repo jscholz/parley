@@ -75,6 +75,7 @@ export async function installMockBackend(page) {
   let historyFirstPageLimit = null;
   const messageDelays = new Map();  // chat_id -> artificial /messages delay in ms
   let sessionsFailStatus = 0;
+  let sessionsDelayMs = 0;      // artificial /sessions list latency
   const messageFailStatus = new Map();
   /** Active SSE responses (real http.ServerResponse objects). */
   const streamSubs = new Set();
@@ -157,6 +158,9 @@ export async function installMockBackend(page) {
       return route.fallback();
     }
     if (route.request().method() !== 'GET') return route.fallback();
+    if (sessionsDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, sessionsDelayMs));
+    }
     if (sessionsFailStatus > 0) {
       await route.fulfill({
         status: sessionsFailStatus,
@@ -1112,6 +1116,12 @@ export async function installMockBackend(page) {
     },
     setSessionsFailure(status = 503) {
       sessionsFailStatus = status > 0 ? status : 0;
+    },
+    /** Hold the /sessions LIST response open for `ms` — simulates the
+     *  slow-list window where a single-flight refresh is in flight and
+     *  drawer paints must NOT wait for it. */
+    setSessionsDelay(ms) {
+      sessionsDelayMs = typeof ms === 'number' && ms > 0 ? ms : 0;
     },
     setMessageFailure(chatId, status = 503) {
       if (!chatId) return;

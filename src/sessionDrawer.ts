@@ -558,20 +558,19 @@ function applyViewChangedEffects(prev: string | null, id: string | null): void {
   if (prev !== id && id) {
     try { window.dispatchEvent(new CustomEvent('sidekick:view-committed', { detail: { chatId: id } })); } catch { /* noop */ }
   }
-  // Synchronous IN-MEMORY list repaint (field bug 2026-07-13: the "New
-  // conversation" placeholder lingered seconds after switching away).
-  // The placeholder is a pure function of (cachedSessions, activeRowId)
-  // — but the only repaints after a switch were the debounced refresh
-  // (whose cleanup pre-read queues behind IDB writes on a busy profile)
-  // and the poller. Repaint from memory NOW — gated on a placeholder
-  // actually being on screen, so the common switch (row highlight
-  // already flipped by the click handler) pays nothing and the
-  // switch-back budget holds.
-  if (prev !== id) {
+  // DERIVED-VIEW NOTIFY (structural contract, 2026-07-13): the sidebar
+  // is a pure function of local state, re-derived synchronously at
+  // every view commit — never gated on a refresh/IDB/network sync.
+  // This ONE unconditional call replaced the per-case repaint
+  // choreography (placeholder-present gates and friends) that kept
+  // producing whack-a-mole lag reports: renderListFiltered's two-tier
+  // diff makes it budget-free (rows unchanged + active moved = two
+  // class toggles; placeholder appear/disappear flips the rows print
+  // and rebuilds). The async refresh still reconciles server truth
+  // behind it.
+  {
     const listEl = document.getElementById('sessions-list');
-    if (listEl && listEl.querySelector('li.sess-placeholder')) {
-      renderListFiltered(listEl, activeRowId());
-    }
+    if (listEl) renderListFiltered(listEl, activeRowId());
   }
 }
 
@@ -908,7 +907,7 @@ async function doRefresh() {
     // "Loading…" on screen forever (found via the optimistic-delete
     // rollback, but reachable by any cache-empty refresh racing an
     // unchanged list — the historical "drawer stuck on Loading" class).
-    lastRenderFingerprint = null;
+    lastRowsPrint = null;
   }
 
   // 2. Background-fetch from server + reconcile.
@@ -1147,15 +1146,25 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
  *  is already correct. This kills the cache-then-server double-render
  *  in refresh(): if the server returned the same list we just painted
  *  from cache, the second renderList is a no-op. Same for repeated
- *  refresh() calls where nothing meaningfully changed. */
-let lastRenderFingerprint: string | null = null;
+ *  refresh() calls where nothing meaningfully changed.
+ *
+ *  TWO-TIER since the derived-view refactor (2026-07-13, Jonathan's
+ *  structural call: "all session operations should have a local
+ *  instant update, followed by a sync"): the ROWS print (content +
+ *  pins + placeholder flag) decides full rebuilds; the active id is
+ *  tracked separately and patched IN PLACE when it's the only change —
+ *  so notifying on every view commit is budget-free (a plain switch
+ *  costs two class toggles, not a 50-row rebuild). */
+let lastRowsPrint: string | null = null;
+let lastActiveId: string | null = null;
 
-/** Cheap fingerprint of the visible state. Includes the fields renderRow
- *  reads (id, title, snippet, messageCount, lastMessageAt, source) plus
- *  activeId and the placeholder flag. Anything not in here can change
- *  without us noticing — keep it broad enough that legitimate updates
- *  still trigger a rebuild. */
-function renderListFingerprint(sessions: any[], activeId: string, showPlaceholder: boolean, pinnedOrder: string[]): string {
+/** Cheap fingerprint of the visible ROW state. Includes the fields
+ *  renderRow reads (id, title, snippet, messageCount, lastMessageAt,
+ *  source, nickname, draft snippet) plus the placeholder flag + pin
+ *  order. Anything not in here can change without us noticing — keep
+ *  it broad enough that legitimate updates still trigger a rebuild.
+ *  Deliberately EXCLUDES activeId (patched in place). */
+function renderListFingerprint(sessions: any[], showPlaceholder: boolean, pinnedOrder: string[]): string {
   const rows = sessions.map(s =>
     `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`
     // Draft snippet state: appearance/disappearance/edit of a row's
@@ -1167,7 +1176,18 @@ function renderListFingerprint(sessions: any[], activeId: string, showPlaceholde
   // any row's fields or the incoming recency order, so without this the
   // diff-bypass would skip the rebuild and the pinned region wouldn't
   // move.
-  return `${activeId}::${showPlaceholder ? 'p' : ''}::pins=${pinnedOrder.join(',')}::${rows}`;
+  return `${showPlaceholder ? 'p' : ''}::pins=${pinnedOrder.join(',')}::${rows}`;
+}
+
+/** Tier-2 reconcile: rows unchanged, active id moved — patch the
+ *  .active class in place instead of rebuilding. */
+function patchActiveRow(listEl: HTMLElement, activeId: string): void {
+  listEl.querySelectorAll('li.active').forEach((el) => el.classList.remove('active'));
+  if (activeId) {
+    try {
+      listEl.querySelector(`li[data-chat-id="${CSS.escape(activeId)}"]`)?.classList.add('active');
+    } catch { /* malformed id — highlight simply absent until rebuild */ }
+  }
 }
 
 function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFresh = false) {
@@ -1198,17 +1218,25 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   const pinnedRows = pinnedOrder.map(id => byId.get(id)).filter(Boolean);
   const restRows = sessions.filter((s: any) => !pinnedSet.has(String(s.id)));
 
-  // Diff-bypass: if nothing the user can see has changed, skip the DOM
-  // rebuild entirely. refresh() naturally renders twice (cache + server);
-  // most pairs reconcile to the same list and the second rebuild is pure
-  // flicker. This one check eliminates ~half the drawer mutations under
-  // normal use.
-  const fingerprint = renderListFingerprint(sessions, activeId, showPlaceholder, pinnedOrder);
-  if (fingerprint === lastRenderFingerprint) return;
+  // Two-tier diff-bypass (derived-view refactor): rows unchanged +
+  // active unchanged → nothing to do; rows unchanged + active moved →
+  // in-place class patch (this is what makes notifying on EVERY view
+  // commit budget-free); rows changed → full rebuild below. refresh()
+  // naturally renders twice (cache + server); most pairs reconcile to
+  // the same list and the second rebuild is pure flicker.
+  const rowsPrint = renderListFingerprint(sessions, showPlaceholder, pinnedOrder);
+  if (rowsPrint === lastRowsPrint) {
+    if (activeId !== lastActiveId) {
+      patchActiveRow(listEl, activeId);
+      lastActiveId = activeId;
+    }
+    return;
+  }
 
   if (sessions.length === 0 && !showPlaceholder) {
     listEl.innerHTML = '<li class="sess-empty">No past sessions yet.</li>';
-    lastRenderFingerprint = fingerprint;
+    lastRowsPrint = rowsPrint;
+    lastActiveId = activeId;
     return;
   }
   listEl.innerHTML = '';
@@ -1234,7 +1262,8 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   // doesn't carry over the .multiselected class because each LI is
   // freshly created.
   syncMultiSelectClasses();
-  lastRenderFingerprint = fingerprint;
+  lastRowsPrint = rowsPrint;
+  lastActiveId = activeId;
 }
 
 function renderPlaceholderRow(id: string): HTMLLIElement {

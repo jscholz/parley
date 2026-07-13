@@ -31,7 +31,7 @@ export function MOCK_SETUP(mock) {
   });
 }
 
-export default async function run({ page, log }) {
+export default async function run({ page, log, mock }) {
   await waitForReady(page);
   await openSidebar(page);
   await clickRow(page, CHAT_A);
@@ -85,6 +85,59 @@ export default async function run({ page, log }) {
   log(`new chat typeable in ${ms.toFixed(0)}ms under contention`);
   if (ms > 500) {
     throw new Error(`new chat took ${ms.toFixed(0)}ms under IDB contention — the mint is waiting on the blocked DB (field bug: "sometimes instant, sometimes 3s")`);
+  }
+
+  // The sidebar's "New conversation" placeholder must APPEAR promptly
+  // too — not wait for the IDB-bound refresh (field 2026-07-13 v0.628:
+  // "new chat still takes 3s to create the session entry in sidebar").
+  const phAppeared = await page.evaluate(async () => {
+    const t0 = performance.now();
+    for (;;) {
+      const has = [...document.querySelectorAll('#sessions-list li')]
+        .some((r) => (r.textContent || '').includes('New conversation'));
+      if (has) return performance.now() - t0;
+      if (performance.now() - t0 > 6000) return -1;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  });
+  if (phAppeared < 0) throw new Error('placeholder row never appeared after new chat');
+  log(`placeholder appeared ${phAppeared.toFixed(0)}ms after new chat`);
+  if (phAppeared > 500) {
+    throw new Error(`placeholder took ${phAppeared.toFixed(0)}ms to appear under IDB contention — sidebar entry is waiting on the blocked refresh`);
+  }
+
+  // ── Slow-list + in-flight-refresh window (field v0.628: "new chat
+  //    still takes 3s to create the session entry in sidebar"). The
+  //    drawer refresh is SINGLE-FLIGHT: with a slow /sessions fetch in
+  //    flight, new-chat's trailing refresh() returns without queuing —
+  //    the placeholder must come from the local derived-view repaint,
+  //    never from the network. Structural contract (Jonathan): every
+  //    session operation updates locally NOW, syncs behind.
+  await clickRow(page, CHAT_A);
+  await new Promise((r) => setTimeout(r, 600));
+  mock.setSessionsDelay(3000);
+  // Kick a refresh so the single-flight lock is HELD on the slow fetch.
+  await page.evaluate(async () => {
+    const drawer = await import('/build/sessionDrawer.mjs');
+    void drawer.refresh?.();
+  });
+  await new Promise((r) => setTimeout(r, 200));   // refresh in flight
+  const phSlow = await page.evaluate(async () => {
+    document.getElementById('sb-new-chat')?.click();
+    const t0 = performance.now();
+    for (;;) {
+      const has = [...document.querySelectorAll('#sessions-list li')]
+        .some((r) => (r.textContent || '').includes('New conversation'));
+      if (has) return performance.now() - t0;
+      if (performance.now() - t0 > 6000) return -1;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  });
+  mock.setSessionsDelay(0);
+  if (phSlow < 0) throw new Error('placeholder never appeared with a slow list fetch in flight');
+  log(`placeholder appeared ${phSlow.toFixed(0)}ms after new chat (slow list in flight)`);
+  if (phSlow > 500) {
+    throw new Error(`placeholder waited ${phSlow.toFixed(0)}ms on the in-flight list fetch — local update must not gate on sync (the v0.628 field bug)`);
   }
 
   // Placeholder must also clear promptly when switching away, without
