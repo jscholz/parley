@@ -463,8 +463,17 @@ class SidekickAdapter(BasePlatformAdapter):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def connect(self) -> bool:
-        """Bind the WS server, listen for the proxy."""
+    async def connect(self, *, is_reconnect: bool = False, **_kwargs) -> bool:
+        """Bind the WS server, listen for the proxy.
+
+        ``is_reconnect`` arrived with hermes 0.18.x
+        (gateway/platforms/base.py connect(*, is_reconnect)) — cold boot
+        vs reconnect-after-drop. Our WS server binds identically in both
+        cases, so it's accepted-and-ignored; ``**_kwargs`` absorbs any
+        future upstream lifecycle kwargs so a gateway upgrade degrades
+        to default behavior instead of a TypeError at connect time (the
+        exact failure the 2026-07-13 0.18.2 swap hit).
+        """
         if not self._token:
             logger.error(
                 "[sidekick] SIDEKICK_PLATFORM_TOKEN unset — refusing to start. "
