@@ -551,6 +551,21 @@ function applyViewChangedEffects(prev: string | null, id: string | null): void {
   if (prev !== id && id) {
     try { window.dispatchEvent(new CustomEvent('sidekick:view-committed', { detail: { chatId: id } })); } catch { /* noop */ }
   }
+  // Synchronous IN-MEMORY list repaint (field bug 2026-07-13: the "New
+  // conversation" placeholder lingered seconds after switching away).
+  // The placeholder is a pure function of (cachedSessions, activeRowId)
+  // — but the only repaints after a switch were the debounced refresh
+  // (whose cleanup pre-read queues behind IDB writes on a busy profile)
+  // and the poller. Repaint from memory NOW — gated on a placeholder
+  // actually being on screen, so the common switch (row highlight
+  // already flipped by the click handler) pays nothing and the
+  // switch-back budget holds.
+  if (prev !== id) {
+    const listEl = document.getElementById('sessions-list');
+    if (listEl && listEl.querySelector('li.sess-placeholder')) {
+      renderListFiltered(listEl, activeRowId());
+    }
+  }
 }
 
 /** The id refresh()/renderList should paint as `.active`: optimistic
@@ -880,6 +895,13 @@ async function doRefresh() {
     renderListFiltered(listEl, active);
   } else {
     listEl.innerHTML = '<li class="sess-empty">Loading…</li>';
+    // Raw innerHTML bypasses renderList's fingerprint bookkeeping —
+    // WITHOUT invalidating it, a later render whose fingerprint matches
+    // the last real paint SKIPS via the diff-bypass and leaves
+    // "Loading…" on screen forever (found via the optimistic-delete
+    // rollback, but reachable by any cache-empty refresh racing an
+    // unchanged list — the historical "drawer stuck on Loading" class).
+    lastRenderFingerprint = null;
   }
 
   // 2. Background-fetch from server + reconcile.
@@ -1210,7 +1232,7 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
 
 function renderPlaceholderRow(id: string): HTMLLIElement {
   const li = document.createElement('li');
-  li.classList.add('active');
+  li.classList.add('active', 'sess-placeholder');
   const body = document.createElement('div');
   body.className = 'sess-body';
   const snippet = document.createElement('div');
@@ -1722,6 +1744,7 @@ async function deleteSessionAtomic(id: string): Promise<void> {
   } catch (e: any) {
     // Rollback: lift the tombstone, restore the row, tell the user.
     unmarkRecentlyDeleted(id);
+    diag(`sessionDrawer: delete ROLLBACK ${id} removedRow=${!!removedRow} cached=${cachedSessions.length}`);
     if (removedRow && !cachedSessions.some((s: any) => s.id === id)) {
       cachedSessions = [...cachedSessions, removedRow];
     }
@@ -1733,6 +1756,20 @@ async function deleteSessionAtomic(id: string): Promise<void> {
     // status line ("Connected") almost immediately, which would eat the
     // failure message.
     toast(`Delete failed — session restored (${e?.message || e})`, 'err', 6000);
+    // Restore the IDB list cache BEFORE kicking the reconcile refresh —
+    // and awaited, deliberately: the optimistic step's filtered write
+    // races this rollback, and an unawaited restore lets refresh()'s
+    // step-1 cache paint read the stale filtered list, clobber the
+    // in-memory restore above, and leave the drawer wrong until the
+    // next poll (~15s). Ordering the write beats racing it.
+    if (removedRow) {
+      try {
+        const cachedList = await sessionCache.getListCache();
+        if (cachedList?.sessions && !cachedList.sessions.some((c: any) => c.id === id)) {
+          await sessionCache.putListCache([...cachedList.sessions, removedRow]);
+        }
+      } catch { /* server reconcile heals */ }
+    }
     refresh();
     throw e;
   }

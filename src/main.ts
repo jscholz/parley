@@ -2613,13 +2613,16 @@ async function boot() {
       composerInput.dispatchEvent(new Event('input'));
       attachments.clear();
       historyLoaded = false;
-      // newSession is async — it mints a chat_id and awaits an IDB write.
-      // Without awaiting, getCurrentSessionId() below returns the PRIOR
-      // activeChatId (or null), setViewed pins to that, and the next
-      // reply's chat_id mismatches the viewed gate → handleReplyDelta /
-      // handleReplyFinal early-return → nothing renders. User sees
-      // "sending…" forever despite the agent replying server-side.
-      await backend.newSession?.();
+      // newSession mints the chat_id SYNCHRONOUSLY (activeChatId is set
+      // before its first await — mintChatId is pure), so
+      // getCurrentSessionId() below is already correct without waiting.
+      // The await it used to carry was only the IDB setActive
+      // persistence — durability, not correctness — and IDB writes
+      // queue behind whatever else is writing, which made new-chat
+      // "sometimes instant, sometimes seconds" on a busy profile
+      // (field 2026-07-13). Fire-and-forget; a reload racing the write
+      // just boots into the previous session, same as before the mint.
+      void backend.newSession?.();
       // Hard-reset the on-screen transcript before painting the blank chat.
       // transcriptStore.clearAll above drops the projection BUBBLES, but two
       // DOM artifacts survive it (field bug 2026-06-16):

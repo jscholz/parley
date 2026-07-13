@@ -72,12 +72,46 @@ export default async function run({ page, log, mock }) {
     const err = await goneImmediately.p;
     return { goneImmediately: goneImmediately.gone, err: String(err) };
   }, CHAT_B);
+  log(`failure-path: goneImmediately=${res.goneImmediately} err="${res.err}"`);
   if (!res.goneImmediately) throw new Error('failure-path row was not optimistically removed first');
-  await page.waitForFunction(
-    (id) => !!document.querySelector(`#sessions-list li[data-chat-id="${id}"]`),
-    CHAT_B, { timeout: 5000, polling: 100 },
-  );
-  const toastText = await page.evaluate(() => document.querySelector('.toast, [class*="toast"]')?.textContent || document.body.textContent || '');
-  if (!/Delete failed/i.test(toastText)) throw new Error('no visible "Delete failed" toast after rollback');
+  // Watch BOTH rollback signals from the same clock: the toast lives 6s
+  // from the rollback moment, so polling them sequentially can miss it
+  // under suite load (the row-wait alone can eat the toast's lifetime).
+  const rollback = await page.evaluate(async (id) => {
+    const t0 = performance.now();
+    let sawToast = false;
+    let sawRow = false;
+    const timeline = [];
+    let lastSnap = '';
+    while (performance.now() - t0 < 8000) {
+      if (!sawToast && /Delete failed/i.test(document.querySelector('.toast, [class*="toast"]')?.textContent || '')) sawToast = true;
+      if (!sawRow && document.querySelector(`#sessions-list li[data-chat-id="${id}"]`)) sawRow = true;
+      const snap = [...document.querySelectorAll('#sessions-list li')]
+        .map((r) => r.getAttribute('data-chat-id') || r.className || '?').join(',');
+      if (snap !== lastSnap) {
+        timeline.push(`+${Math.round(performance.now() - t0)}ms [${snap.slice(0, 120)}]`);
+        lastSnap = snap;
+      }
+      if (sawToast && sawRow) return { sawToast, sawRow, timeline };
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return { sawToast, sawRow, timeline };
+  }, CHAT_B);
+  for (const t of (rollback.timeline || []).slice(0, 8)) log(`  timeline: ${t}`);
+  if (!rollback.sawRow) {
+    const probe = await page.evaluate(async (id) => {
+      const ops = await import('/build/sessionOps.mjs').catch(() => null);
+      const drawer = await import('/build/sessionDrawer.mjs').catch(() => null);
+      return {
+        tombstoned: ops ? ops.isRecentlyDeleted(id) : 'n/a',
+        cachedLen: drawer?.getCachedSessions ? drawer.getCachedSessions().length : 'n/a',
+        cachedIds: drawer?.getCachedSessions ? drawer.getCachedSessions().map((s) => s.id).join(',') : 'n/a',
+        listHtml: (document.getElementById('sessions-list')?.innerHTML || '').slice(0, 100),
+      };
+    }, CHAT_B);
+    log(`  probe: ${JSON.stringify(probe)}`);
+  }
+  if (!rollback.sawRow) throw new Error('row never restored after failed DELETE');
+  if (!rollback.sawToast) throw new Error('no visible "Delete failed" toast after rollback');
   log('failed DELETE rolled back: row restored + error toast shown');
 }
