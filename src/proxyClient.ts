@@ -1573,18 +1573,21 @@ export const proxyClientAdapter = {
     // immediate-delete races re-pin after delete clears activeChatId,
     // and the drawer paints a placeholder for the deleted chat.
     markRecentlyDeleted(id);
-    // Drop the proxy-side row first (best-effort — the local row is
-    // the source of truth, but we want the drawer-enrichment query
-    // to stop returning this id immediately). Then drop locally + clear
-    // active pointer if needed.
-    try {
-      const r = await fetch(`${apiBase()}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!r.ok && r.status !== 404 && r.status !== 503) {
-        const errText = await r.text().catch(() => '');
-        diag(`proxy-client.deleteSession: proxy returned ${r.status}: ${errText.slice(0, 120)}`);
-      }
-    } catch (e: any) {
-      diag(`proxy-client.deleteSession: proxy delete failed: ${e.message}`);
+    // Server delete FIRST, and failures PROPAGATE (latency-audit A1,
+    // 2026-07-13): the old best-effort swallow removed the local row
+    // even when the server kept its copy — the session then resurrected
+    // as a zombie on the next list refresh, which reads as "delete
+    // randomly didn't work". The optimistic caller (sessionDrawer)
+    // already removed the ROW from view; a thrown error here is its
+    // rollback signal. Tolerated statuses:
+    //   404            — already gone (success for our purposes)
+    //   405 / 501      — backend has no delete endpoint (npx stub);
+    //                    local-only delete is the feature, not a bug.
+    const r = await fetch(`${apiBase()}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok && ![404, 405, 501].includes(r.status)) {
+      const errText = await r.text().catch(() => '');
+      diag(`proxy-client.deleteSession: proxy returned ${r.status}: ${errText.slice(0, 120)}`);
+      throw new Error(`server delete failed (HTTP ${r.status})`);
     }
     await conversations.remove(id);
     if (activeChatId === id) {

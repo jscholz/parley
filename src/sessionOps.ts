@@ -50,6 +50,13 @@ export function isRecentlyDeleted(id: string): boolean {
   return true;
 }
 
+/** Lift the tombstone for `id` — the optimistic-delete ROLLBACK path
+ *  (server DELETE failed; the row is being restored and must stop
+ *  being filtered out of renders). */
+export function unmarkRecentlyDeleted(id: string): void {
+  recentlyDeleted.delete(id);
+}
+
 /** Test seam — clear the set between scenarios so cross-test state
  *  doesn't leak. Production never calls this. */
 export function _resetRecentlyDeletedForTests(): void {

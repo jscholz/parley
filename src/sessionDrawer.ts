@@ -27,10 +27,11 @@ import { parseQuery, applyFilter } from './sessionFilter.ts';
 import { meetingCountFor, hasMeetings } from './capture/meetingsIndex.ts';
 import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter as clearStoredFilter } from './util/filterStore.ts';
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
-import { markRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize } from './sessionOps.ts';
+import { markRecentlyDeleted, unmarkRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize } from './sessionOps.ts';
 import * as badge from './notifications/badge.ts';
 import * as composerDrafts from './composerDrafts.ts';
 import { escapeHtml } from './util/dom.ts';
+import { toast } from './toast.ts';
 import { isMuted as isChatMuted, setMuted as setChatMuted } from './notifications/mutes.ts';
 import { reportChatSwitch } from './notifications/visibility.ts';
 import { unreadFor } from './notifications/badge.ts';
@@ -1680,8 +1681,8 @@ async function promptRename(s: any) {
  *  Throws if backend.deleteSession throws; callers handle (promptDelete
  *  alerts, multiSelect logs and continues to the next id). */
 async function deleteSessionAtomic(id: string): Promise<void> {
-  // Mark + bump generation BEFORE the network call so any list response
-  // or resume continuation that lands during the await is already gated.
+  // Mark + bump generation BEFORE anything async so any list response
+  // or resume continuation that lands during the awaits is already gated.
   markRecentlyDeleted(id);
   switchCtl.invalidate();
   if (switchCtl.optimisticId() === id) switchCtl.setOptimistic(null);
@@ -1694,12 +1695,46 @@ async function deleteSessionAtomic(id: string): Promise<void> {
   // Drop any per-session identity (nickname/voice) so a recycled id
   // doesn't inherit a stale name/voice. No-op if none was set.
   sessionIdentity.remove(id);
-  await backend.deleteSession(id);
-  await sessionCache.removeMessagesCache(id);
-  const cached = await sessionCache.getListCache();
-  if (cached?.sessions?.length) {
-    const filtered = cached.sessions.filter((c: any) => c.id !== id);
-    await sessionCache.putListCache(filtered);
+  // OPTIMISTIC (latency audit A1, 2026-07-13): the row disappears NOW —
+  // drop it from the in-memory list + repaint synchronously, then let
+  // the server DELETE settle in the background. Everything above
+  // already ran pre-await (the safety net was built for this); the only
+  // thing that ever waited on the round-trip was the repaint. On
+  // failure the tombstone lifts, the caches revert on the next refresh,
+  // and the row returns with a status toast — visible failure, not a
+  // silent zombie.
+  const removedRow = cachedSessions.find((s: any) => s.id === id) ?? null;
+  cachedSessions = cachedSessions.filter((s: any) => s.id !== id);
+  {
+    const listEl = document.getElementById('sessions-list');
+    if (listEl) renderListFiltered(listEl, activeRowId());
+  }
+  // IDB caches follow (async, non-blocking, pre-server so a reload
+  // mid-flight doesn't resurrect the row).
+  void sessionCache.removeMessagesCache(id);
+  void sessionCache.getListCache().then((cached) => {
+    if (cached?.sessions?.length) {
+      return sessionCache.putListCache(cached.sessions.filter((c: any) => c.id !== id));
+    }
+  }).catch(() => { /* refresh() reconciles */ });
+  try {
+    await backend.deleteSession(id);
+  } catch (e: any) {
+    // Rollback: lift the tombstone, restore the row, tell the user.
+    unmarkRecentlyDeleted(id);
+    if (removedRow && !cachedSessions.some((s: any) => s.id === id)) {
+      cachedSessions = [...cachedSessions, removedRow];
+    }
+    {
+      const listEl = document.getElementById('sessions-list');
+      if (listEl) renderListFiltered(listEl, activeRowId());
+    }
+    // Toast, not the status line: the connection heartbeat repaints the
+    // status line ("Connected") almost immediately, which would eat the
+    // failure message.
+    toast(`Delete failed — session restored (${e?.message || e})`, 'err', 6000);
+    refresh();
+    throw e;
   }
   refresh();
 }
