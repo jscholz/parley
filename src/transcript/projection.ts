@@ -1,10 +1,11 @@
 /**
  * @fileoverview Crack A — pure projection from ChatState → BubbleSpec[].
  *
- * No DOM, no logging, no globals, no time-of-day reads. The reconciler
- * consumes the output and brings the DOM in line. Identical inputs MUST
- * produce identical outputs — that's what makes the projection
- * cache-friendly + easy to test.
+ * No DOM, no logging, no globals, no time-of-day reads (single tolerated
+ * exception: the thinking-placeholder staleness cap in step 5). The
+ * reconciler consumes the output and brings the DOM in line. Identical
+ * inputs MUST produce identical outputs — that's what makes the
+ * projection cache-friendly + easy to test.
  *
  * Ordering rule:
  *   - Walk `durable` in given order (server-canonical).
@@ -227,6 +228,16 @@ export function project(state: ChatState): BubbleSpec[] {
   // Pending lookup so user_message echoes inherit source/attachments
   // from the optimistic send.
   const pendingByKey = new Map<string, PendingSend>(state.pendingSends.map(p => [p.messageId, p]));
+  // Turn-liveness bookkeeping for the local thinking placeholder (B1a,
+  // step 5 below). A user bubble sourced from a LIVE envelope echo (not
+  // yet covered by durable) keeps its turn "open" after the optimistic
+  // pendingSend is cleared — the echo lands well before the model's
+  // first delta, and dots must survive that hop. A reply_final closes
+  // its turn even when the final is blank (tool-only / degenerate
+  // finals produce no assistant spec to detect, so the bubble list
+  // alone can't tell "answered" from "still thinking").
+  const inflightUserKeys = new Set<string>();
+  const finalizedTurnUserKeys = new Set<string>();
 
   for (const env of state.inflight) {
     switch (env.type) {
@@ -240,6 +251,7 @@ export function project(state: ChatState): BubbleSpec[] {
           inflightTs = Math.max(inflightTs, currentTurnTs + 1);
         } else {
           userKeys.add(key);
+          inflightUserKeys.add(key);
           const pend = pendingByKey.get(key);
           const ts = pend ? pend.sentAt : inflightTs++;
           currentTurnTs = ts;
@@ -334,6 +346,11 @@ export function project(state: ChatState): BubbleSpec[] {
         if (currentTurnKey) {
           const row = activityByKey.get(currentTurnKey);
           if (row) row.complete = true;
+          // The turn is answered — even a BLANK final (tool-only turn)
+          // must retire the thinking placeholder (step 5).
+          if (currentTurnKey.startsWith('turn:')) {
+            finalizedTurnUserKeys.add(currentTurnKey.slice('turn:'.length));
+          }
         }
         break;
       }
@@ -448,6 +465,71 @@ export function project(state: ChatState): BubbleSpec[] {
     }
     return kindOrder(a) - kindOrder(b);
   });
+
+  // ── 5. Local thinking placeholder (latency audit B1a): after a send
+  // commits, the thinking dots used to appear only when the server's
+  // first delta arrived — a full round-trip of dead air on EVERY turn.
+  // Derive them locally instead: iff the conversation ENDS with the
+  // user's live message — the newest user/assistant/activityRow spec is
+  // a user bubble backed by a live send (young non-failed pendingSend,
+  // or its inflight echo whose turn hasn't seen reply_final) — splice a
+  // streaming assistant spec directly after it (`pending:turn:` key,
+  // reserved for exactly this). "Conversation ends with the user" is
+  // the whole suppression rule in one predicate: a streaming bubble, an
+  // activity row, or a finalized reply for the turn all land AFTER the
+  // user bubble and retire the dots; a failed send never enters
+  // liveSendKeys (its bubble owns the Retry affordance); a send gone
+  // silent past the staleness cap ages out (a dead turn must not think
+  // forever — the ONE tolerated wall-clock read in this file: it can
+  // only flip output across the 120s boundary of an already-stuck
+  // send). Runs after the sort because "newest" must be judged in
+  // final display order, where durable/inflight timestamp spaces are
+  // already merged.
+  //
+  // First-turn gate: no placeholder until the agent has at least one
+  // real row (assistant / activityRow / notification) in this chat.
+  // The placeholder is DOM-indistinguishable from a real reply
+  // (`.line.agent[data-message-id]`, caret/pin/mark-unread all bind to
+  // it), so in a fresh chat every "first agent reply" consumer would
+  // adopt the impostor — field: mark-unread wrote an activity row keyed
+  // `pending:turn:*`, and first-reply wait predicates raced two sends
+  // into colliding mock message ids. On turn 1 the optimistic user
+  // bubble is the send feedback; dots start from turn 2.
+  {
+    const PLACEHOLDER_MAX_AGE_MS = 120_000;
+    const liveSendKeys = new Set<string>();
+    for (const p of state.pendingSends) {
+      if (!p.failed && Date.now() - p.sentAt < PLACEHOLDER_MAX_AGE_MS) {
+        liveSendKeys.add(p.messageId);
+      }
+    }
+    const agentHasSpoken = specs.some(s =>
+      s.kind === 'assistant' || s.kind === 'activityRow' || s.kind === 'notification');
+    if (agentHasSpoken) {
+      for (let i = specs.length - 1; i >= 0; i--) {
+        const s = specs[i];
+        // Decorations / notifications / gaps neither answer a turn nor
+        // open one — skip past them to the newest conversation row.
+        if (s.kind !== 'user' && s.kind !== 'assistant' && s.kind !== 'activityRow') continue;
+        if (
+          s.kind === 'user'
+          && !finalizedTurnUserKeys.has(s.key)
+          && (liveSendKeys.has(s.key) || inflightUserKeys.has(s.key))
+        ) {
+          specs.splice(i + 1, 0, {
+            kind: 'assistant',
+            key: `pending:turn:${s.key}`,
+            text: '',
+            streaming: true,
+            // +1ms: directly under its user bubble, ahead of anything
+            // landing in the same millisecond.
+            timestamp: s.timestamp + 1,
+          });
+        }
+        break;
+      }
+    }
+  }
   return specs;
 }
 

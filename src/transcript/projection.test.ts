@@ -694,3 +694,146 @@ describe('decorations (owner-scoped system lines, hardening phase 4)', () => {
     assert.equal(after.filter(x => x.kind === 'systemLine').length, 1);
   });
 });
+
+
+describe('local thinking placeholder (latency B1a, 2026-07-13)', () => {
+  const pending = (id: string, sentAt: number, failed = false): PendingSend =>
+    ({ messageId: id, text: 'q', source: 'text', sentAt, failed });
+  // Prior turn giving the chat agent presence (first-turn gate). Durable
+  // rows use UNIX SECONDS like the live items endpoint — the placeholder
+  // math must survive the seconds→ms normalization boundary.
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const priorTurn = () => [
+    u('umsg_q1', 'q1', nowSec() - 60),
+    a('msg_e1', 'echo1', nowSec() - 55),
+  ];
+
+  it('live send in an ongoing chat → streaming placeholder right after its user bubble', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: priorTurn(),
+      pendingSends: [pending('umsg_p1', now - 500)],
+    }));
+    assert.deepEqual(out.map(x => x.kind), ['user', 'assistant', 'user', 'assistant']);
+    const ph = out[3];
+    assert.equal(ph.key, 'pending:turn:umsg_p1');
+    assert.equal((ph as any).streaming, true);
+    assert.equal(ph.timestamp, now - 500 + 1);
+  });
+
+  it('first-turn gate: no placeholder before the agent has any row in the chat', () => {
+    // The placeholder is DOM-indistinguishable from a real agent reply;
+    // in a fresh chat every "first agent reply" consumer would bind to
+    // it (mark-unread wrote pending:turn:* activity rows in the field).
+    const now = Date.now();
+    const out = project(state({ pendingSends: [pending('umsg_p0', now - 500)] }));
+    assert.deepEqual(out.map(x => x.kind), ['user']);
+  });
+
+  it('persists across the user_message echo (pendingSend cleared, no reply yet)', () => {
+    // handleUserMessage clears the optimistic send when the echo lands —
+    // well BEFORE the model streams. The dots must ride the echo, or
+    // B1a only covers the POST→echo hop instead of the dead-air window.
+    const s = state({
+      durable: priorTurn(),
+      inflight: [{ type: 'user_message', chat_id: 'c', message_id: 'umsg_p2', text: 'q' }],
+    });
+    const out = project(s);
+    const ph = out[out.length - 1];
+    assert.equal(ph.key, 'pending:turn:umsg_p2');
+    assert.equal((ph as any).streaming, true);
+  });
+
+  it('suppressed once the agent is visibly active (real streaming bubble)', () => {
+    const s = state({
+      durable: priorTurn(),
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_p3', text: 'q' },
+        { type: 'reply_delta', chat_id: 'c', text: 'thinking about it', message_id: 'msg_r' },
+      ],
+    });
+    const out = project(s);
+    assert.equal(out.some(x => x.key === 'pending:turn:umsg_p3'), false, 'placeholder must yield to the real bubble');
+    assert.equal(out.some(x => x.kind === 'assistant' && (x as any).streaming), true);
+  });
+
+  it('suppressed by an in-flight activity row (tool-using turn)', () => {
+    const s = state({
+      durable: priorTurn(),
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_p4', text: 'q' },
+        { type: 'tool_call', chat_id: 'c', call_id: 'c1', tool_name: 'web', args: {} },
+      ],
+    });
+    assert.equal(project(s).some(x => x.key === 'pending:turn:umsg_p4'), false);
+  });
+
+  it('no ghost dots after reply_final while the pendingSend lingers (multi-turn regression)', () => {
+    // Exact failing sequence from the two-send smoke race: turn 1 is
+    // durable; turn 2's send is still in pendingSends when its echo AND
+    // full reply have already streamed in (handleUserMessage notifies
+    // between appendInflight and clearPendingSend). The parked B1a
+    // patch re-emitted dots AFTER the finalized reply here.
+    const now = Date.now();
+    const s = state({
+      durable: priorTurn(),
+      pendingSends: [pending('umsg_p5', now - 500)],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_p5', text: 'q' },
+        { type: 'reply_delta', chat_id: 'c', text: 'echo2', message_id: 'msg_e2' },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_e2' },
+      ],
+    });
+    const out = project(s);
+    assert.equal(out.some(x => x.key.startsWith('pending:turn:')), false, 'turn is answered — no dots');
+    const last = out[out.length - 1];
+    assert.equal(last.key, 'msg_e2');
+    assert.equal((last as any).streaming, false);
+  });
+
+  it('blank reply_final (tool-only turn) retires the dots even with the echo still inflight', () => {
+    const s = state({
+      durable: priorTurn(),
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_p6', text: 'q' },
+        { type: 'tool_call', chat_id: 'c', call_id: 'c2', tool_name: 'web', args: {} },
+        { type: 'tool_result', chat_id: 'c', call_id: 'c2', tool_name: 'web', result: 'ok' },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_e3' },
+      ],
+    });
+    assert.equal(project(s).some(x => x.key.startsWith('pending:turn:')), false);
+  });
+
+  it('post-final durable state renders all four bubbles in order, no placeholder', () => {
+    const t = nowSec();
+    const s = state({
+      durable: [
+        u('umsg_q1', 'q1', t - 60), a('msg_e1', 'echo1', t - 55),
+        u('umsg_q2', 'q2', t - 10), a('msg_e2', 'echo2', t - 5),
+      ],
+    });
+    assert.deepEqual(project(s).map(x => x.key), ['umsg_q1', 'msg_e1', 'umsg_q2', 'msg_e2']);
+  });
+
+  it('no placeholder for failed or stale sends', () => {
+    const now = Date.now();
+    assert.equal(
+      project(state({ durable: priorTurn(), pendingSends: [pending('umsg_f', now - 500, true)] }))
+        .some(x => x.key.startsWith('pending:turn:')), false, 'failed send');
+    assert.equal(
+      project(state({ durable: priorTurn(), pendingSends: [pending('umsg_old', now - 300_000)] }))
+        .some(x => x.key.startsWith('pending:turn:')), false, 'stale send past the cap');
+  });
+
+  it('rapid double-send: dots only under the NEWEST live send', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: priorTurn(),
+      pendingSends: [pending('umsg_a', now - 400), pending('umsg_b', now - 200)],
+    }));
+    const phs = out.filter(x => x.key.startsWith('pending:turn:'));
+    assert.equal(phs.length, 1);
+    assert.equal(phs[0].key, 'pending:turn:umsg_b');
+    assert.equal(out[out.length - 1], phs[0]);
+  });
+});
