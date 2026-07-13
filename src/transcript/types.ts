@@ -68,14 +68,28 @@ export interface ChatState {
   decorations: Decoration[];
 }
 
-export interface Decoration {
+export type Decoration = SystemDecoration | MemoDecoration;
+
+export interface SystemDecoration {
   /** Stable reconcile key: `deco_${ts}_${rand}`. */
   key: string;
-  /** v1: system lines only. Draft blocks / memo cards may migrate
-   *  here in later phase-4 commits. */
   kind: 'system';
   text: string;
   /** Wall-clock ms — sorts the row into the transcript. */
+  timestamp: number;
+}
+
+/** A pending voice-memo card, addressed to the chat it was RECORDED
+ *  in. The decoration declares existence + timeline position; the
+ *  memo's data (blob, waveform, transcript, status) lives in the
+ *  voiceMemos IDB store with an in-memory mirror in memoCard's rec
+ *  registry, and playback state lives in the DOM node the reconciler
+ *  preserves via keyed identity. */
+export interface MemoDecoration {
+  /** Stable reconcile key: `memo:${memoId}`. */
+  key: string;
+  kind: 'memo';
+  memoId: string;
   timestamp: number;
 }
 
@@ -160,7 +174,8 @@ export type BubbleSpec =
   | NotificationBubbleSpec
   | ActivityRowSpec
   | GapBubbleSpec
-  | SystemLineSpec;
+  | SystemLineSpec
+  | MemoCardSpec;
 
 /** A client-only system line ("New chat started", "Model: …"). Derived
  *  from ChatState.decorations — reconciler-owned DOM, unlike the legacy
@@ -169,6 +184,18 @@ export interface SystemLineSpec {
   kind: 'systemLine';
   key: string;
   text: string;
+  timestamp: number;
+}
+
+/** A pending voice-memo playback card. Derived from a MemoDecoration;
+ *  the reconciler renders it once via memoCard's registry and then
+ *  PRESERVES the node (update is a no-op) — waveform/status/transcript
+ *  updates flow through the card's own DOM hooks, and playback state
+ *  survives reconciles because the node does. */
+export interface MemoCardSpec {
+  kind: 'memoCard';
+  key: string;
+  memoId: string;
   timestamp: number;
 }
 

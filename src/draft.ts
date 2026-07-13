@@ -79,6 +79,15 @@ export function ensureBlock() {
 
   blockEl = document.createElement('div');
   blockEl.className = 'draft-block';
+  // ISLAND declaration (transcript ownership contract, reconciler.ts):
+  // the reconciler preserves this node across reconciles instead of
+  // wiping it as stale. Before this, the block survived by ACCIDENT —
+  // wiped on every reconcile and re-created by the next ensureBlock()
+  // call — which lost focus/cursor mid-dictation whenever a background
+  // render landed. contentEditable state can't round-trip through
+  // spec-driven re-render, so the island (uncontrolled-component)
+  // pattern is the correct ownership, not a migration shortcut.
+  blockEl.setAttribute('data-island', 'draft');
 
   textEl = document.createElement('div');
   textEl.className = 'draft-text';

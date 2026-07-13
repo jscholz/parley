@@ -530,13 +530,27 @@ export function clearPendingSend(chatId: string, messageId: string): void {
 }
 
 /** Drop all state for a chat. Used on session deletion. */
-/** Append an owner-scoped decoration (system line). Keyed — a replay
- *  can't duplicate it, a repaint can't orphan it (hardening phase 4;
- *  previously these were keyless DOM appends the reconciler had to
- *  preserve by exception). */
+/** UPSERT an owner-scoped decoration (system line, memo card). Keyed —
+ *  a replay can't duplicate it, a repaint can't orphan it (hardening
+ *  phase 4; previously these were keyless DOM appends the reconciler
+ *  had to preserve by exception). Upsert-by-key makes re-seeding
+ *  (boot restore, view-commit reseed) idempotent. */
 export function addDecoration(chatId: string, deco: Decoration): void {
   const s = getState(chatId);
-  s.decorations = [...s.decorations, deco];
+  const idx = s.decorations.findIndex(d => d.key === deco.key);
+  s.decorations = idx >= 0
+    ? [...s.decorations.slice(0, idx), deco, ...s.decorations.slice(idx + 1)]
+    : [...s.decorations, deco];
+  notify(chatId);
+}
+
+/** Remove a decoration by key (memo sent/discarded). No-op when the
+ *  key isn't present. */
+export function removeDecoration(chatId: string, key: string): void {
+  const s = getState(chatId);
+  const next = s.decorations.filter(d => d.key !== key);
+  if (next.length === s.decorations.length) return;
+  s.decorations = next;
   notify(chatId);
 }
 

@@ -120,13 +120,24 @@ import loadingCard from './cards/kinds/loading.ts';
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
-/** Re-render memo cards from IndexedDB into the transcript. Idempotent — render skips existing. */
+/** Restore pending memo cards from IndexedDB through the transcript
+ *  MODEL (writer migration 2026-07-13): register each record in the
+ *  memoCard registry and upsert its decoration into the chat it was
+ *  RECORDED in (rec.chatId). Legacy records without a chatId land in
+ *  the currently-focused chat, matching the old float-to-current
+ *  behavior. Idempotent — addDecoration upserts by key. */
 async function restoreMemoCards() {
   try {
-    const transcriptEl = document.getElementById('transcript');
-    if (!transcriptEl) return;
     const memos = await voiceMemos.getAll();
-    for (const rec of memos) memoCard.render(transcriptEl, rec);
+    for (const rec of memos) {
+      const chatId = rec.chatId ?? switchCtl.focusedId() ?? backend.getCurrentSessionId?.() ?? null;
+      memoCard.registerRec(rec, rec.chatId ?? null);
+      if (chatId) {
+        transcriptStore.addDecoration(chatId, {
+          key: `memo:${rec.id}`, kind: 'memo', memoId: rec.id, timestamp: rec.timestamp || Date.now(),
+        });
+      }
+    }
     if (memos.length) {
       log('restored', memos.length, 'memo card(s) from IndexedDB');
       chat.forceScrollToBottom();

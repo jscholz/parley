@@ -30,7 +30,8 @@ import * as settings from '../settings.ts';
 import { getAgentLabel } from '../config.ts';
 import { applyBubbleState as applyReplyPlayerState } from '../audio/turn-based/replyPlayer.ts';
 import { rehydrateCards } from '../cards/attach.ts';
-import type { ActivityRowSpec, ActivityTool, AssistantBubbleSpec, BubbleSpec, GapBubbleSpec, NotificationBubbleSpec, SystemLineSpec, UserBubbleSpec } from './types.ts';
+import * as memoCardMod from '../memoCard.ts';
+import type { ActivityRowSpec, ActivityTool, AssistantBubbleSpec, BubbleSpec, GapBubbleSpec, MemoCardSpec, NotificationBubbleSpec, SystemLineSpec, UserBubbleSpec } from './types.ts';
 
 const KEY_ATTR = 'data-key';
 
@@ -62,14 +63,19 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
   //   1. MODEL-OWNED (has data-key): created/updated/removed by this
   //      reconciler from BubbleSpecs — bubbles, activity rows, gaps,
   //      notifications, and (since phase 4) system-line decorations.
-  //   2. OWNER-SCOPED, self-healing (keyless, non-`system`): the boot
-  //      HTML-snapshot restore and the draft block. These are wiped as
-  //      stale by the next reconcile BY DESIGN — the snapshot is a
-  //      pre-pipeline boot paint replaced by the first real render;
-  //      the draft block re-creates itself via ensureBlock() on every
-  //      write (its contentEditable mid-edit state cannot round-trip
-  //      through spec-driven re-render, which is WHY it stays outside
-  //      the model — deliberate phase-4 disposition, not an oversight).
+  //   2. OWNER-SCOPED:
+  //      2a. ISLANDS (`data-island` attribute): surfaces whose interior
+  //          state cannot round-trip through spec-driven re-render —
+  //          the draft block's contentEditable cursor/IME state. The
+  //          reconciler PRESERVES them by declaration (position kept
+  //          relative to the timeline, like system markers). This is
+  //          the uncontrolled-component pattern: declare the boundary,
+  //          don't own the interior. Pinned by smoke
+  //          draft-island-survives-reconcile.
+  //      2b. Self-healing keyless leftovers: the boot HTML-snapshot
+  //          restore. Wiped as stale by the next reconcile BY DESIGN —
+  //          it's a pre-pipeline boot paint replaced by the first real
+  //          render.
   //   3. LEGACY keyless `.line.system` rows — preserved by the
   //      exception below. Post-phase-4 these can only come from a boot
   //      HTML-snapshot restore (addSystemLine now writes keyed
@@ -96,11 +102,11 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
     const key = child.getAttribute(KEY_ATTR);
     if (key) {
       existing.set(key, child);
-    } else if (!child.classList.contains('system')) {
+    } else if (!child.classList.contains('system') && !child.hasAttribute('data-island')) {
       stale.push(child);
     }
-    // keyless `.line.system` rows fall through — neither tracked
-    // nor removed.
+    // Keyless `.line.system` rows and declared islands fall through —
+    // neither tracked nor removed (contract case 2a/3 above).
   }
   for (const el of stale) el.remove();
 
@@ -113,7 +119,7 @@ export function reconcile(transcriptEl: HTMLElement, specs: BubbleSpec[], opts: 
   const isKeylessSystemRow = (n: ChildNode | null): boolean =>
     !!n && n instanceof HTMLElement
     && !n.getAttribute(KEY_ATTR)
-    && n.classList.contains('system');
+    && (n.classList.contains('system') || n.hasAttribute('data-island'));
 
   // Position spec elements in spec order using a DOM cursor that SKIPS
   // keyless system rows. The previous implementation positioned spec[i]
@@ -178,7 +184,21 @@ function createForSpec(spec: BubbleSpec, batch: boolean): HTMLElement | null {
     case 'activityRow': return createActivityRow(spec);
     case 'gap':        return createGap(spec);
     case 'systemLine': return createSystemLine(spec);
+    case 'memoCard':   return createMemoCard(spec);
   }
+}
+
+/** Reconciler-owned memo card (writer migration 2026-07-13). The
+ *  decoration declares existence + timeline position; the card's data
+ *  comes synchronously from memoCard's rec registry (IDB-mirrored).
+ *  Registry miss (e.g. a stale decoration surviving a registry drop)
+ *  renders nothing — returning null skips the spec cleanly. Playback
+ *  state lives in the node; updateForSpec is deliberately a no-op so
+ *  the node (and its playing <audio>) is never rebuilt. */
+function createMemoCard(spec: MemoCardSpec): HTMLElement | null {
+  const entry = memoCardMod.getRegistered(spec.memoId);
+  if (!entry) return null;
+  return memoCardMod.createCard(entry.rec);
 }
 
 /** Reconciler-owned system line (hardening phase 4). Same DOM shape as
@@ -322,6 +342,11 @@ function updateForSpec(el: HTMLElement, spec: BubbleSpec): void {
     case 'gap':        return updateGap(el, spec);
     case 'systemLine':
       if (el.textContent !== spec.text) el.textContent = spec.text;
+      return;
+    case 'memoCard':
+      // No-op by design: waveform/status/transcript updates flow
+      // through the card's own DOM hooks (memoCard.update / find), and
+      // rebuilding would kill in-progress playback.
       return;
   }
 }

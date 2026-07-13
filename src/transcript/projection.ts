@@ -428,7 +428,11 @@ export function project(state: ChatState): BubbleSpec[] {
   // reconciler-owned. Client-only, so no dedup axis against durable /
   // inflight is needed.
   for (const deco of state.decorations) {
-    specs.push({ kind: 'systemLine', key: deco.key, text: deco.text, timestamp: deco.timestamp });
+    if (deco.kind === 'system') {
+      specs.push({ kind: 'systemLine', key: deco.key, text: deco.text, timestamp: deco.timestamp });
+    } else if (deco.kind === 'memo') {
+      specs.push({ kind: 'memoCard', key: deco.key, memoId: deco.memoId, timestamp: deco.timestamp });
+    }
   }
 
   // ── 4. Stable sort: timestamp asc, then kind tiebreak.
@@ -596,6 +600,8 @@ function kindOrder(s: BubbleSpec): number {
     // System lines annotate what just happened — same-ms ties render
     // them after the conversation rows they comment on.
     case 'systemLine': return 5;
+    // Memo cards record what the user just spoke — same placement logic.
+    case 'memoCard': return 5;
   }
 }
 

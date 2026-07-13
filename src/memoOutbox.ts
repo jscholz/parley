@@ -26,6 +26,8 @@ import * as queue from './queue.ts';
 import * as voiceMemos from './voiceMemos.ts';
 import * as memoCard from './memoCard.ts';
 import * as webrtcControls from './audio/realtime/controls.ts';
+import * as switchCtl from './switchController.ts';
+import * as transcriptStore from './transcript/store.ts';
 import * as turnbased from './audio/turn-based/turnbased.ts';
 import * as handsfree from './audio/shared/handsfree.ts';
 import * as listenReply from './listenReplyState.ts';
@@ -321,7 +323,17 @@ export async function flushOutbox() {
         status.setStatus('', null);
         return;
       }
-      if (card) card.remove();
+      // Model removal (writer migration): drop the decoration — the
+      // reconciler removes the card. Registry + IDB follow. The direct
+      // card.remove() covers the no-decoration edge (legacy record
+      // rendered before this deploy).
+      const registered = memoCard.getRegistered(id);
+      if (registered?.chatId) {
+        transcriptStore.removeDecoration(registered.chatId, `memo:${id}`);
+      } else if (card) {
+        card.remove();
+      }
+      memoCard.dropRec(id);
       await voiceMemos.remove(id);
       composer.appendText(text);
       if (autoSend) {
@@ -337,6 +349,24 @@ export async function flushOutbox() {
 /** Start the two background pollers (periodic retry + network-status
  *  refresh). Called once from boot. */
 export function startBackgroundPollers(): void {
+  // View-commit reseed (writer migration 2026-07-13): decorations live
+  // in ChatState, and a new-chat rotation clearAll()s the leaving
+  // chat's state — unlike durable rows, memo decorations can't be
+  // refetched from the server, so revisiting that chat would lose its
+  // pending cards until reload. The memo registry is the in-memory
+  // truth; re-upsert its decorations for whichever chat just committed
+  // (addDecoration is upsert-by-key, so this is idempotent and free
+  // when nothing was lost).
+  window.addEventListener('sidekick:view-committed', (ev) => {
+    const chatId = (ev as CustomEvent).detail?.chatId;
+    if (!chatId) return;
+    for (const rec of memoCard.registeredForChat(chatId)) {
+      transcriptStore.addDecoration(chatId, {
+        key: `memo:${rec.id}`, kind: 'memo', memoId: rec.id, timestamp: rec.timestamp || Date.now(),
+      });
+    }
+  });
+
   // Periodic background retry. Covers the scenario where /transcribe
   // fails mid-memo (blob queued) but the gateway WS stays connected —
   // no reconnect event fires, no user send happens. Without this, a
@@ -438,17 +468,29 @@ async function renderMemoCard(audioBlob, durationMs, autoSend = false) {
   const id = crypto.randomUUID();
   const transcriptEl = document.getElementById('transcript');
 
+  // Addressed, not pointed (invariant #3 applied to memos): the card
+  // belongs to the chat the memo was RECORDED in — view state first,
+  // adapter pointer as the no-view fallback (same precedence as sends).
+  const memoChatId = switchCtl.focusedId() ?? backend.getCurrentSessionId?.() ?? null;
   const rec = {
     id, blob: audioBlob, mimeType: audioBlob.type, durationMs,
     waveform: new Float32Array(40),
     transcript: null, status: 'pending', timestamp: Date.now(),
+    chatId: memoChatId,
   };
 
-  let card = null;
-  if (transcriptEl) {
-    card = memoCard.render(transcriptEl, rec);
-    chat.autoScroll();
+  // Writer migration 2026-07-13: the card renders through the
+  // transcript MODEL (memo decoration → reconciler), not a direct DOM
+  // append. addDecoration notifies synchronously, so the card exists
+  // in the DOM by the next line and the waveform hook can find it.
+  memoCard.registerRec(rec, memoChatId);
+  if (memoChatId) {
+    transcriptStore.addDecoration(memoChatId, {
+      key: `memo:${id}`, kind: 'memo', memoId: id, timestamp: rec.timestamp,
+    });
   }
+  let card = transcriptEl ? memoCard.find(transcriptEl, id) : null;
+  if (card) chat.autoScroll();
 
   await voiceMemos.save(rec);
   await queue.enqueue({ id, type: 'audio', blob: audioBlob, mimeType: audioBlob.type, durationMs, autoSend });

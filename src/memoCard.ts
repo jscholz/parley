@@ -35,17 +35,40 @@ function drawBars(canvas, bars, progress) {
   }
 }
 
-/**
- * Render a memo card into the container. Returns the root element.
- * @param {HTMLElement} container
- * @param {Object} rec - { id, blob, mimeType, durationMs, waveform, transcript, status }
- * @param {Object} [opts] - { onSend }
- */
-export function render(container, rec, opts = {}) {
-  // If a card for this id already exists, return it (no-op)
-  const existing = container.querySelector(`.memo-card[data-memo-id="${rec.id}"]`);
-  if (existing) return existing;
+/** In-memory rec registry (writer-migration 2026-07-13): the memo
+ *  DECORATION in the transcript store declares "memo X exists at time
+ *  T in chat C"; the reconciler renders it synchronously from this
+ *  registry (IDB is async and the reconciler isn't). voiceMemos' IDB
+ *  store remains the durable source — the registry mirrors it for the
+ *  lifetime of the page and is populated at save/restore time. Values
+ *  are { rec, chatId }. */
+const recRegistry = new Map();
 
+export function registerRec(rec, chatId) {
+  recRegistry.set(rec.id, { rec, chatId });
+}
+export function getRegistered(memoId) {
+  return recRegistry.get(memoId) || null;
+}
+export function dropRec(memoId) {
+  recRegistry.delete(memoId);
+}
+/** All registered memos for a chat (view-commit reseed). chatId null
+ *  matches legacy recs saved before chat addressing. */
+export function registeredForChat(chatId) {
+  const out = [];
+  for (const { rec, chatId: c } of recRegistry.values()) {
+    if (c === chatId || c == null) out.push(rec);
+  }
+  return out;
+}
+
+/**
+ * Build a memo card element. The caller (reconciler) owns insertion —
+ * this creates and wires the node only.
+ * @param {Object} rec - { id, blob, mimeType, durationMs, waveform, transcript, status }
+ */
+export function createCard(rec) {
   const card = document.createElement('div');
   card.className = 'line memo-card';
   card.dataset.memoId = rec.id;
@@ -83,7 +106,6 @@ export function render(container, rec, opts = {}) {
   tsEl.title = new Date(ts).toLocaleString();
 
   card.append(topRow, transcriptEl, tsEl);
-  container.appendChild(card);
 
   // ── Audio playback ──
   let bars = rec.waveform instanceof Float32Array ? rec.waveform : Float32Array.from(rec.waveform || []);

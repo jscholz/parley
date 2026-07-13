@@ -543,6 +543,13 @@ function applyViewChangedEffects(prev: string | null, id: string | null): void {
   // bound-chat-guarded, so same-chat repaints (view-token resumes) are
   // free.
   composerDrafts.switchTo(id);
+  // Broadcast the commit for decoupled per-chat state owners (memo
+  // outbox reseeds its pending-card decorations for the incoming chat —
+  // a clearAll'd ChatState loses decorations, and unlike durable rows
+  // they can't be refetched from the server).
+  if (prev !== id && id) {
+    try { window.dispatchEvent(new CustomEvent('sidekick:view-committed', { detail: { chatId: id } })); } catch { /* noop */ }
+  }
 }
 
 /** The id refresh()/renderList should paint as `.active`: optimistic

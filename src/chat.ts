@@ -698,7 +698,11 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
       restoredViewedSessionId = saved.sessionId || null;
       viewedSessionIdRef = restoredViewedSessionId;
       // Strip stale memo cards — their audio element + blob reference are dead
-      // after serialization. Caller will re-render them fresh from IndexedDB.
+      // after serialization. Caller re-seeds them fresh from IndexedDB
+      // (restoreMemoCards → memo decorations). NOW ESSENTIAL, not just
+      // tidy: post-migration the snapshot HTML carries memo cards WITH
+      // data-key, and the reconciler would ADOPT a dead-blob node as the
+      // spec's element instead of creating a live one.
       transcriptEl.querySelectorAll('.memo-card').forEach(el => el.remove());
       // Strip stale activity rows. saveSnapshot() (below) excludes them
       // going forward, but existing IDB snapshots written by older builds

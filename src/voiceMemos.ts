@@ -31,13 +31,17 @@ function reqP<T = any>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
-/** Save a memo record. waveform is a Float32Array (~40 amplitude values). */
-export async function save({ id, blob, mimeType, durationMs, waveform, transcript = null, status = 'pending', timestamp = Date.now() }) {
+/** Save a memo record. waveform is a Float32Array (~40 amplitude values).
+ *  chatId (added 2026-07-13) addresses the memo to the chat it was
+ *  RECORDED in so its card renders there, not wherever the user happens
+ *  to be looking later; legacy records without it fall back to the
+ *  current chat at restore time. */
+export async function save({ id, blob, mimeType, durationMs, waveform, transcript = null, status = 'pending', timestamp = Date.now(), chatId = null }) {
   const db = await openDB();
   // Copy waveform to a plain array for IDB cloneability
   const waveArr = Array.from(waveform);
   await reqP(db.transaction(STORE, 'readwrite').objectStore(STORE).put({
-    id, blob, mimeType, durationMs, waveform: waveArr, transcript, status, timestamp,
+    id, blob, mimeType, durationMs, waveform: waveArr, transcript, status, timestamp, chatId,
   }));
   db.close();
 }
