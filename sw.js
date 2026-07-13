@@ -11,7 +11,7 @@
  * network-first, so first-load pulls anything missed and caches on the
  * way through.
  */
-const CACHE_NAME = 'v0.627';
+const CACHE_NAME = 'v0.628';
 
 // Dedicated cache for VAD assets. Key insight: VAD assets are 14.7 MB
 // and don't change with every app deploy — the Silero model is

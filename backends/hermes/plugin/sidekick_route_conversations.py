@@ -489,6 +489,26 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
             "Caller should use prefixed id `sidekick:%s` to be explicit.",
             raw_id, chat_id,
         )
+    # TERMINATE any active agent turn for this chat BEFORE removing its
+    # rows (field 2026-07-13: a meeting-ingest turn survived its
+    # session's deletion, replied minutes later, and the turn-end
+    # persistence resurrected the session as a zombie). Deleting a chat
+    # means "stop acting on my behalf in this context" — the interrupt
+    # also stops the turn's remaining tool calls and token spend, not
+    # just the reply. The tombstone below catches the in-flight tail
+    # the interrupt can't (a reply already past the loop's last
+    # interrupt check).
+    try:
+        for session_key in list(getattr(adapter, "_active_sessions", {}) or {}):
+            if chat_id in session_key:
+                await adapter.interrupt_session_activity(session_key, chat_id)
+                logger.info(
+                    "[sidekick] DELETE %s — interrupted active agent session %s",
+                    chat_id, session_key,
+                )
+    except Exception as e:  # noqa: BLE001 — delete must proceed regardless
+        logger.warning("[sidekick] DELETE %s — agent interrupt failed: %s", chat_id, e)
+    mark_chat_deleted(adapter, chat_id)
     result = await asyncio.to_thread(
         delete_conversation_sync, adapter, chat_id, source,
     )
@@ -616,6 +636,36 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
 
 
 # ── worker-thread helpers ────────────────────────────────────────────
+
+
+_DELETED_CHAT_TTL_S = 600.0
+
+
+def mark_chat_deleted(adapter, chat_id: str) -> None:
+    """Tombstone a just-deleted chat on the ADAPTER so late agent output
+    for it gets dropped instead of resurrecting the session (unified
+    with the interrupt in handle_delete — this is the belt for the
+    in-flight tail the interrupt can't reach). Read via
+    ``is_chat_deleted``; entries self-evict after the TTL so a chat_id
+    legitimately recreated later isn't suppressed forever."""
+    store = getattr(adapter, "_deleted_chat_tombstones", None)
+    if store is None:
+        store = {}
+        adapter._deleted_chat_tombstones = store
+    store[chat_id] = time.time()
+
+
+def is_chat_deleted(adapter, chat_id: str) -> bool:
+    store = getattr(adapter, "_deleted_chat_tombstones", None)
+    if not store:
+        return False
+    ts = store.get(chat_id)
+    if ts is None:
+        return False
+    if time.time() - ts > _DELETED_CHAT_TTL_S:
+        store.pop(chat_id, None)
+        return False
+    return True
 
 
 def delete_conversation_sync(

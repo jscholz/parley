@@ -28,6 +28,7 @@ import asyncio
 import importlib.util
 import json
 import sys
+import time
 import types
 from pathlib import Path
 from unittest import mock
@@ -432,7 +433,19 @@ def test_send_classifies_approval_prompt_as_urgent_notification(plugin):
     result = asyncio.run(adapter.send("approval-chat", content))
 
     assert result.message_id == "notif_test_approval"
-    assert sent == [{
+    assert len(sent) == 1
+    env = sent[0]
+    # expires_at (unified elicitation, 2026-07-13): epoch ms mirroring
+    # the gateway's approval window so the PWA pop-up dies WITH the
+    # approval. Timing-dependent — assert shape + plausible window,
+    # then compare the rest exactly.
+    expires_at = env.pop("expires_at", None)
+    assert isinstance(expires_at, int)
+    now_ms = int(time.time() * 1000)
+    # Default window is 60s (config approvals.timeout); allow config
+    # overrides up to 1h and a generous lower bound for slow runs.
+    assert now_ms + 5_000 < expires_at <= now_ms + 3_600_000
+    assert env == {
         "type": "notification",
         "chat_id": "approval-chat",
         "kind": "approval",
@@ -440,7 +453,7 @@ def test_send_classifies_approval_prompt_as_urgent_notification(plugin):
         "text": content,
         "urgent": True,
         "sidekick_id": "notif_test_approval",
-    }]
+    }
 
 
 def _make_envelope_routing_adapter(plugin):

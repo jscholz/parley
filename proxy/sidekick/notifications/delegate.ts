@@ -244,6 +244,26 @@ export async function delegateUnreadMark(req: http.IncomingMessage, res: http.Se
   } catch (e: any) { sendUpstreamUnavailable(res, e); }
 }
 
+// ── Agent questions (unified elicitation protocol, 2026-07-13) ────────
+
+/** POST /api/sidekick/questions/{id} → plugin /v1/questions/{id}.
+ *  Resolves a blocking agent question (hermes clarify). 404 from
+ *  upstream = the question lapsed (answered elsewhere / expired) —
+ *  the PWA renders that state rather than treating it as an error. */
+export async function delegateQuestionAnswer(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  questionId: string,
+) {
+  let body: any;
+  try { body = await readBody(req); }
+  catch (e: any) { return sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
+  try {
+    const r = await forwardRaw(`/v1/questions/${encodeURIComponent(questionId)}`, 'POST', body);
+    sendJson(res, r.status, r.body ?? {});
+  } catch (e: any) { sendUpstreamUnavailable(res, e); }
+}
+
 // ── Pin sync (server-of-truth for cross-device pins) ──────────────────
 
 export async function delegatePinsList(req: http.IncomingMessage, res: http.ServerResponse) {

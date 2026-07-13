@@ -100,6 +100,11 @@ const FANOUT_TYPES = new Set<string>([
   'unread_changed',
   'pins_changed',
   'conversation_deleted',
+  // Unified elicitation protocol (2026-07-13): the agent is blocked on
+  // a user answer (hermes clarify tool today; any backend's ask-user
+  // mechanism tomorrow). PWA renders a pop-up with choice buttons +
+  // countdown from expires_at; the answer POSTs to /questions/{id}.
+  'agent_question',
   // display_doc tool → Docs panel push. Carries the full document body
   // (plugin caps it at 1MB) — rides the ring like any other envelope so
   // a tab opened seconds after the push still receives it via replay.

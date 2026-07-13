@@ -1335,6 +1335,12 @@ const requestHandler: http.RequestListener = async (req, res) => {
       if (req.method === 'POST' && req.url === '/api/sidekick/notifications/mark') {
         return delegate.delegateUnreadMark(req, res);
       }
+      // Unified elicitation: answer a blocking agent question (clarify).
+      const questionAnswer = req.method === 'POST'
+        && req.url.match(/^\/api\/sidekick\/questions\/([^/?]+)(?:\?.*)?$/);
+      if (questionAnswer) {
+        return delegate.delegateQuestionAnswer(req, res, decodeURIComponent(questionAnswer[1]));
+      }
       if (req.method === 'GET' && req.url && /^\/api\/sidekick\/pins(?:\?.*)?$/.test(req.url)) {
         return delegate.delegatePinsList(req, res);
       }

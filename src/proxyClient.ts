@@ -393,6 +393,8 @@ function startStreamChannel(): void {
                    'conversation_deleted',
                    // display_doc tool → Docs panel push.
                    'doc_show',
+                   // Unified elicitation: agent blocked on a user answer.
+                   'agent_question',
                    // Meeting capture: external start/stop triggers +
                    // cross-device lifecycle state.
                    'capture_control', 'capture_changed']) {
@@ -727,6 +729,29 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
         kind: 'image',
         payload: { url: env.url, caption: env.caption || '' },
         conversation: chatId,
+      });
+      return;
+    }
+
+    case 'agent_question': {
+      // Unified elicitation: the agent thread is BLOCKED on a user
+      // answer (hermes clarify; approvals carry the same shape via
+      // notification kind for now). Not replay-gated here — the popup
+      // itself skips questions whose expires_at already passed, so a
+      // ring replay resurfaces a STILL-LIVE question (good: the tab
+      // that missed it while closed gets a working popup) without
+      // reviving dead ones.
+      subs?.onToolEvent?.({
+        kind: 'agent.question',
+        payload: {
+          question_id: typeof env.question_id === 'string' ? env.question_id : '',
+          chat_id: typeof env.chat_id === 'string' ? env.chat_id : '',
+          kind: typeof env.kind === 'string' ? env.kind : 'clarify',
+          question: typeof env.question === 'string' ? env.question : '',
+          choices: Array.isArray(env.choices) ? env.choices : [],
+          allow_free_text: env.allow_free_text !== false,
+          expires_at: typeof env.expires_at === 'number' ? env.expires_at : null,
+        },
       });
       return;
     }

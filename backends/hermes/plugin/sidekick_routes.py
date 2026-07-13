@@ -357,6 +357,39 @@ async def handle_activity_clear(ctx, request: web.Request) -> web.Response:
     return _json({"ok": True, **result})
 
 
+async def handle_question_answer(ctx, request: web.Request) -> web.Response:
+    """POST /v1/questions/{question_id} — resolve a pending agent
+    question (unified elicitation protocol, 2026-07-13).
+
+    Body: ``{"response": "<choice text or free text>"}``. For
+    kind='clarify' questions this resolves the blocking
+    ``tools.clarify_gateway`` entry the agent thread is waiting on.
+    404 when the entry is gone (answered elsewhere, expired, or a
+    pre-0.18 hermes without the clarify tool) — the PWA renders that
+    as the question having lapsed, the pop-up equivalent of
+    "/approve → No pending command".
+    """
+    question_id = request.match_info.get("question_id", "")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    response = body.get("response")
+    if not question_id or not isinstance(response, str) or not response:
+        return _json({"ok": False, "error": "question_id + response required"}, status=400)
+    try:
+        from tools.clarify_gateway import resolve_gateway_clarify  # noqa: WPS433
+    except Exception:
+        return _json({"ok": False, "error": "clarify not supported by this hermes"}, status=404)
+    try:
+        resolved = resolve_gateway_clarify(question_id, response)
+    except Exception as e:  # noqa: BLE001
+        return _json({"ok": False, "error": str(e)}, status=500)
+    if not resolved:
+        return _json({"ok": False, "error": "no pending question with that id"}, status=404)
+    return _json({"ok": True})
+
+
 # ── Registrar ────────────────────────────────────────────────────────
 
 def register_routes(app: web.Application, ctx) -> None:
@@ -381,6 +414,8 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_get("/v1/pins", lambda r: handle_pins(ctx, r))
     app.router.add_post("/v1/pins", lambda r: handle_pins(ctx, r))
     app.router.add_delete("/v1/pins/{chat_id}/{msg_id}", lambda r: handle_pin_delete(ctx, r))
+
+    app.router.add_post("/v1/questions/{question_id}", lambda r: handle_question_answer(ctx, r))
 
     app.router.add_get("/v1/activity", lambda r: handle_activity(ctx, r))
     app.router.add_post("/v1/activity", lambda r: handle_activity(ctx, r))

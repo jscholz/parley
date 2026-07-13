@@ -1116,6 +1116,53 @@
 
   /* Generic toast (src/toast.ts) — same bubble as the announce toast,
      used for notices that must outlive the clobbered header status line. */
+  /* Agent-question pop-up (unified elicitation, 2026-07-13): the agent
+     is blocked on an answer. Sticks until expires_at (countdown in the
+     header); .expired dims it + disables actions for a visible death
+     instead of a silent vanish. */
+  .question-popup {
+    position: fixed;
+    bottom: max(84px, calc(env(safe-area-inset-bottom, 0px) + 84px));
+    left: 50%; transform: translateX(-50%);
+    z-index: 95;
+    width: min(92vw, 420px);
+    background: var(--surface-2);
+    border: 1px solid var(--primary-glow);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.55);
+  }
+  .question-popup.expired { opacity: 0.65; border-color: var(--border-strong); }
+  .question-popup .q-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 12px; color: var(--muted); margin-bottom: 6px;
+    padding-right: 18px;  /* clear the absolute × dismiss */
+  }
+  .question-popup .q-kind { font-weight: 600; letter-spacing: 0.02em; }
+  .question-popup .q-countdown { font-variant-numeric: tabular-nums; color: var(--primary); }
+  .question-popup.expired .q-countdown { color: var(--danger); }
+  .question-popup .q-body { font-size: 14px; line-height: 1.45; margin-bottom: 10px; white-space: pre-wrap; }
+  .question-popup .q-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .question-popup .q-choice {
+    background: var(--primary-soft); color: var(--fg);
+    border: 1px solid var(--primary-glow); border-radius: 8px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+  }
+  .question-popup .q-choice:hover:not(:disabled) { background: var(--primary-glow); }
+  .question-popup .q-choice:disabled { opacity: 0.5; cursor: default; }
+  .question-popup .q-free-row { display: flex; gap: 8px; margin-top: 8px; }
+  .question-popup .q-freetext {
+    flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    padding: 7px 10px; font-size: 13px;
+  }
+  .question-popup .q-hint { font-size: 11px; color: var(--muted); margin-top: 8px; font-style: italic; }
+  .question-popup .q-dismiss {
+    position: absolute; top: 6px; right: 8px;
+    background: none; border: none; color: var(--muted);
+    font-size: 16px; cursor: pointer; line-height: 1;
+  }
+
   .toast {
     position: fixed;
     bottom: max(76px, calc(env(safe-area-inset-bottom, 0px) + 76px));

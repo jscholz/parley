@@ -520,7 +520,14 @@ export function commitView(tok: switchCtl.SwitchToken): boolean {
   return true;
 }
 
+/** The chat viewed immediately BEFORE the current one — the natural
+ *  landing spot when the current chat is deleted out from under the
+ *  user. Updated at every view commit; only ever read as a candidate
+ *  (validated against the live list at use time). */
+let previouslyViewedId: string | null = null;
+
 function applyViewChangedEffects(prev: string | null, id: string | null): void {
+  if (prev && prev !== id) previouslyViewedId = prev;
   // Switching INTO a chat is the canonical "user has now seen this"
   // signal — clear its unread badge.
   if (id) {
@@ -1707,8 +1714,9 @@ async function deleteSessionAtomic(id: string): Promise<void> {
   // or resume continuation that lands during the awaits is already gated.
   markRecentlyDeleted(id);
   switchCtl.invalidate();
+  const wasViewed = switchCtl.viewedId() === id;
   if (switchCtl.optimisticId() === id) switchCtl.setOptimistic(null);
-  if (switchCtl.viewedId() === id) switchCtl.setViewed(null);
+  if (wasViewed) switchCtl.setViewed(null);
   // Drop the pin if this session was pinned — a dangling id in
   // pinnedSessions would render nothing (it's filtered against the live
   // list) but would still count as the landing default on cold-open.
@@ -1730,6 +1738,26 @@ async function deleteSessionAtomic(id: string): Promise<void> {
   {
     const listEl = document.getElementById('sessions-list');
     if (listEl) renderListFiltered(listEl, activeRowId());
+  }
+  // Deleting the chat you're LOOKING AT must take the transcript with
+  // it (field 2026-07-13: the row vanished but the dead chat's DOM
+  // stayed on screen). Land somewhere sensible, in preference order:
+  // the PREVIOUSLY-viewed chat (where the user just came from) → top
+  // pinned → most recent. No candidate (drawer now empty) → drop the
+  // dead content and leave the blank pane; the store row is already
+  // cleared so nothing can repaint it.
+  if (wasViewed) {
+    transcriptStore.clearAll(id);
+    const alive = (cid: string | null | undefined): string | null =>
+      (cid && cid !== id && cachedSessions.some((s: any) => s.id === cid)) ? cid : null;
+    const candidate = alive(previouslyViewedId)
+      ?? alive(sessionPins.topPinned())
+      ?? (cachedSessions[0]?.id ?? null);
+    if (candidate) {
+      void resume(candidate);
+    } else {
+      document.getElementById('transcript')?.replaceChildren();
+    }
   }
   // IDB caches follow (async, non-blocking, pre-server so a reload
   // mid-flight doesn't resurrect the row).

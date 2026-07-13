@@ -91,6 +91,7 @@ import * as attachments from './attachments.ts';
 import * as draft from './draft.ts';
 import * as composer from './composer.ts';
 import * as composerDrafts from './composerDrafts.ts';
+import * as questionPopup from './questionPopup.ts';
 import * as selectToQuote from './selectToQuote.ts';
 import * as docStore from './rightDrawer/docStore.ts';
 import * as slashCommands from './slashCommands.ts';
@@ -1903,6 +1904,17 @@ async function boot() {
   });
   void composerDrafts.hydrateDrafts();
 
+  // Agent-question pop-up (unified elicitation): approval answers ride
+  // the normal ADDRESSED send path — same invariant-#3 plumbing as any
+  // composer send, into the question's own chat.
+  questionPopup.init({
+    sendCommand: (text: string, chatId: string) => {
+      const userMessageId = `umsg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      try { backend.sendMessage(text, { userMessageId, chatId }); }
+      catch (e: any) { diag(`question-popup send failed: ${e?.message || e}`); }
+    },
+  });
+
   // Keyboard-driven transcript highlight mode (Slack-style):
   //   Empty composer + ↑ → highlight most recent bubble; ↑/↓
   //   navigates; ↓ past most recent returns to composer; p pins;
@@ -2180,6 +2192,10 @@ async function boot() {
       // The ADDRESSED chat's draft is spent (send committed — a failure
       // comes back through Retry, which restores the text).
       composerDrafts.clearDraft(sendChatId);
+      // A typed message in this chat also answers any pending clarify
+      // via the gateway's text-intercept — drop the pop-up so it
+      // doesn't outlive the question it was asking.
+      if (sendChatId) questionPopup.noteUserSentText(sendChatId);
       autoResize();
       updateSendButtonState();
     } else if (draft.hasContent()) {

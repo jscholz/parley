@@ -416,6 +416,14 @@ export function handleToolEvent({ kind, payload, conversation, isReplay }: any) 
     } catch { /* non-browser */ }
     return;
   }
+  if (kind === 'agent.question' && payload) {
+    // Elicitation pop-up is app-global chrome (like the Docs drawer):
+    // the agent is blocked regardless of which chat is on screen, so no
+    // viewed-session gate. questionPopup itself refuses already-expired
+    // questions (ring replays of answered/dead ones).
+    void import('./questionPopup.ts').then((m) => m.show(payload));
+    return;
+  }
   if (kind === 'doc.show' && payload) {
     // Docs drawer is chat-independent chrome — no viewed-session gate:
     // the user may have switched chats while the turn ran, and they

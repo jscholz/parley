@@ -2120,6 +2120,61 @@ class SidekickAdapter(BasePlatformAdapter):
     # (2026-05-17). Call sites use `_route_events.publish_out_of_turn(self,
     # env)` directly so the same module owns the SSE reader + publisher.
 
+    async def send_clarify(
+        self,
+        chat_id: str,
+        question: str,
+        choices: Optional[list],
+        clarify_id: str,
+        session_key: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> SendResult:
+        """Deliver hermes 0.18's blocking ``clarify`` prompt as a
+        first-class ``agent_question`` envelope (unified elicitation
+        protocol, 2026-07-13).
+
+        Without this override, the base class's plain-text "❓" fallback
+        rode the reply path during an active turn and never surfaced —
+        the agent then blocked invisibly for up to ``clarify_timeout``
+        (field incident: 58 minutes at "iteration 25/60, clarify").
+
+        The PWA renders the envelope as a pop-up with choice buttons +
+        free text; the answer comes back via POST /v1/questions/{id}
+        which resolves ``tools.clarify_gateway``. ``expires_at`` (epoch
+        ms) drives the pop-up's countdown so UI lifetime always matches
+        the gateway's actual wait. Text replies in the chat also still
+        resolve it via the gateway's text-intercept — the envelope also
+        enables mark_awaiting_text for choice prompts so a typed answer
+        works exactly like the base fallback promised.
+        """
+        expires_at_ms: Optional[int] = None
+        try:
+            from tools.clarify_gateway import get_clarify_timeout, mark_awaiting_text  # noqa: WPS433
+            expires_at_ms = int((time.time() + get_clarify_timeout()) * 1000)
+            # Typed replies must resolve choice prompts too (parity with
+            # the base-class text fallback).
+            if choices:
+                mark_awaiting_text(clarify_id)
+        except Exception:  # pragma: no cover — pre-0.18 hermes without clarify
+            pass
+        env = {
+            "type": "agent_question",
+            "chat_id": chat_id,
+            "question_id": clarify_id,
+            "kind": "clarify",
+            "question": question,
+            "choices": list(choices) if choices else [],
+            "allow_free_text": True,
+            "expires_at": expires_at_ms,
+            "urgent": True,
+        }
+        ok = await self._safe_send_envelope(env)
+        logger.info(
+            "[sidekick] clarify %s → agent_question envelope (chat=%s choices=%d ok=%s)",
+            clarify_id, chat_id, len(choices or []), ok,
+        )
+        return SendResult(success=ok, message_id=clarify_id)
+
     async def send(
         self,
         chat_id: str,
@@ -2136,6 +2191,26 @@ class SidekickAdapter(BasePlatformAdapter):
         UI bubble on.
         """
         from .sidekick_dispatcher import is_approval_prompt
+        from .sidekick_route_conversations import is_chat_deleted
+
+        # Late output for a chat the user DELETED mid-turn: drop it.
+        # The delete handler interrupts the running turn, but a reply
+        # already past the loop's last interrupt check still lands here
+        # — and letting it through re-adds the chat to known ids, fans
+        # out an envelope, and (via turn-end persistence) resurrects
+        # the session as a zombie (field 2026-07-13: a 6s test
+        # recording's ingest reply rebuilt its deleted session).
+        # Reporting success keeps the gateway loop unwinding normally.
+        # Residual: hermes-core turn-end persistence may still recreate
+        # the state.db session row (we're patch-free upstream by
+        # policy); it stays invisible here and the user can re-delete
+        # the rare zombie row. Tombstone TTL 10min.
+        if is_chat_deleted(self, chat_id):
+            logger.info(
+                "[sidekick] send() dropped for deleted chat %s (%d chars) — "
+                "turn outlived its session's deletion", chat_id, len(content or ""),
+            )
+            return SendResult(success=True, message_id="")
 
         # Hermes approval prompts are blocking workflow events. They
         # arrive as normal adapter text, so classify them into a
@@ -2144,6 +2219,21 @@ class SidekickAdapter(BasePlatformAdapter):
         if is_approval_prompt(content or ""):
             if chat_id not in self._known_chat_ids:
                 self._known_chat_ids.add(chat_id)
+            # expires_at (epoch ms) mirrors the gateway's real approval
+            # window (tools.approval, config approvals.timeout, default
+            # 60s) so the PWA pop-up can live exactly as long as the
+            # approval does and render EXPIRED when it dies — instead of
+            # the user approving a corpse ("/approve → No pending
+            # command", field 2026-07-13).
+            approval_timeout_s = 60
+            try:
+                from hermes_cli.config import load_config  # noqa: WPS433
+                _cfg = load_config() or {}
+                approval_timeout_s = int(
+                    ((_cfg.get("approvals", {}) or {}).get("timeout", 60)) or 60
+                )
+            except Exception:
+                pass
             env = {
                 "type": "notification",
                 "chat_id": chat_id,
@@ -2151,6 +2241,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 "content": content,
                 "text": content,
                 "urgent": True,
+                "expires_at": int((time.time() + approval_timeout_s) * 1000),
             }
             ok = await self._safe_send_envelope(env)
             return SendResult(success=ok, message_id=env.get("sidekick_id") or "")

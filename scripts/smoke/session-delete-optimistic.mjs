@@ -3,7 +3,7 @@
 // in the background. On server failure the row comes BACK with an
 // error status (visible failure, not a silent zombie).
 
-import { waitForReady, openSidebar, waitForDrawerQuiet } from './lib.mjs';
+import { waitForReady, openSidebar, clickRow, waitForDrawerQuiet } from './lib.mjs';
 
 export const NAME = 'session-delete-optimistic';
 export const DESCRIPTION = 'Delete removes the row instantly (no server wait); a failed DELETE restores the row with an error status';
@@ -12,18 +12,24 @@ export const BACKEND = 'mocked';
 
 const CHAT_A = 'mock-del-chat-a';
 const CHAT_B = 'mock-del-chat-b';
+const CHAT_C = 'mock-del-chat-c';
 
 export function MOCK_SETUP(mock) {
-  const t0 = Date.now() / 1000 - 120;
+  const base = Date.now() - 120_000;
   mock.addChat(CHAT_A, {
     title: 'Delete me',
-    messages: [{ role: 'user', content: 'DEL-A-SEED', sidekick_id: 'umsg_del_a', timestamp: t0 }],
-    lastActiveAt: Date.now() - 2000,
+    messages: [{ role: 'user', content: 'DEL-A-SEED', sidekick_id: 'umsg_del_a', timestamp: base / 1000 }],
+    lastActiveAt: base,
   });
   mock.addChat(CHAT_B, {
     title: 'Keep me',
-    messages: [{ role: 'user', content: 'DEL-B-SEED', sidekick_id: 'umsg_del_b', timestamp: t0 + 10 }],
-    lastActiveAt: Date.now() - 1000,
+    messages: [{ role: 'user', content: 'DEL-B-SEED', sidekick_id: 'umsg_del_b', timestamp: (base + 10_000) / 1000 }],
+    lastActiveAt: base + 10_000,
+  });
+  mock.addChat(CHAT_C, {
+    title: 'Viewed then deleted',
+    messages: [{ role: 'user', content: 'DEL-C-SEED', sidekick_id: 'umsg_del_c', timestamp: (base + 20_000) / 1000 }],
+    lastActiveAt: base + 20_000,
   });
 }
 
@@ -114,4 +120,39 @@ export default async function run({ page, log, mock }) {
   if (!rollback.sawRow) throw new Error('row never restored after failed DELETE');
   if (!rollback.sawToast) throw new Error('no visible "Delete failed" toast after rollback');
   log('failed DELETE rolled back: row restored + error toast shown');
+
+  // ── Deleting the VIEWED chat navigates away (field 2026-07-13: the
+  //    row vanished but the dead transcript stayed in the DOM).
+  //    Preference: previously-viewed chat → top pinned → most recent.
+  //    Stage the "previous" by visiting B then C, then delete C while
+  //    viewing it — must land back in B with C's content gone.
+  await clickRow(page, CHAT_B);
+  await page.waitForFunction(
+    () => (document.getElementById('transcript')?.textContent || '').includes('DEL-B-SEED'),
+    null, { timeout: 5000, polling: 50 },
+  );
+  await waitForDrawerQuiet(page);
+  await clickRow(page, CHAT_C);
+  await page.waitForFunction(
+    () => (document.getElementById('transcript')?.textContent || '').includes('DEL-C-SEED'),
+    null, { timeout: 5000, polling: 50 },
+  );
+  await waitForDrawerQuiet(page);
+  await page.evaluate(async (id) => {
+    const drawer = await import('/build/sessionDrawer.mjs');
+    await drawer.deleteSessionFromUI(id);
+  }, CHAT_C);
+  await page.waitForFunction(
+    () => (document.getElementById('transcript')?.textContent || '').includes('DEL-B-SEED'),
+    null, { timeout: 5000, polling: 50 },
+  );
+  const afterViewedDelete = await page.evaluate(() => ({
+    deadContent: (document.getElementById('transcript')?.textContent || '').includes('DEL-C-SEED'),
+    activeRow: document.querySelector('#sessions-list li.active')?.getAttribute('data-chat-id') || null,
+  }));
+  if (afterViewedDelete.deadContent) throw new Error('deleted chat\'s transcript still in the DOM after delete-of-viewed');
+  if (afterViewedDelete.activeRow !== CHAT_B) {
+    throw new Error(`delete-of-viewed should land on the PREVIOUS chat (B), landed on: ${afterViewedDelete.activeRow}`);
+  }
+  log('delete-of-viewed navigated to the previously-viewed chat, dead transcript gone');
 }
