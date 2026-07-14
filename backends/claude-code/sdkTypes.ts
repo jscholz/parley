@@ -98,11 +98,13 @@ export type SdkPermissionMode =
   | 'dontAsk'
   | 'auto';
 
-/** Docs (2026-07): `{ allow: true }` approves, `{ allow: false }` denies,
- *  `null` declines to decide (falls through to default deny). */
+/** RECONCILED against the installed .d.ts (0.3.209, wiring 2026-07-14):
+ *  the shipped shape is `{behavior: 'allow'|'deny'}` — the docs' newer
+ *  `{allow: boolean}` form is NOT what this SDK version exports. `deny`
+ *  REQUIRES `message`. `null` declines to decide (default deny). */
 export type SdkPermissionResult =
-  | { allow: true; updatedInput?: Record<string, unknown> }
-  | { allow: false; message?: string };
+  | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
+  | { behavior: 'deny'; message: string; interrupt?: boolean };
 
 export type SdkCanUseTool = (
   toolName: string,

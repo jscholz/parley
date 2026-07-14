@@ -245,14 +245,16 @@ export class ClaudeCodeUpstream {
       });
       push(envelope);
       const ans = await answer;
+      // {behavior} shape per the installed SDK .d.ts (0.3.209) — the
+      // docs' {allow} form is a newer API this version doesn't export.
       if (ans == null) {
-        return { allow: false, message: 'Denied: the turn ended before the user answered.' };
+        return { behavior: 'deny', message: 'Denied: the turn ended before the user answered.' };
       }
-      if (isApproval(ans.response)) return { allow: true };
+      if (isApproval(ans.response)) return { behavior: 'allow' };
       const trimmed = ans.response.trim();
       const isPlainDeny = trimmed === DENY_CHOICE || /^(deny|denied|no|n)$/i.test(trimmed);
       return {
-        allow: false,
+        behavior: 'deny',
         message: isPlainDeny ? 'Denied by user.' : `Denied by user: ${trimmed}`,
       };
     };

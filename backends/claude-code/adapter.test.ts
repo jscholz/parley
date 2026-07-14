@@ -264,7 +264,7 @@ function approvalSdk(record: Array<SdkPermissionResult | null>): FakeSdk {
       { signal: new AbortController().signal, toolUseID: 'toolu_9', requestId: 'req_1' },
     );
     record.push(verdict);
-    if (verdict && verdict.allow) {
+    if (verdict && verdict.behavior === 'allow') {
       yield delta('ran it');
       yield resultMsg('ran it');
     } else {
@@ -299,7 +299,7 @@ test('approval round-trip: agent_question mid-turn, answer Allow resolves canUse
   assert.match(q.question, /Bash/);
   assert.match(q.question, /rm -rf build/);
 
-  assert.deepEqual(verdicts, [{ allow: true }]);
+  assert.deepEqual(verdicts, [{ behavior: 'allow' }]);
   // The question rode the turn stream BETWEEN typing and the deltas.
   const seq = types(envs);
   assert.ok(seq.indexOf('agent_question') > seq.indexOf('typing'));
@@ -320,7 +320,7 @@ test('approval round-trip: answer Deny resolves canUseTool to deny', async () =>
   });
 
   assert.equal(verdicts.length, 1);
-  assert.deepEqual(verdicts[0], { allow: false, message: 'Denied by user.' });
+  assert.deepEqual(verdicts[0], { behavior: 'deny', message: 'Denied by user.' });
 });
 
 test('free-text answer becomes a deny carrying the text back to the model', async () => {
@@ -335,7 +335,7 @@ test('free-text answer becomes a deny carrying the text back to the model', asyn
   });
 
   assert.deepEqual(verdicts, [
-    { allow: false, message: 'Denied by user: use /tmp/scratch instead' },
+    { behavior: 'deny', message: 'Denied by user: use /tmp/scratch instead' },
   ]);
 });
 

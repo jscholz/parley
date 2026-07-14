@@ -1022,6 +1022,12 @@ sidekick.init({
   token: process.env.SIDEKICK_PLATFORM_TOKEN
     || (cfgVal('SIDEKICK_PLATFORM_TOKEN', 'backend.sidekick_platform.token', '') as string),
   url: SIDEKICK_UPSTREAM_URL,
+  // Backend switch (claude-code wiring 2026-07-14): `backend: claude-code`
+  // in sidekick.config.yaml (or SIDEKICK_BACKEND env, which wins inside
+  // init) selects the in-process Agent SDK upstream; the claude_code
+  // block carries its config (cwd, allowlist, model, approvals, …).
+  backend: cfgVal('SIDEKICK_BACKEND', 'backend.name', 'http') as string,
+  claudeCode: (cfgVal('', 'claude_code', null) as Record<string, unknown> | null) ?? undefined,
 });
 
 // Meeting-capture transcription pipeline (proxy/sidekick/

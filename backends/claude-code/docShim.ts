@@ -9,15 +9,13 @@
 // right chat under concurrent turns (hermes solves the same problem
 // with per-session env; we get it for free from the closure).
 //
-// Schema note: the real SDK's tool() takes a Zod raw shape. This module
-// passes DISPLAY_DOC_INPUT_SCHEMA (a plain descriptor) through
-// unchanged; the wiring step replaces it with
-// `{ path: z.string(), title: z.string().optional() }` once zod is
-// installed alongside the SDK. Tests fake tool()/createSdkMcpServer so
-// the placeholder never reaches a real validator.
+// Schema: the SDK's tool() takes a Zod raw shape (wired 2026-07-14).
+// Tests fake tool()/createSdkMcpServer, so they never invoke the
+// validator — but the shape below is the real thing.
 
 import { readFileSync, statSync } from 'node:fs';
 import { resolve as resolvePath, extname, basename } from 'node:path';
+import { z } from 'zod';
 import type { AgentSdk, SdkMcpServerConfig, SdkCallToolResult } from './sdkTypes.ts';
 import type { ClaudeCodeEnvelope } from './envelopes.ts';
 import { docIdFor } from './envelopes.ts';
@@ -36,10 +34,9 @@ const FORMAT_BY_SUFFIX: Record<string, string> = {
   '.htm': 'html',
 };
 
-/** Placeholder for the Zod raw shape — swapped at wiring time. */
 export const DISPLAY_DOC_INPUT_SCHEMA = {
-  path: { type: 'string', description: 'Absolute path of the file to display' },
-  title: { type: 'string', description: 'Optional panel title (defaults to the filename)', optional: true },
+  path: z.string().describe('Absolute path of the file to display'),
+  title: z.string().optional().describe('Optional panel title (defaults to the filename)'),
 };
 
 function textResult(payload: Record<string, unknown>, isError = false): SdkCallToolResult {

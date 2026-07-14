@@ -54,11 +54,13 @@
     "prepare": "node -e \"const fs=require('fs');if(!fs.existsSync('build/index.html')&&fs.existsSync('scripts/build.mjs')&&fs.existsSync('src'))require('child_process').execFileSync(process.execPath,['scripts/build.mjs'],{stdio:'inherit'})\""
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.209",
     "playwright-core": "^1.59.1",
     "qrcode-terminal": "^0.12.0",
     "web-push": "^3.6.7",
     "ws": "^8.20.0",
-    "yaml": "^2.8.4"
+    "yaml": "^2.8.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@capacitor/android": "^8.3.1",

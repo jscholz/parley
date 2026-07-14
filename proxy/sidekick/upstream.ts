@@ -32,6 +32,22 @@ export type SidekickEnvelope =
   // `message_id`. See backends/hermes/plugin/__init__.py
   // `_handle_responses` for the emission site.
   | { type: 'user_message'; chat_id: string; message_id: string; text: string }
+  // Unified elicitation (2026-07-13): the agent is blocked on a user
+  // answer. hermes emits these for clarify; the claude-code backend
+  // for canUseTool approvals. The PWA renders a pop-up; answers ride
+  // POST /api/sidekick/questions/{id}. expires_at null = sticks until
+  // answered.
+  | {
+      type: 'agent_question'; chat_id: string; question_id: string;
+      kind: string; question: string; choices?: string[];
+      allow_free_text?: boolean; expires_at?: number | null; urgent?: boolean;
+    }
+  // display_doc → Docs shelf push (hermes plugin + claude-code MCP shim).
+  | {
+      type: 'doc_show'; chat_id: string; title: string; content: string;
+      format?: string; path?: string; doc_id?: string;
+      displayed_at?: number; source?: string; capture_id?: string;
+    }
   | { type: 'error'; chat_id: string; message: string };
 
 /** Drawer-list row, OAI Conversations API shape. */

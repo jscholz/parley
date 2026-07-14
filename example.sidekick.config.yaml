@@ -31,9 +31,30 @@ app:
 # drops in. The token + URL go through env vars in production
 # (SIDEKICK_PLATFORM_URL / SIDEKICK_PLATFORM_TOKEN).
 backend:
+  # Which upstream to run. 'http' (default) = any /v1 abstract-agent
+  # server (hermes plugin, bundled stub). 'claude-code' = your local
+  # Claude Code install via the Agent SDK, in-process (configure the
+  # claude_code block below). Env override: SIDEKICK_BACKEND.
+  name: http
   sidekick_platform:
     url: http://127.0.0.1:8645
     # token: read from $SIDEKICK_PLATFORM_TOKEN; never in this file.
+
+# Claude Code backend (backend.name: claude-code). See
+# backends/claude-code/README.md for the full contract. Approvals
+# default to 'remote': tool-permission requests pop in the app (and on
+# your phone) and the turn waits; 'auto' skips the round-trip and runs
+# with permission_mode. Pending approvals are auto-denied when the turn
+# ends/aborts, so an abandoned prompt can't hang the SDK. v1 degrades
+# gracefully on unread/pins/activity (plugin-HTTP extras).
+claude_code:
+  cwd: ~                    # project dir chats pin to (required to enable)
+  # cwd_allowlist: ['/home/me/code']
+  # model: claude-sonnet-5  # omit = account default
+  approvals: remote         # remote | auto
+  # permission_mode: acceptEdits   # used when approvals: auto
+  # persist_path: ~/.sidekick/claude-code-sessions.json
+  # max_turns: 80
 
 # HTTP server.
 server:

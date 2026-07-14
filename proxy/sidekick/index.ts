@@ -80,7 +80,46 @@ let upstream: UpstreamAgent | null = null;
  *  the bundled stub agent and any upstream that doesn't require auth
  *  work without one. Hermes (and other auth-gated upstreams) will reject
  *  unauthenticated calls and the user sees an upstream 401 in the UI. */
-export function init(opts: { token: string; url: string }): void {
+export function init(opts: { token: string; url: string; backend?: string; claudeCode?: Record<string, unknown> }): void {
+  // Backend switch (claude-code wiring, 2026-07-14). Selection:
+  // SIDEKICK_BACKEND env wins, then the config `backend:` key, default
+  // 'http' (hermes/stub over /v1). The claude-code upstream is
+  // in-process (no HTTP hop) — constructed lazily via dynamic import so
+  // installs that never select it don't pay the SDK load.
+  const backend = (process.env.SIDEKICK_BACKEND || opts.backend || 'http').trim().toLowerCase();
+  if (backend === 'claude-code' || backend === 'claude_code') {
+    void (async () => {
+      try {
+        const [{ ClaudeCodeUpstream }, sdk] = await Promise.all([
+          import('../../backends/claude-code/adapter.ts'),
+          import('@anthropic-ai/claude-agent-sdk'),
+        ]);
+        // YAML block is snake_case; the adapter config is camelCase.
+        const raw: any = opts.claudeCode ?? {};
+        const config: any = {
+          cwd: raw.cwd,
+          cwdAllowlist: raw.cwdAllowlist ?? raw.cwd_allowlist,
+          model: raw.model,
+          approvals: raw.approvals,
+          permissionMode: raw.permissionMode ?? raw.permission_mode,
+          persistPath: raw.persistPath ?? raw.persist_path,
+          maxTurns: raw.maxTurns ?? raw.max_turns,
+        };
+        const cc = new ClaudeCodeUpstream({ sdk: sdk as any, config });
+        upstream = cc.asUpstreamAgent();
+        console.log(`[sidekick] upstream ready (claude-code, cwd=${(opts.claudeCode as any)?.cwd ?? process.cwd()})`);
+      } catch (e: any) {
+        console.error(`[sidekick] claude-code backend failed to init: ${e?.message ?? e} — falling back to HTTP upstream`);
+        upstream = new HTTPAgentUpstream({ url: opts.url, token: opts.token });
+      }
+    })();
+    initStream();
+    notificationsInitSettled = initNotifications().then(
+      () => {},
+      (e) => { console.warn('[sidekick] notifications init failed:', e?.message ?? e); },
+    );
+    return;
+  }
   // Tolerate legacy SIDEKICK_PLATFORM_URL values that include the
   // ws://…/ws form (the WS path is gone but old configs may still
   // carry it). Normalize to the HTTP root.

@@ -258,6 +258,18 @@ export async function delegateQuestionAnswer(
   let body: any;
   try { body = await readBody(req); }
   catch (e: any) { return sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
+  // In-process upstreams (claude-code) expose answerQuestion directly —
+  // no HTTP hop, and their questions never exist on the plugin side.
+  // false → 404 keeps "question lapsed" semantics identical to hermes.
+  try {
+    const { getUpstream } = await import('../index.ts');
+    const up: any = getUpstream?.();
+    if (up && typeof up.answerQuestion === 'function') {
+      const ok = up.answerQuestion(questionId, String(body?.response ?? ''));
+      return sendJson(res, ok ? 200 : 404,
+        ok ? { ok: true } : { ok: false, error: 'no pending question with that id' });
+    }
+  } catch { /* fall through to the HTTP plugin route */ }
   try {
     const r = await forwardRaw(`/v1/questions/${encodeURIComponent(questionId)}`, 'POST', body);
     sendJson(res, r.status, r.body ?? {});
