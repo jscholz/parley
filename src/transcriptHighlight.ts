@@ -2,8 +2,8 @@
  * @fileoverview Keyboard-driven message-highlight mode for the
  * transcript. Slack-style:
  *
- *   • Composer EMPTY + ↑ → enter highlight mode, highlight the most
- *     recent message, scroll it into view.
+ *   • Composer empty, or caret at absolute start + ↑ → enter highlight
+ *     mode, highlight the most recent message, scroll it into view.
  *   • ↑ / ↓ — move highlight to prev / next message.
  *   • ↓ past the most recent message → exit highlight mode, return
  *     focus to the composer.
@@ -138,6 +138,14 @@ function composerIsEmpty(): boolean {
   return !composerEl.value || composerEl.value.trim() === '';
 }
 
+/** True when a non-empty draft's caret is collapsed at the absolute
+ *  top-left of the textarea. ArrowUp anywhere else remains native
+ *  textarea navigation. */
+function composerCaretIsAtStart(): boolean {
+  if (!composerEl) return false;
+  return composerEl.selectionStart === 0 && composerEl.selectionEnd === 0;
+}
+
 function move(delta: 1 | -1): void {
   const list = bubbles();
   if (list.length === 0) return;
@@ -203,12 +211,12 @@ export function initTranscriptHighlight(opts: {
     return;
   }
 
-  // Composer keydown: empty + Up enters highlight mode.
+  // Composer keydown: empty, or caret at top-left + Up enters highlight mode.
   composerEl.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key !== 'ArrowUp') return;
     // Modifier keys passthrough — only bare Up engages the gesture.
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (!composerIsEmpty()) return;
+    if (!composerIsEmpty() && !composerCaretIsAtStart()) return;
     if (highlightedEl) return;  // already in highlight mode
     e.preventDefault();
     const list = bubbles();
