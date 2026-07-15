@@ -32,6 +32,7 @@ import type {
   ChatState,
   ConversationItem,
   PendingSend,
+  UserBubbleSpec,
 } from './types.ts';
 
 export function project(state: ChatState): BubbleSpec[] {
@@ -68,6 +69,11 @@ export function project(state: ChatState): BubbleSpec[] {
   // synthetic shape that didn't match the envelope's `message_id`
   // shape — both got sidekick_ids, neither dedup'd, both rendered.
   const durableAssistantContentCounts = new Map<string, number>();
+  // Durable USER bubbles by content — consulted by the heal-rekey echo
+  // shadow in step 2 (an echo whose key vanished from durable matching
+  // an identical-content durable bubble under a different key). Entries
+  // are consumed 1:1 per shadow match so legit repeats can't collapse.
+  const durableUserSpecsByContent = new Map<string, UserBubbleSpec[]>();
 
   // Durable-vs-durable dedup pre-pass. The items endpoint can return
   // the same logical assistant message TWICE when the plugin's
@@ -80,9 +86,22 @@ export function project(state: ChatState): BubbleSpec[] {
   // duplicates with `created_at=0` (rendering at epoch time) lose to
   // the row that has a real wall-clock timestamp.
   const durableWinnerKey = pickDurableContentWinners(state.durable);
+  // Keys the client's LIVE state already references — inflight user_message
+  // echoes and optimistic pendingSends. The user dedup passes below prefer
+  // these keys as duplicate winners: when the plugin's reconcile pass
+  // double-persists a message under a fresh heal-minted key (field
+  // 2026-07-15), the id tiebreak alone picks the heal twin and drops the
+  // client's own key — which the inflight walk then re-adds as a ghost
+  // bubble at the tail (its key isn't in userKeys). Winning by live key
+  // keeps the join axis intact AND the DOM node's identity stable.
+  const liveUserKeys = new Set<string>();
+  for (const env of state.inflight) {
+    if (env.type === 'user_message') liveUserKeys.add(env.message_id);
+  }
+  for (const p of state.pendingSends) liveUserKeys.add(p.messageId);
   // Near-simultaneous duplicate USER rows to drop (backend double-write
   // defense — see pickUserDuplicateLosers). Far-apart legit repeats survive.
-  const userDropKeys = pickUserDuplicateLosers(state.durable);
+  const userDropKeys = pickUserDuplicateLosers(state.durable, liveUserKeys);
 
   // Track the current turn so tool rows attach to the right activity
   // row. Updated when we walk past a user message in durable OR an
@@ -127,7 +146,16 @@ export function project(state: ChatState): BubbleSpec[] {
       const key = userKey(item);
       if (!userKeys.has(key)) {
         userKeys.add(key);
-        pushDurableSpec({ kind: 'user', key, text: item.content || '', timestamp: ts });
+        const spec: UserBubbleSpec = { kind: 'user', key, text: item.content || '', timestamp: ts };
+        pushDurableSpec(spec);
+        // Track by content for the heal-rekey echo shadow (step 2) —
+        // the user twin of durableAssistantContentCounts, except the
+        // matcher needs key + timestamp, so keep the specs themselves.
+        if (item.content) {
+          let arr = durableUserSpecsByContent.get(item.content);
+          if (!arr) { arr = []; durableUserSpecsByContent.set(item.content, arr); }
+          arr.push(spec);
+        }
       }
       currentTurnKey = `turn:${key}`;
       currentTurnTs = ts;
@@ -238,6 +266,21 @@ export function project(state: ChatState): BubbleSpec[] {
   // alone can't tell "answered" from "still thinking").
   const inflightUserKeys = new Set<string>();
   const finalizedTurnUserKeys = new Set<string>();
+  // Pre-scan: user keys whose turn's reply_final is ALSO in this inflight
+  // buffer (SSE-reconnect replay / undrained completed turn). The walk's
+  // own finalizedTurnUserKeys is only complete after the fact; the
+  // heal-rekey echo shadow below must know at user_message time.
+  const inflightReplayFinalizedUserKeys = new Set<string>();
+  {
+    let turnUser: string | null = null;
+    for (const env of state.inflight) {
+      if (env.type === 'user_message') turnUser = env.message_id;
+      else if (env.type === 'reply_final' && turnUser) {
+        inflightReplayFinalizedUserKeys.add(turnUser);
+        turnUser = null;
+      }
+    }
+  }
 
   for (const env of state.inflight) {
     switch (env.type) {
@@ -250,9 +293,30 @@ export function project(state: ChatState): BubbleSpec[] {
           currentTurnTs = lookupTimestamp(specs, 'user', key) ?? inflightTs;
           inflightTs = Math.max(inflightTs, currentTurnTs + 1);
         } else {
+          const pend = pendingByKey.get(key);
+          // Heal-rekey shadow (field 2026-07-15): this echo's key has no
+          // durable row, its turn is already FINALIZED in this same
+          // buffer (replay shape — a live send's turn is still open),
+          // and durable holds an identical-content user bubble under a
+          // DIFFERENT key near this echo's mint time. That's the same
+          // send served under a re-minted key (the plugin heal re-keyed
+          // it, or a bounded tail merge kept only the twin) — durable
+          // owns the bubble. Adopt its key for turn anchoring, emit
+          // nothing. An open turn never shadows: a genuinely new
+          // identical send must render.
+          const shadow = inflightReplayFinalizedUserKeys.has(key)
+            ? takeContentShadowedUserSpec(
+                durableUserSpecsByContent, liveUserKeys, env.text || pend?.text || '', key)
+            : null;
+          if (shadow) {
+            userKeys.add(key);
+            currentTurnKey = `turn:${shadow.key}`;
+            currentTurnTs = shadow.timestamp;
+            inflightTs = Math.max(inflightTs, currentTurnTs + 1);
+            break;
+          }
           userKeys.add(key);
           inflightUserKeys.add(key);
-          const pend = pendingByKey.get(key);
           const ts = pend ? pend.sentAt : inflightTs++;
           currentTurnTs = ts;
           inflightTs = Math.max(inflightTs, ts + 1);
@@ -757,7 +821,9 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
  *  near-simultaneous case: within each identical-content group, rows are
  *  clustered by time, and any non-winner that falls within
  *  USER_DEDUP_WINDOW_MS of a sibling is dropped. Far-apart legitimate repeats
- *  land in separate clusters and each survive. Returns identityKey()s to drop. */
+ *  land in separate clusters and each survive. `liveKeys` (inflight echo +
+ *  pendingSend message ids) takes precedence in winner selection — see
+ *  flushCluster. Returns identityKey()s to drop. */
 const USER_DEDUP_WINDOW_MS = 30_000;
 // An unlinked state.db user row and its umsg_* envelope-only copy are the
 // SAME send served twice during the envelope→reconcile-link window. state.db
@@ -776,7 +842,48 @@ function isEnvelopeOnlyUserCopy(it: ConversationItem): boolean {
     && Number(it.id) >= ENVELOPE_ID_MIN;
 }
 
-function pickUserDuplicateLosers(items: ConversationItem[]): Set<string> {
+/** Mint time embedded in a client-minted user key (`umsg_<epoch-ms>_…`),
+ *  or null for any other shape. Heal-minted keys carry a mint that can
+ *  PREDATE the send, so this is only trustworthy on the CLIENT's own key. */
+function umsgMintMs(key: string): number | null {
+  const m = /^umsg_(\d{13})/.exec(key);
+  return m ? Number(m[1]) : null;
+}
+
+/** Find-and-consume the durable user bubble an uncovered inflight echo is
+ *  shadowing: same text, key NOT owned by any live echo/pendingSend (those
+ *  consume their own twins by key), and — when the echo key carries a
+ *  parseable mint — within the reconcile-lag bound of it. Closest-in-time
+ *  candidate wins; it's spliced out so each durable bubble can shadow at
+ *  most ONE echo (legit repeats pair 1:1, same contract as the envelope-
+ *  shadow pass). */
+function takeContentShadowedUserSpec(
+  byContent: Map<string, UserBubbleSpec[]>,
+  liveKeys: ReadonlySet<string>,
+  text: string,
+  echoKey: string,
+): UserBubbleSpec | null {
+  if (!text) return null;
+  const candidates = byContent.get(text);
+  if (!candidates || candidates.length === 0) return null;
+  const mint = umsgMintMs(echoKey);
+  let bestIdx = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (liveKeys.has(c.key)) continue;
+    const dist = mint == null ? 0 : Math.abs(c.timestamp - mint);
+    if (mint != null && dist > ENVELOPE_SHADOW_WINDOW_MS) continue;
+    if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+  }
+  if (bestIdx < 0) return null;
+  return candidates.splice(bestIdx, 1)[0];
+}
+
+function pickUserDuplicateLosers(
+  items: ConversationItem[],
+  liveKeys: ReadonlySet<string>,
+): Set<string> {
   const byContent = new Map<string, ConversationItem[]>();
   for (const it of items) {
     if (it.role !== 'user' || !it.content) continue;
@@ -818,9 +925,21 @@ function pickUserDuplicateLosers(items: ConversationItem[]): Set<string> {
     let start = 0;
     const flushCluster = (end: number) => {
       if (end - start < 2) return;  // single row in this time-cluster → keep
-      let winner = arr[start];
-      for (let j = start + 1; j < end; j++) {
-        if (compareDurableForDedup(arr[j], winner) > 0) winner = arr[j];
+      // A row whose key the client's live state already references
+      // (inflight echo / pendingSend) wins outright — dropping it would
+      // orphan that live state, and the inflight walk would re-add the
+      // key as a ghost bubble (heal-rekeyed twin, field 2026-07-15).
+      // Among live-keyed rows (or absent any), the usual tiebreak.
+      let winner: ConversationItem | null = null;
+      for (let j = start; j < end; j++) {
+        if (!liveKeys.has(userKey(arr[j]))) continue;
+        if (!winner || compareDurableForDedup(arr[j], winner) > 0) winner = arr[j];
+      }
+      if (!winner) {
+        winner = arr[start];
+        for (let j = start + 1; j < end; j++) {
+          if (compareDurableForDedup(arr[j], winner) > 0) winner = arr[j];
+        }
       }
       for (let j = start; j < end; j++) {
         if (arr[j] !== winner) losers.add(identityKey(arr[j]));

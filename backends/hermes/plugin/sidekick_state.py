@@ -543,6 +543,112 @@ def list_messages_for_chat(
 _ENVELOPE_CURSOR_THRESHOLD = 10**11
 
 
+# Compaction machinery rows hermes-core writes into the transcript.
+# ``[CONTEXT COMPACTION`` is the child-session seed marker; ``[PRIOR
+# CONTEXT —`` is the compressor's merged-summary header
+# (agent/context_compressor.py _MERGED_PRIOR_CONTEXT_HEADER), which
+# lands in the SAME session when a post-compaction turn-end flush
+# re-persists the rebuilt context (field 2026-07-15). Neither is a real
+# message; both are dropped from reads and reconcile.
+_COMPACTION_SEED_PREFIXES = ("[CONTEXT COMPACTION", "[PRIOR CONTEXT —")
+
+
+def _is_compaction_seed(content) -> bool:
+    text = content or ""
+    return any(text.startswith(p) for p in _COMPACTION_SEED_PREFIXES)
+
+
+def _find_replay_duplicate_state_ids(state_rows) -> set:
+    """Identify state.db rows that are compaction-replay duplicates of
+    an earlier row in the same session walk.
+
+    hermes-core's context compressor rebuilds the in-memory transcript
+    and strips the ``_db_persisted`` markers; the next turn-end flush
+    then re-appends the ENTIRE rebuilt context to the SAME session
+    (field 2026-07-15, session 20260715_190037: rows 74423-74555 were
+    re-persisted copies of 74380-74422 plus summarized copies of
+    compacted-away turns, flushed in one batch). Reconcile must treat
+    those rows as already-present — linking to them or minting
+    ``legacy:`` twins for them re-materializes messages the user
+    already has (duplicate bubbles) and feeds the order-fallback
+    linker bogus candidates (cross-assigned umsg ids).
+
+    A row is a duplicate when an EARLIER row (lower id — ``state_rows``
+    arrives ORDER BY id ASC) matches its logical identity:
+
+      * tool rows: same ``tool_call_id`` — unique per call by
+        construction, so this also catches summarized replays whose
+        content was rewritten by the compressor;
+      * other rows: same ``(role, content, timestamp)`` exactly (replay
+        copies of user rows keep their original timestamps), OR same
+        ``(role, content, tool_calls)`` when content or tool_calls is
+        non-empty — replay copies of assistant rows get re-stamped
+        with the flush time, so identity can't rely on the timestamp.
+
+    Trade-off: a user/assistant legitimately repeating the exact same
+    non-empty text later in a session dedupes against the first
+    occurrence here, so the repeat gets no msg_links twin. That costs
+    only the sidekick_id annotation on the v2 read path (the state.db
+    row itself still surfaces) — strictly better than the failure mode
+    this guards against.
+    """
+    seen_tool_call_ids: set = set()
+    seen_strict: set = set()
+    seen_relaxed: set = set()
+    dup_ids: set = set()
+    for r in state_rows:
+        role = r["role"]
+        content = r["content"] or ""
+        tool_call_id = r["tool_call_id"] or ""
+        tool_calls = (r["tool_calls"] if "tool_calls" in r.keys() else None) or ""
+        if role == "tool" and tool_call_id:
+            if tool_call_id in seen_tool_call_ids:
+                dup_ids.add(str(r["id"]))
+            else:
+                seen_tool_call_ids.add(tool_call_id)
+            continue
+        strict_key = (role, content, r["timestamp"], tool_calls)
+        relaxed_key = (role, content, tool_calls)
+        has_identity = bool(content.strip()) or bool(tool_calls)
+        if strict_key in seen_strict or (has_identity and relaxed_key in seen_relaxed):
+            dup_ids.add(str(r["id"]))
+            continue
+        seen_strict.add(strict_key)
+        if has_identity:
+            seen_relaxed.add(relaxed_key)
+    return dup_ids
+
+
+def _order_fallback_content_compatible(env_content, state_content) -> bool:
+    """True when an order-fallback pairing between an envelope row and
+    a state.db row is plausible for the SAME logical message.
+
+    Order-fallback (Pass 1.b) exists for three documented drift shapes:
+    whitespace drift, small hermes-side post-edits, and the
+    empty-final-reply path. It must never pair two unrelated messages —
+    the field incident (2026-07-15) had it zip slash-command envelopes
+    (``/start``…) onto replayed transcript rows (``did this turn
+    die?``…), permanently attaching umsg ids to the wrong content.
+    Linking correctly matters less than not mis-linking: an unlinked
+    envelope row surfaces fine; a cross-linked one corrupts identity.
+    """
+    a = (env_content or "").strip()
+    b = (state_content or "").strip()
+    if not a or not b:
+        return True  # empty-final-reply path: nothing to contradict.
+    if a == b:
+        return True
+    na = " ".join(a.split())
+    nb = " ".join(b.split())
+    if na == nb:
+        return True  # pure whitespace drift.
+    shorter, longer = (na, nb) if len(na) <= len(nb) else (nb, na)
+    if longer.startswith(shorter):
+        return True  # truncation / trailing-punctuation drift.
+    import difflib
+    return difflib.SequenceMatcher(None, na[:2000], nb[:2000]).ratio() >= 0.7
+
+
 def _resolve_cursor_sort_key(state_db_path, cursor_id):
     """Resolve a pagination cursor to its ``(created_at, id)`` sort tuple.
 
@@ -931,7 +1037,7 @@ def _build_chronological_items(
                     compaction_head_end_per_session[r["session_id"]] = r["id"]
     surviving = [
         r for r in rows
-        if not (r["content"] or "").startswith("[CONTEXT COMPACTION")
+        if not _is_compaction_seed(r["content"])
         and not (
             (drop_through := compaction_head_end_per_session.get(r["session_id"])) is not None
             and r["id"] <= drop_through
@@ -1258,13 +1364,24 @@ def reconcile_from_state_db(
     except Exception:
         return 0
 
-    # Drop compaction-injected seed rows (the `[CONTEXT COMPACTION]`
-    # marker that hermes injects when minting a child session — never
-    # surfaced to the PWA).
+    # Drop compaction machinery rows (the `[CONTEXT COMPACTION]` seed
+    # marker + the compressor's `[PRIOR CONTEXT —]` merged-summary
+    # header — never surfaced to the PWA).
     state_rows = [
         r for r in state_rows
-        if not (r["content"] or "").startswith("[CONTEXT COMPACTION")
+        if not _is_compaction_seed(r["content"])
     ]
+
+    # Compaction-replay duplicates: rows hermes-core re-persisted into
+    # the same session after an in-place compaction (see
+    # _find_replay_duplicate_state_ids). They are NOT link targets for
+    # order-fallback and NOT candidates for Pass 2 legacy inserts —
+    # both would re-materialize messages that already exist. They stay
+    # in `state_rows` for everything else: Pass 1.a exact-content
+    # linking (harmless — same content either way), Pass 3's
+    # live-row set (a link pointing at a replay row must not be
+    # orphan-dropped while the row exists).
+    replay_dup_ids = _find_replay_duplicate_state_ids(state_rows)
 
     # Linked agent_row_ids already in sidekick.db.
     linked_rows = db.fetchall(
@@ -1336,14 +1453,35 @@ def reconcile_from_state_db(
         # roles where envelope and state.db are 1:1 by construction.
         # state_rows came back ORDER BY id ASC (see the CTE query);
         # still_unlinked is in created_at ASC, rowid ASC (the SELECT
-        # above). Both append-only sequences, so per-role zip pairs them.
+        # above). Both append-only sequences, so per-role in-order
+        # pairing matches them — but ONLY content-compatible pairs
+        # link (see _order_fallback_content_compatible): an envelope
+        # row with no plausible twin stays unlinked rather than being
+        # zipped positionally onto unrelated text (field 2026-07-15:
+        # slash-command envelopes cross-assigned onto compaction-replay
+        # rows). A refused pairing does not consume the state row, so
+        # a later envelope can still claim it; the scan pointer only
+        # moves forward, preserving append-only order.
         for role_to_fallback in ("user", "assistant"):
             env_queue = [sk for sk in still_unlinked if sk["role"] == role_to_fallback]
             state_queue = [
-                str(r["id"]) for r in state_rows
-                if r["role"] == role_to_fallback and str(r["id"]) not in claimed_state_ids
+                (str(r["id"]), r["content"] or "") for r in state_rows
+                if r["role"] == role_to_fallback
+                and str(r["id"]) not in claimed_state_ids
+                and str(r["id"]) not in replay_dup_ids
             ]
-            for sk, state_id in zip(env_queue, state_queue):
+            next_idx = 0
+            for sk in env_queue:
+                match_idx = None
+                for j in range(next_idx, len(state_queue)):
+                    if _order_fallback_content_compatible(
+                        sk["content"], state_queue[j][1]
+                    ):
+                        match_idx = j
+                        break
+                if match_idx is None:
+                    continue  # link correctly or not at all.
+                state_id = state_queue[match_idx][0]
                 try:
                     db.exec(
                         "UPDATE msg_links SET agent_row_id = ?, updated_at = ? "
@@ -1352,16 +1490,25 @@ def reconcile_from_state_db(
                     )
                     claimed_state_ids.add(state_id)
                     links += 1
+                    next_idx = match_idx + 1
                 except Exception:
                     continue
 
     # ── Pass 2: insert state.db rows that still have no sidekick.db
     # twin. These are legacy chats from before Phase 1's write-through,
     # OR rows that drifted (sidekick.db write-path bug missed them).
+    # Compaction-replay duplicates are skipped: their logical message
+    # already exists (linked or about-to-be-inserted via its first
+    # occurrence), so a legacy: twin here would double every replayed
+    # bubble (field 2026-07-15: legacy:74535 duplicating msg_ab2a→74402).
     inserted = 0
+    dup_skipped = 0
     for r in state_rows:
         state_id = str(r["id"])
         if state_id in claimed_state_ids:
+            continue
+        if state_id in replay_dup_ids:
+            dup_skipped += 1
             continue
         sk_id = f"legacy:{state_id}"
         ts = float(r["timestamp"]) if r["timestamp"] is not None else time.time()
@@ -1434,15 +1581,18 @@ def reconcile_from_state_db(
                 dropped += 1
             except Exception:
                 continue
-    if dropped or healed_tc:
+    if dropped or healed_tc or dup_skipped:
         # Log every heal event — write-path bugs and whole-session
         # mutations both surface here. Threshold for alerting is a
         # future concern; for now bake into a single warning line a
-        # grep can find.
+        # grep can find. dup_skipped>0 means hermes-core double-
+        # persisted a compaction replay into the session (upstream
+        # behavior the heal now tolerates instead of amplifying).
         import logging as _logging
         _logging.getLogger(__name__).warning(
-            "[sidekick] heal chat=%s links=%d inserted=%d dropped=%d tc_healed=%d",
-            chat_id, links, inserted, dropped, healed_tc,
+            "[sidekick] heal chat=%s links=%d inserted=%d dropped=%d "
+            "tc_healed=%d dup_skipped=%d",
+            chat_id, links, inserted, dropped, healed_tc, dup_skipped,
         )
     # Perf-investigation breadcrumb. Logs at INFO when reconcile takes
     # longer than 50ms; helps distinguish no-op reconciles (should be

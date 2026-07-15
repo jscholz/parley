@@ -577,6 +577,136 @@ describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
   });
 });
 
+describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15)', () => {
+  // Field shape (chat sidekick:a7d55680…, dump missing-bubble-repro-20260715):
+  // the plugin's reconcile pass DOUBLE-persisted two user messages, appending
+  // a second state.db row per message with a heal-minted umsg_* key whose
+  // embedded mint time PREDATES the send. Same content, same timestamp,
+  // higher row id → the durable dedup's id tiebreak picks the HEAL copy and
+  // drops the client-minted key. But the live client's inflight echo and
+  // pendingSend are keyed by its OWN mint — if that key loses, the echo
+  // walk re-adds it as a ghost bubble at the transcript tail. Real ids +
+  // timestamps below (unix seconds, hermes shape).
+  const SENT_SEC = 1_784_148_027;                       // 20:40:27
+  const CLIENT_KEY = 'umsg_1784148027542_jy4tqfcm';     // row 74399 (client mint)
+  const HEAL_KEY = 'umsg_1784147961892_hfg8d15d';       // row 74532 (heal mint, predates send)
+  const TEXT = 'can you delete pls?';
+  const dupPair = (): ConversationItem[] => [
+    { id: 74399, sidekick_id: CLIENT_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+    { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+  ];
+
+  it('inflight echo keyed by the dropped duplicate does NOT re-add a ghost bubble', () => {
+    const s = state({
+      durable: dupPair(),
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
+      ] as SidekickEnvelope[],
+    });
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
+    assert.equal(userSpecs[0].key, CLIENT_KEY,
+      'the key the client already knows must win the dedup — inflight/pendingSend join off it, and the DOM node keeps its identity');
+  });
+
+  it('pendingSend keyed by the dropped duplicate does NOT re-add a pending ghost', () => {
+    const s = state({
+      durable: dupPair(),
+      pendingSends: [{ messageId: CLIENT_KEY, text: TEXT, sentAt: SENT_SEC * 1000 + 542 }],
+    });
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length}`);
+    assert.equal(userSpecs[0].key, CLIENT_KEY);
+    assert.ok(!userSpecs[0].pending, 'durable covers the send — the bubble must not regress to pending');
+  });
+
+  it('echo + pendingSend + full turn envelopes still land on exactly one bubble per message', () => {
+    // Both field messages at once, mid-live shape: durable refresh delivered
+    // the heal twins while the echoes were still in inflight and the second
+    // send's optimistic row hadn't cleared.
+    const s = state({
+      durable: [
+        { id: 74397, sidekick_id: 'umsg_1784147977585_8ed1ppse', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
+        { id: 74530, sidekick_id: 'umsg_1784147959469_mqcjttgj', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
+        ...dupPair(),
+        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147977585_8ed1ppse', text: 'did this turn die?' },
+        { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_ab2a043662146c9ebbdf', text: 'Deleted and verified all four are gone. 🧹' },
+      ] as SidekickEnvelope[],
+      pendingSends: [{ messageId: CLIENT_KEY, text: TEXT, sentAt: SENT_SEC * 1000 + 542 }],
+    });
+    const out = project(s);
+    for (const text of ['did this turn die?', TEXT]) {
+      const bubbles = out.filter(x => x.kind === 'user' && x.text === text);
+      assert.equal(bubbles.length, 1, `"${text}": expected 1 bubble, got ${bubbles.length} (${bubbles.map(b => b.key).join(', ')})`);
+    }
+  });
+
+  it('replayed echo for a finalized turn whose durable copy survives ONLY under the heal key is content-shadowed', () => {
+    // Bounded tail-page merge can evict the client-keyed row entirely
+    // (mergeTailRefresh keeps the page's copy — the heal twin). An SSE
+    // reconnect then replays the turn's envelopes with the ORIGINAL key:
+    // no key match, but durable owns the bubble — the echo must not fork
+    // a ghost. Gated on the turn being finalized in the same replay so a
+    // genuinely new send (durable not caught up) still renders.
+    const s = state({
+      durable: [
+        { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_replayed_final', text: '' },
+      ] as SidekickEnvelope[],
+    });
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
+    assert.equal(userSpecs[0].key, HEAL_KEY, 'durable owns the bubble when the client key is gone from durable');
+  });
+
+  it('content-shadow does NOT eat a genuinely new identical send (turn not finalized)', () => {
+    // Same text as an already-persisted message, sent again while its turn
+    // is still open — the fresh echo is the only copy of the NEW send and
+    // must render alongside the durable bubble of the OLD one.
+    const s = state({
+      durable: [
+        { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'ok done', timestamp: 1_784_148_044 },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784148200000_fresh', text: TEXT },
+      ] as SidekickEnvelope[],
+    });
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 2, `new send must render, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
+  });
+
+  it('replay with echoes for BOTH copies of a legit repeat keeps both bubbles', () => {
+    // Two real sends of the same text; durable holds both, replay carries
+    // both echoes + finals. Key-covered echoes must consume their own
+    // durable twins so the content-shadow never collapses the repeat.
+    const s = state({
+      durable: [
+        { id: '70001', sidekick_id: 'umsg_1784147000000_a', role: 'user', content: 'ok', timestamp: 1_784_147_000 },
+        { id: '70002', sidekick_id: 'msg_r1', role: 'assistant', content: 'first', timestamp: 1_784_147_010 },
+        { id: '70003', sidekick_id: 'umsg_1784147100000_b', role: 'user', content: 'ok', timestamp: 1_784_147_100 },
+        { id: '70004', sidekick_id: 'msg_r2', role: 'assistant', content: 'second', timestamp: 1_784_147_110 },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147000000_a', text: 'ok' },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_r1', text: 'first' },
+        { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147100000_b', text: 'ok' },
+        { type: 'reply_final', chat_id: 'c', message_id: 'msg_r2', text: 'second' },
+      ] as SidekickEnvelope[],
+    });
+    const userSpecs = project(s).filter(x => x.kind === 'user');
+    assert.equal(userSpecs.length, 2, `legit repeat must keep both bubbles, got ${userSpecs.length}`);
+  });
+});
+
 describe('notification update path renders markdown (not plaintext)', () => {
   // Regression: updateNotification used to overwrite the bubble's .text with
   // escapeHtml(text).replace(/\n/g,'<br>') on every reconcile pass, flattening
