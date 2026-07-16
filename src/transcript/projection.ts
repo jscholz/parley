@@ -794,8 +794,21 @@ function pickDurableContentWinners(items: ConversationItem[]): Map<string, strin
 }
 
 /** Returns > 0 when `a` wins, < 0 when `b` wins, 0 when tied.
- *  Tier order: (real-timestamp beats zero-timestamp) → higher timestamp
- *  → higher id. */
+ *  Tier order: real-timestamp beats zero-timestamp → annotated
+ *  (sidekick_id present) beats unannotated → EARLIER timestamp →
+ *  lower id.
+ *
+ *  Earlier-and-annotated-wins because every observed duplicate shape
+ *  appends a degraded copy AFTER the original: the reconcile legacy:
+ *  twin, the platform-ingest double-write (2026-05-27, ~4s later),
+ *  and hermes-core's compaction re-flush (field 2026-07-16), whose
+ *  replay rows are UNANNOTATED and — for assistant rows — re-stamped
+ *  with the flush time. Preferring highest-timestamp there tore the
+ *  assistant bubble away from its turn to a flush-time cluster at the
+ *  transcript tail; preferring the original keeps the bubble in its
+ *  turn AND keeps the key that pins/anchors/inflight dedup join on.
+ *  The one shape where the LATER copy must win — an original stuck at
+ *  created_at=0 rendering at epoch time — is tier 1. */
 function compareDurableForDedup(a: ConversationItem, b: ConversationItem): number {
   const aTs = a.timestamp ?? a.created_at ?? 0;
   const bTs = b.timestamp ?? b.created_at ?? 0;
@@ -803,12 +816,16 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
   const bIsReal = bTs > 0;
   if (aIsReal && !bIsReal) return 1;
   if (!aIsReal && bIsReal) return -1;
-  if (aTs !== bTs) return aTs > bTs ? 1 : -1;
-  // Both have the same timestamp (and both real, or both zero).
-  // Tie-break by id (string compare works for both integer-id and
-  // sidekick_id-string-id shapes; consistent ordering is what we
-  // need, not numeric correctness).
-  return String(a.id) > String(b.id) ? 1 : -1;
+  const aAnnotated = !!a.sidekick_id;
+  const bAnnotated = !!b.sidekick_id;
+  if (aAnnotated && !bAnnotated) return 1;
+  if (!aAnnotated && bAnnotated) return -1;
+  if (aTs !== bTs) return aTs < bTs ? 1 : -1;
+  // Same annotation tier, same timestamp. Tie-break by LOWER id — the
+  // original row was persisted first (string compare works for both
+  // integer-id and sidekick_id-string-id shapes; consistent ordering
+  // is what we need, not numeric correctness).
+  return String(a.id) < String(b.id) ? 1 : -1;
 }
 
 /** Defensive durable-vs-durable dedup for USER rows. `pickDurableContentWinners`

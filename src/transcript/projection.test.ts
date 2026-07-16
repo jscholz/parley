@@ -384,11 +384,13 @@ describe('project: dedup keys', () => {
     assert.equal(assistantBubbles[0].key, 'msg_xyz');
   });
 
-  it('durable-vs-durable: two assistant rows with same content + same valid timestamp picks the higher id deterministically', () => {
+  it('durable-vs-durable: two assistant rows with same content + same valid timestamp picks the lower id deterministically', () => {
     // Defensive: if BOTH rows have real timestamps that happen to match
     // (e.g. plugin write-through + reconcile Pass 2 fired in the same
     // second), the projection must still emit one bubble — pick by
-    // a stable tiebreak so future runs render identically.
+    // a stable tiebreak so future runs render identically. LOWER id
+    // wins: the original row was persisted first (compaction-replay
+    // twins, field 2026-07-16).
     const s = state({
       durable: [
         { id: 100, sidekick_id: 'msg_a', role: 'assistant', content: 'same text', timestamp: T0 + 1000 },
@@ -398,8 +400,8 @@ describe('project: dedup keys', () => {
     const out = project(s);
     const assistantBubbles = out.filter(o => o.kind === 'assistant');
     assert.equal(assistantBubbles.length, 1);
-    // Higher id wins on tie ("msg_b" > "msg_a" lex order).
-    assert.equal(assistantBubbles[0].key, 'msg_b');
+    // Lower id wins on tie ("msg_a" < "msg_b" lex order).
+    assert.equal(assistantBubbles[0].key, 'msg_a');
   });
 
   it('durable-vs-durable dedup does NOT collapse genuinely different content', () => {
@@ -704,6 +706,65 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
     });
     const userSpecs = project(s).filter(x => x.kind === 'user');
     assert.equal(userSpecs.length, 2, `legit repeat must keep both bubbles, got ${userSpecs.length}`);
+  });
+});
+
+describe('project: compaction-replay durable twins (field 2026-07-16)', () => {
+  // Field shape (chat 20249e46…, session 20260715_133109): hermes-core's
+  // in-place compaction re-flushed the rebuilt context into the same
+  // session — verbatim copies of every recent message, UNANNOTATED
+  // (sidekick_id null; the plugin heal now refuses to link/insert for
+  // them). The asymmetry is real and matters: replayed USER rows keep
+  // their original timestamps, replayed ASSISTANT rows are re-stamped
+  // with the flush time. The old "highest timestamp, then highest id"
+  // winner rule therefore picked the replay copy on both sides — the
+  // assistant bubble tore away from its turn to the flush-time cluster
+  // at the tail (rendered as "missing user bubble" mid-conversation),
+  // and the user bubble lost its umsg_* key. Real ids/timestamps below.
+  const SENT = 1_784_208_102;      // user send
+  const REPLIED = 1_784_208_309;   // original assistant reply
+  const FLUSH = 1_784_208_910;     // compaction re-flush batch stamp
+  const JOHN = 'Hey. My name is John. I’m the CEO of R2.';
+  const REPEATBACK = '## Daniel’s repeatback\n\n> I understand the technical development story.';
+  const replayShape = (): ConversationItem[] => [
+    { id: 75950, sidekick_id: 'umsg_1784208100938_j9hwifw1', role: 'user', content: JOHN, timestamp: SENT },
+    { id: 75967, sidekick_id: 'msg_852640f789b8b3c0f437', role: 'assistant', content: REPEATBACK, timestamp: REPLIED },
+    { id: 76010, sidekick_id: null, role: 'user', content: JOHN, timestamp: SENT },
+    { id: 76027, sidekick_id: null, role: 'assistant', content: REPEATBACK, timestamp: FLUSH },
+  ];
+
+  it('assistant winner is the annotated ORIGINAL row, not the flush-restamped replay', () => {
+    const specs = project(state({ durable: replayShape() }));
+    const assistants = specs.filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 1, `expected 1 assistant bubble, got ${assistants.length}`);
+    assert.equal(assistants[0].key, 'msg_852640f789b8b3c0f437',
+      'the annotated original must win — its key matches pins/anchors/inflight and its timestamp keeps the bubble in its turn');
+    assert.equal(assistants[0].timestamp, REPLIED * 1000);
+  });
+
+  it('user winner is the annotated ORIGINAL row, not the unannotated replay', () => {
+    const specs = project(state({ durable: replayShape() }));
+    const users = specs.filter(x => x.kind === 'user');
+    assert.equal(users.length, 1, `expected 1 user bubble, got ${users.length}`);
+    assert.equal(users[0].key, 'umsg_1784208100938_j9hwifw1');
+  });
+
+  it('turn stays adjacent: user then assistant, in send order', () => {
+    const specs = project(state({ durable: replayShape() }));
+    assert.deepEqual(specs.map(s => s.kind), ['user', 'assistant']);
+    assert.ok(specs[0].timestamp < specs[1].timestamp, 'reply must sort after its prompt');
+  });
+
+  it('epoch-zero duplicate still loses to a real-wall-clock copy (original tiebreak intent)', () => {
+    const specs = project(state({
+      durable: [
+        { id: 100, sidekick_id: 'msg_orig', role: 'assistant', content: 'same text', timestamp: 0 },
+        { id: 200, sidekick_id: null, role: 'assistant', content: 'same text', timestamp: REPLIED },
+      ],
+    }));
+    const assistants = specs.filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 1);
+    assert.equal(assistants[0].key, '200', 'a row rendering at epoch time must lose to one with a real timestamp');
   });
 });
 

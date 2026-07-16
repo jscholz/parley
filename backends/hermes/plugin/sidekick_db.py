@@ -129,6 +129,23 @@ CREATE INDEX IF NOT EXISTS idx_msg_links_agent ON msg_links(agent_row_id);
 -- Idempotent migration: ALTER TABLE in sqlite is forgiving when the
 -- column already exists (it'd raise; we catch in Python).
 
+-- Provable compaction-replay duplicate rows in state.db, detected by
+-- reconcile's full pass (see sidekick_state.
+-- _classify_replay_duplicate_state_ids). hermes-core's in-place
+-- compaction re-appends the whole rebuilt context into the SAME
+-- session on the next turn-end flush (field 2026-07-15/16); the v2
+-- read path filters its bounded window against this set so the
+-- duplicate copies never render, even when the ORIGINAL row falls
+-- outside the window the read fetched. Rows here are advisory-only:
+-- a stale entry (state row since deleted) is harmless, and reconcile
+-- re-syncs the set for a chat on every full pass.
+CREATE TABLE IF NOT EXISTS replay_dups (
+  chat_id       TEXT NOT NULL,
+  agent_row_id  TEXT NOT NULL,   -- state.db.messages.id (stringified)
+  detected_at   REAL NOT NULL,
+  PRIMARY KEY (chat_id, agent_row_id)
+);
+
 CREATE TABLE IF NOT EXISTS pins (
   chat_id    TEXT NOT NULL,
   msg_id     TEXT NOT NULL,

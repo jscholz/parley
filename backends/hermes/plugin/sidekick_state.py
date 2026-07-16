@@ -558,7 +558,17 @@ def _is_compaction_seed(content) -> bool:
     return any(text.startswith(p) for p in _COMPACTION_SEED_PREFIXES)
 
 
-def _find_replay_duplicate_state_ids(state_rows) -> set:
+# Max |timestamp − flush-anchor timestamp| for a relaxed-identity match
+# to count as a PROVABLE replay duplicate (droppable from reads). The
+# flush stamps every re-persisted row with one captured time — both
+# field batches (2026-07-15 ts 1784148228.04, 2026-07-16 ts
+# 1784208910.7255x) spread <1ms across 60-129 rows — so 2s is generous
+# slack without letting an unrelated same-content repeat (which lands
+# minutes-to-days later) match.
+_REPLAY_FLUSH_ANCHOR_EPS_S = 2.0
+
+
+def _classify_replay_duplicate_state_ids(state_rows) -> tuple:
     """Identify state.db rows that are compaction-replay duplicates of
     an earlier row in the same session walk.
 
@@ -585,38 +595,91 @@ def _find_replay_duplicate_state_ids(state_rows) -> set:
         non-empty — replay copies of assistant rows get re-stamped
         with the flush time, so identity can't rely on the timestamp.
 
-    Trade-off: a user/assistant legitimately repeating the exact same
-    non-empty text later in a session dedupes against the first
-    occurrence here, so the repeat gets no msg_links twin. That costs
-    only the sidekick_id annotation on the v2 read path (the state.db
-    row itself still surfaces) — strictly better than the failure mode
-    this guards against.
+    Returns ``(dup_ids, provable_dup_ids)`` — both sets of stringified
+    state.db row ids, ``provable_dup_ids ⊆ dup_ids``:
+
+      * ``dup_ids`` is the AGGRESSIVE set reconcile uses for linking
+        decisions (no order-fallback target, no Pass 2 legacy insert).
+        Trade-off: a user/assistant legitimately repeating the exact
+        same non-empty text later in a session dedupes against the
+        first occurrence here, so the repeat gets no msg_links twin.
+        That costs only the sidekick_id annotation on the v2 read path
+        (the state.db row itself still surfaces) — strictly better
+        than the failure mode this guards against.
+
+      * ``provable_dup_ids`` is the strictly narrower set the READ
+        path may DROP (field 2026-07-16: the items API served both
+        copies of every duplicated message until cleaned). Hiding a
+        legitimate repeat from the transcript is a worse failure than
+        an unlinked annotation, so a relaxed (timestamp-blind) match
+        only counts as provable when the row is ANCHORED to a
+        compaction flush — its timestamp within
+        ``_REPLAY_FLUSH_ANCHOR_EPS_S`` of a machinery-seed row's
+        (``[PRIOR CONTEXT``/``[CONTEXT COMPACTION`` rows are stamped
+        with the flush time and are structural to every replay batch:
+        the rebuilt context always contains its compaction seed).
+        Tool-call-id and strict (timestamp-included) matches are
+        provable unconditionally: tool_call_ids are unique per call by
+        construction, and two genuinely distinct messages never share
+        an identical float timestamp AND content.
+
+    Machinery-seed rows in ``state_rows`` are used only as flush-time
+    anchors — they're never marked and never contribute identity keys
+    (both callers filter them out of everything separately).
     """
+    anchor_ts = [
+        float(r["timestamp"])
+        for r in state_rows
+        if r["timestamp"] is not None and _is_compaction_seed(r["content"])
+    ]
+
+    def _near_flush_anchor(ts) -> bool:
+        if ts is None:
+            return False
+        ts = float(ts)
+        return any(abs(ts - a) <= _REPLAY_FLUSH_ANCHOR_EPS_S for a in anchor_ts)
+
     seen_tool_call_ids: set = set()
     seen_strict: set = set()
     seen_relaxed: set = set()
     dup_ids: set = set()
+    provable_dup_ids: set = set()
     for r in state_rows:
-        role = r["role"]
         content = r["content"] or ""
+        if _is_compaction_seed(content):
+            continue
+        role = r["role"]
         tool_call_id = r["tool_call_id"] or ""
         tool_calls = (r["tool_calls"] if "tool_calls" in r.keys() else None) or ""
         if role == "tool" and tool_call_id:
             if tool_call_id in seen_tool_call_ids:
                 dup_ids.add(str(r["id"]))
+                provable_dup_ids.add(str(r["id"]))
             else:
                 seen_tool_call_ids.add(tool_call_id)
             continue
         strict_key = (role, content, r["timestamp"], tool_calls)
         relaxed_key = (role, content, tool_calls)
         has_identity = bool(content.strip()) or bool(tool_calls)
-        if strict_key in seen_strict or (has_identity and relaxed_key in seen_relaxed):
+        if strict_key in seen_strict:
             dup_ids.add(str(r["id"]))
+            provable_dup_ids.add(str(r["id"]))
+            continue
+        if has_identity and relaxed_key in seen_relaxed:
+            dup_ids.add(str(r["id"]))
+            if _near_flush_anchor(r["timestamp"]):
+                provable_dup_ids.add(str(r["id"]))
             continue
         seen_strict.add(strict_key)
         if has_identity:
             seen_relaxed.add(relaxed_key)
-    return dup_ids
+    return dup_ids, provable_dup_ids
+
+
+def _find_replay_duplicate_state_ids(state_rows) -> set:
+    """Aggressive (linking-side) replay-duplicate set — see
+    ``_classify_replay_duplicate_state_ids``."""
+    return _classify_replay_duplicate_state_ids(state_rows)[0]
 
 
 def _order_fallback_content_compatible(env_content, state_content) -> bool:
@@ -1044,6 +1107,45 @@ def _build_chronological_items(
         )
     ]
 
+    # Drop compaction-replay duplicate rows (hermes-core's post-
+    # compaction turn-end flush re-appends the whole rebuilt context
+    # into the SAME session — field 2026-07-16, session
+    # 20260715_133109: the items API served both copies of every
+    # duplicated message). Two complementary sources, same elision
+    # mechanics as the machinery filter above (callers slice AFTER
+    # this, and the fetch over-fetches by ITEMS_FETCH_ELISION_MARGIN,
+    # so has_more/first_id contracts hold):
+    #   1. `replay_dups` — the provable set reconcile persisted from
+    #      its whole-session walk. Needed because a duplicate's
+    #      ORIGINAL row often falls OUTSIDE the bounded window fetched
+    #      here (re-deriving it would mean re-fetching the session's
+    #      full content on every read: ~680ms on the largest live
+    #      chat, vs one indexed sidekick.db lookup).
+    #   2. An in-window classification pass over the rows already in
+    #      hand (~0.3ms at window size) — closes the freshness gap for
+    #      damage newer than the last reconcile when both copies (and
+    #      the flush's machinery anchor) sit inside the window, which
+    #      is exactly the tail-read-right-after-the-flush case.
+    # Only PROVABLE duplicates are dropped — see
+    # _classify_replay_duplicate_state_ids; legitimately repeated
+    # identical messages keep serving.
+    replay_drop_ids: set = set()
+    try:
+        dup_rows = sidekick_db.fetchall(
+            "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
+            (chat_id,),
+        )
+        replay_drop_ids = {str(r["agent_row_id"]) for r in dup_rows}
+    except Exception:
+        pass  # sidekick.db unavailable — in-window pass still applies.
+    replay_drop_ids |= _classify_replay_duplicate_state_ids(
+        sorted(rows, key=lambda r: r["id"])
+    )[1]
+    if replay_drop_ids:
+        surviving = [
+            r for r in surviving if str(r["id"]) not in replay_drop_ids
+        ]
+
     # Fetch sidekick.db.msg_links rows for these state.db ids in one
     # query, then merge in Python. This is the "JOIN" that gives the
     # PWA its sidekick_id / kind annotations without the dual-body
@@ -1364,6 +1466,21 @@ def reconcile_from_state_db(
     except Exception:
         return 0
 
+    # Compaction-replay duplicates: rows hermes-core re-persisted into
+    # the same session after an in-place compaction (see
+    # _classify_replay_duplicate_state_ids). Classified on the RAW row
+    # set — the machinery rows filtered just below are the flush-time
+    # anchors the provable classification needs. The aggressive set is
+    # NOT a link target for order-fallback and NOT a candidate for
+    # Pass 2 legacy inserts — both would re-materialize messages that
+    # already exist. The rows stay in `state_rows` for everything
+    # else: Pass 1.a exact-content linking (harmless — same content
+    # either way), Pass 3's live-row set (a link pointing at a replay
+    # row must not be orphan-dropped while the row exists).
+    replay_dup_ids, provable_replay_dup_ids = (
+        _classify_replay_duplicate_state_ids(state_rows)
+    )
+
     # Drop compaction machinery rows (the `[CONTEXT COMPACTION]` seed
     # marker + the compressor's `[PRIOR CONTEXT —]` merged-summary
     # header — never surfaced to the PWA).
@@ -1372,16 +1489,37 @@ def reconcile_from_state_db(
         if not _is_compaction_seed(r["content"])
     ]
 
-    # Compaction-replay duplicates: rows hermes-core re-persisted into
-    # the same session after an in-place compaction (see
-    # _find_replay_duplicate_state_ids). They are NOT link targets for
-    # order-fallback and NOT candidates for Pass 2 legacy inserts —
-    # both would re-materialize messages that already exist. They stay
-    # in `state_rows` for everything else: Pass 1.a exact-content
-    # linking (harmless — same content either way), Pass 3's
-    # live-row set (a link pointing at a replay row must not be
-    # orphan-dropped while the row exists).
-    replay_dup_ids = _find_replay_duplicate_state_ids(state_rows)
+    # Persist the PROVABLE subset so the v2 read path can filter its
+    # bounded window against it (field 2026-07-16: the read served
+    # both copies of every duplicated message — the duplicate's
+    # ORIGINAL often falls outside the window the read fetched, so the
+    # read can't re-derive this set cheaply itself; reconcile already
+    # walks the whole session chain). Full sync per chat: stale
+    # entries (rows a cleanup deleted / rows no longer classified
+    # provable) are removed so the set never outlives its evidence.
+    # Best-effort — a sidekick.db hiccup must not fail the heal.
+    try:
+        existing_dup_rows = db.fetchall(
+            "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
+            (chat_id,),
+        )
+        existing_dups = {str(r["agent_row_id"]) for r in existing_dup_rows}
+        for sid in provable_replay_dup_ids - existing_dups:
+            db.exec(
+                "INSERT OR IGNORE INTO replay_dups "
+                "(chat_id, agent_row_id, detected_at) VALUES (?, ?, ?)",
+                (chat_id, sid, time.time()),
+            )
+        stale_dups = existing_dups - provable_replay_dup_ids
+        if stale_dups:
+            placeholders = ",".join("?" * len(stale_dups))
+            db.exec(
+                f"DELETE FROM replay_dups WHERE chat_id = ? "
+                f"AND agent_row_id IN ({placeholders})",
+                (chat_id, *sorted(stale_dups)),
+            )
+    except Exception:
+        pass
 
     # Linked agent_row_ids already in sidekick.db.
     linked_rows = db.fetchall(
