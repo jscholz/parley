@@ -528,7 +528,10 @@ async function getBrowser() {
   if (browser && browser.isConnected()) return browser;
   console.log('launching persistent Chromium...');
   browser = await chromium.launch({
-    executablePath: '/usr/bin/chromium',
+    // Prefer an explicit deployment override, then Playwright's managed
+    // Chromium. Hard-coding /usr/bin/chromium breaks on Ubuntu 24.04,
+    // where the apt package is a Snap shim and no such binary exists.
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM || chromium.executablePath(),
     args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
   });
   console.log('Chromium ready');
