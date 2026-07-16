@@ -196,6 +196,7 @@ async function dispatchTurnViaUpstream(
       type: 'error',
       chat_id: chatId,
       message: `upstream dispatch failed: ${e?.message || String(e)}`,
+      ...(userMessageId ? { user_message_id: userMessageId } : {}),
     });
   }
 }

@@ -1767,7 +1767,12 @@ class SidekickAdapter(BasePlatformAdapter):
         # notification kind='debug' carve-out or for a chatty
         # reply_final that's just a tool acknowledgement.
         if "should_push" not in env:
-            env = {**env, "should_push": env_type in ("reply_final", "notification")}
+            # Mutate the caller-owned envelope. Notification persistence
+            # deliberately stamps ``sidekick_id`` onto this same object and
+            # send() returns that id to the gateway. Rebinding to a shallow
+            # copy here made the persisted/live envelope correct while the
+            # caller still saw an empty message_id.
+            env["should_push"] = env_type in ("reply_final", "notification")
 
         # Replace hermes' misleading "No <provider> credentials stored"
         # wrapper with a chat message that names the actual problem
@@ -2016,30 +2021,18 @@ class SidekickAdapter(BasePlatformAdapter):
             logger.warning("[sidekick] activity persist failed: %s", exc)
 
     def _persist_notification(self, env: Dict[str, Any]) -> None:
-        """Write a notification envelope to state.db.messages as an
-        assistant row, link it via sidekick_msg_links with kind=<kind>,
-        and stamp the minted sidekick_id back on the envelope.
+        """Persist a notification in Hermes' canonical message history.
 
-        Why role='assistant' and not a custom role: this IS the agent's
-        reply — it just got routed through the cron scheduler instead
-        of a /v1/responses turn. Persisting under role='assistant' in
-        the user's chat session means:
-          (a) reload finds the row via the same items endpoint the rest
-              of the transcript uses (single source of truth — same as
-              Telegram, which echoes platform-delivered messages back
-              into state.db via webhook),
-          (b) hermes' context loader pulls it into the next turn's
-              prompt (which is correct — the agent SHOULD know what
-              cron output it produced when forming the next reply),
-          (c) one query at fetch time, no UNION.
+        The assistant body belongs in ``state.db.messages`` so the agent sees
+        its own out-of-turn output on the next turn. Sidekick-specific identity
+        and ``kind`` metadata belong in ``sidekick.db.msg_links``; the
+        subsequent write-through reads ``agent_row_id`` from this envelope and
+        links the supplemental row directly. The retired
+        ``state.db.sidekick_msg_links`` table must not be recreated.
 
-        The PWA discriminates notification rows from regular replies
-        via the `kind` field on the wire item (set from
-        sidekick_msg_links.kind). Renderer paints them as
-        .line.system.notification regardless of state.db role.
-
-        Best-effort: failures only mean the row won't survive a reload
-        — the live SSE fan-out still happens regardless."""
+        Best-effort: failures only mean the row won't enter Hermes context or
+        survive through state.db alone. The sidekick.db write-through and live
+        SSE fan-out still happen regardless."""
         if self._state_db_path is None or not self._state_db_path.exists():
             return
         chat_id_raw = env.get("chat_id", "")
@@ -2055,7 +2048,6 @@ class SidekickAdapter(BasePlatformAdapter):
         existing_sk_id = env.get("sidekick_id")
         if isinstance(existing_sk_id, str) and existing_sk_id.startswith("notif_"):
             return
-        kind = env.get("kind") if isinstance(env.get("kind"), str) else None
         session_id = self._resolve_session_id_for_chat(chat_id_bare)
         if not session_id:
             logger.warning(
@@ -2077,17 +2069,10 @@ class SidekickAdapter(BasePlatformAdapter):
                         (session_id, content, time.time()),
                     )
                     state_db_id = cur.lastrowid
-                    # Link the freshly-inserted row to its sidekick_id
-                    # + carry the notification kind. The kind column
-                    # is what the items endpoint surfaces so the PWA
-                    # can render this row as a notification rather
-                    # than a regular assistant reply.
-                    conn.execute(
-                        "INSERT INTO sidekick_msg_links "
-                        "(state_db_id, sidekick_id, kind) "
-                        "VALUES (?, ?, ?)",
-                        (state_db_id, sk_id, kind),
-                    )
+                # The transaction committed successfully. The sidekick.db
+                # write-through immediately after this method consumes the
+                # cross-link and stores kind + sidekick_id there.
+                env["agent_row_id"] = str(state_db_id)
         except Exception as exc:
             logger.warning(
                 "[sidekick] notification persist failed (non-fatal): %s", exc

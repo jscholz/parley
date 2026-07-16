@@ -48,7 +48,7 @@ export type SidekickEnvelope =
       format?: string; path?: string; doc_id?: string;
       displayed_at?: number; source?: string; capture_id?: string;
     }
-  | { type: 'error'; chat_id: string; message: string };
+  | { type: 'error'; chat_id: string; message: string; user_message_id?: string };
 
 /** Drawer-list row, OAI Conversations API shape. */
 export interface ConversationSummary {
@@ -174,7 +174,7 @@ export interface ConversationItem {
   tool_calls?: string;
   // Sidekick extension: SSE-shape id (umsg_X / msg_X) the plugin
   // emitted during the live turn that persisted this row. Recorded
-  // by the plugin via sidekick_msg_links and surfaced through the
+  // by the plugin via sidekick.db msg_links and surfaced through the
   // history endpoint so reload-time dedup keys off the same id the
   // IDB cache stored. Absent for legacy rows, other-channel rows,
   // and tool / system rows.
@@ -182,7 +182,7 @@ export interface ConversationItem {
   /** Sidekick extension: notification kind ('cron', 'reminder',
    *  'approval', etc.) when the row was persisted by the cron
    *  scheduler / background-task path. Plumbed through from
-   *  sidekick_msg_links.kind. State.db role stays 'assistant' (single
+   *  sidekick.db msg_links.kind. State.db role stays 'assistant' (single
    *  source of truth — hermes' context loader sees these too, which
    *  is correct: the agent should know what cron output it produced).
    *  PWA reads this as the discriminator to render the row as a
@@ -545,6 +545,7 @@ export class HTTPAgentUpstream implements UpstreamAgent {
         type: 'error',
         chat_id: chatId,
         message: `upstream sendMessage HTTP ${r.status}: ${errText.slice(0, 240)}`,
+        ...(opts.userMessageId ? { user_message_id: opts.userMessageId } : {}),
       };
       return;
     }
@@ -555,6 +556,7 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     let assembled = '';
     let messageId: string | null = null;
     let closed = false;
+    let terminalSeen = false;
 
     try {
       while (!closed) {
@@ -582,16 +584,22 @@ export class HTTPAgentUpstream implements UpstreamAgent {
           let payload: any;
           try { payload = JSON.parse(data); } catch { continue; }
 
-          for (const env of translateOAIEvent(event, payload, chatId, {
+          for (const translated of translateOAIEvent(event, payload, chatId, {
             getAssembled: () => assembled,
             setAssembled: (v) => { assembled = v; },
             getMessageId: () => messageId,
             setMessageId: (v) => { messageId = v; },
           })) {
-            yield env;
+            // Keep failures addressable to the optimistic user send that
+            // initiated the run. The PWA can then render/retry the correct
+            // turn even if another message was sent before the failure.
+            yield translated.type === 'error' && opts.userMessageId
+              ? { ...translated, user_message_id: opts.userMessageId }
+              : translated;
           }
 
           if (event === 'response.completed' || event === 'response.error') {
+            terminalSeen = true;
             closed = true;
             break;
           }
@@ -599,6 +607,18 @@ export class HTTPAgentUpstream implements UpstreamAgent {
       }
     } finally {
       try { reader.releaseLock(); } catch {}
+    }
+    // A gateway restart / OOM can close the HTTP body cleanly at the TCP
+    // layer without emitting response.error. Treat that as an interrupted
+    // turn, not success; otherwise the proxy ends quietly and the PWA keeps
+    // showing an in-flight operation forever.
+    if (!terminalSeen && !opts.signal?.aborted) {
+      yield {
+        type: 'error',
+        chat_id: chatId,
+        message: 'upstream response stream ended before response.completed or response.error',
+        ...(opts.userMessageId ? { user_message_id: opts.userMessageId } : {}),
+      };
     }
   }
 

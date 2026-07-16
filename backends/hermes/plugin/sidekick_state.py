@@ -1769,6 +1769,7 @@ def record_envelope(db, env: Dict[str, Any]) -> Optional[str]:
             content=env.get("content") or env.get("text") or "",
             status="final",
             kind=env.get("kind"),
+            agent_row_id=env.get("agent_row_id"),
         )
         return row_id
 

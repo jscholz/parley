@@ -575,6 +575,77 @@ test('SSE — last_event_id query param resumes from the ring (manual reconnect)
   }
 });
 
+test('turn failure — upstream EOF before terminal emits an addressed error envelope', async () => {
+  // A gateway process death closes /v1/responses without either
+  // response.completed or response.error. That used to look like a clean end
+  // to the proxy, leaving the PWA working forever with no failure signal.
+  const rig = await startRig({ mode: 'gateway' });
+  try {
+    rig.fakeAgent.enqueueTurnEvents([
+      { event: 'response.in_progress', data: { type: 'response.in_progress' } },
+    ]);
+
+    const ac = new AbortController();
+    const stream = await fetch(
+      `${rig.proxyUrl}/api/sidekick/stream?chat_id=restart-failure`,
+      { signal: ac.signal },
+    );
+    assert.equal(stream.status, 200);
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+
+    const envelopes: any[] = [];
+    let buf = '';
+    const collect = (async () => {
+      const timeout = setTimeout(() => ac.abort(), 700);
+      try {
+        while (!envelopes.some((env) => env.type === 'error')) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) buf += decoder.decode(value, { stream: true });
+          let sep = buf.indexOf('\n\n');
+          while (sep !== -1) {
+            const frame = buf.slice(0, sep);
+            buf = buf.slice(sep + 2);
+            sep = buf.indexOf('\n\n');
+            let data = '';
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('data:')) data += line.slice(5).trim();
+            }
+            if (!data) continue;
+            try { envelopes.push(JSON.parse(data)); } catch {}
+          }
+        }
+      } catch (error) {
+        if (!ac.signal.aborted) throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    })();
+
+    const response = await fetch(`${rig.proxyUrl}/api/sidekick/messages`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: 'restart-failure',
+        text: 'survive the gateway restart',
+        user_message_id: 'umsg_restart_failure_1',
+      }),
+    });
+    assert.equal(response.status, 202);
+    await collect;
+    ac.abort();
+    try { reader.releaseLock(); } catch {}
+
+    const failures = envelopes.filter((env) => env.type === 'error');
+    assert.equal(failures.length, 1, `expected one error, saw ${JSON.stringify(envelopes)}`);
+    assert.match(failures[0].message, /ended before response\.(completed|error)/);
+    assert.equal(failures[0].user_message_id, 'umsg_restart_failure_1');
+  } finally {
+    await rig.stop();
+  }
+});
+
 test('user_message — broadcast envelope reaches /api/sidekick/stream subscribers', async () => {
   // Cross-device user-message asymmetry fix: when the upstream
   // emits a user_message envelope (out-of-turn, before agent

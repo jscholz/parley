@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import sqlite3
 import sys
 import time
 import types
@@ -454,6 +455,124 @@ def test_send_classifies_approval_prompt_as_urgent_notification(plugin):
         "urgent": True,
         "sidekick_id": "notif_test_approval",
     }
+
+
+def _make_current_schema_state_db(path: Path, *, chat_id: str) -> Path:
+    """Create the post-cleanup state.db subset without sidekick_msg_links."""
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            user_id TEXT,
+            started_at REAL NOT NULL,
+            parent_session_id TEXT,
+            system_prompt TEXT
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT,
+            timestamp REAL NOT NULL,
+            tool_name TEXT,
+            tool_call_id TEXT,
+            tool_calls TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?, ?, ?, ?)",
+        ("session-current-schema", "sidekick", chat_id, time.time()),
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_approval_persists_and_surfaces_without_retired_state_side_table(
+    plugin, tmp_path,
+):
+    """Approval persistence must match the post-May-19 production schema."""
+    import importlib
+
+    state = importlib.import_module(f"{plugin.__name__}.sidekick_state")
+    db_mod = importlib.import_module(f"{plugin.__name__}.sidekick_db")
+
+    chat_id = "approval-current-schema"
+    adapter = _make_envelope_routing_adapter(plugin)
+    adapter._state_db_path = _make_current_schema_state_db(
+        tmp_path / "state.db", chat_id=chat_id,
+    )
+    adapter._sidekick_db = db_mod.SidekickDB(tmp_path / "sidekick.db")
+    subscriber = asyncio.Queue()
+    adapter._event_subscribers.add(subscriber)
+
+    content = (
+        "⚠️ Dangerous command requires approval:\n\n"
+        "printf safe-approval-smoke\n\n"
+        "Reason: command approval test\n"
+        "Reply /approve to execute or /deny to cancel."
+    )
+    result = asyncio.run(adapter.send(chat_id, content))
+
+    assert result.success is True
+    assert result.message_id.startswith("notif_")
+
+    with sqlite3.connect(adapter._state_db_path) as conn:
+        state_rows = conn.execute(
+            "SELECT id, role, content FROM messages ORDER BY id"
+        ).fetchall()
+    assert len(state_rows) == 1
+    state_row_id, role, body = state_rows[0]
+    assert role == "assistant"
+    assert body == content
+
+    sidekick_row = adapter._sidekick_db.fetchone(
+        "SELECT id, kind, status, agent_row_id FROM msg_links WHERE id = ?",
+        (result.message_id,),
+    )
+    assert sidekick_row is not None
+    assert sidekick_row["kind"] == "approval"
+    assert sidekick_row["status"] == "final"
+    assert sidekick_row["agent_row_id"] == str(state_row_id)
+
+    replayed = [env for _event_id, env in adapter._event_replay_ring]
+    approval_events = [env for env in replayed if env.get("kind") == "approval"]
+    assert len(approval_events) == 1
+    assert approval_events[0]["sidekick_id"] == result.message_id
+    _event_id, delivered = subscriber.get_nowait()
+    assert delivered["sidekick_id"] == result.message_id
+
+    history = state.list_messages_for_chat_with_state_db_source(
+        adapter._sidekick_db, adapter._state_db_path, chat_id, "sidekick",
+    )
+    assert len(history["items"]) == 1
+    assert history["items"][0]["sidekick_id"] == result.message_id
+    assert history["items"][0]["kind"] == "approval"
+
+    adapter._sidekick_db.close()
+
+
+def test_failure_event_reaches_out_of_turn_replay_ring(plugin):
+    """A run failure must surface as an event rather than vanish."""
+    adapter = _make_envelope_routing_adapter(plugin)
+    env = {
+        "type": "error",
+        "chat_id": "failure-chat",
+        "message": "agent run interrupted",
+    }
+
+    # No live subscriber is present, hence False; replay retention is still
+    # mandatory so a reconnecting PWA receives the failure.
+    assert asyncio.run(adapter._safe_send_envelope(env)) is False
+    replayed = [item for _event_id, item in adapter._event_replay_ring]
+    assert replayed == [{
+        **env,
+        "should_push": False,
+        "chat_id": "sidekick:failure-chat",
+    }]
 
 
 def _make_envelope_routing_adapter(plugin):
