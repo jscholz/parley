@@ -29,6 +29,12 @@ class TurnEntry:
         "tool_calls", "tool_results",
         "assistant_text", "assistant_message_id",
         "started_at",
+        # Additive (transcript v3 Phase 1 — turn-end deterministic
+        # linker): the reply_final envelope's message_id and the set of
+        # tool call_ids observed this turn (the tc:/tr: envelope id
+        # space). close_turn_and_link reads both to pair the turn's
+        # state.db rows with envelope ids WITHOUT content matching.
+        "final_message_id", "call_ids",
     )
 
     def __init__(self, *, chat_id: str, user_message: str,
@@ -48,6 +54,8 @@ class TurnEntry:
         self.assistant_text: str = ""
         self.assistant_message_id: str = ""
         self.started_at = started_at
+        self.final_message_id: str = ""
+        self.call_ids: set = set()
 
 
 class TurnBuffer:
@@ -91,6 +99,9 @@ class TurnBuffer:
                     "args": env.get("args"),
                     "ts": env.get("started_at") or time.time(),
                 })
+                call_id = env.get("call_id")
+                if isinstance(call_id, str) and call_id:
+                    entry.call_ids.add(call_id)
             elif etype == "tool_result":
                 entry.tool_results.append({
                     "call_id": env.get("call_id", ""),
@@ -98,6 +109,16 @@ class TurnBuffer:
                     "result": env.get("result"),
                     "ts": time.time(),
                 })
+                call_id = env.get("call_id")
+                if isinstance(call_id, str) and call_id:
+                    entry.call_ids.add(call_id)
+            elif etype == "reply_final":
+                # Turn-linker identity: the final assistant bubble's
+                # stable id. Captured here (observe runs before
+                # close_turn pops the entry in _safe_send_envelope).
+                msg_id = env.get("message_id")
+                if isinstance(msg_id, str) and msg_id:
+                    entry.final_message_id = msg_id
             elif etype == "reply_delta":
                 text = env.get("text")
                 if isinstance(text, str):

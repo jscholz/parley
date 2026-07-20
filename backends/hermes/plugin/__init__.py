@@ -1789,12 +1789,15 @@ class SidekickAdapter(BasePlatformAdapter):
         # In-flight turn buffer: capture tool/reply envelopes for the
         # mid-flight /items merge. Closes on reply_final (state.db is
         # now authoritative). Independent of the in-turn vs out-of-turn
-        # routing below.
+        # routing below. The popped TurnEntry is kept for the turn
+        # linker's close capture (scheduled further down) — it carries
+        # the turn's call-id set + reply_final message_id.
+        closed_turn_entry = None
         if self._turn_buffer is not None:
             try:
                 self._turn_buffer.observe_envelope(env)
                 if env_type == "reply_final" and chat_id:
-                    self._turn_buffer.close_turn(chat_id)
+                    closed_turn_entry = self._turn_buffer.close_turn(chat_id)
             except Exception as exc:
                 logger.warning("[sidekick] turn buffer observe failed: %s", exc)
 
@@ -1829,6 +1832,27 @@ class SidekickAdapter(BasePlatformAdapter):
                 _sunread.invalidate_unread_cache()
             except Exception as exc:
                 logger.warning("[sidekick] sidekick.db record failed: %s", exc)
+
+        # Transcript v3 Phase 1 (dark launch): schedule the turn
+        # linker's turn-end capture off-loop. reply_final closes the
+        # open watermark window; a notification with no open window is
+        # a background turn (cron/scheduler) and synthesizes one. Safe
+        # to capture now: hermes-core persists the turn's rows strictly
+        # BEFORE the plugin sees reply_final — the gateway's single
+        # end-of-run persistence step commits before final_response is
+        # extracted and delivered (see _process_message_background in
+        # gateway/run.py). Runs AFTER _persist_notification + the
+        # write-through above so a notification's agent_row_id link is
+        # already in msg_links when the window classifies (rule-1
+        # pre-exclusion). No-op when SIDEKICK_TURN_LINKER=0.
+        if env_type in ("reply_final", "notification") and chat_id:
+            try:
+                from . import sidekick_turn_linker as _linker  # noqa: WPS433
+                _linker.schedule_close(self, chat_id, env, closed_turn_entry)
+            except Exception as exc:
+                logger.warning(
+                    "[sidekick] turn-linker close schedule failed: %s", exc,
+                )
 
         # Plugin-owned push dispatch. Fires on push-eligible envelopes
         # (reply_final, notification) when SIDEKICK_PUSH_OWNED_BY_PLUGIN
@@ -1910,12 +1934,15 @@ class SidekickAdapter(BasePlatformAdapter):
         # an active conversation is one re-fetch per ~1.5s window per
         # chat — cheap.
         #
-        # Race note: reply_final fires here BEFORE hermes' state.db
-        # write commits. The PWA's fetch may see the count as N-1 if
-        # the race lands wrong. Self-heals on the next event (or any
-        # visibilitychange refresh) so the worst case is a brief stale
-        # badge. Fix in-place if it turns out to be user-visible: hook
-        # off the state.db commit instead.
+        # Ordering note (corrected 2026-07-20): hermes' state.db write
+        # commits BEFORE the plugin sees reply_final — the gateway's
+        # end-of-run persistence step runs inside the agent-result
+        # chain, and final_response is only extracted and delivered
+        # after it returns (gateway/run.py _process_message_background;
+        # the turn linker's turn-end capture relies on the same
+        # ordering). An earlier version of this comment claimed the
+        # opposite; the badge count computed on the PWA's follow-up
+        # fetch is NOT racing the row flush.
         if env_type in ("reply_final", "notification") and chat_id:
             try:
                 _route_events.publish_out_of_turn(self, {

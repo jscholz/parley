@@ -146,6 +146,61 @@ CREATE TABLE IF NOT EXISTS replay_dups (
   PRIMARY KEY (chat_id, agent_row_id)
 );
 
+-- ── Transcript v3 Phase 1 (dark launch) — turn-end deterministic linker ──
+-- SHADOW tables only. The turn linker (sidekick_turn_linker.py) records
+-- its envelope↔state.db-row decisions here so they can be soak-compared
+-- against the content-matching reconcile's msg_links.agent_row_id
+-- opinions in the journal. NOTHING reads these tables on a serving
+-- path, and the linker never writes msg_links — writing agent_row_id
+-- there would blind reconcile's independent opinion and un-dark the
+-- launch. Phase 3 flips reads onto these links; until then they are
+-- droppable at any time.
+--
+-- turn_links: one row per state.db message row claimed by an observed
+-- turn. msg_id is the envelope-space id (umsg_*/msg_*/tr:<call_id>) or
+-- NULL for assistant tool-orchestration rows (no envelope exists for
+-- those; comparison treats reconcile's legacy:<id> twin as agreement).
+-- method ∈ {user, tool_call_id, orchestration, final}.
+CREATE TABLE IF NOT EXISTS turn_links (
+  chat_id       TEXT NOT NULL,
+  msg_id        TEXT,
+  agent_row_id  TEXT NOT NULL,
+  turn_id       TEXT NOT NULL,
+  method        TEXT NOT NULL,
+  created_at    REAL NOT NULL,
+  PRIMARY KEY (chat_id, agent_row_id)
+);
+CREATE INDEX IF NOT EXISTS idx_turn_links_turn ON turn_links(chat_id, turn_id);
+
+-- turn_observations: one row per observed turn WINDOW — the state.db
+-- id range (hwm_open, hwm_close] captured between dispatch and
+-- reply_final. turn_id is the turn's user_message_id (umsg_*), the
+-- notification id (notif_*) for background windows, or gap:<lo>-<hi>
+-- for rows that appeared with no observing turn (plugin down /
+-- terminal use). status ∈ {open, closed, aborted, background,
+-- unobserved}. flags is a JSON object: {"flags": [...],
+-- "unclaimed": {agent_row_id: reason}, "inactive_ids": [...],
+-- "prelinked_ids": [...], "cmd": bool, "gap": [lo, hi]}.
+-- inactive_ids snapshots which window rows had messages.active=0 at
+-- capture time (the lighter representation vs a column per link;
+-- Phase 3's read path needs it to honor hermes-core's soft deletes).
+CREATE TABLE IF NOT EXISTS turn_observations (
+  chat_id        TEXT NOT NULL,
+  turn_id        TEXT NOT NULL,
+  hwm_open       INTEGER NOT NULL,
+  hwm_close      INTEGER,
+  count_at_open  INTEGER,
+  status         TEXT NOT NULL,
+  flags          TEXT,
+  env_count      INTEGER,
+  row_count      INTEGER,
+  claimed        INTEGER,
+  unclaimed      INTEGER,
+  created_at     REAL NOT NULL,
+  closed_at      REAL,
+  PRIMARY KEY (chat_id, turn_id)
+);
+
 CREATE TABLE IF NOT EXISTS pins (
   chat_id    TEXT NOT NULL,
   msg_id     TEXT NOT NULL,

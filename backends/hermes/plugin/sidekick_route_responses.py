@@ -404,6 +404,21 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue(maxsize=_TURN_QUEUE_MAX)
     adapter._turn_queues[chat_id] = queue
 
+    # Transcript v3 Phase 1 (dark launch): capture the turn linker's
+    # state.db watermark. MUST happen (a) before _dispatch_message can
+    # run — nothing of THIS turn is in state.db yet, so the capture is
+    # race-free — and (b) before the turn buffer below replaces the
+    # previous TurnEntry, because the barrier inside (close any stale
+    # open window as aborted) needs the PREVIOUS turn's call-id set.
+    # No-op when SIDEKICK_TURN_LINKER=0. Writes shadow tables only.
+    from . import sidekick_turn_linker as _linker  # noqa: WPS433
+    try:
+        await _linker.open_turn_watermark(
+            adapter, chat_id, user_message_id, user_text=text,
+        )
+    except Exception as exc:
+        logger.warning("[sidekick] turn-linker open failed: %s", exc)
+
     # Open the in-flight turn buffer. Source of truth for
     # /v1/conversations/{id}/items between POST receipt and
     # reply_final's link-write — the PWA's mid-flight reload

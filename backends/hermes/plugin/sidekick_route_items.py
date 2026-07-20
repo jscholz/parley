@@ -79,10 +79,29 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
 
     async def _run() -> None:
         try:
+            # The turn linker's soak comparison (below) only judges
+            # observations closed before reconcile started — a turn
+            # closing DURING the pass would be diffed against stale
+            # msg_links and, once past the per-chat compare high-water
+            # mark, never re-compared.
+            _reconcile_started_at = _time.time()
             await _perf.run_in_sidekick_worker(
                 _sstate.reconcile_from_state_db,
                 adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             )
+            # Transcript v3 Phase 1 (dark launch): diff the turn
+            # linker's shadow links against the reconcile pass that
+            # just ran and emit one linker-soak journal line per chat
+            # when there are new turns or divergences. No-op when
+            # SIDEKICK_TURN_LINKER=0.
+            from . import sidekick_turn_linker as _linker  # noqa: WPS433
+            if _linker.enabled() and adapter._sidekick_db is not None:
+                await _perf.run_in_sidekick_worker(
+                    _linker.compare_and_log,
+                    adapter._sidekick_db, chat_id,
+                    state_db_path=adapter._state_db_path,
+                    closed_before=_reconcile_started_at,
+                )
         except Exception:
             pass
         finally:
