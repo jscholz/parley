@@ -71,6 +71,49 @@ def _read_state_unread_state(db) -> Dict[str, Tuple[Optional[float], bool]]:
     }
 
 
+# Grace window before an out-of-universe unread_state row is purged.
+# Protects the brand-new-chat race: the user opens a chat mid-first-
+# turn, mark_seen writes the pointer, but the state.db session row
+# hasn't been flushed yet — the chat is briefly absent from the
+# universe and its FRESH pointer must survive until the flush lands.
+_STALE_UNREAD_PURGE_GRACE_S = 3600.0
+
+
+def _purge_stale_unread_state(db, pointer: Dict[str, Tuple[Optional[float], bool]],
+                              universe: set, source: str) -> None:
+    """Delete unread_state rows whose chat is absent from the served
+    universe and old enough to be provably stale. Rows with a NULL
+    last_read_at can't be aged, so they're left alone (they're already
+    excluded from the badge by the universe scoping); rows carrying a
+    different source prefix aren't ours to judge."""
+    now = time.time()
+    prefix = f"{source}:"
+    doomed = []
+    for key, (last_read_at, _marked) in pointer.items():
+        if key.startswith(prefix):
+            bare = key[len(prefix):]
+        elif ":" not in key:
+            bare = key
+        else:
+            continue
+        if not bare or bare in universe:
+            continue
+        if last_read_at is None or (now - last_read_at) < _STALE_UNREAD_PURGE_GRACE_S:
+            continue
+        doomed.append(key)
+    # Chunked under SQLite's ~999 host-param cap — the live DB carried
+    # 400+ stale rows at fix time (unread_state was never cleaned on
+    # chat delete), so the first purge is a big batch.
+    BATCH = 400
+    for i in range(0, len(doomed), BATCH):
+        chunk = doomed[i:i + BATCH]
+        placeholders = ",".join(["?"] * len(chunk))
+        db.exec(
+            f"DELETE FROM unread_state WHERE chat_id IN ({placeholders})",
+            chunk,
+        )
+
+
 def compute_unread(
     *,
     db,
@@ -160,8 +203,22 @@ def _compute_unread_uncached(
     """
     pointer = _read_state_unread_state(db)
 
-    # Chat set: union of state.db user_ids (existing behavior) + msg_links
-    # chat_ids (catches envelope-only chats not yet in state.db).
+    # Chat universe: EXACTLY the set the conversations route serves —
+    # state.db sessions with a user_id for this source (the same root
+    # resolution _summaries_by_user_id in sidekick_route_conversations
+    # groups by; child/rotated sessions have user_id NULL and roll up
+    # to these roots). The badge must be a sum over chats the drawer
+    # can actually show, or an unservable chat becomes a permanent
+    # unclearable +1 (field 2026-07-20: `sidekick:upgrade-probe-…` had
+    # one msg_links row, no state.db session, and badged forever).
+    #
+    # msg_links chat_ids are deliberately NOT added to the universe —
+    # they only contribute COUNTS (the envelope-only pre-flush window,
+    # see the batch query below) for chats already in the universe.
+    # Degraded fallback: when state.db is unreachable we keep the old
+    # msg_links-derived universe rather than report 0 — a transient
+    # read failure must not zero the badge (badge.ts treats total==0
+    # as "everything read").
     chat_ids_set: set = set()
     state_reachable = state_db_path is not None and state_db_path.exists()
     if state_reachable:
@@ -176,16 +233,26 @@ def _compute_unread_uncached(
                     chat_ids_set.add(r[0])
         except Exception:
             state_reachable = False
-    try:
-        msg_chat_rows = db.fetchall(
-            "SELECT DISTINCT chat_id FROM msg_links WHERE chat_id IS NOT NULL",
-        )
-        for r in msg_chat_rows:
-            cid = r["chat_id"]
-            if cid:
-                chat_ids_set.add(cid)
-    except Exception:
-        pass
+    if state_reachable:
+        # Opportunistic hygiene: unread_state rows for chats that fell
+        # out of the universe (deleted chats, probe leftovers) are
+        # inert now — purge the clearly-stale ones. Best-effort; a
+        # failure here must never break the badge computation.
+        try:
+            _purge_stale_unread_state(db, pointer, chat_ids_set, source)
+        except Exception:
+            pass
+    else:
+        try:
+            msg_chat_rows = db.fetchall(
+                "SELECT DISTINCT chat_id FROM msg_links WHERE chat_id IS NOT NULL",
+            )
+            for r in msg_chat_rows:
+                cid = r["chat_id"]
+                if cid:
+                    chat_ids_set.add(cid)
+        except Exception:
+            pass
 
     if not chat_ids_set:
         return {"chats": [], "total": 0}

@@ -93,9 +93,18 @@ def test_unread_counts_envelope_only_reply_before_state_db_flush(db, state_db):
     status='final', non-NULL tool_calls excluded) must count toward
     unread regardless of whether state.db has caught up yet. msg_links
     is the canonical source of truth for "what messages exist."
+
+    2026-07-20 (BUG A ghost-chat scoping): the chat universe is now
+    scoped to chats the conversations route serves — state.db sessions
+    with a user_id. The chat's SESSION row therefore must exist (it
+    does in the field scenario: the user has been talking in the chat);
+    only its MESSAGE rows lag the envelope. The essential contract —
+    envelope rows count before the state.db message flush — is
+    unchanged and still asserted below.
     """
-    # No state.db session for this chat yet — agent hasn't flushed.
+    # Session exists; hermes hasn't flushed the reply's MESSAGE row yet.
     # Envelope path has written the reply to msg_links.
+    _add_session(state_db, "s1")
     state.record_envelope(db, {
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_pre_flush", "text": "Checking.",

@@ -1993,6 +1993,34 @@ class SidekickAdapter(BasePlatformAdapter):
 
         try:
             from . import sidekick_state as _sstate
+            # True mint time: notif_* ids embed their epoch-ms mint. A
+            # replayed envelope (gateway restart re-driving the
+            # notification path) re-persisting a PRUNED item must land
+            # at its original time, not the replay batch's time.time()
+            # — otherwise old items resurrect at the top of the pane
+            # (field 2026-07-20: four cron items spanning Jul 18-20
+            # re-inserted with one identical replay-batch created_at).
+            created_at = _sstate.mint_time_from_activity_id(item_id)
+            if created_at is None:
+                created_at = time.time()
+            # Born-read coverage: an item older than the chat's
+            # last_read_at pointer is something the user has already
+            # read past — insert it read so a replay of a pruned item
+            # can't mint a phantom unread the chat can no longer clear.
+            # NEVER for unresolved approvals (this path always inserts
+            # resolved=None): they block a workflow until actioned.
+            read = False
+            if kind != "approval":
+                try:
+                    row = _sstate.get_unread_row(self._sidekick_db, chat_id)
+                    if row is None and raw_chat_id != chat_id:
+                        # Legacy bare-id unread_state rows.
+                        row = _sstate.get_unread_row(self._sidekick_db, raw_chat_id)
+                    last_read_at = row.get("lastReadAt") if row else None
+                    if isinstance(last_read_at, (int, float)) and created_at <= last_read_at:
+                        read = True
+                except Exception:
+                    read = False
             _sstate.upsert_activity_item(
                 self._sidekick_db,
                 id=item_id,
@@ -2000,9 +2028,9 @@ class SidekickAdapter(BasePlatformAdapter):
                 kind=kind,
                 title=title,
                 body=body,
-                created_at=time.time(),
+                created_at=created_at,
                 urgent=urgent,
-                read=False,
+                read=read,
                 message_id=item_id,
                 resolved=None,
             )

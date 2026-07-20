@@ -9,6 +9,7 @@ Keep this module pure: storage operations only. Dispatch logic
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -310,19 +311,49 @@ def prune_activity_items(db, *, limit: Optional[int] = None) -> Dict[str, Any]:
     return {"removed": cur.rowcount, "limit": keep}
 
 
+# Activity ids minted by the envelope path embed their creation time:
+# ``notif_<epoch-ms>_<hex>`` (see __init__._persist_activity_for_push).
+# 13 digits pins epoch-milliseconds (2001-2286) so a shorter/longer
+# digit run (some other id scheme) never parses as a bogus timestamp.
+_ACTIVITY_ID_MINT_RE = re.compile(r"^notif_(\d{13})_")
+
+
+def mint_time_from_activity_id(item_id: Any) -> Optional[float]:
+    """Epoch-seconds mint time embedded in a ``notif_<13-digit-ms>_…``
+    activity id, or None when the id doesn't carry one. Lets a
+    replayed/pruned-then-reinserted notification land at its TRUE time
+    instead of the replay batch's time.time() (field 2026-07-20: four
+    cron items with mints spanning Jul 18-20 all re-inserted with one
+    identical replay-batch created_at)."""
+    if not isinstance(item_id, str):
+        return None
+    m = _ACTIVITY_ID_MINT_RE.match(item_id)
+    if not m:
+        return None
+    return int(m.group(1)) / 1000.0
+
+
 def upsert_activity_item(db, *, id: str, chat_id: Optional[str], kind: str, title: str,
                          body: str, created_at: Optional[float] = None,
                          urgent: bool = False, read: bool = False,
                          message_id: Optional[str] = None,
                          resolved: Optional[str] = None) -> None:
+    # ON CONFLICT is one-way for user-visible progress: a replayed
+    # envelope (gateway restart re-emitting the notification path) must
+    # never UN-read an item, wipe a resolution, or move created_at.
+    # ``read`` only ratchets 0→1; ``resolved`` keeps the first non-NULL
+    # value; ``created_at`` is insert-time only (deliberately absent
+    # from the update set — pinned by test_replay_upsert_preserves_created_at).
     now = time.time()
     db.exec(
         "INSERT INTO activity_items (id, chat_id, kind, title, body, created_at, urgent, read, message_id, resolved) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "  chat_id = excluded.chat_id, kind = excluded.kind, title = excluded.title, "
-        "  body = excluded.body, urgent = excluded.urgent, read = excluded.read, "
-        "  message_id = excluded.message_id, resolved = excluded.resolved",
+        "  body = excluded.body, urgent = excluded.urgent, "
+        "  read = MAX(activity_items.read, excluded.read), "
+        "  message_id = excluded.message_id, "
+        "  resolved = COALESCE(activity_items.resolved, excluded.resolved)",
         (id, chat_id, kind, title, body, created_at if created_at is not None else now,
          1 if urgent else 0, 1 if read else 0, message_id, resolved),
     )
@@ -339,12 +370,19 @@ def resolve_activity_item(db, *, id: str, resolution: str) -> Dict[str, Any]:
     return {"updated": cur.rowcount > 0}
 
 
-def mark_activity_seen(db, *, chat_id: Optional[str] = None, all_items: bool = False) -> Dict[str, Any]:
+def mark_activity_seen(db, *, chat_id: Optional[str] = None, all_items: bool = False,
+                       exclude_open_approvals: bool = False) -> Dict[str, Any]:
+    """Mark activity items read. ``exclude_open_approvals=True`` is for
+    IMPLICIT seen paths (opening a chat via /v1/unread/seen): approval
+    items with resolved IS NULL are blocking workflow events and must
+    never be auto-read as a side effect — only an explicit pane action
+    (default, exclude_open_approvals=False) may read them."""
+    guard = " AND NOT (kind = 'approval' AND resolved IS NULL)" if exclude_open_approvals else ""
     if all_items:
-        cur = db.exec("UPDATE activity_items SET read = 1 WHERE read = 0")
+        cur = db.exec(f"UPDATE activity_items SET read = 1 WHERE read = 0{guard}")
     elif chat_id:
         cur = db.exec(
-            "UPDATE activity_items SET read = 1 WHERE chat_id = ? AND read = 0",
+            f"UPDATE activity_items SET read = 1 WHERE chat_id = ? AND read = 0{guard}",
             (chat_id,),
         )
     else:

@@ -19,7 +19,6 @@
 
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
-import * as activityStore from './activityStore.ts';
 
 // Read-through cache. The Map values are the per-chat unread counts
 // the server returned at the last refresh. NEVER mutate these
@@ -107,7 +106,16 @@ async function refreshFromServer(): Promise<void> {
       for (const k of nextMarked) markedUnread.add(k);
     }
     await syncBadge();
-    if (totalUnread() === 0 && activityStore.unreadActivityCount() > 0) activityStore.markAllRead();
+    // (2026-07-20) The auto-markAllRead heuristic that lived here
+    // ("totalUnread()===0 → pane must be stale → markAllRead") is gone.
+    // The server now keeps pane items consistent with chat unread
+    // itself: /v1/unread/seen marks the chat's activity items read
+    // (never unresolved approvals), replayed envelopes can't un-read
+    // or resurrect items, and items covered by the chat's last_read_at
+    // are born read. The heuristic's failure modes were real: it nuked
+    // FRESH activity rows during the envelope→state.db flush race, and
+    // its markAllRead(all:true) marked blocking unresolved approvals
+    // read whenever the badge hit zero.
     if (changed) notifyChange();
   } catch { /* swallow — best-effort */ }
 }
