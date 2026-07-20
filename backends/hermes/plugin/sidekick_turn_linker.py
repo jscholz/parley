@@ -57,6 +57,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import time
 from typing import Any, Dict, List, Optional, Set
 
@@ -822,13 +823,21 @@ def compare_and_log(
         "turns": len(obs_rows), "agree": agree, "diverge": diverge,
         "linker_only": linker_only, "reconcile_only": reconcile_only,
     }
-    logger.log(
-        logging.WARNING if diverge else logging.INFO,
-        "[sidekick] linker-soak chat=%s turns=%d agree=%d diverge=%d "
-        "linker_only=%d reconcile_only=%d%s",
-        chat_id, counts["turns"], agree, diverge, linker_only,
-        reconcile_only, first_detail,
+    line = (
+        f"[sidekick] linker-soak chat={chat_id} turns={counts['turns']} "
+        f"agree={agree} diverge={diverge} linker_only={linker_only} "
+        f"reconcile_only={reconcile_only}{first_detail}"
     )
+    # Clean lines go to stderr in the perf-trace style: the gateway's
+    # stdlib logging handler drops sub-WARNING records, so a
+    # logger.info soak line never reaches journalctl — and an
+    # invisible soak defeats the Phase-1 gate (field 2026-07-20: the
+    # first live soak line was emitted and filtered). Divergence ALSO
+    # goes through logger.warning so alert grep patterns keyed on the
+    # heal line's channel catch it.
+    print(f"[perf-trace INFO] {line}", flush=True, file=sys.stderr)
+    if diverge:
+        logger.warning("%s", line)
     return counts
 
 

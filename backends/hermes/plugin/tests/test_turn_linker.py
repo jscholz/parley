@@ -674,20 +674,21 @@ def _seed_compared_turn(db, state_db, *, reconcile_agrees: bool):
     return u, f, stray
 
 
-def test_compare_and_log_agreement(db, state_db, caplog):
+def test_compare_and_log_agreement(db, state_db, capsys):
     _seed_compared_turn(db, state_db, reconcile_agrees=True)
-    with caplog.at_level(logging.INFO, logger=linker.logger.name):
-        counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
     assert counts == {
         "turns": 1, "agree": 2, "diverge": 0,
         "linker_only": 0, "reconcile_only": 0,
     }
-    assert "linker-soak" in caplog.text and "diverge=0" in caplog.text
+    # Clean lines ride the perf-trace stderr channel — the gateway's
+    # stdlib handler drops sub-WARNING records, so logger.info soak
+    # lines never reached journalctl (field 2026-07-20).
+    err = capsys.readouterr().err
+    assert "linker-soak" in err and "diverge=0" in err
     # High-water mark: nothing new → silent (no per-poll spam).
-    caplog.clear()
-    with caplog.at_level(logging.INFO, logger=linker.logger.name):
-        assert linker.compare_and_log(db, CHAT_ID, state_db_path=state_db) is None
-    assert "linker-soak" not in caplog.text
+    assert linker.compare_and_log(db, CHAT_ID, state_db_path=state_db) is None
+    assert "linker-soak" not in capsys.readouterr().err
 
 
 def test_compare_and_log_divergence_detail(db, state_db, caplog):
