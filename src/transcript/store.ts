@@ -50,6 +50,17 @@ type PaginationInput = {
   hasMoreNewer?: boolean;
 };
 
+/** Non-creating read. Returns null when no state exists for `chatId` —
+ *  callers that must distinguish "hydrated (possibly empty)" from
+ *  "never loaded this page-load" use this instead of getState, whose
+ *  lazy-create makes absence unobservable. Example: the new-chat no-op
+ *  guard on a cold offline resume (boot fetch failed, only the DOM
+ *  snapshot is on screen) must not read a never-hydrated chat as
+ *  "empty" and swallow the click. */
+export function peekState(chatId: string): ChatState | null {
+  return states.get(chatId) ?? null;
+}
+
 /** Get (and lazily create) the ChatState for `chatId`. Returns a live
  *  reference — callers should NOT mutate it directly; go through the
  *  exported mutators so subscribers fire. */

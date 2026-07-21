@@ -74,6 +74,20 @@ export async function installMockBackend(page) {
    *  PWA sends. */
   let historyFirstPageLimit = null;
   const messageDelays = new Map();  // chat_id -> artificial /messages delay in ms
+  /** SSE-disconnect simulation (offline-first smokes). While true:
+   *   - /api/sidekick/stream is answered with a 503 → the PWA's
+   *     EventSource HARD-fails (readyState CLOSED, no native retry) →
+   *     proxyClient flips connected=false, exactly the spotty-mobile
+   *     shape the field bug reproduced (isConnected() gate class).
+   *   - live SSE subscribers are killed so the drop is immediate.
+   *   - POST /messages and the sessions/history GETs are aborted at the
+   *     network layer (fetch rejects with a TypeError) — the offline
+   *     shape, distinct from an answered HTTP error.
+   *  Recovery: setStreamOutage(false) then have the page dispatch a
+   *  window 'online' event — the closed EventSource never retries on
+   *  its own; the OS-lifecycle handler calls forceReconnect (mirrors
+   *  real mobile foreground/online behavior). */
+  let streamOutage = false;
   let sessionsFailStatus = 0;
   let sessionsDelayMs = 0;      // artificial /sessions list latency
   const messageFailStatus = new Map();
@@ -158,6 +172,7 @@ export async function installMockBackend(page) {
       return route.fallback();
     }
     if (route.request().method() !== 'GET') return route.fallback();
+    if (streamOutage) return route.abort('connectionfailed');
     if (sessionsDelayMs > 0) {
       await new Promise((r) => setTimeout(r, sessionsDelayMs));
     }
@@ -222,6 +237,7 @@ export async function installMockBackend(page) {
   // reply_final). Tests rely on this alignment for cross-path dedup.
   await page.route(/.*\/api\/sidekick\/sessions\/[^/]+\/messages/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    if (streamOutage) return route.abort('connectionfailed');
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/sessions\/([^/]+)\/messages/);
     const chatId = m ? decodeURIComponent(m[1]) : '';
@@ -343,7 +359,18 @@ export async function installMockBackend(page) {
     // live tail. lastId/hasMoreNewer expose the newer edge so the PWA
     // knows when it has connected the window to the tail.
     if (after !== null) {
-      const newer = allMessages.filter((m) => typeof m.id === 'number' && m.id > after);
+      // Positional slice past the cursor row when it exists. The real
+      // proxy pages by state.db rowid, where EVERY row has an integer
+      // id; the mock persists live-POSTed rows with their SSE-shape
+      // string ids (see the POST handler), so a pure `id > after`
+      // numeric filter silently DROPPED them — a delta resume after a
+      // reconnect then repainted stale pre-POST state over the newest
+      // turn (surfaced by send-while-offline-queues). Fall back to the
+      // numeric filter when the cursor row is gone.
+      const cursorIdx = allMessages.findIndex((m) => typeof m.id === 'number' && m.id === after);
+      const newer = cursorIdx >= 0
+        ? allMessages.slice(cursorIdx + 1)
+        : allMessages.filter((m) => typeof m.id === 'number' && m.id > after);
       const page = newer.slice(0, limit);
       const lastId = page.length > 0 ? page[page.length - 1].id : null;
       const hasMoreNewer = page.length < newer.length;
@@ -479,6 +506,7 @@ export async function installMockBackend(page) {
   // schedules a reply envelope on the persistent stream.
   await page.route('**/api/sidekick/messages', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
+    if (streamOutage) return route.abort('connectionfailed');
     let body;
     try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
@@ -580,6 +608,13 @@ export async function installMockBackend(page) {
   // EventSource-reconnect hop required.
   await page.route('**/api/sidekick/stream', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    if (streamOutage) {
+      // Non-200 makes the EventSource fail HARD (readyState CLOSED, no
+      // native retry) — that's what flips proxyClient's connected=false.
+      // A network abort would leave it in the CONNECTING retry loop with
+      // connected stuck true, which is a different failure shape.
+      return route.fulfill({ status: 503, contentType: 'text/plain', body: 'mock stream outage' });
+    }
     const lastEventId = route.request().headers()['last-event-id'];
     // Forward Last-Event-Id as a query param too — some Playwright
     // versions strip the header when overriding `url`.
@@ -721,6 +756,13 @@ export async function installMockBackend(page) {
   // new state on its next fetch.
   const unreadByChat = new Map();   // chat_id → unread_count
   const markedUnread = new Set();   // chat_ids with sticky-unread
+  // Artificial GET /notifications/unread latency. SNAPSHOT-THEN-DELIVER
+  // (unlike sessionsDelayMs, which delays before computing): the body is
+  // computed at request time and delivered after the hold, so a mutation
+  // landing mid-flight makes the held response genuinely STALE — the
+  // exact race the badge stale-snapshot guard must discard. Delaying
+  // first would deliver fresh state and mask the revert under test.
+  let unreadDelayMs = 0;
   function bumpUnread(chatId) {
     if (!chatId) return;
     unreadByChat.set(chatId, (unreadByChat.get(chatId) || 0) + 1);
@@ -739,6 +781,10 @@ export async function installMockBackend(page) {
     }
     for (const cid of markedUnread) {
       if (!seen.has(cid)) out.push({ chat_id: cid, unread_count: 0, marked_unread: true });
+    }
+    // Body is fully computed above — the hold only delays DELIVERY.
+    if (unreadDelayMs > 0) {
+      await new Promise((r) => setTimeout(r, unreadDelayMs));
     }
     await route.fulfill({
       status: 200, contentType: 'application/json',
@@ -1013,6 +1059,23 @@ export async function installMockBackend(page) {
         clearUnreadFor(env.chat_id);
       }
     },
+    /** Simulate an SSE disconnect + network outage (see the streamOutage
+     *  block comment above for the exact per-endpoint behavior). While
+     *  on, the PWA's isConnected() goes false — the state whose gates
+     *  the offline-first smokes exercise. Turn off, then dispatch a
+     *  window 'online' event in-page to reconnect (the CLOSED
+     *  EventSource never retries on its own). */
+    setStreamOutage(on) {
+      streamOutage = !!on;
+      if (streamOutage) {
+        // Kill live subscribers so the drop is immediate: the client's
+        // EventSource sees the stream die, retries (retry: 200), hits
+        // the 503 above, and hard-fails → connected=false within ms.
+        for (const sub of streamSubs) { try { sub.end(); } catch {} }
+        streamSubs.clear();
+        for (const sock of openSockets) { try { sock.destroy(); } catch {} }
+      }
+    },
     /** Meeting capture: flip the mocked segment endpoint into a 503
      *  outage (and back) — exercises the client uploader's durable
      *  retry path. `getCaptures()` exposes the mock's manifests for
@@ -1033,6 +1096,14 @@ export async function installMockBackend(page) {
     clearUnread(chatId) { clearUnreadFor(chatId); },
     getUnreadState() {
       return { byChat: new Map(unreadByChat), marked: new Set(markedUnread) };
+    },
+    /** Hold GET /notifications/unread responses open for `ms`,
+     *  snapshot-then-deliver (see unreadDelayMs above) — stages the
+     *  stale-refresh-vs-optimistic-mutation race deterministically.
+     *  In-flight holds keep the delay they captured at request time;
+     *  pass 0 to make subsequent GETs instant. */
+    setUnreadDelay(ms) {
+      unreadDelayMs = typeof ms === 'number' && ms > 0 ? ms : 0;
     },
     /** Test escape hatch: seed a pin directly in the mock's server-
      *  side store. Use this when a test wants to verify cross-device

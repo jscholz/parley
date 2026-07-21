@@ -311,6 +311,153 @@ async function populateMicPicker() {
   }
 }
 
+// ─── Offline-first send queue (field 2026-07-21) ────────────────────────────
+// Sends are never GATED on backend.isConnected(): it mirrors the SSE
+// EventSource state, which flaps constantly on spotty mobile links even
+// while a plain POST would succeed (the walking-with-phone case). Every
+// composer/draft send is attempted immediately; a CONNECTIVITY-class
+// failure (fetch network error — the gateway never answered) keeps the
+// optimistic bubble `.pending` and parks the send here until the stream
+// channel reconnects (onStatus(true) → flushQueuedSends). An ANSWERED
+// rejection (`Sidekick HTTP <status>` from the proxy) is a real refusal
+// → the existing `.failed` Retry affordance, exactly as before.
+// In-memory by design: it rides the same lifetime as the pendingSends
+// store the bubbles live in — a reload drops both together, so a queued
+// send can never outlive (and double-post behind) its visible bubble.
+type QueuedSend = {
+  chatId: string | null;
+  messageId: string;
+  text: string;
+  sendOpts: Record<string, any>;
+  flushes: number;
+};
+const queuedSends: QueuedSend[] = [];
+/** A flush re-attempts a queued send at most this many times before
+ *  giving up and surfacing the `.failed` Retry affordance — a
+ *  genuinely-unreachable send must not sit silently `.pending` forever. */
+const QUEUED_SEND_MAX_FLUSHES = 3;
+let queuedSendFlushInFlight = false;
+
+// Backoff timer for queued sends. The reconnect handler (onStatus(true)
+// → flushQueuedSends) only covers failures where the SSE channel ALSO
+// dropped; a POST can network-fail while the stream stays up (server
+// blip, half-open link — the retry-keeps-attachments shape), and with
+// no reconnect transition ever firing, the queued send would sit
+// `.pending` forever. The timer retries with backoff (1s→2s→4s) while
+// the channel is CONNECTED — three misses exhaust the flush budget
+// (~7s) and surface the `.failed` Retry affordance. While DISCONNECTED
+// it just re-arms without attempting: the budget must not burn on a
+// dead link (the walking case queues indefinitely until reconnect,
+// which is the point).
+let queuedSendRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let queuedSendRetryDelayMs = 1000;
+const QUEUED_SEND_RETRY_MAX_DELAY_MS = 8000;
+
+function scheduleQueuedSendRetry(): void {
+  if (queuedSendRetryTimer != null || queuedSends.length === 0) return;
+  queuedSendRetryTimer = setTimeout(() => {
+    queuedSendRetryTimer = null;
+    if (!backend.isConnected()) {
+      scheduleQueuedSendRetry();   // safety-net re-arm; reconnect flush is primary
+      return;
+    }
+    queuedSendRetryDelayMs = Math.min(queuedSendRetryDelayMs * 2, QUEUED_SEND_RETRY_MAX_DELAY_MS);
+    void flushQueuedSends().then(() => {
+      if (queuedSends.length === 0) queuedSendRetryDelayMs = 1000;
+      else scheduleQueuedSendRetry();
+    });
+  }, queuedSendRetryDelayMs);
+}
+
+/** Shared send-failure surface: status line + flip the optimistic bubble
+ *  to `.failed` (renders the Retry button that restores the composer). */
+function failSendBubble(chatId: string | null, messageId: string, msg: string): void {
+  diag(`sendMessage failed: ${msg}`);
+  status.setStatus(`Send failed: ${msg}`, 'err');
+  if (chatId) transcriptStore.markPendingSendFailed(chatId, messageId);
+}
+
+/** Connectivity-class = the request never got an answer (fetch network
+ *  error/abort). proxyClient prefixes ANSWERED rejections with
+ *  "Sidekick HTTP <status>" — those mean the gateway is reachable and
+ *  refused the send; retrying on reconnect can't fix them. */
+function isConnectivitySendError(e: unknown): boolean {
+  return !/^Sidekick HTTP \d/.test(String((e as Error)?.message ?? e ?? ''));
+}
+
+/** Has the server's user_message echo for this send already landed?
+ *  The flush uses this to skip re-POSTing a send whose ORIGINAL POST
+ *  actually reached the gateway but whose 202 was lost to the dying
+ *  link — the echo arrives with the reconnect ring replay, before the
+ *  flush runs. Checked via the echo record (inflight/durable), not the
+ *  pendingSend's absence: a session switch/new-chat clearAll() also
+ *  drops pendingSends, and that must NOT silently discard a queued
+ *  message that never reached the server. */
+function sendEchoSeen(chatId: string | null, messageId: string): boolean {
+  if (!chatId) return false;
+  const s = transcriptStore.peekState(chatId);
+  if (!s) return false;
+  return s.inflight.some((e: any) => e.type === 'user_message' && e.message_id === messageId)
+    || s.durable.some((d: any) => d.sidekick_id === messageId);
+}
+
+/** Offline-first send dispatch. Fire the POST now; classify a failure as
+ *  connectivity (→ queue for reconnect, bubble stays `.pending`) or an
+ *  answered refusal (→ `.failed` Retry affordance). Never throws. */
+function sendOrQueueMessage(
+  chatId: string | null,
+  messageId: string,
+  text: string,
+  sendOpts: Record<string, any>,
+): void {
+  Promise.resolve()
+    .then(() => backend.sendMessage(text, sendOpts))
+    .catch((e: unknown) => {
+      const msg = (e as Error)?.message || String(e);
+      if (!isConnectivitySendError(e)) {
+        failSendBubble(chatId, messageId, msg);
+        return;
+      }
+      diag(`send queued (offline): chat=${chatId} msg=${messageId} — ${msg}`);
+      queuedSends.push({ chatId, messageId, text, sendOpts, flushes: 0 });
+      scheduleQueuedSendRetry();
+      // Passive signal only — the interaction already committed (bubble
+      // is on screen `.pending`, composer cleared). Never gates anything.
+      status.setStatus('Offline — message queued', 'err');
+    });
+}
+
+/** Re-POST queued sends. Fired on every disconnected→connected
+ *  transition (onStatus in boot()). Sequential + single-flight so two
+ *  rapid status flips can't double-send the same message. */
+async function flushQueuedSends(): Promise<void> {
+  if (queuedSendFlushInFlight || queuedSends.length === 0) return;
+  queuedSendFlushInFlight = true;
+  try {
+    const batch = queuedSends.splice(0);
+    for (const q of batch) {
+      if (sendEchoSeen(q.chatId, q.messageId)) continue;   // original POST landed
+      try {
+        await backend.sendMessage(q.text, q.sendOpts);
+      } catch (e: unknown) {
+        const msg = (e as Error)?.message || String(e);
+        q.flushes += 1;
+        if (isConnectivitySendError(e) && q.flushes < QUEUED_SEND_MAX_FLUSHES) {
+          queuedSends.push(q);   // still unreachable — hold for the next reconnect
+        } else {
+          failSendBubble(q.chatId, q.messageId, msg);
+        }
+      }
+    }
+  } finally {
+    queuedSendFlushInFlight = false;
+    // Items can remain after a flush (requeued connectivity misses or
+    // pushes that raced the batch splice) — keep the backoff loop alive
+    // so they can't strand `.pending` when no reconnect ever fires.
+    scheduleQueuedSendRetry();
+  }
+}
+
 // ─── Boot ───────────────────────────────────────────────────────────────────
 
 async function boot() {
@@ -1224,7 +1371,11 @@ async function boot() {
           messageId: userMessageId, text, source: 'voice', sentAt: Date.now(),
         });
       }
-      backend.sendMessage(text, chatId
+      // Offline-first: same queued dispatch as the composer path — a
+      // draft flushed while the link is down stays `.pending` and POSTs
+      // on reconnect (field 2026-07-21). Previously this was a bare
+      // sendMessage whose offline rejection went unhandled.
+      sendOrQueueMessage(chatId, userMessageId, text, chatId
         ? { voice: true, userMessageId, chatId }
         : { voice: true, userMessageId });
       playFeedback('send');
@@ -1350,6 +1501,17 @@ async function boot() {
   // Tool events including canvas.show flow through the regular SSE
   // stream; the shell subscribes via onToolEvent below.
   bootMark('pre backend.connect');
+  // The session-landing block below (deliberate-target resolve → boot
+  // resume → most-recent fallback) is a BOOT concern: it decides where a
+  // fresh page load lands. onStatus(true) fires on EVERY disconnected→
+  // connected transition, and re-running the landing on a reconnect could
+  // yank the view — worst case, a freshly-minted (still server-unknown)
+  // new chat resumes empty and the most-recent fallback repaints the
+  // PREVIOUS session over it (the exact "new chat fell back" class,
+  // field 2026-07-21). Reconnect reconciliation of the active chat is
+  // the adapter's job (ring replay + epoch-guarded onResume), so the
+  // landing runs exactly once.
+  let sessionLandingRan = false;
   await backend.connect({
     onStatus: async (connected) => {
       if (connected) {
@@ -1360,7 +1522,9 @@ async function boot() {
         // replaySessionMessages is a no-op and the user gets the blank
         // welcome. For backends without session browsing (openclaw),
         // fall back to the existing history backfill path.
-        if (backend.capabilities().sessionBrowsing) {
+        // First-connect only — see sessionLandingRan above.
+        if (backend.capabilities().sessionBrowsing && !sessionLandingRan) {
+          sessionLandingRan = true;
           // URL-driven chat selection: `?chat=X` (or `?chat=X&msg=Y`)
           // overrides whatever was last viewed. Used by the iOS push
           // notification click path — service-worker navigates the
@@ -1522,11 +1686,14 @@ async function boot() {
               diag(`boot: most-recent fallback failed: ${e.message}`);
             }
           }
-        } else {
+        } else if (!backend.capabilities().sessionBrowsing) {
           await backfillHistory();
         }
         bootMark('resume/replay done');
         await memoOutbox.flushOutbox();
+        // Offline-first: re-POST sends queued while the link was down.
+        // Fire-and-forget — the flush marks its own failures.
+        void flushQueuedSends();
         if (settings.refreshModels) settings.refreshModels().catch(() => {});
         // Eager schema fetch so consumers depending on agent settings
         // (currently the composer attach-button vision-gate) have data
@@ -2053,13 +2220,12 @@ async function boot() {
       // (stub backend still on its echo LLM) a send is HELD, not errored
       // — the wizard opens and the text stays in the composer.
       if (setupWizard.gateIfNeeded()) return;
-      if (!backend.isConnected()) {
-        status.setStatus('Gateway offline', 'err');
-        // Don't leave the mic hot after a blocked send — user expects
-        // the UI to reset to a clean state when the gateway is down.
-        releaseCaptureIfActive();
-        return;
-      }
+      // NO connectivity gate here (field 2026-07-21): isConnected()
+      // mirrors the SSE EventSource, which flaps on spotty links while
+      // a POST would succeed. The send proceeds optimistically; a
+      // connectivity failure queues it for reconnect (sendOrQueueMessage)
+      // with the bubble staying `.pending`. The normal send path below
+      // still runs releaseCaptureIfActive(), so the mic never stays hot.
       // Typed session-boundary commands. These are hidden from the slash
       // catalog (server-side), and gateway vocabulary collides with
       // Sidekick's: gateway /new is an IN-PLACE session reset (same thread,
@@ -2145,43 +2311,31 @@ async function boot() {
       // mutable pointer is out of the loop for composer sends.
       const sendOpts: Record<string, any> = { userMessageId };
       if (sendChatId) sendOpts.chatId = sendChatId;
-      // sendMessage is async (POST + await !res.ok rejection), so a
-      // sync try/catch only catches the !connected synchronous throw.
-      // Capture both via the promise's .catch — flips bubble → failed
-      // and offers Retry, which restores `text` to the composer.
-      const failBubble = (msg: string) => {
-        diag(`sendMessage failed: ${msg}`);
-        status.setStatus(`Send failed: ${msg}`, 'err');
-        if (sendChatId) {
-          transcriptStore.markPendingSendFailed(sendChatId, userMessageId);
-        }
-      };
+      // sendMessage failures come back through the promise;
+      // sendOrQueueMessage classifies them: connectivity-class (fetch
+      // network error — the gateway never answered) keeps the bubble
+      // `.pending` and queues the POST for the next reconnect; an
+      // answered HTTP rejection flips the bubble to `.failed` with
+      // Retry, which restores `text` to the composer.
       if (hasAttachments) {
         // Large attachments (task #158) stream to the upload endpoint
         // before send, so building the payload is async. toSendPayload
         // snapshots the pending list synchronously, so the clear() below
-        // can't race the in-flight uploads. An upload failure flips the
-        // bubble to failed; Retry restores text + re-attaches inline
-        // (data:) attachments, and toasts a re-attach notice for large
-        // (blob:) ones whose previews were revoked at send time.
+        // can't race the in-flight uploads. An UPLOAD failure still flips
+        // the bubble straight to failed — the upload can't be replayed
+        // after attachments.clear() revokes the blob previews; Retry
+        // restores text + re-attaches inline (data:) attachments, and
+        // toasts a re-attach notice for large (blob:) ones. Once the
+        // payload is built, the POST itself is offline-queued like a
+        // plain send.
         attachments.toSendPayload()
-          .then((att) => { sendOpts.attachments = att; return backend.sendMessage(text, sendOpts); })
-          .catch((e) => failBubble((e as Error)?.message || String(e)));
+          .then((att) => {
+            sendOpts.attachments = att;
+            sendOrQueueMessage(sendChatId, userMessageId, text, sendOpts);
+          })
+          .catch((e) => failSendBubble(sendChatId, userMessageId, (e as Error)?.message || String(e)));
       } else {
-        try {
-          const sendPromise = backend.sendMessage(text, sendOpts);
-          if (sendPromise && typeof (sendPromise as any).catch === 'function') {
-            (sendPromise as Promise<unknown>).catch((e) => {
-              const msg = (e as Error)?.message || String(e);
-              failBubble(msg);
-            });
-          }
-        } catch (e) {
-          const msg = (e as Error)?.message || String(e);
-          releaseCaptureIfActive();
-          failBubble(msg);
-          return;
-        }
+        sendOrQueueMessage(sendChatId, userMessageId, text, sendOpts);
       }
       // Tear down any in-progress capture (dictation, memo, call) BEFORE
       // we clear the textarea. Otherwise an in-flight STT final lands
@@ -2203,11 +2357,10 @@ async function boot() {
       autoResize();
       updateSendButtonState();
     } else if (draft.hasContent()) {
-      if (!backend.isConnected()) {
-        status.setStatus('Gateway offline', 'err');
-        releaseCaptureIfActive();
-        return;
-      }
+      // NO connectivity gate (field 2026-07-21): flush unconditionally —
+      // the draft's onFlush path dispatches via sendOrQueueMessage, so a
+      // flush while the link is down renders a `.pending` bubble and
+      // POSTs on reconnect instead of swallowing the tap.
       draft.flush();
     }
   }
@@ -2533,7 +2686,14 @@ async function boot() {
   const btnNewChat = document.getElementById('sb-new-chat');
   if (btnNewChat) {
     btnNewChat.onclick = async () => {
-      if (!backend.isConnected()) { status.setStatus('Gateway offline', 'err'); return; }
+      // NO connectivity gate (field 2026-07-21, walking-test): new chat
+      // is FULLY LOCAL — backend.newSession() mints the chat_id
+      // synchronously and its only I/O is a fire-and-forget IDB
+      // setActive; there is no server-side rotation call (the server
+      // row materializes lazily on first send, which is itself
+      // offline-queued). Gating on isConnected() — the flapping SSE
+      // boolean — swallowed the click on spotty links and left the
+      // user staring at the previous session.
       // No-op if there's already an active chat AND it's empty (no
       // real content in the transcript). Without this guard, rapid
       // new-chat clicks accumulate empty 'New chat / 0 msgs' rows in
@@ -2565,11 +2725,20 @@ async function boot() {
       // a guard that ignores inflight would no-op the click in that
       // window (regression caught by `sidebar-immediate-title`).
       const viewedForGuard = switchCtl.viewedId();
+      // peekState (non-creating): on a cold resume whose boot fetch
+      // failed (offline mobile relaunch — snapshot DOM on screen, store
+      // never hydrated) the viewed chat has NO store entry at all.
+      // getState's lazy-create would read that as "hydrated and empty"
+      // and the guard below would swallow a legitimate click. Absent
+      // state = UNKNOWN content → treat as non-empty so the click always
+      // mints. A state that EXISTS with empty buckets is a genuinely
+      // empty chat (hydrated-empty resume, or a fresh mint whose
+      // 'New chat started' decoration created the entry) → no-op holds.
+      const guardState = viewedForGuard ? transcriptStore.peekState(viewedForGuard) : null;
       const hasContent = viewedForGuard
-        ? (() => {
-            const s = transcriptStore.getState(viewedForGuard);
-            return s.durable.length + s.inflight.length + s.pendingSends.length > 0;
-          })()
+        ? (guardState
+            ? guardState.durable.length + guardState.inflight.length + guardState.pendingSends.length > 0
+            : true)
         : false;
       const hasActiveChat = !!backend.getCurrentSessionId?.();
       // Keep the DOM ref around — sweep paths further down still

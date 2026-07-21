@@ -4,18 +4,25 @@
 // handler ignores pendingSend.attachments) — the user re-sends a
 // text-only message without noticing.
 //
-// Fix under test: the retry handler re-attaches inline (data:) echo
-// attachments from the pending send before restoring the text, so a
-// second Send carries the same attachment.
+// Updated for the offline-first send queue (2026-07-21): the two
+// failure classes now have different — both attachment-preserving —
+// contracts:
+//
+//   A. CONNECTIVITY failure (network abort, gateway never answered):
+//      the bubble stays `.pending` and the queue's backoff timer
+//      re-POSTs automatically. No Retry button — the auto-retry must
+//      itself carry the attachment.
+//   B. ANSWERED failure (HTTP 5xx from a reachable gateway): retrying
+//      can't fix a refusal, so the classic `.failed` + Retry
+//      affordance appears, and Retry must restore text AND chip
+//      (the original field bug).
 //
 // Test plan (mocked):
-//   1. Attach a tiny PNG; fill text; send. The first POST to
-//      /api/sidekick/messages is aborted at the network layer.
-//   2. Wait for the "Send failed." row; click Retry.
-//   3. Assert composer text is restored AND the attachment chip is
-//      back (FAILS pre-fix: chip count 0).
-//   4. Send again; assert the second POST carries the inline
-//      data:image attachment.
+//   Phase A: attach + send into ONE network-aborted POST → assert no
+//     failed-row appears, the queued auto-retry's POST carries the
+//     inline image, and the turn completes.
+//   Phase B: attach + send into a 503-fulfilled POST → failed row →
+//     Retry → text + chip restored → re-send carries the image.
 
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
@@ -43,6 +50,14 @@ export function MOCK_SETUP(mock) {
   ]);
 }
 
+async function attachAndFill(page, text) {
+  await page.setInputFiles('#attach-input', {
+    name: 'receipt.png', mimeType: 'image/png', buffer: TINY_PNG,
+  });
+  await page.waitForSelector('#composer-attachments .attachment-chip', { timeout: 10_000 });
+  await page.fill('#composer-input', text);
+}
+
 export default async function run({ page, log }) {
   await page.route('**/api/sidekick/auxiliary-models', async (route) => {
     await route.fulfill({
@@ -62,11 +77,23 @@ export default async function run({ page, log }) {
     });
   });
 
-  let msgPosts = 0;
+  // Failure staging: 'abort' → network-layer failure (connectivity
+  // class), 'http503' → answered refusal, null → pass through.
+  let failNextPost = null;
+  const postBodies = [];
   await page.route('**/api/sidekick/messages', async (route) => {
     if (route.request().method() !== 'POST') { await route.fallback(); return; }
-    msgPosts += 1;
-    if (msgPosts === 1) { await route.abort('failed'); return; }
+    const mode = failNextPost;
+    failNextPost = null;
+    if (mode === 'abort') { await route.abort('failed'); return; }
+    if (mode === 'http503') {
+      await route.fulfill({
+        status: 503, contentType: 'application/json',
+        body: JSON.stringify({ error: 'unavailable' }),
+      });
+      return;
+    }
+    postBodies.push(JSON.parse(route.request().postData() || '{}'));
     await route.fallback();
   });
 
@@ -77,17 +104,36 @@ export default async function run({ page, log }) {
     null, { timeout: 5_000 },
   );
 
-  // 1. Attach + send into the aborted POST.
-  await page.setInputFiles('#attach-input', {
-    name: 'receipt.png', mimeType: 'image/png', buffer: TINY_PNG,
-  });
-  await page.waitForSelector('#composer-attachments .attachment-chip', { timeout: 10_000 });
-  await page.fill('#composer-input', 'expense this receipt please');
+  // ── Phase A: connectivity failure → queued auto-retry carries the
+  // attachment; no Retry button involved.
+  failNextPost = 'abort';
+  await attachAndFill(page, 'expense this receipt please');
   await page.evaluate(() => document.getElementById('composer-send')?.click());
 
-  // 2. Failure row appears; click Retry.
+  // The auto-retry (backoff starts at 1s) must land the POST and the
+  // mock's reply must arrive; the bubble never flips to failed.
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll('.line'))
+      .some((l) => (l.textContent || '').includes('[mock] echo: expense this receipt')),
+    null, { timeout: 15_000 },
+  );
+  const failedRowDuringA = await page.evaluate(() => !!document.querySelector('.send-failed-row'));
+  assert(!failedRowDuringA,
+    'a transient network failure must auto-recover via the send queue, not surface the Retry affordance');
+  assert(postBodies.length === 1, `auto-retry must land exactly one server POST (got ${postBodies.length})`);
+  assert(Array.isArray(postBodies[0].attachments) && postBodies[0].attachments.length === 1
+    && String(postBodies[0].attachments[0].content || '').startsWith('data:image/'),
+    'the queued auto-retry must carry the inline data:image attachment');
+  log('phase A: queued auto-retry carried the attachment, no failed-row ✓');
+
+  // ── Phase B: answered 503 → classic failed row → Retry restores
+  // text AND chip (the original #224 contract).
+  failNextPost = 'http503';
+  await attachAndFill(page, 'second receipt, answered failure');
+  await page.evaluate(() => document.getElementById('composer-send')?.click());
+
   await page.waitForSelector('.send-failed-row button', { timeout: 15_000 });
-  log('send failed as staged ✓');
+  log('phase B: answered failure surfaced the Retry affordance ✓');
   // evaluate-click: the settings panel left open for model-caps gating
   // overlays the transcript and intercepts real pointer events.
   await page.evaluate(() => {
@@ -95,9 +141,8 @@ export default async function run({ page, log }) {
     if (btn instanceof HTMLElement) btn.click();
   });
 
-  // 3. Text AND attachment must be restored.
   await page.waitForFunction(
-    () => document.getElementById('composer-input')?.value === 'expense this receipt please',
+    () => document.getElementById('composer-input')?.value === 'second receipt, answered failure',
     null, { timeout: 5_000 },
   );
   const chipRestored = await page
@@ -106,22 +151,21 @@ export default async function run({ page, log }) {
     .catch(() => false);
   assert(chipRestored,
     'Retry must restore the attachment chip, not just the text (field bug: silent text-only re-send)');
-  log('retry restored text + chip ✓');
+  log('phase B: retry restored text + chip ✓');
 
-  // 4. Re-send; the second POST must carry the inline image.
-  // The first (aborted) POST is long done — a fresh waitForRequest only
-  // sees the re-send.
-  const secondReqP = page.waitForRequest(
-    (req) => req.url().includes('/api/sidekick/messages') && req.method() === 'POST',
-    { timeout: 15_000 },
-  );
+  const before = postBodies.length;
   await page.evaluate(() => document.getElementById('composer-send')?.click());
-  const req2 = await secondReqP;
-  const body2 = JSON.parse(req2.postData() || '{}');
+  await page.waitForFunction(
+    () => Array.from(document.querySelectorAll('.line'))
+      .some((l) => (l.textContent || '').includes('[mock] echo: second receipt')),
+    null, { timeout: 15_000 },
+  );
+  const body2 = postBodies[postBodies.length - 1];
+  assert(postBodies.length === before + 1, 'manual Retry re-send must land exactly one more POST');
   assert(Array.isArray(body2.attachments) && body2.attachments.length === 1,
     'retried send must carry exactly one attachment');
   assert(typeof body2.attachments[0].content === 'string'
     && body2.attachments[0].content.startsWith('data:image/'),
     'retried attachment must be the inline data:image payload');
-  log('re-send carried the attachment inline ✓');
+  log('phase B: re-send carried the attachment inline ✓');
 }

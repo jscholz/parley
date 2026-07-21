@@ -1056,9 +1056,17 @@ export const proxyClientAdapter = {
   },
 
   async sendMessage(text: string, opts: any = {}) {
+    // Offline-first (field 2026-07-21): do NOT gate the POST on
+    // `connected` — that boolean mirrors the SSE EventSource, which
+    // flaps constantly on spotty mobile links even while a plain HTTP
+    // POST would succeed. Attempt the send regardless; if the link is
+    // genuinely down the fetch below rejects with a network error and
+    // the shell's queued-send machinery (main.ts sendOrQueueMessage)
+    // holds it for the next reconnect. An answered HTTP rejection
+    // still throws `Sidekick HTTP <status>` — the shell treats that
+    // as a real refusal, not connectivity.
     if (!connected) {
-      diag('proxy-client.sendMessage: DROPPED (not connected)');
-      throw new Error('Sidekick proxy not connected');
+      diag('proxy-client.sendMessage: POSTing while stream channel is down (offline-first)');
     }
     // Explicit target override — approval actions (and any other
     // send whose owning chat is pinned at tap time) must NOT follow
