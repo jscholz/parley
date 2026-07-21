@@ -352,6 +352,9 @@ function navigateByKey(direction: -1 | 1): boolean {
   // any scheduleRefresh racing the async resume() can't undo.
   paintActiveRowSync(targetId, { scrollIntoView: true });
   switchCtl.setOptimistic(targetId);
+  // Arrow-nav is a user gesture — the seen signal fires now, not after
+  // the transcript fetch commits.
+  noteViewIntent(targetId);
   // Async resume — fetch transcript + render. Same path the click
   // handler uses, so behavior (scroll-save + switch-then-load clear +
   // replay + drawer refresh) is identical to a click; resume() handles
@@ -391,6 +394,15 @@ export function drillTo(id: string, targetMessageId?: string): Promise<void> {
   // resume(), but painting the row here closes the visible gap.
   paintActiveRowSync(id);
   switchCtl.setOptimistic(id);
+  // NO noteViewIntent here, deliberately (2026-07-21). Drills are
+  // cache-first (mem/IDB/around-window), so the commit-time backstop
+  // clears the chip almost immediately anyway — and firing the clear at
+  // tap time perturbs the drill render's micro-timing enough to trip
+  // the latent depin-vs-reconcile-repin scroll race
+  // (activity-row-drills-to-bubble went 0/5 → ~2/5 flaky with a
+  // tap-time clear here; the measured fix-2 pathology was the ROW-TAP
+  // path, not drills). If drills ever need tap-time clearing, fix the
+  // reconcile-pass repin race first.
   return resume(id, targetMessageId).catch((e: any) => {
     diag(`sessionDrawer: drillTo resume failed: ${e?.message || e}`);
   });
@@ -526,10 +538,36 @@ export function commitView(tok: switchCtl.SwitchToken): boolean {
  *  (validated against the live list at use time). */
 let previouslyViewedId: string | null = null;
 
+/** The user COMMITTED to viewing this chat — row tap, arrow-nav,
+ *  cmdk session pick. Fire the "seen" effects NOW, at the gesture,
+ *  not at view-commit-after-fetch: on an uncached chat over a slow link
+ *  the commit trails the /messages round trip by seconds, and the
+ *  unread chip hanging on after the tap reads as a broken tap (measured
+ *  2026-07-21). The tap is the seen signal; the render isn't.
+ *
+ *  USER-INTENT PATHS ONLY. Programmatic view changes (delete-navigation
+ *  fallback landing on the previously-viewed chat, boot landing,
+ *  new-chat/meeting-session mints) must NOT call this — landing there
+ *  isn't the user choosing to read that chat, so nothing about it
+ *  should clear before the chat has actually rendered. Those paths keep
+ *  the commit-time-only behavior via the backstop in
+ *  applyViewChangedEffects below (pre-existing, unchanged).
+ *
+ *  Both calls are synchronous local-first flips (badge applyLocal +
+ *  activity store commit); the server POSTs settle behind. */
+export function noteViewIntent(id: string): void {
+  if (!id) return;
+  void badge.clearUnread(id);
+  activityStore.markChatRead(id);
+}
+
 function applyViewChangedEffects(prev: string | null, id: string | null): void {
   if (prev && prev !== id) previouslyViewedId = prev;
-  // Switching INTO a chat is the canonical "user has now seen this"
-  // signal — clear its unread badge.
+  // Switching INTO a chat is the "user has now seen this" signal.
+  // User-gesture paths already cleared at tap time via noteViewIntent;
+  // this commit-time repeat is the idempotent backstop that also covers
+  // programmatic landings (boot, delete-navigation) once they actually
+  // render — the pre-2026-07-21 behavior, unchanged.
   if (id) {
     badge.clearUnread(id);
     activityStore.markChatRead(id);
@@ -1454,6 +1492,11 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
     // flicker where the old active chat momentarily re-highlights.
     switchCtl.setOptimistic(s.id);
     trace('sync-active-flip');
+    // Row tap = the seen signal. Clear the unread chip/badge NOW —
+    // waiting for the view commit gated it on the /messages fetch (an
+    // uncached chat on a slow link kept its chip for seconds after the
+    // tap, measured 2026-07-21).
+    noteViewIntent(s.id);
     // Switch-then-load: resume() blanks the transcript + shows the
     // spinner synchronously (after it saves the leaving chat's scroll
     // position) so the old chat's content doesn't linger until the new

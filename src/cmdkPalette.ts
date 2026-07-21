@@ -496,6 +496,12 @@ async function activate(hit: Hit) {
   // the await supersedes this — the paint below then refuses.
   const targetMessageId = hit.kind === 'message' ? String(hit.message_id) : undefined;
   const tok = switchCtl.begin(id, targetMessageId);
+  // Palette pick = user intent to view — the seen effects (unread chip
+  // + badge clear, activity read-mark) fire at the pick, not after the
+  // resumeSession fetch commits the view. (The message-hit DRILL branch
+  // above deliberately stays commit-time-cleared — see the note in
+  // sessionDrawer.drillTo about the drill scroll race.)
+  sessionDrawer.noteViewIntent(id);
   try {
     const result: any = await backend.resumeSession(id);
     const messages = result.messages || [];

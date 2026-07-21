@@ -28,6 +28,53 @@ const markedUnread = new Set<string>();
 let refreshDebounce: number | null = null;
 let hydrated = false;
 
+/** Injection seam so unit tests can hold GET/POST responses open and
+ *  force each stale-snapshot race window deterministically (same seam
+ *  shape as util/serverBackedStore.ts's cfg.fetchImpl). null → global
+ *  fetch. Never captured into a variable-call (`const f = fetch` is an
+ *  Illegal invocation in browsers), always `(fetchImpl ?? fetch)(…)`. */
+let fetchImpl: typeof fetch | null = null;
+
+// Stale-snapshot guard, ported from util/serverBackedStore.ts (badge
+// state stays on its Map+Set shape rather than migrating onto
+// ServerBackedStore: the A4 applyLocal contract needs syncBadge — an OS
+// API write — fused into every local flip AND an unconditional
+// syncBadge after every applied refresh (the stuck-SW-push-badge
+// reconcile above refreshFromServer), while the base store's diff-gated
+// notify has no post-refresh hook and models ONE Map<string,T>, not a
+// counts-Map + sticky-Set pair). A GET response that raced a local
+// mutation is STALE — applying it visibly reverts the optimistic
+// chip/badge for a full round trip (measured 2026-07-21; iOS
+// foregrounding fires visibilitychange+focus refreshes, so a stale GET
+// is nearly always in flight across the user's tap). Three windows,
+// same as the base store:
+//   - GET issued BEFORE the local flip → mutationEpoch (bumped by
+//     applyLocal) differs by response time.
+//   - GET still in flight while a seen/mark POST is in flight →
+//     pendingWrites > 0 at response time (every POST goes through
+//     trackWrite).
+//   - GET's snapshot taken before a write applied server-side, but its
+//     response arrives AFTER that write already settled →
+//     writesSettled changed during the GET's flight.
+// Either way refreshFromServer discards the response and reschedules
+// (debounced), converging once writes go quiet.
+let mutationEpoch = 0;
+let pendingWrites = 0;
+let writesSettled = 0;
+
+/** Run a seen/mark POST under the pendingWrites counter so a refresh
+ *  snapshot that raced it gets discarded (see the guard above). EVERY
+ *  server mutation this module makes must go through this. */
+async function trackWrite<R>(fn: () => Promise<R>): Promise<R> {
+  pendingWrites++;
+  try {
+    return await fn();
+  } finally {
+    pendingWrites--;
+    writesSettled++;
+  }
+}
+
 /** Every chat with any unread state (count > 0 or sticky mark). */
 function unreadChatIds(): Set<string> {
   const ids = new Set<string>(markedUnread);
@@ -85,10 +132,21 @@ async function closeAllSwNotifications(): Promise<void> {
  *  notifyChange() (which triggers a sidebar repaint over many rows)
  *  remains diff-gated to avoid repaint storms on large session lists. */
 async function refreshFromServer(): Promise<void> {
+  const epochAtFetch = mutationEpoch;
+  const settledAtFetch = writesSettled;
   try {
-    const r = await fetch(apiUrl('/api/sidekick/notifications/unread'));
+    const r = await (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/unread'));
     if (!r.ok) return;
     const data: any = await r.json();
+    if (mutationEpoch !== epochAtFetch || pendingWrites > 0 || writesSettled !== settledAtFetch) {
+      // Snapshot raced a local mutation — applying it would revert the
+      // optimistic chip/badge. Discard; one debounced trailing refresh
+      // reconciles after the writes settle. Local state is untouched so
+      // syncBadge/notifyChange are both unnecessary here.
+      log(`[badge] refresh discarded: raced a local write (epoch ${epochAtFetch}→${mutationEpoch}, pendingWrites ${pendingWrites}, settled ${settledAtFetch}→${writesSettled})`);
+      requestRefresh();
+      return;
+    }
     const nextCounts = new Map<string, number>();
     const nextMarked = new Set<string>();
     for (const c of (data?.chats ?? [])) {
@@ -173,6 +231,7 @@ export function incrementUnread(_chatId: string, _delta: number = 1): void {
  *  paths awaited the POST + a full refetch before any repaint — the
  *  chip visibly lagged the interaction (his field addendum). */
 function applyLocal(chatId: string, mutate: () => void): void {
+  mutationEpoch++;
   mutate();
   void syncBadge();
   notifyChange();
@@ -190,11 +249,11 @@ export async function clearUnread(chatId: string): Promise<void> {
     });
   }
   try {
-    await fetch(apiUrl('/api/sidekick/notifications/seen'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/seen'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId }),
-    });
+    }));
   } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
 }
@@ -203,11 +262,11 @@ export async function markUnread(chatId: string): Promise<void> {
   if (!chatId || markedUnread.has(chatId)) return;
   applyLocal(chatId, () => { markedUnread.add(chatId); });
   try {
-    await fetch(apiUrl('/api/sidekick/notifications/mark'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: true }),
-    });
+    }));
   } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
   log(`[badge] markUnread chat=${chatId}`);
@@ -219,11 +278,11 @@ export async function unmarkUnread(chatId: string): Promise<void> {
     applyLocal(chatId, () => { markedUnread.delete(chatId); });
   }
   try {
-    await fetch(apiUrl('/api/sidekick/notifications/mark'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: false }),
-    });
+    }));
   } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();
   log(`[badge] unmarkUnread chat=${chatId}`);
@@ -238,11 +297,11 @@ export async function clearAllUnread(): Promise<void> {
   const markedList = Array.from(markedUnread);
   const all = new Set([...seenList, ...markedList]);
   await Promise.all(Array.from(all).map((chatId) =>
-    fetch(apiUrl('/api/sidekick/notifications/seen'), {
+    trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/seen'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId }),
-    }).catch(() => {}),
+    })).catch(() => {}),
   ));
   await refreshFromServer();
 }
@@ -271,6 +330,11 @@ function notifyChange() {
 // envelope on /api/sidekick/stream — re-fetch immediately.
 if (typeof window !== 'undefined') {
   window.addEventListener('sidekick:server-unread-changed', () => requestRefresh());
+  // NOTE for the stale-snapshot guard: both foreground triggers below
+  // funnel through requestRefresh → refreshFromServer, so an iOS
+  // foregrounding that fires visibilitychange AND focus while a seen/
+  // mark POST is settling rides the same epoch/pendingWrites discard —
+  // no separate mechanism.
   // Page visibility heartbeat → refresh on foreground. iOS PWA in
   // particular can come back after long backgrounding; pull fresh.
   document?.addEventListener?.('visibilitychange', () => {
@@ -279,4 +343,38 @@ if (typeof window !== 'undefined') {
   // macOS PWA windows can be visible-but-unfocused for hours; refresh
   // on focus so the dock number catches up with reads made elsewhere.
   window.addEventListener('focus', () => requestRefresh());
+}
+
+// ── Test seams (node:test, no DOM) ───────────────────────────────────
+// Module-singleton state needs explicit reset + fetch injection to unit
+// test the refresh/mutation races. Naming follows sessionOps.ts's
+// _resetRecentlyDeletedForTests. Never called by product code.
+
+export function _setFetchForTests(f: typeof fetch | null): void {
+  fetchImpl = f;
+}
+
+/** Direct handle on refreshFromServer so tests can hold a GET open
+ *  across a mutation without waiting out the 1500ms debounce. */
+export function _refreshForTests(): Promise<void> {
+  return refreshFromServer();
+}
+
+export function _resetForTests(): void {
+  unreadByChat.clear();
+  markedUnread.clear();
+  hydrated = false;
+  fetchImpl = null;
+  mutationEpoch = 0;
+  pendingWrites = 0;
+  writesSettled = 0;
+  if (refreshDebounce != null) {
+    (globalThis as any).clearTimeout(refreshDebounce);
+    refreshDebounce = null;
+  }
+}
+
+/** Introspection for guard assertions (trailing-refresh scheduled?). */
+export function _debugForTests(): { refreshScheduled: boolean } {
+  return { refreshScheduled: refreshDebounce != null };
 }
