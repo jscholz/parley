@@ -12,11 +12,11 @@
 //      with lastActiveAt = now. Assert B's cache does NOT have it yet.
 //   4. Kick a drawer refresh() → TFC-B sweep must merge msg 21 into B's
 //      cache in the background (no switch, no click).
-//   5. Payoff: mock.setMessageDelay(B, 4000), click B → msg 21 renders
-//      well within the server delay. Deterministic: only the refreshed
-//      cache can paint it that fast.
+//   5. Payoff: mock.setMessageDelay(B, SERVER_DELAY_MS), click B → msg
+//      21 renders well within the server delay. Deterministic: only the
+//      refreshed cache can paint it that fast.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'stale-tail-background-refresh';
 export const DESCRIPTION = 'drawer sweep refreshes a cached tail when the server list shows newer activity; next switch paints the new message from cache';
@@ -27,7 +27,14 @@ const CHAT_A = 'mock-tfcb-viewed';
 const CHAT_B = 'mock-tfcb-stale';
 const B_MSGS = 20;
 const NEW_MSG_ID = `tfcb-msg-${B_MSGS + 1}`;
-const SERVER_DELAY_MS = 4000;
+// Payoff budget. The contract is only "cached paint beats the server
+// round trip" — the delay exists so the two are cleanly separable, so a
+// BIGGER delay is strictly MORE discriminating (the cache has to paint
+// on its own; the server answer is even further away) while giving the
+// harness load headroom. 4000ms left ~2.5s of paint budget, which
+// flaked under full-suite load (2x on 2026-07-20, 8/8 quiet); 8000ms
+// keeps the same mechanism with ~6.5s of headroom.
+const SERVER_DELAY_MS = 8000;
 
 function bMessages(count) {
   const base = Date.now() - 10 * 60_000;
@@ -79,14 +86,17 @@ export default async function run({ page, log, mock }) {
 
   // 1-2. Prime B's cache via a real resume, then move to A.
   await clickChat(page, CHAT_B);
+  // NOTE: fn, arg, options — options in the 2nd slot are silently
+  // treated as the ARG by Playwright (the old shape here did exactly
+  // that, so these waits ran on the 30s default with rAF polling).
   await page.waitForFunction(
     () => !!document.querySelector('#transcript .line[data-message-id="tfcb-msg-20"]'),
-    { timeout: 8_000, polling: 100 });
+    null, { timeout: 8_000, polling: 100 });
   await page.waitForTimeout(600); // resume reconcile + cache write settle
   await clickChat(page, CHAT_A);
   await page.waitForFunction(
     () => !!document.querySelector('#transcript .line[data-message-id="tfcb-a-1"]'),
-    { timeout: 8_000, polling: 100 });
+    null, { timeout: 8_000, polling: 100 });
   assert(await cacheHasMsg(page, CHAT_B, 'tfcb-msg-20'), 'B cache primed with its tail');
   log('B cache primed; now viewing A ✓');
 
@@ -111,11 +121,11 @@ export default async function run({ page, log, mock }) {
     const sd = await import('/build/sessionDrawer.mjs');
     await sd.refresh();
   });
-  await page.waitForFunction(async ({ c, s }) => {
+  await pollUntil(page, async ({ c, s }) => {
     const sc = await import('/build/sessionCache.mjs');
     const rec = await sc.getMessagesCache(c);
     return !!rec?.messages?.some((m) => m?.sidekick_id === s);
-  }, { c: CHAT_B, s: NEW_MSG_ID }, { timeout: 8_000, polling: 200 });
+  }, { c: CHAT_B, s: NEW_MSG_ID }, { timeout: 12_000, polling: 200, label: `TFC-B sweep never merged ${NEW_MSG_ID} into B's cache` });
   assert(await cacheHasMsg(page, CHAT_B, 'tfcb-msg-1'),
     'sweep must MERGE the newest page — older cached history preserved');
   log('TFC-B sweep merged the new message into B cache (still viewing A) ✓');
@@ -129,6 +139,9 @@ export default async function run({ page, log, mock }) {
     (m) => !!document.querySelector(`#transcript .line[data-message-id="${CSS.escape(m)}"]`),
     NEW_MSG_ID, { timeout: SERVER_DELAY_MS - 1500, polling: 50 });
   const paintMs = Date.now() - t0;
+  // Wall-clock backstop for the wait above: the paint must land with
+  // clear air before the server could possibly have answered (the
+  // MIN_WAIT_MS floor can stretch the wait budget, so re-check here).
   assert(paintMs < SERVER_DELAY_MS - 1000,
     `cached paint must beat the ${SERVER_DELAY_MS}ms server delay — took ${paintMs}ms`);
   mock.setMessageDelay(CHAT_B, 0);

@@ -510,7 +510,25 @@ function drillScrollTo(target: HTMLElement): void {
   // on the next render — the user explicitly asked to be at THIS
   // bubble, not the live edge. Without this, autoScroll can yank back
   // to scrollHeight on a duplicate-resume render after drillScrollTo.
-  chat.setPinnedToBottom(false);
+  //
+  // HOLD the de-pin, don't just set it (depin-vs-reconcile-repin race,
+  // field 2026-07-21, activity-row-drills-to-bubble 2/5 flake once a
+  // tap-time unread-clear shifted the timing). Two-part pathology:
+  //   1. The target bubble can be transiently MIS-SORTED to the tail
+  //      when the drill render runs (a background reply's live-envelope
+  //      bubble carries arrival-time until the durable reconcile heals
+  //      its timestamp), so `apply` scrolls to the BOTTOM (clamped) —
+  //      and the scroll listener's geometric re-derivation re-latches
+  //      pinnedToBottom=true (distance 0 ≤ threshold). Every subsequent
+  //      rerender's autoScroll then snaps to the live edge while the
+  //      heal re-sorts the bubble up and out of view.
+  //   2. The one-shot 120ms retry expires before that reconcile lands.
+  // holdUnpinnedFor suspends the geometric re-latch (and therefore
+  // autoScroll) for the settle window; the settle loop below re-anchors
+  // the target if a late re-sort moves it. A real user gesture releases
+  // both immediately.
+  chat.holdUnpinnedFor(DRILL_SETTLE_MS);
+  const drillStartedAt = Date.now();
   const apply = () => {
     const tr = transcriptEl.getBoundingClientRect();
     const tg = target.getBoundingClientRect();
@@ -530,11 +548,81 @@ function drillScrollTo(target: HTMLElement): void {
   };
   target.classList.add('search-target-flash');
   apply();
+  // Task-boundary correction. The drill can run MID-render-task: rows the
+  // same task appends AFTER this call (timestamp-sorted inserts above a
+  // transiently mis-sorted target) push the target away from the position
+  // the synchronous apply just established — and the MutationObserver
+  // below only sees mutations from LATER tasks (observe starts after this
+  // task's mutations already fired). A microtask runs at THIS task's end,
+  // after all of its DOM work, before any other task (or a smoke's
+  // evaluate) can observe the transcript — so the drill task never leaves
+  // a visibly wrong position behind. (Measured: without this, the target
+  // sat below the fold for the ~70ms until the next rAF under render
+  // load — activity-row-drills-to-bubble's sample window.)
+  queueMicrotask(() => { if (target.isConnected && drifted()) apply(); });
   requestAnimationFrame(apply);
-  // One more retry after a paint+layout cycle catches late-rendering
-  // content (images decoding, tool-call summaries hydrating).
-  setTimeout(apply, 120);
+  // Settle defense: re-anchor the target through the reconcile window.
+  // Late-rendering content (images decoding, tool summaries hydrating),
+  // the durable-heal re-sort described above, AND width-change re-wraps
+  // all move the target after the first paint. Three watchers, one apply:
+  //   - A MutationObserver re-anchors in the SAME task as a reconcile
+  //     re-sort (MO callbacks are microtasks — they run before the next
+  //     paint and before any other task can observe the target sitting
+  //     out of view). The 150ms-poll version of this lost the race to
+  //     anything sampling right after the re-sort.
+  //   - A ResizeObserver on the transcript + its rows catches pure
+  //     LAYOUT drift, which mutates no nodes and is invisible to the MO
+  //     (measured: the activity drawer closing over the drill re-wraps
+  //     every row — ~170px of growth above the target across ~70ms —
+  //     and shoved the target below the fold between rAF frames). RO
+  //     callbacks fire in the rendering steps, so each frame's drift is
+  //     corrected pre-paint instead of accumulating. Same pattern as
+  //     scheduleAtBottomRepin, opposite anchor.
+  //   - A slow poll backstops anything neither observer sees.
+  // All stand down when the window expires, the target leaves the DOM
+  // (session switched), or the user scrolls (their gesture owns the
+  // viewport from that instant) — and all only write when the target
+  // actually drifted off the anchor position.
+  const drifted = () => {
+    const tr = transcriptEl.getBoundingClientRect();
+    const tg = target.getBoundingClientRect();
+    return Math.abs((tg.top - tr.top) - 8) > 4;
+  };
+  let settleDone = false;
+  const finish = () => { settleDone = true; mo.disconnect(); ro.disconnect(); };
+  const stillDrilling = () => {
+    if (settleDone) return false;
+    if (Date.now() - drillStartedAt > DRILL_SETTLE_MS
+        || !target.isConnected
+        || chat.lastUserScrollGestureAt() >= drillStartedAt) {
+      finish();
+      return false;
+    }
+    return true;
+  };
+  const mo = new MutationObserver(() => {
+    if (stillDrilling() && drifted()) apply();
+  });
+  mo.observe(transcriptEl, { childList: true, subtree: true });
+  const ro = new ResizeObserver(() => {
+    if (stillDrilling() && drifted()) apply();
+  });
+  ro.observe(transcriptEl);
+  for (const child of Array.from(transcriptEl.children)) {
+    if (child instanceof HTMLElement) ro.observe(child);
+  }
+  const poll = () => {
+    if (!stillDrilling()) return;
+    if (drifted()) apply();
+    setTimeout(poll, 150);
+  };
+  setTimeout(poll, 120);
+  setTimeout(finish, DRILL_SETTLE_MS + 50);
 }
+/** How long drillScrollTo defends the drilled position against late
+ *  layout shifts / reconcile re-sorts. Mirrors REPIN_WINDOW_MS — the
+ *  same "post-restore settle" horizon, opposite anchor. */
+const DRILL_SETTLE_MS = 1500;
 
 /** Page through older history pages until the target message renders
  *  in the DOM, then scroll-and-flash it. Driven by the pin-drawer

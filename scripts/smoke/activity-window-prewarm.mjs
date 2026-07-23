@@ -24,7 +24,7 @@
 // Pre-fix the cache stays empty until a manual drill, so getWindow returns
 // null and the assertion fails. Post-fix the prewarm fills it.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'activity-window-prewarm';
 export const DESCRIPTION = 'activity-item around-windows prewarm into the keyed cache on boot, with no manual drill';
@@ -91,13 +91,13 @@ export default async function run({ page, log }) {
   // 1. Boot trigger: the server-seeded activity item hydrates, fires
   //    `sidekick:activity-changed`, and prewarmActivityWindows warms its
   //    deep around-window — with NO drill. Poll the cache until it lands.
-  await page.waitForFunction(
+  await pollUntil(page,
     async (m) => {
       const wc = await import('/build/drillWindowCache.mjs');
       const rec = await wc.getWindow('mock-activity-window-prewarm', m);
       return !!rec && rec.messages.length > 0;
     },
-    deepMsg, { timeout: 8_000, polling: 150 });
+    deepMsg, { timeout: 8_000, polling: 150, label: `boot prewarm never warmed ${deepMsg}` });
   const bootLen = await cachedWindowLen(page, CHAT_ID, deepMsg);
   assert(bootLen > 0,
     `BUG: boot-seeded activity item's deep around-window was never prewarmed ` +
@@ -119,13 +119,13 @@ export default async function run({ page, log }) {
       sidekickId: msgId,
     })), { chatId: CHAT_ID, msgId: runtimeMsg });
 
-  await page.waitForFunction(
+  await pollUntil(page,
     async (m) => {
       const wc = await import('/build/drillWindowCache.mjs');
       const rec = await wc.getWindow('mock-activity-window-prewarm', m);
       return !!rec && rec.messages.length > 0;
     },
-    runtimeMsg, { timeout: 8_000, polling: 150 });
+    runtimeMsg, { timeout: 8_000, polling: 150, label: `activity-changed prewarm never warmed ${runtimeMsg}` });
   const runtimeLen = await cachedWindowLen(page, CHAT_ID, runtimeMsg);
   assert(runtimeLen > 0,
     `BUG: activity item ingested at runtime did not prewarm its around-window ` +

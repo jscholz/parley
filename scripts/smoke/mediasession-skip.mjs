@@ -62,7 +62,7 @@ export default async function run({ page, log, fail, url, mock }) {
     timeout: 15_000, polling: 250,
   });
 
-  const { openSidebar } = await import('./lib.mjs');
+  const { openSidebar, pollUntil } = await import('./lib.mjs');
   await openSidebar(page);
   await page.waitForSelector('#sessions-list li[data-chat-id="chat-with-replies"]', { timeout: 5_000 });
   await page.click('#sessions-list li[data-chat-id="chat-with-replies"] .sess-body');
@@ -111,26 +111,26 @@ export default async function run({ page, log, fail, url, mock }) {
   // replyNavigator's currentBubble default. previoustrack walks BACK
   // to m-r2.
   await page.evaluate(() => (window).__audioSessionTest.fireAction('previoustrack'));
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tts = await import('/build/audio/turn-based/tts.mjs');
     return tts.getActiveReplyId() === 'm-r2';
-  }, null, { timeout: 5_000, polling: 100 });
+  }, null, { timeout: 5_000, polling: 100, label: 'previoustrack never moved activeReplyId to m-r2' });
   log('previoustrack → activeReplyId = m-r2');
 
   // ── 2. previoustrack again → m-r1 ───────────────────────────────
   await page.evaluate(() => (window).__audioSessionTest.fireAction('previoustrack'));
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tts = await import('/build/audio/turn-based/tts.mjs');
     return tts.getActiveReplyId() === 'm-r1';
-  }, null, { timeout: 5_000, polling: 100 });
+  }, null, { timeout: 5_000, polling: 100, label: 'second previoustrack never moved activeReplyId to m-r1' });
   log('previoustrack again → activeReplyId = m-r1');
 
   // ── 3. nexttrack → m-r2 (forward) ───────────────────────────────
   await page.evaluate(() => (window).__audioSessionTest.fireAction('nexttrack'));
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tts = await import('/build/audio/turn-based/tts.mjs');
     return tts.getActiveReplyId() === 'm-r2';
-  }, null, { timeout: 5_000, polling: 100 });
+  }, null, { timeout: 5_000, polling: 100, label: 'nexttrack never moved activeReplyId to m-r2' });
   log('nexttrack → activeReplyId = m-r2');
 
   // nexttrack kicks off playNext → playReplyTts, which fetches /tts

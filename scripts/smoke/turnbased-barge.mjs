@@ -26,7 +26,7 @@
 // Latency sentinel: <1s for arm, <1.5s for fire (same budget as
 // realtime — arch is identical).
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'turnbased-barge';
 export const DESCRIPTION = 'BargeDetector fires in turnbased mode (parity with realtime)';
@@ -88,10 +88,10 @@ export default async function run({ page, log }) {
     });
   });
   // Wait for state='armed' (silence loop running, mic + analyser up).
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tb = await import('/build/audio/turn-based/turnbased.mjs');
     return tb.getState() === 'armed';
-  }, null, { timeout: 5_000, polling: 50 });
+  }, null, { timeout: 5_000, polling: 50, label: "turnbased never reached state 'armed'" });
   const armMs = Date.now() - t0;
   log(`arm latency: ${armMs}ms`);
 
@@ -100,10 +100,10 @@ export default async function run({ page, log }) {
     const tb = await import('/build/audio/turn-based/turnbased.mjs');
     tb.notifyReplyPlayback(true);
   });
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tb = await import('/build/audio/turn-based/turnbased.mjs');
     return tb.getState() === 'playing';
-  }, null, { timeout: 2_000, polling: 50 });
+  }, null, { timeout: 2_000, polling: 50, label: "turnbased never reached state 'playing'" });
 
   // ── Fire ────────────────────────────────────────────────────────────
   await page.evaluate(() => { (window).__TEST_SPEECH_ACTIVE__ = true; });

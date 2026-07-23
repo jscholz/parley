@@ -20,7 +20,7 @@
 // cache stays empty until a manual drill, so getWindow returns null and
 // both assertions fail. Post-fix the prewarm fills both.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'pin-window-prewarm';
 export const DESCRIPTION = 'pinned message around-windows prewarm into the keyed cache on boot + on-pin, with no manual drill';
@@ -76,13 +76,13 @@ export default async function run({ page, log }) {
   // 1. Boot trigger: the server-seeded pin hydrates, fires
   //    `sidekick:pins-changed`, and the prewarm warms its around-window —
   //    with no drill. Poll the cache until it lands.
-  await page.waitForFunction(
+  await pollUntil(page,
     async (m) => {
       const wc = await import('/build/drillWindowCache.mjs');
       const rec = await wc.getWindow('mock-pin-window-prewarm', m);
       return !!rec && rec.messages.length > 0;
     },
-    bootPinMsg, { timeout: 8_000, polling: 150 });
+    bootPinMsg, { timeout: 8_000, polling: 150, label: `boot prewarm never warmed ${bootPinMsg}` });
   const bootLen = await cachedWindowLen(page, CHAT_ID, bootPinMsg);
   assert(bootLen > 0,
     `BUG: boot-seeded pin's around-window was never prewarmed (getWindow → ${bootLen}). ` +
@@ -102,13 +102,13 @@ export default async function run({ page, log }) {
       chatId, msgId, role: 'user', text: `user marker ${idx}`, timestamp: Date.now(),
     })), { chatId: CHAT_ID, msgId: runtimePinMsg, idx: RUNTIME_PIN_IDX });
 
-  await page.waitForFunction(
+  await pollUntil(page,
     async (m) => {
       const wc = await import('/build/drillWindowCache.mjs');
       const rec = await wc.getWindow('mock-pin-window-prewarm', m);
       return !!rec && rec.messages.length > 0;
     },
-    runtimePinMsg, { timeout: 8_000, polling: 150 });
+    runtimePinMsg, { timeout: 8_000, polling: 150, label: `on-pin prewarm never warmed ${runtimePinMsg}` });
   const runtimeLen = await cachedWindowLen(page, CHAT_ID, runtimePinMsg);
   assert(runtimeLen > 0,
     `BUG: pin added at runtime did not prewarm its around-window (getWindow → ${runtimeLen}). ` +

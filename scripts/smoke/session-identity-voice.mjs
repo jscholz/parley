@@ -11,7 +11,7 @@
 //
 // /tts is stubbed so this runs in the default suite with no Deepgram key.
 
-import { waitForReady, openSidebar, resetServerSettings, assert } from './lib.mjs';
+import { waitForReady, openSidebar, resetServerSettings, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'session-identity-voice';
 export const DESCRIPTION = 'Per-session voice from the sheet drives the /tts model on that session\'s autoplay';
@@ -50,11 +50,11 @@ export default async function run({ page, log, url }) {
   await page.selectOption('.session-identity-dialog .ident-voice', SESSION_VOICE);
   await page.click('.session-identity-dialog .ident-save');
 
-  await page.waitForFunction(
+  await pollUntil(page,
     (v) => fetch('/api/sidekick/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => typeof b?.value === 'string' && b.value.includes(v)),
-    SESSION_VOICE, { timeout: 3_000, polling: 100 },
+    SESSION_VOICE, { timeout: 3_000, polling: 100, label: 'session voice never written to sessionIdentities' },
   );
   log(`sheet ✓ voice ${SESSION_VOICE} written to sessionIdentities`);
 

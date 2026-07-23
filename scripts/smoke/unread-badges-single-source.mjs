@@ -14,7 +14,7 @@
 //   - a marked-unread chat with no new messages (was: counted by the
 //     badge total but chip-less — two formulas over one map)
 
-import { waitForReady } from './lib.mjs';
+import { waitForReady, pollUntil } from './lib.mjs';
 
 export const NAME = 'unread-badges-single-source';
 export const DESCRIPTION = 'App badge ≡ Σ row chips by construction: single accessor, unread-first ordering, no below-the-fold unreads';
@@ -51,10 +51,10 @@ export default async function run({ page, log }) {
   await waitForReady(page);
 
   // Let the badge store hydrate from /unread.
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const badge = await import('/build/notifications/badge.mjs');
     return badge.totalUnreadCount() >= 2;
-  }, null, { timeout: 10_000, polling: 200 });
+  }, null, { timeout: 10_000, polling: 200, label: 'badge store never hydrated 2+ unreads from /unread' });
 
   const state = await page.evaluate(async () => {
     const badge = await import('/build/notifications/badge.mjs');

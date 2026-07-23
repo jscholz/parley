@@ -8,7 +8,7 @@
 // because deleteSessionAtomic is where sessionIdentity.remove() lives. A
 // direct backend DELETE bypasses that path.
 
-import { waitForReady, openSidebar, assert } from './lib.mjs';
+import { waitForReady, openSidebar, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'session-identity-delete-cleanup';
 export const DESCRIPTION = 'Deleting a session with an identity prunes it from sessionIdentities';
@@ -77,11 +77,11 @@ export default async function run({ page, log }) {
   page.once('dialog', (d) => d.accept());
   await rowMenuAction(page, ID('beta'), 'Delete');
 
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => !String(b?.value || '').includes('Nick beta')),
-    null, { timeout: 5_000, polling: 100 },
+    null, { timeout: 5_000, polling: 100, label: 'beta identity never pruned from sessionIdentities' },
   );
   ids = await persistedIdentities(page);
   assert(!ids?.[ID('beta')],

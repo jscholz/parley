@@ -102,6 +102,18 @@ export function getRestoredViewedSessionId(): string | null {
 const PINNED_THRESHOLD_PX = 300;
 
 let pinnedToBottom = true;
+/** While `Date.now() < unpinnedHoldUntil`, the scroll listener must NOT
+ *  re-derive pinnedToBottom from geometry — it stays false. Set by
+ *  drillScrollTo (via holdUnpinnedFor): a drill's programmatic scroll can
+ *  land clamped at the bottom when the target bubble is transiently
+ *  mis-sorted to the tail (live-envelope timestamp, pre-durable-heal), and
+ *  the geometric re-derivation would re-latch pinned=true — so the
+ *  reconcile re-sort's rerender autoScroll snaps to the live edge and the
+ *  drilled bubble scrolls out of view (the depin-vs-reconcile-repin race,
+ *  field 2026-07-21 activity-row-drills-to-bubble 2/5 flake). Cleared by a
+ *  real user gesture (user reclaims the scroll), by forceScrollToBottom /
+ *  setPinnedToBottom(true) (explicit re-pins win), or by expiry. */
+let unpinnedHoldUntil = 0;
 let missedWhileScrolled = 0;
 /** Message ids already counted toward (or exempt from) the unread badge.
  *  Dedups the many envelopes one message produces (delta…delta…final…
@@ -321,6 +333,7 @@ let _stickBottomGen = 0;
 export function forceScrollToBottom(): void {
   if (!transcriptEl) return;
   const el = transcriptEl;
+  unpinnedHoldUntil = 0; // explicit re-pin overrides any drill hold
   pinnedToBottom = true;
   missedWhileScrolled = 0;
   updateButton();
@@ -484,7 +497,21 @@ export function isPinnedToBottom(): boolean {
 }
 
 export function setPinnedToBottom(v: boolean): void {
+  if (v) unpinnedHoldUntil = 0; // explicit re-pin overrides any drill hold
   pinnedToBottom = v;
+  updateButton();
+}
+
+/** Keep pinnedToBottom false for `ms` regardless of scroll geometry —
+ *  the scroll listener's re-derivation is suspended for the window (see
+ *  unpinnedHoldUntil above for the drill race this closes). autoScroll
+ *  therefore no-ops for the duration, so post-drill rerenders can't yank
+ *  the viewport to the live edge. A real user gesture, or an explicit
+ *  forceScrollToBottom / setPinnedToBottom(true) / jump-to-bottom,
+ *  releases the hold immediately. */
+export function holdUnpinnedFor(ms: number): void {
+  unpinnedHoldUntil = Date.now() + ms;
+  pinnedToBottom = false;
   updateButton();
 }
 
@@ -617,7 +644,7 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
       //     pinned=false → subsequent bubble adds don't drag the user
       //     away from the restored position.
       const wasPinned = pinnedToBottom;
-      pinnedToBottom = isPinned();
+      pinnedToBottom = Date.now() < unpinnedHoldUntil ? false : isPinned();
       if (pinnedToBottom && !wasPinned) missedWhileScrolled = 0;
       updateButton();
     }, { passive: true });
@@ -626,6 +653,7 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
     for (const evt of ['wheel', 'touchstart', 'pointerdown'] as const) {
       transcriptEl.addEventListener(evt, () => {
         lastUserGestureAt = Date.now();
+        unpinnedHoldUntil = 0; // user reclaims the scroll — drop any drill hold
         cancelPendingScrollRestores();
       }, { passive: true });
     }

@@ -234,6 +234,46 @@ export async function waitForReady(page, url = DEFAULT_URL, { debug = true, time
   );
 }
 
+/** Poll an in-page (possibly async) predicate until it is truthy.
+ *
+ *  WHY THIS EXISTS: Playwright's page.waitForFunction does NOT await
+ *  async predicates. An `async` pageFunction (or a sync one returning a
+ *  Promise, e.g. `() => fetch(...).then(...)`) hands the poller a
+ *  Promise object, which is truthy — so the wait resolves immediately
+ *  and VACUOUSLY, regardless of what the predicate would eventually
+ *  return. page.evaluate() DOES await in-page promises, so this helper
+ *  is the required pattern for any wait whose check needs `await`
+ *  inside the page (dynamic import(), fetch(), IDB reads, …). Sync
+ *  DOM-only predicates should keep using waitForFunction. A unit test
+ *  (test/smoke-no-async-waitforfunction.test.ts) rejects async /
+ *  Promise-returning waitForFunction predicates in smoke sources.
+ *
+ *  `fn` runs in the page via page.evaluate(fn, arg) on each tick.
+ *  Resolves with the first truthy result; throws `label` on timeout.
+ *  Evaluate errors (e.g. execution context destroyed mid-navigation)
+ *  do not abort the poll — the condition just isn't true yet.
+ *  Honors the same SMOKE_MIN_WAIT_MS reliability floor that
+ *  launchBrowser applies to waitForFunction/waitForSelector. */
+export async function pollUntil(page, fn, arg = undefined, {
+  timeout = 8_000, polling = 100, label = 'pollUntil: condition not met',
+} = {}) {
+  const floor = Number(process.env.SMOKE_MIN_WAIT_MS ?? 8000);
+  const budget = (floor > 0 && timeout < floor) ? floor : timeout;
+  const start = Date.now();
+  let lastErr = null;
+  for (;;) {
+    try {
+      const v = await page.evaluate(fn, arg);
+      if (v) return v;
+      lastErr = null;
+    } catch (e) { lastErr = e; }
+    if (Date.now() - start >= budget) break;
+    await page.waitForTimeout(polling);
+  }
+  throw new Error(`${label} (after ${budget}ms)`
+    + (lastErr ? ` — last evaluate error: ${lastErr.message}` : ''));
+}
+
 /** Reset proxy-side yaml-backed settings to known values BEFORE the
  *  page boots. Smokes share the server's sidekick.config.yaml across
  *  scenarios — per-scenario BrowserContext gives clean localStorage +

@@ -21,7 +21,7 @@
 //      (composer.submit silently no-ops offline, so the flush handler
 //      must throw to keep the item); reconnect flush auto-sends it.
 
-import { waitForReady, resetServerSettings, assert } from './lib.mjs';
+import { waitForReady, resetServerSettings, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'listen-turn-durable-retry';
 export const DESCRIPTION = 'transcribeListenTurn + sendListenText: committed call turns (audio + local-engine text) ride the durable outbox — retained on dead connection, auto-sent on retry, composer review cross-chat';
@@ -164,10 +164,10 @@ export default async function run({ page, log }) {
   currentTranscript = '';
   await fireListenTurn(page, { bytes: 2048, reason: 'silence', chatId: liveChat });
   // Give the flush a beat to settle, then confirm drop with no send.
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const q = await import('/build/queue.mjs');
     return (await q.pending()) === 0;
-  }, null, { timeout: 8_000 });
+  }, null, { timeout: 8_000, label: 'D: queue never drained after empty-transcript flush' });
   assert((await composerValue(page)) === '', 'D: empty transcript must not populate the composer');
   log('D ✓ empty transcript dropped, queue drained, nothing sent');
 
@@ -190,10 +190,10 @@ export default async function run({ page, log }) {
     const b = await import('/build/backend.mjs');
     b.reconnect();
   });
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const b = await import('/build/backend.mjs');
     return b.isConnected();
-  }, null, { timeout: 8_000 });
+  }, null, { timeout: 8_000, label: 'E: backend never reported connected after reconnect()' });
   await flush(page);
   await page.waitForFunction(
     () => Array.from(document.querySelectorAll('#transcript .line.s0'))

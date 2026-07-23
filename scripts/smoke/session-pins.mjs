@@ -16,7 +16,7 @@
 //   4. AUTO-UNPIN ON DELETE — deleting a pinned session removes it from
 //      `pinnedSessions` so no dangling id lingers as a landing default.
 
-import { waitForReady, openSidebar, assert } from './lib.mjs';
+import { waitForReady, openSidebar, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'session-pins';
 export const DESCRIPTION = 'Pin a session → top region; persists across reload; unpin → recency; delete auto-unpins';
@@ -119,10 +119,10 @@ export default async function run({ page, log }) {
   log('pin ✓ gamma jumped to top region, rest stay in recency order');
 
   // ── 2. PERSIST — pinnedSessions written + survives reload ───────────
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/pinnedSessions')
       .then((r) => r.json()).then((b) => typeof b?.value === 'string' && b.value.includes('gamma')),
-    null, { timeout: 3_000, polling: 100 },
+    null, { timeout: 3_000, polling: 100, label: 'gamma pin never persisted to pinnedSessions' },
   );
   assert(JSON.stringify(await persistedPins(page)) === JSON.stringify([ID('gamma')]),
     `pinnedSessions should persist [gamma]; got ${JSON.stringify(await persistedPins(page))}`);
@@ -169,10 +169,10 @@ export default async function run({ page, log }) {
     `expected pins [beta,alpha] (newest pin on top); got ${JSON.stringify(await persistedPins(page))}`);
 
   await uiDeleteChat(page, ID('beta'));
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/pinnedSessions')
       .then((r) => r.json()).then((b) => !String(b?.value || '').includes('beta')),
-    null, { timeout: 5_000, polling: 100 },
+    null, { timeout: 5_000, polling: 100, label: 'deleted beta never auto-unpinned from pinnedSessions' },
   );
   assert(JSON.stringify(await persistedPins(page)) === JSON.stringify([ID('alpha')]),
     `deleting pinned beta must auto-unpin it; expected [alpha], got ${JSON.stringify(await persistedPins(page))}`);

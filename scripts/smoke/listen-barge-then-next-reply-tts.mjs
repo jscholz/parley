@@ -34,6 +34,8 @@
 //   3. Turn 2 reply autoplays → Listen state reaches 'playing' AGAIN.
 //      (THE REGRESSION: pre-fix it stayed armed/cooldown, never 'playing'.)
 
+import { pollUntil } from './lib.mjs';
+
 export const NAME = 'listen-barge-then-next-reply-tts';
 export const DESCRIPTION = 'Barge-pause of reply #1 must not mute TTS for reply #2 (re-arms to playing)';
 export const STATUS = 'implemented';
@@ -126,10 +128,10 @@ export default async function run({ page, log, fail, url, mock }) {
   // TTS should report 'paused' and KEEP its active session (resume-able),
   // which is what leaves the stale `active` that reply #2's superseded
   // cancel later trips over.
-  await page.waitForFunction(async () => {
+  await pollUntil(page, async () => {
     const tts = await import('/build/audio/turn-based/tts.mjs');
     return tts.getState() === 'paused';
-  }, null, { timeout: 3_000, polling: 50 });
+  }, null, { timeout: 3_000, polling: 50, label: 'tts never reported paused after simulated barge' });
   log('barge simulated — tts paused');
 
   // Listen re-arms after the cooldown grace.

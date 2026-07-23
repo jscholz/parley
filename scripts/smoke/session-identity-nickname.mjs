@@ -13,7 +13,7 @@
 //   3. CLEAR — re-opening the sheet, blanking the nickname, saving drops
 //      the chip and prunes the entry from `sessionIdentities`.
 
-import { waitForReady, openSidebar, assert } from './lib.mjs';
+import { waitForReady, openSidebar, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'session-identity-nickname';
 export const DESCRIPTION = 'Set a session nickname via the sheet → chip renders, persists across reload, clears on blank';
@@ -85,11 +85,11 @@ export default async function run({ page, log }) {
   log('set ✓ nickname chip renders on alpha only');
 
   // ── 2. PERSIST — written to sessionIdentities + survives reload ─────
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => typeof b?.value === 'string' && b.value.includes('Acme client')),
-    null, { timeout: 3_000, polling: 100 },
+    null, { timeout: 3_000, polling: 100, label: 'nickname never persisted to sessionIdentities' },
   );
   let ids = await persistedIdentities(page);
   assert(ids?.[ID('alpha')]?.nickname === 'Acme client',

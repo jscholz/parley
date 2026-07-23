@@ -8,7 +8,7 @@
 // is committed to the synced `pinnedSessions` setting (so it survives a
 // reload / syncs across devices).
 
-import { waitForReady, openSidebar, assert } from './lib.mjs';
+import { waitForReady, openSidebar, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'session-pin-reorder';
 export const DESCRIPTION = 'Drag-reorder within the pinned region commits the new order to pinnedSessions';
@@ -108,14 +108,14 @@ export default async function run({ page, log }) {
   log('drag ✓ DOM pinned order is now [alpha, beta]');
 
   // Committed to the synced setting.
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/pinnedSessions')
       .then((r) => r.json())
       .then((b) => {
         try { return JSON.stringify(JSON.parse(b.value)) === JSON.stringify(['mock-chat-alpha', 'mock-chat-beta']); }
         catch { return false; }
       }),
-    null, { timeout: 5_000, polling: 100 },
+    null, { timeout: 5_000, polling: 100, label: 'reordered pin order never committed to pinnedSessions' },
   );
   assert(JSON.stringify(await persistedPins(page)) === JSON.stringify([ID('alpha'), ID('beta')]),
     `reorder must persist [alpha, beta]; got ${JSON.stringify(await persistedPins(page))}`);

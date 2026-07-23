@@ -68,3 +68,53 @@ export function _resetRecentlyDeletedForTests(): void {
 export function recentlyDeletedSize(): number {
   return recentlyDeleted.size;
 }
+
+// ── Pending renames ─────────────────────────────────────────────────────
+// The optimistic-rename twin of recentlyDeleted (field 2026-07-22: rename
+// patched the in-memory row instantly — latency audit A3 — but a list
+// response already IN FLIGHT at rename time landed seconds later carrying
+// the OLD title and repainted it over the optimistic one until the
+// post-rename refresh settled; on a slow link the title visibly reverted
+// for seconds, reading as "rename is laggy"). While an entry is fresh,
+// every server-derived sessions payload is overlaid with the local title
+// before it reaches cachedSessions, so a stale snapshot cannot regress
+// the rename. TTL'd so a settle that never happens (tab killed mid-POST)
+// self-heals to server truth instead of pinning a phantom title forever.
+
+const PENDING_RENAME_TTL_MS = 60_000;
+
+const pendingRenames = new Map<string, { title: string; ts: number }>();
+
+/** Record an optimistic rename. Cleared on rollback (server refused —
+ *  the old title is correct again) or evicted by TTL; a SUCCESSFUL
+ *  rename deliberately keeps the entry until TTL so stragglers that
+ *  were in flight across the settle still get overlaid. */
+export function markPendingRename(id: string, title: string): void {
+  pendingRenames.set(id, { title, ts: Date.now() });
+}
+
+/** Lift the overlay — the optimistic-rename ROLLBACK path. */
+export function unmarkPendingRename(id: string): void {
+  pendingRenames.delete(id);
+}
+
+/** Overlay fresh pending renames onto a server-derived sessions list.
+ *  Returns the same array when nothing is pending (zero-cost fast path
+ *  for every ordinary refresh). */
+export function overlayPendingRenames<T extends { id: string; title?: string }>(sessions: T[]): T[] {
+  if (pendingRenames.size === 0) return sessions;
+  const now = Date.now();
+  for (const [id, e] of pendingRenames) {
+    if (now - e.ts > PENDING_RENAME_TTL_MS) pendingRenames.delete(id);
+  }
+  if (pendingRenames.size === 0) return sessions;
+  return sessions.map((s) => {
+    const e = pendingRenames.get(s.id);
+    return e ? { ...s, title: e.title } : s;
+  });
+}
+
+/** Test seam — clear between scenarios. Production never calls this. */
+export function _resetPendingRenamesForTests(): void {
+  pendingRenames.clear();
+}

@@ -16,7 +16,7 @@
 //   2. Add a chip in the UI. The server store should reflect it —
 //      proving the local edit WRITES through to the synced row.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'cross-device-keyterms-sync';
 export const DESCRIPTION = 'seeded server keyterms render on boot; a local chip edit writes through to the synced row';
@@ -69,14 +69,14 @@ export default async function run({ page, log, mock }) {
 
   // Verify the synced server row picked up the new term (end-to-end
   // through the same GET the PWA reads, not the mock internals).
-  await page.waitForFunction(
+  await pollUntil(page,
     async () => {
       const r = await fetch('/api/sidekick/prefs/stt_keyterms');
       const body = await r.json();
       return Array.isArray(body?.value) && body.value.includes('Blueberry');
     },
     null,
-    { timeout: 3_000, polling: 100 },
+    { timeout: 3_000, polling: 100, label: 'added keyterm never reached the synced server row' },
   );
   const serverList = await page.evaluate(async () => {
     const r = await fetch('/api/sidekick/prefs/stt_keyterms');

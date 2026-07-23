@@ -27,7 +27,7 @@ import { parseQuery, applyFilter } from './sessionFilter.ts';
 import { meetingCountFor, hasMeetings } from './capture/meetingsIndex.ts';
 import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter as clearStoredFilter } from './util/filterStore.ts';
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
-import { markRecentlyDeleted, unmarkRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize } from './sessionOps.ts';
+import { markRecentlyDeleted, unmarkRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize, markPendingRename, unmarkPendingRename, overlayPendingRenames } from './sessionOps.ts';
 import * as badge from './notifications/badge.ts';
 import * as composerDrafts from './composerDrafts.ts';
 import { escapeHtml } from './util/dom.ts';
@@ -394,15 +394,20 @@ export function drillTo(id: string, targetMessageId?: string): Promise<void> {
   // resume(), but painting the row here closes the visible gap.
   paintActiveRowSync(id);
   switchCtl.setOptimistic(id);
-  // NO noteViewIntent here, deliberately (2026-07-21). Drills are
-  // cache-first (mem/IDB/around-window), so the commit-time backstop
-  // clears the chip almost immediately anyway — and firing the clear at
-  // tap time perturbs the drill render's micro-timing enough to trip
-  // the latent depin-vs-reconcile-repin scroll race
-  // (activity-row-drills-to-bubble went 0/5 → ~2/5 flaky with a
-  // tap-time clear here; the measured fix-2 pathology was the ROW-TAP
-  // path, not drills). If drills ever need tap-time clearing, fix the
-  // reconcile-pass repin race first.
+  // Tap-time seen-signal, same as the row-click and arrow-nav paths — a
+  // drill IS the user choosing to read this chat. Re-enabled 2026-07-22:
+  // the tap-time clear was excluded on 2026-07-21 because its timing
+  // shift exposed the (pre-existing) depin-vs-reconcile-repin scroll
+  // race — the drill's programmatic scroll could land clamped at the
+  // bottom while the target bubble was transiently mis-sorted to the
+  // tail (live-envelope timestamp, pre-durable-heal), the scroll
+  // listener re-latched pinnedToBottom=true from geometry, and the
+  // heal's rerender autoScroll then held the viewport at the live edge
+  // while the bubble re-sorted up and out of view. That race is now
+  // closed at the source: drillScrollTo holds the de-pin through the
+  // settle window (chat.holdUnpinnedFor) and re-anchors the target if a
+  // late re-sort moves it (sessionResume.ts drillScrollTo settle loop).
+  noteViewIntent(id);
   return resume(id, targetMessageId).catch((e: any) => {
     diag(`sessionDrawer: drillTo resume failed: ${e?.message || e}`);
   });
@@ -935,7 +940,7 @@ async function doRefresh() {
   // 1. Render from cache if available.
   const cached = await sessionCache.getListCache();
   if (cached?.sessions?.length) {
-    cachedSessions = cached.sessions;
+    cachedSessions = overlayPendingRenames(cached.sessions);
     renderListFiltered(listEl, active);
   } else {
     listEl.innerHTML = '<li class="sess-empty">Loading…</li>';
@@ -952,7 +957,11 @@ async function doRefresh() {
   try {
     const sessions = await backend.listSessions(50);
     await sessionCache.putListCache(sessions);
-    cachedSessions = sessions;
+    // Pending-rename overlay: a list response that was in flight when
+    // the user renamed carries the OLD title — without the overlay it
+    // repaints over the optimistic rename (title visibly reverts until
+    // the post-rename refresh; field 2026-07-22).
+    cachedSessions = overlayPendingRenames(sessions);
     // Drain pending sessions:
     //   1. Server now knows about the id — confirmed; drop the
     //      synthesized row, the persisted row supersedes it.
@@ -1098,7 +1107,7 @@ async function runServerFilterReconcile(q: string) {
     // filter or typed something different. Drop stale results — the
     // current input handler will dispatch its own reconcile.
     if (q !== currentFilter) return;
-    cachedSessions = sessions;
+    cachedSessions = overlayPendingRenames(sessions);
     await sessionCache.putListCache(sessions);
     const listEl = document.getElementById('sessions-list');
     if (!listEl) return;
@@ -1753,6 +1762,10 @@ async function promptRename(s: any) {
   const prevTitle = s.title;
   const row = cachedSessions.find((c: any) => c.id === s.id);
   if (row) row.title = title;
+  // Overlay guard: any server list response in flight across this
+  // rename (or landing within the settle window) gets the local title
+  // stamped over its stale one — see overlayPendingRenames.
+  markPendingRename(s.id, title);
   {
     const listEl = document.getElementById('sessions-list');
     if (listEl) renderListFiltered(listEl, activeRowId());
@@ -1762,6 +1775,7 @@ async function promptRename(s: any) {
     refresh();
   } catch (e: any) {
     diag(`sessionDrawer: rename failed: ${e.message}`);
+    unmarkPendingRename(s.id);
     const rowBack = cachedSessions.find((c: any) => c.id === s.id);
     if (rowBack) rowBack.title = prevTitle;
     {

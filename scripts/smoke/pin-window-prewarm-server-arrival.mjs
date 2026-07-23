@@ -30,7 +30,7 @@
 // so getWindow returns null and the assertion fails. Post-fix (prewarm
 // also listens on `sidekick:server-pins-changed`) the prewarm fills it.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'pin-window-prewarm-server-arrival';
 export const DESCRIPTION = 'a pin that arrives FROM THE SERVER after boot (empty localStorage) prewarms its around-window with no manual drill';
@@ -100,12 +100,12 @@ export default async function run({ page, log, mock }) {
   });
 
   // The pin must hydrate into the store from the server reconcile...
-  await page.waitForFunction(
+  await pollUntil(page,
     async (m) => {
       const mod = await import('/build/pins/store.mjs');
       return mod.listAllPins().some((p) => p.msgId === m);
     },
-    serverPinMsg, { timeout: 8_000, polling: 150 });
+    serverPinMsg, { timeout: 8_000, polling: 150, label: `server pin ${serverPinMsg} never hydrated into the store` });
   log(`server pin hydrated into store: ${serverPinMsg} ✓`);
 
   // ...and the prewarm must warm its around-window with NO manual drill.

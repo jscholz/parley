@@ -21,7 +21,7 @@
 // (#set-agent-activity, Interaction section) so the UI edit is easy to
 // drive and observe.
 
-import { waitForReady, openSettingsSection, assert } from './lib.mjs';
+import { waitForReady, openSettingsSection, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'settings-persist-to-db';
 export const DESCRIPTION = 'synced settings seed-forward from YAML into sidekick.db, UI edits PUT to /prefs (not POST /config), and the DB wins on reload';
@@ -50,12 +50,12 @@ export default async function run({ page, log, mock }) {
   // ── Part 1: seed-forward. Boot ran settings.load() with an empty DB
   // Map, so the synced key should have been backfilled from the YAML
   // and written into the DB. Poll the DB store until the PUT lands.
-  await page.waitForFunction(
+  await pollUntil(page,
     () => fetch('/api/sidekick/prefs/agentActivity')
       .then((r) => r.json())
       .then((b) => b && b.value != null),
     null,
-    { timeout: 5_000, polling: 100 },
+    { timeout: 5_000, polling: 100, label: 'seed-forward PUT never landed agentActivity in the DB' },
   );
   const seeded = mock.getUserSetting(KEY);
   const yamlValue = await page.evaluate(async () => {
@@ -77,12 +77,12 @@ export default async function run({ page, log, mock }) {
   await page.selectOption('#set-agent-activity', next);
 
   // set() fires PUT fire-and-forget; poll the DB store for the new value.
-  await page.waitForFunction(
+  await pollUntil(page,
     (want) => fetch('/api/sidekick/prefs/agentActivity')
       .then((r) => r.json())
       .then((b) => b && b.value === want),
     next,
-    { timeout: 3_000, polling: 100 },
+    { timeout: 3_000, polling: 100, label: 'UI edit PUT never landed the new agentActivity value' },
   );
   assert(mock.getUserSetting(KEY) === next,
     `UI edit should PUT ${KEY}=${next} into the DB; got ${JSON.stringify(mock.getUserSetting(KEY))}`);

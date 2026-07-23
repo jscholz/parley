@@ -47,21 +47,10 @@ export default async function run({ page, log }) {
   });
 
   // Wait for prefetch to fire (5s delay) + lib-parse step + headroom.
-  log('waiting for VAD prefetch (5s + 1s headroom)…');
-  await page.waitForFunction(
-    () => {
-      const logs = (() => {
-        // Return all dbg console messages by walking the DOM is hard;
-        // we'll rely on a global hook instead. main.ts logs via the
-        // util/log.ts module — we can hook __TEST_LOG_CAPTURE__ if
-        // we want, but simpler: just wait by elapsed time.
-        return null;
-      })();
-      return true;
-    },
-    null,
-    { timeout: 100 },
-  );
+  // (A vestigial waitForFunction that always returned true used to sit
+  // here — removed; the elapsed-time wait below is the real gate, and
+  // the console-line assertions further down do the verifying.)
+  log('waiting for VAD prefetch (5s + 1.5s headroom)…');
   await page.waitForTimeout(6_500);  // 5s prefetch trigger + 1.5s lib-parse headroom
 
   // Find the prefetch + lib-parse log lines. The phrase "sequentially

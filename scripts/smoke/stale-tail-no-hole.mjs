@@ -23,7 +23,7 @@
 //   5. Switch to B. Messages 21..23 (the would-be hole — analog of the
 //      missing user bubble) MUST render once the resume settles.
 
-import { waitForReady, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'stale-tail-no-hole';
 export const DESCRIPTION = 'stale-tail sweep with more new rows than the prefetch window must not splice a permanent hole into the cached transcript';
@@ -117,11 +117,11 @@ export default async function run({ page, log, mock }) {
     const sd = await import('/build/sessionDrawer.mjs');
     await sd.refresh();
   });
-  await page.waitForFunction(async ({ c, s }) => {
+  await pollUntil(page, async ({ c, s }) => {
     const sc = await import('/build/sessionCache.mjs');
     const rec = await sc.getMessagesCache(c);
     return !!rec?.messages?.some((m) => m?.sidekick_id === s);
-  }, { c: CHAT_B, s: WINDOW_TAIL_ID }, { timeout: 8_000, polling: 200 });
+  }, { c: CHAT_B, s: WINDOW_TAIL_ID }, { timeout: 8_000, polling: 200, label: `sweep never merged ${WINDOW_TAIL_ID} into B's cache` });
   log('sweep refreshed B cache with the no-overlap window ✓');
 
   // 5. Switch to B — the messages the window skipped (21..23) must
