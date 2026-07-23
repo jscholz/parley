@@ -768,6 +768,71 @@ describe('project: compaction-replay durable twins (field 2026-07-16)', () => {
   });
 });
 
+describe('project: byte-identical assistant repeats (field 2026-07-23, /reasoning)', () => {
+  // Field shape: the /reasoning slash command produces BYTE-IDENTICAL
+  // assistant replies on every invocation (same settings → same text).
+  // The old pickDurableContentWinners collapsed identical-content
+  // assistant rows to ONE winner across the whole window unconditionally
+  // — built for reconcile-artifact twins, never anticipating legitimate
+  // repeats — and since 07-16 the winner was the EARLIEST copy, so every
+  // newer identical reply vanished after the durable merge. The fix
+  // windows the collapse the same way the user-side dedup does.
+  const REASONING_REPLY = '**Reasoning effort:** high\n**Verbosity:** low\n\n'
+    + 'Current model: gpt-5.5 · reasoning summaries on.';
+
+  it('two byte-identical annotated replies minutes apart BOTH render (the /reasoning bug)', () => {
+    const s = state({ durable: [
+      u('umsg_r1', '/reasoning', T0),
+      a('msg_r1', REASONING_REPLY, T0 + 1000),
+      u('umsg_r2', '/reasoning', T0 + 300_000),
+      a('msg_r2', REASONING_REPLY, T0 + 301_000),
+    ]});
+    const assistants = project(s).filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 2,
+      `far-apart identical replies are legitimate repeats — both must render, got ${assistants.length}`);
+    assert.deepEqual(assistants.map(b => b.key), ['msg_r1', 'msg_r2']);
+    assert.equal(assistants[1].timestamp, (T0 + 301_000));
+  });
+
+  it('three identical annotated replies within 30s collapse to one (earliest / lowest id)', () => {
+    const s = state({ durable: [
+      a('msg_a', 'dup burst', T0),
+      a('msg_b', 'dup burst', T0 + 5_000),
+      a('msg_c', 'dup burst', T0 + 10_000),
+    ]});
+    const assistants = project(s).filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 1, `near-simultaneous twins collapse, got ${assistants.length}`);
+    assert.equal(assistants[0].key, 'msg_a');
+  });
+
+  it('unannotated replay copy 10min later collapses into the annotated original (artifact drop, any distance)', () => {
+    // Compaction-replay shape: the copy is re-stamped far outside the
+    // 30s cluster window, so only the timestamp-blind artifact rule
+    // can catch it — annotated (client-keyed) beats unannotated.
+    const s = state({ durable: [
+      { id: 500, sidekick_id: 'msg_orig9', role: 'assistant', content: 'replayed reply', timestamp: T0 + 1000 },
+      { id: 900, sidekick_id: null, role: 'assistant', content: 'replayed reply', timestamp: T0 + 601_000 },
+    ]});
+    const assistants = project(s).filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 1, `replay copy must fold into the original, got ${assistants.length}`);
+    assert.equal(assistants[0].key, 'msg_orig9');
+    assert.equal(assistants[0].timestamp, T0 + 1000, 'original renders at its own timestamp');
+  });
+
+  it('all-legacy group with identical content 5min apart keeps BOTH (history-chat guard)', () => {
+    // Pre-write-through chats are entirely legacy: rows — identical
+    // far-apart repeats there are legitimate; with no client-keyed row
+    // in the group the artifact rule must stand down and let the 30s
+    // window decide.
+    const s = state({ durable: [
+      { id: 1, sidekick_id: 'legacy:1', role: 'assistant', content: 'ok', timestamp: T0 },
+      { id: 2, sidekick_id: 'legacy:2', role: 'assistant', content: 'ok', timestamp: T0 + 300_000 },
+    ]});
+    const assistants = project(s).filter(x => x.kind === 'assistant');
+    assert.equal(assistants.length, 2, `all-legacy far-apart repeats must both render, got ${assistants.length}`);
+  });
+});
+
 describe('notification update path renders markdown (not plaintext)', () => {
   // Regression: updateNotification used to overwrite the bubble's .text with
   // escapeHtml(text).replace(/\n/g,'<br>') on every reconcile pass, flattening

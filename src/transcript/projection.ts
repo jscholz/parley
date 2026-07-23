@@ -75,17 +75,22 @@ export function project(state: ChatState): BubbleSpec[] {
   // are consumed 1:1 per shadow match so legit repeats can't collapse.
   const durableUserSpecsByContent = new Map<string, UserBubbleSpec[]>();
 
-  // Durable-vs-durable dedup pre-pass. The items endpoint can return
-  // the same logical assistant message TWICE when the plugin's
-  // reconciler links the envelope-written row to its state.db twin by
-  // content match and fails (whitespace difference, etc.) — Pass 2
-  // then inserts a parallel `legacy:<state_id>` row alongside the
-  // existing `msg_xyz` row. The PWA can't tell them apart by key
-  // alone (different sidekick_ids), so we dedup here by content +
-  // role. The "winner" is the row with the highest timestamp;
-  // duplicates with `created_at=0` (rendering at epoch time) lose to
-  // the row that has a real wall-clock timestamp.
-  const durableWinnerKey = pickDurableContentWinners(state.durable);
+  // Durable-vs-durable dedup pre-pass for ASSISTANT rows. The items
+  // endpoint can return the same logical assistant message TWICE when
+  // the plugin's reconciler links the envelope-written row to its
+  // state.db twin by content match and fails (whitespace difference,
+  // etc.) — Pass 2 then inserts a parallel `legacy:<state_id>` row
+  // alongside the existing `msg_xyz` row — and compaction re-flush
+  // (field 2026-07-16) appends unannotated verbatim copies. The PWA
+  // can't tell twins apart by key alone (different sidekick_ids), so
+  // we dedup by content + role — but WINDOWED and artifact-aware, the
+  // same way the user rows are dedup'd below. An unconditional whole-
+  // window content collapse ate legitimate repeats: slash commands
+  // like /reasoning emit BYTE-IDENTICAL replies on every invocation
+  // (field 2026-07-23), and each one must render. Returns the losers
+  // to drop; every surviving copy lands as its own bubble.
+  const assistantDropKeys = pickDuplicateLosers(
+    state.durable, 'assistant', /*liveKeys*/ new Set(), 'msg_');
   // Keys the client's LIVE state already references — inflight user_message
   // echoes and optimistic pendingSends. The user dedup passes below prefer
   // these keys as duplicate winners: when the plugin's reconcile pass
@@ -100,8 +105,8 @@ export function project(state: ChatState): BubbleSpec[] {
   }
   for (const p of state.pendingSends) liveUserKeys.add(p.messageId);
   // Near-simultaneous duplicate USER rows to drop (backend double-write
-  // defense — see pickUserDuplicateLosers). Far-apart legit repeats survive.
-  const userDropKeys = pickUserDuplicateLosers(state.durable, liveUserKeys);
+  // defense — see pickDuplicateLosers). Far-apart legit repeats survive.
+  const userDropKeys = pickDuplicateLosers(state.durable, 'user', liveUserKeys, 'umsg_');
 
   // Track the current turn so tool rows attach to the right activity
   // row. Updated when we walk past a user message in durable OR an
@@ -195,14 +200,12 @@ export function project(state: ChatState): BubbleSpec[] {
           if (!row.tools.find(t => t.callId === c.callId)) row.tools.push(c);
         }
       }
-      // Durable-vs-durable dedup: only the "winning" copy of a given
-      // (role, content) pair lands as a bubble. Losers are silently
-      // dropped — they're sidekick.db reconcile duplicates.
-      const itemKey = identityKey(item);
-      const winnerForContent = durableWinnerKey.get(`assistant:${item.content || ''}`);
-      if (winnerForContent && winnerForContent !== itemKey) {
-        continue;
-      }
+      // Durable-vs-durable dedup: a row that lost the windowed
+      // artifact-aware dedup is silently dropped — it's a reconcile /
+      // replay twin of a sibling that renders. (Checked AFTER the
+      // tool_calls fold above so a losing twin's calls still reach
+      // the activity row, same as before.)
+      if (assistantDropKeys.has(identityKey(item))) continue;
       if (item.content && !assistantKeys.has(akey)) {
         assistantKeys.add(akey);
         pushDurableSpec({ kind: 'assistant', key: akey, text: item.content, timestamp: ts });
@@ -758,41 +761,6 @@ function identityKey(item: ConversationItem): string {
   return `${item.sidekick_id || ''}:${String(item.id)}`;
 }
 
-/** Pre-pass over durable: for each (role, content) pair, pick a single
- *  winning ConversationItem. Used to dedup duplicate rows that the
- *  items endpoint can return (sidekick.db.msg_links reconcile failed
- *  to link → two rows for the same logical message). The winner is
- *  the row with the highest non-zero timestamp; if all timestamps
- *  match (or are all zero), the row with the higher id wins (stable
- *  per sqlite ordering). Returns Map<role:content, identityKey> so
- *  callers can check `winnerForContent === identityKey(item)`.
- *
- *  Skips items with empty content (nothing to dedup; tool-only
- *  assistant rows fold into activity rows, not bubbles).
- *
- *  Scope: assistant-only for now. User dupes haven't been observed
- *  in the field; user_message envelopes are well-keyed by umsg_* and
- *  the optimistic-send path already dedups by messageId. */
-function pickDurableContentWinners(items: ConversationItem[]): Map<string, string> {
-  const winners = new Map<string, ConversationItem>();
-  for (const item of items) {
-    if (item.role !== 'assistant') continue;
-    if (!item.content) continue;
-    const key = `assistant:${item.content}`;
-    const prev = winners.get(key);
-    if (!prev) {
-      winners.set(key, item);
-      continue;
-    }
-    if (compareDurableForDedup(item, prev) > 0) {
-      winners.set(key, item);
-    }
-  }
-  const out = new Map<string, string>();
-  for (const [key, item] of winners) out.set(key, identityKey(item));
-  return out;
-}
-
 /** Returns > 0 when `a` wins, < 0 when `b` wins, 0 when tied.
  *  Tier order: real-timestamp beats zero-timestamp → annotated
  *  (sidekick_id present) beats unannotated → EARLIER timestamp →
@@ -828,34 +796,26 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
   return String(a.id) < String(b.id) ? 1 : -1;
 }
 
-/** Defensive durable-vs-durable dedup for USER rows. `pickDurableContentWinners`
- *  intentionally skips user rows because identical user content is often
- *  legitimate (the same short utterance sent again — e.g. voice-test
- *  "1 2 3 … 20" repeated minutes apart). But a backend double-write can
- *  store the SAME user message twice within seconds (field 2026-05-27: a
- *  sidekick message written once natively + once via hermes' platform-ingest
- *  path, ~4s apart, different ids → both rendered). This collapses ONLY that
- *  near-simultaneous case: within each identical-content group, rows are
- *  clustered by time, and any non-winner that falls within
- *  USER_DEDUP_WINDOW_MS of a sibling is dropped. Far-apart legitimate repeats
- *  land in separate clusters and each survive. `liveKeys` (inflight echo +
- *  pendingSend message ids) takes precedence in winner selection — see
- *  flushCluster. Returns identityKey()s to drop. */
-const USER_DEDUP_WINDOW_MS = 30_000;
-// An unlinked state.db user row and its umsg_* envelope-only copy are the
-// SAME send served twice during the envelope→reconcile-link window. state.db
-// stamps rows at turn-END batch-write, so the twins sit a full TURN DURATION
-// apart (91s in the 2026-07-04 field report; minutes for tool-heavy turns) —
-// far beyond the near-simultaneous window above. Bounded so a genuinely old
-// envelope copy can never swallow a fresh identical send.
+// Near-simultaneous cluster width for the windowed dedup (rule 4 in
+// pickDuplicateLosers). Twins inside the window are backend artifacts
+// (double-write, reconcile race); identical content further apart is a
+// legitimate repeat unless a timestamp-blind rule (2/3) says otherwise.
+const DEDUP_CLUSTER_WINDOW_MS = 30_000;
+// An unlinked state.db row and its envelope-only copy (umsg_* for user
+// rows, msg_* for assistant rows) are the SAME message served twice during
+// the envelope→reconcile-link window. state.db stamps rows at turn-END
+// batch-write, so the twins sit a full TURN DURATION apart (91s in the
+// 2026-07-04 field report; minutes for tool-heavy turns) — far beyond the
+// near-simultaneous window above. Bounded so a genuinely old envelope copy
+// can never swallow a fresh identical send.
 const ENVELOPE_SHADOW_WINDOW_MS = 30 * 60_000;
 // Envelope-only rows are keyed by created_at epoch-millis; state.db rowids
 // stay far below. (Mirrors _ENVELOPE_CURSOR_THRESHOLD in sidekick_state.py.)
 const ENVELOPE_ID_MIN = 1e11;
 
-function isEnvelopeOnlyUserCopy(it: ConversationItem): boolean {
+function isEnvelopeOnlyCopy(it: ConversationItem, envelopeIdPrefix: string): boolean {
   return typeof it.sidekick_id === 'string'
-    && it.sidekick_id.startsWith('umsg_')
+    && it.sidekick_id.startsWith(envelopeIdPrefix)
     && Number(it.id) >= ENVELOPE_ID_MIN;
 }
 
@@ -897,13 +857,55 @@ function takeContentShadowedUserSpec(
   return candidates.splice(bestIdx, 1)[0];
 }
 
-function pickUserDuplicateLosers(
+/** Windowed, artifact-aware durable-vs-durable dedup — one implementation
+ *  for BOTH roles (users pass their live keys + 'umsg_'; assistants pass an
+ *  empty set + 'msg_'). Identical content is NOT sufficient evidence of a
+ *  duplicate: the same short utterance gets sent again minutes apart, and
+ *  slash commands like /reasoning emit byte-identical replies on every
+ *  invocation (field 2026-07-23 — the old whole-window assistant collapse
+ *  ate every newer copy). Only rows a KNOWN artifact shape explains are
+ *  dropped. Per identical-content group, in this exact order:
+ *
+ *  1. Envelope-shadow pass: pair each unannotated state row with the
+ *     nearest earlier unpaired envelope-only copy (1:1, so legit repeats
+ *     keep their own rows) and drop the state twin — the same message
+ *     served twice during the envelope→reconcile-link window (field
+ *     2026-07-04). The envelope copy wins because it carries the true
+ *     send time AND its key stays stable when the reconcile link heals.
+ *  2. Zero-timestamp drop: a twin stuck at created_at=0 (rendering at
+ *     epoch time) loses to any sibling with a real wall-clock timestamp,
+ *     at any distance — the original intent of the 2026-05-19 dedup.
+ *  3. Artifact drop (ASSISTANT rows only): rows with a client-keyed
+ *     annotation (sidekick_id present, not `legacy:`) are "good"; when
+ *     any exist, every non-good row is dropped at ANY time distance —
+ *     unannotated compaction-replay copies are re-stamped with the flush
+ *     time (field 2026-07-16) and `legacy:` reconcile twins collapse
+ *     into their keyed originals. All-legacy groups (pre-write-through
+ *     history chats) skip this rule: identical far-apart repeats there
+ *     are legitimate, so they fall through to the window below. User
+ *     rows skip it entirely — a fresh identical user send sits
+ *     unannotated until its reconcile link lands, and replayed user
+ *     rows keep their original timestamps, so rule 1's bounded window
+ *     and rule 4's cluster already cover every observed user artifact
+ *     (the same-ts compaction user twin included) without eating a
+ *     genuinely new send (pinned by the 45-min no-shadow contract).
+ *  4. Near-simultaneous cluster pass over the survivors: cluster by
+ *     time (DEDUP_CLUSTER_WINDOW_MS), one winner per cluster — a row
+ *     whose key the client's live state references (inflight echo /
+ *     pendingSend) wins outright, else compareDurableForDedup. Far-apart
+ *     survivors land in separate clusters and ALL render — this is what
+ *     lets legitimate byte-identical repeats through.
+ *
+ *  Returns identityKey()s of the losers to drop. */
+function pickDuplicateLosers(
   items: ConversationItem[],
+  role: 'user' | 'assistant',
   liveKeys: ReadonlySet<string>,
+  envelopeIdPrefix: string,
 ): Set<string> {
   const byContent = new Map<string, ConversationItem[]>();
   for (const it of items) {
-    if (it.role !== 'user' || !it.content) continue;
+    if (it.role !== role || !it.content) continue;
     let arr = byContent.get(it.content);
     if (!arr) { arr = []; byContent.set(it.content, arr); }
     arr.push(it);
@@ -912,13 +914,8 @@ function pickUserDuplicateLosers(
   for (const group of byContent.values()) {
     if (group.length < 2) continue;
     group.sort((a, b) => normalizeTimestamp(a) - normalizeTimestamp(b));
-    // Envelope-shadow pre-pass: pair each unannotated state row with the
-    // nearest earlier unpaired envelope copy (1:1, so legit repeats keep
-    // their own rows) and drop the state twin. The envelope copy wins
-    // because it carries the true send time AND its key stays stable when
-    // the reconcile link heals — the healed row is served WITH
-    // sidekick_id=umsg_*, so userKey converges instead of re-keying.
-    const envelopes = group.filter(isEnvelopeOnlyUserCopy);
+    // Rule 1 — envelope-shadow pass (1:1 pairing, bounded window).
+    const envelopes = group.filter((it) => isEnvelopeOnlyCopy(it, envelopeIdPrefix));
     const pairedEnvelopes = new Set<ConversationItem>();
     for (const stateCopy of group) {
       if (stateCopy.sidekick_id) continue;  // annotated → already linked
@@ -935,9 +932,33 @@ function pickUserDuplicateLosers(
         losers.add(identityKey(stateCopy));
       }
     }
-    // Near-simultaneous cluster pass (backend double-write defense) over
-    // whatever the shadow pass left standing.
-    const arr = group.filter((it) => !losers.has(identityKey(it)));
+    let alive = group.filter((it) => !losers.has(identityKey(it)));
+    // Rule 2 — zero-timestamp drop: epoch-time ghosts lose to any real-
+    // wall-clock sibling regardless of distance.
+    if (alive.length >= 2 && alive.some((it) => normalizeTimestamp(it) > 0)) {
+      for (const it of alive) {
+        if (normalizeTimestamp(it) === 0) losers.add(identityKey(it));
+      }
+      alive = alive.filter((it) => !losers.has(identityKey(it)));
+    }
+    // Rule 3 — artifact drop (assistant rows only; see the rationale in
+    // the function doc): client-keyed rows absorb their unannotated /
+    // legacy: twins at any time distance. All-legacy groups fall through.
+    if (role === 'assistant' && alive.length >= 2) {
+      const good = alive.filter((it) =>
+        typeof it.sidekick_id === 'string'
+        && it.sidekick_id.length > 0
+        && !it.sidekick_id.startsWith('legacy:'));
+      if (good.length > 0 && good.length < alive.length) {
+        for (const it of alive) {
+          if (!good.includes(it)) losers.add(identityKey(it));
+        }
+        alive = good;
+      }
+    }
+    // Rule 4 — near-simultaneous cluster pass (backend double-write
+    // defense) over whatever the rules above left standing.
+    const arr = alive;
     if (arr.length < 2) continue;
     let start = 0;
     const flushCluster = (end: number) => {
@@ -947,6 +968,9 @@ function pickUserDuplicateLosers(
       // orphan that live state, and the inflight walk would re-add the
       // key as a ghost bubble (heal-rekeyed twin, field 2026-07-15).
       // Among live-keyed rows (or absent any), the usual tiebreak.
+      // (userKey computes the sidekick_id||id join key — same shape for
+      // both roles; assistants pass an empty liveKeys set so this loop
+      // is a no-op for them.)
       let winner: ConversationItem | null = null;
       for (let j = start; j < end; j++) {
         if (!liveKeys.has(userKey(arr[j]))) continue;
@@ -964,7 +988,7 @@ function pickUserDuplicateLosers(
     };
     for (let i = 1; i <= arr.length; i++) {
       if (i === arr.length
-          || normalizeTimestamp(arr[i]) - normalizeTimestamp(arr[i - 1]) > USER_DEDUP_WINDOW_MS) {
+          || normalizeTimestamp(arr[i]) - normalizeTimestamp(arr[i - 1]) > DEDUP_CLUSTER_WINDOW_MS) {
         flushCluster(i);
         start = i;
       }
