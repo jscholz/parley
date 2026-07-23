@@ -13,10 +13,15 @@
  * voice (interim → final transcripts arriving asynchronously). Two
  * principles drive the state machine:
  *
- *   1. Human edits are sacrosanct. If the user types or moves the cursor
- *      mid-utterance, voice respects that: commit the in-flight interim
- *      as if it were final at its current position, then start a fresh
- *      anchor on the next utterance.
+ *   1. Human edits are sacrosanct. The user owns the caret: if they move
+ *      it (or type elsewhere) mid-utterance, voice NEVER yanks it back —
+ *      but the utterance keeps its anchor, so transcripts for speech that
+ *      started at P0 land at P0 even while the user edits at P1 (Jonathan
+ *      field bug 2026-07-21: finals used to chase the moved caret).
+ *      Manual edits outside the utterance span slide the anchor by the
+ *      edit delta; an edit INSIDE the span (the user touched the dictated
+ *      text itself) drops the pending utterance — the fallback when
+ *      anchor bookkeeping is no longer reliable.
  *   2. Cursor advances with the dictated text, just like typing. Each
  *      interim REPLACES the previous interim's text in place, and after
  *      every splice the caret is moved to the END of what's been written
@@ -111,13 +116,20 @@
  *     - reset: anchor=null, committedLen=0, interimLen=0, lastFinalText=''.
  *
  *   • User input event (typing/paste, NOT our own writes):
- *     - reset state machine (anchor → null) so the next utterance
- *       captures fresh wherever the user's cursor lands.
+ *     - diff the previous vs current value into one contiguous edit
+ *       (util/textAnchor.diffEdit) and slide the anchor across it
+ *       (shiftSpan). Edit before the span → anchor shifts; after →
+ *       no-op; INTERSECTING the span → drop the pending utterance
+ *       (resetUtterance + abandon suppression) — the user rewrote the
+ *       dictated text, so splicing at stale offsets would corrupt it.
+ *       Either way the caret is detached: voice stops moving it.
  *
  *   • User selectionchange (caret move that wasn't ours):
- *     - if the new caret falls outside the utterance range
- *       [anchor, anchor+committedLen+interimLen], reset state machine.
- *       Caret moves WITHIN the range are tolerated.
+ *     - detach the caret (caretDetached=true). The utterance KEEPS its
+ *       anchor — subsequent interims/finals still land there — but
+ *       setCursor becomes a no-op so the user's new caret position is
+ *       respected. writeRange's setRangeText(…, 'preserve') shifts the
+ *       user's caret automatically when a splice lands before it.
  *
  * On call close: stop() clears state and restores the prior data-channel
  * listener (call-mode wiring registers one at boot; we replaced it).
@@ -134,6 +146,7 @@
 
 import * as conn from './realtime.ts';
 import { log, diag } from '../../util/log.ts';
+import { diffEdit, shiftSpan } from '../../util/textAnchor.ts';
 import type { STTProvider, TranscriptEvent, Unsubscribe } from '../shared/stt-provider.ts';
 
 // ── Diagnostic flag ────────────────────────────────────────────────────
@@ -246,6 +259,20 @@ let lastInterimWritten = '';
  *  never resetting, and voice kept appending at the end). */
 let lastSetCursor = -1;
 
+/** True once the user has taken the caret mid-utterance (moved it,
+ *  focused the composer, or typed). While detached, splices keep landing
+ *  at the anchor but setCursor is a no-op — voice must not yank the
+ *  caret away from where the user is editing. setRangeText's 'preserve'
+ *  mode keeps their caret consistent when a splice lands before it.
+ *  Reset at each utterance boundary: the NEXT utterance anchors at the
+ *  user's chosen caret and cursor-follow resumes. */
+let caretDetached = false;
+
+/** Snapshot of the textarea value after our last write / last processed
+ *  user edit. onUserInput diffs this against the live value to derive
+ *  the single-region edit that shifts (or drops) the anchor. */
+let observedValue = '';
+
 // ── Public API ─────────────────────────────────────────────────────────
 
 export function setStateListener(cb: (opening: boolean, error?: string) => void): void {
@@ -323,6 +350,7 @@ export async function start(opts: {
   abandonedText = '';
   lastInterimText = '';
   lastSetCursor = -1;
+  observedValue = composerInput.value;
   initialCursor = (typeof opts.initialCursor === 'number') ? opts.initialCursor : null;
   if (dictateDebugOn) log('[dictate] start initialCursor=', initialCursor);
 
@@ -516,7 +544,9 @@ function handleUtteranceEnd(): void {
     // the user's next keystroke should land between committed and
     // interim if interim is still showing; in practice handleUtterance
     // End fires after interimLen has been zeroed by the last final).
-    setCursor(anchor + committedLen);
+    // Skipped while the user owns the caret — closing out an anchored
+    // utterance must not yank them away from where they're editing.
+    if (!caretDetached) setCursor(anchor + committedLen);
   }
   resetUtterance('utterance-end');
 }
@@ -580,6 +610,8 @@ function ensureAnchor(): void {
   interimLen = 0;
   lastFinalText = '';
   lastInterimWritten = '';
+  caretDetached = false;
+  observedValue = composerInput.value;
   // Refocus the textarea so the caret is VISIBLE as text streams in.
   // Without this, the user's gesture (e.g. clicking the mic button)
   // moved focus to the button; setSelectionRange on a non-focused
@@ -650,8 +682,10 @@ function spliceInterim(text: string): void {
   // pause, the cursor is sitting right after the last word; their
   // next keystroke / mouse-click resumes from there. setSelectionRange
   // fires selectionchange; our own listener short-circuits via
-  // `updating`.
-  setCursor(anchor + committedLen + interimLen);
+  // `updating`. Skipped once the user has taken the caret (they're
+  // editing elsewhere — the splice still lands at the anchor, but the
+  // caret is theirs).
+  if (!caretDetached) setCursor(anchor + committedLen + interimLen);
 }
 
 /** Bake a content final into committed text: replace the in-flight
@@ -670,19 +704,22 @@ function spliceFinal(text: string): void {
   // Cursor sits at the end of committed text — same advancing-with-
   // speech invariant as the interim path. Text should land
   // immediately behind the cursor as if the user had typed it.
-  setCursor(anchor + committedLen);
+  // Skipped while the user owns the caret (see spliceInterim).
+  if (!caretDetached) setCursor(anchor + committedLen);
 }
 
 // ── Reset helper ──────────────────────────────────────────────────────
 
 function resetUtterance(reason: string): void {
-  // User-driven resets mean the user accepted the in-flight interim
-  // where it sits and moved on. Stash the abandoned interim's text +
-  // timestamp so handleInterim / handleContentFinal can drop late
-  // events refining the same utterance (which would otherwise re-paste
-  // at the new caret and duplicate). New utterances with different
-  // content pass the prefix check and process normally.
-  if ((reason === 'user-input' || reason === 'user-cursor-outside' || reason === 'user-focus') && lastInterimText) {
+  // A user-edit drop means the user rewrote the in-flight utterance's
+  // text where it sits and owns the result. Stash the abandoned
+  // interim's text + timestamp so handleInterim / handleContentFinal
+  // can drop late events refining the same utterance (which would
+  // otherwise re-paste at their caret and duplicate). New utterances
+  // with different content pass the prefix check and process normally.
+  // (Caret moves and out-of-span edits no longer reset at all — the
+  // utterance stays anchored; see onUserSelectionChange / onUserInput.)
+  if (reason === 'user-input' && lastInterimText) {
     abandonedAt = Date.now();
     abandonedText = lastInterimText;
   }
@@ -692,6 +729,7 @@ function resetUtterance(reason: string): void {
   lastFinalText = '';
   lastInterimText = '';
   lastInterimWritten = '';
+  caretDetached = false;
   if (dictateDebugOn) dlog('reset', { reason });
 }
 
@@ -740,6 +778,9 @@ function writeRange(start: number, end: number, text: string): void {
   } finally {
     updating = false;
   }
+  // Keep the user-edit diff baseline in sync with our own writes so the
+  // next onUserInput diff only sees the USER's edit.
+  observedValue = composerInput.value;
 }
 
 function setCursor(pos: number): void {
@@ -759,13 +800,32 @@ function setCursor(pos: number): void {
 function onUserInput(_ev: Event): void {
   if (updating) return;          // our own write — ignore
   if (!active) return;           // not dictating — irrelevant
-  if (anchor === null) return;   // no in-flight utterance — nothing to commit
+  if (!composerInput) return;
+  if (anchor === null) return;   // no in-flight utterance — nothing to track
   // The user typed (or pasted, or undo'd) DURING an in-flight utterance.
-  // Bow out: the textarea already reflects whatever happened (typing
-  // inserted between voice, delete removed something, etc.), and the
-  // next utterance captures fresh wherever the user's cursor lands.
-  diag('[dictate] user input mid-utterance — committing in place');
-  resetUtterance('user-input');
+  // Diff our last-observed value against the live one and slide the
+  // anchor across the edit so the utterance keeps landing where the
+  // speech started (field bug 2026-07-21). The user owns the caret from
+  // here on — voice stops moving it.
+  const edit = diffEdit(observedValue, composerInput.value);
+  observedValue = composerInput.value;
+  if (!edit) return;
+  const spanLen = committedLen + interimLen;
+  const shifted = shiftSpan(anchor, spanLen, edit);
+  if (shifted === null) {
+    // The edit touched the dictated span itself — anchor bookkeeping
+    // through that isn't reliable. Fallback semantics: drop the pending
+    // utterance in place (their edit is the truth) and suppress its
+    // late refinements.
+    diag('[dictate] user edited inside the utterance span — dropping pending utterance');
+    resetUtterance('user-input');
+    return;
+  }
+  if (shifted !== anchor) {
+    dlog('anchor shift (user edit)', { from: anchor, to: shifted, edit: JSON.stringify(edit) });
+    anchor = shifted;
+  }
+  caretDetached = true;
 }
 
 function onComposerFocus(_ev: Event): void {
@@ -773,11 +833,12 @@ function onComposerFocus(_ev: Event): void {
   if (!active) return;           // not dictating — let iOS handle focus normally
   if (anchor === null) return;   // no in-flight utterance — programmatic focus at dictation start fires before the first interim
   // User tapped the composer while we had a voice utterance in flight.
-  // Commit it and stop calling setCursor on the now-focused textarea so
-  // iOS WKWebView can present the keyboard without programmatic-selection
-  // interference.
-  diag('[dictate] composer focused mid-utterance — committing in place');
-  resetUtterance('user-focus');
+  // Detach the caret: the utterance keeps its anchor (transcripts still
+  // land there), but we stop calling setCursor on the now-focused
+  // textarea so iOS WKWebView can present the keyboard without
+  // programmatic-selection interference.
+  diag('[dictate] composer focused mid-utterance — caret detached, utterance stays anchored');
+  caretDetached = true;
 }
 
 function onUserSelectionChange(_ev: Event): void {
@@ -789,12 +850,14 @@ function onUserSelectionChange(_ev: Event): void {
   // chat bubbles, settings, etc. shouldn't affect the dictation state.
   if (document.activeElement !== composerInput) return;
   const pos = composerInput.selectionStart ?? 0;
-  // Strict equality with the cursor we last placed. The previous
-  // "is pos inside [anchor, utteranceEnd]" heuristic was too lenient
-  // when the utterance covered the whole textarea — ANY click inside
-  // existing content was tolerated, no reset, and voice kept
-  // appending at the end.
+  // Strict equality with the cursor we last placed — anything else is a
+  // user-driven move (or the 'preserve'-mode shift of a caret the user
+  // already owns, in which case caretDetached is already true).
   if (pos === lastSetCursor) return;
-  diag('[dictate] user moved cursor — committing in place');
-  resetUtterance('user-cursor-outside');
+  // The user took the caret. Keep the utterance anchored where speech
+  // started — pending finals land there — but stop moving the caret.
+  if (!caretDetached) {
+    diag('[dictate] user moved cursor — caret detached, utterance stays anchored');
+    caretDetached = true;
+  }
 }

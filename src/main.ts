@@ -2998,10 +2998,21 @@ async function boot() {
    *  in view; on memo completion the transcript appends at the cursor
    *  for autoSend=false, or appends + sends together for autoSend=true).
    *  The send button is moved into the memo bar so it stays right-anchored. */
-  async function startMemo(autoSend: boolean, dictateToComposer = false): Promise<void> {
+  async function startMemo(
+    autoSend: boolean,
+    dictateToComposer = false,
+    initialCursor: number | null = null,
+  ): Promise<void> {
     if (memoActive) return;
     if (dictateActive) await webrtcDictate.stop();
     if (webrtcControls.isOpen()) await webrtcControls.closeIfOpen();
+    // Batch dictation: register the composer insertion anchor NOW, at
+    // recording start (the cursor captured at the mic gesture site).
+    // The transcript can land seconds — or, via the durable outbox
+    // retry, minutes — later; the anchor slides with edits in between
+    // so the text lands where the utterance was aimed, not wherever
+    // the caret sits at flush time (Jonathan field bug 2026-07-21).
+    const dictateAnchorId = dictateToComposer ? composer.createAnchor(initialCursor) : null;
     // iOS AVAudioSession prep: prepareForCapture before getUserMedia.
     primeAudio(player);
     audioSession.prepareForCapture();
@@ -3024,7 +3035,7 @@ async function boot() {
         const { audioBlob, durationMs } = await memo.stop();
         exitMemoMode();
         if (dictateToComposer) {
-          await memoOutbox.transcribeToComposer(audioBlob, durationMs);
+          await memoOutbox.transcribeToComposer(audioBlob, durationMs, dictateAnchorId);
         } else {
           await memoOutbox.handleMemoResult(audioBlob, durationMs, autoSend, 'composerSend.click');
         }
@@ -3048,16 +3059,19 @@ async function boot() {
       onDone: (audioBlob) => {
         exitMemoMode();
         if (dictateToComposer) {
-          void memoOutbox.transcribeToComposer(audioBlob, undefined);
+          void memoOutbox.transcribeToComposer(audioBlob, undefined, dictateAnchorId);
         } else {
           memoOutbox.handleMemoResult(audioBlob, undefined, autoSend, 'memo.onDone');
         }
       },
       onCancel: () => {
+        // Recording discarded — nothing will consume the anchor.
+        composer.releaseAnchor(dictateAnchorId);
         exitMemoMode();
       },
     });
     if (!ok) {
+      composer.releaseAnchor(dictateAnchorId);
       exitMemoMode();
       status.setStatus('Mic not available', 'err');
       return;
@@ -3083,7 +3097,7 @@ async function boot() {
     // startMemo(false) appends text and never submits. Fixes long-form
     // over-punctuation from per-pause streaming finals (#112).
     if (!settings.get().dictateRealtime) {
-      await startMemo(false, /* dictateToComposer */ true);
+      await startMemo(false, /* dictateToComposer */ true, initialCursor);
       return;
     }
     // streamingEngine === 'local' uses browser Web Speech (Chrome/Safari);
@@ -3094,7 +3108,7 @@ async function boot() {
     const useLocalEngine = settings.get().streamingEngine === 'local';
     if (!navigator.onLine && !useLocalEngine) {
       status.setStatus('Offline — using memo mode', null);
-      await startMemo(false, /* dictateToComposer */ true);
+      await startMemo(false, /* dictateToComposer */ true, initialCursor);
       return;
     }
     primeAudio(player);

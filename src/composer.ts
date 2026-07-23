@@ -18,11 +18,30 @@
  */
 
 import { diag } from './util/log.ts';
+import { diffEdit, shiftPoint } from './util/textAnchor.ts';
 
 let inputEl: HTMLTextAreaElement | null = null;
 let interimEl: HTMLElement | null = null;
 let onChange = () => {};
 let onSubmit = () => {};
+
+/** Registered insertion anchors — positions captured when a dictation
+ *  utterance STARTED, slid across subsequent edits by the 'input'
+ *  listener below so a transcript arriving seconds (or, via the durable
+ *  outbox, minutes) later still lands where the speech was aimed
+ *  (Jonathan field bug 2026-07-21: appendText used to chase the live
+ *  caret). An anchor whose position gets deleted is dropped from the
+ *  map — appendText then falls back to the legacy at-caret insert.
+ *  Anchors don't survive a reload (in-memory), which is fine: a
+ *  reloaded outbox item falls back the same way. */
+const anchors = new Map<number, number>();
+let anchorSeq = 1;
+const ANCHORS_MAX = 50;
+/** Baseline for diffing user edits in the anchor-shift input listener.
+ *  Kept in sync by that listener itself; programmatic value swaps that
+ *  never fire 'input' are absorbed as one aggregate edit on the next
+ *  event (worst case an anchor over-invalidates — the safe direction). */
+let anchorSnapshot = '';
 
 /** Last cursor position the user explicitly set in the composer textarea
  *  while it was focused. Updated by a global selectionchange listener
@@ -55,6 +74,25 @@ export function init(opts: {
   // On non-Mac platforms Ctrl+K still opens search (handled in
   // cmdkPalette.ts), so this handler also gates on !metaKey.
   if (inputEl) {
+    // Slide registered anchors across every edit (typed, pasted, or one
+    // of our own dispatched inserts — all funnel through 'input').
+    anchorSnapshot = inputEl.value;
+    inputEl.addEventListener('input', () => {
+      if (!inputEl) return;
+      const edit = diffEdit(anchorSnapshot, inputEl.value);
+      anchorSnapshot = inputEl.value;
+      if (!edit || anchors.size === 0) return;
+      for (const [id, pos] of anchors) {
+        const next = shiftPoint(pos, edit);
+        if (next === null) {
+          anchors.delete(id);
+          diag('composer anchor dropped (position deleted):', id);
+        } else if (next !== pos) {
+          anchors.set(id, next);
+        }
+      }
+    });
+
     // Track caret position whenever the user moves it within the
     // (focused) textarea. selectionchange fires on document; gate to
     // our textarea via activeElement.
@@ -106,6 +144,33 @@ export function submit() { onSubmit(); }
  *  fallback for live selectionStart reads that go stale post-blur. */
 export function getLastCaret(): number | null { return lastKnownCaret; }
 
+/** Register an insertion anchor at `pos` (the composer cursor captured
+ *  when a dictation utterance started). The anchor slides with edits via
+ *  the input listener in init(); pass the returned id to appendText so
+ *  the transcript lands at the anchored position. Returns null when the
+ *  position is unknown (caller passes appendText no anchor → legacy
+ *  at-caret behavior). */
+export function createAnchor(pos: number | null | undefined): number | null {
+  if (typeof pos !== 'number' || pos < 0) return null;
+  // Bound the registry — leaked anchors (dropped recordings, permanently
+  // failed outbox items) must not accumulate. Oldest-first eviction:
+  // Map iterates in insertion order.
+  while (anchors.size >= ANCHORS_MAX) {
+    const oldest = anchors.keys().next().value;
+    if (oldest === undefined) break;
+    anchors.delete(oldest);
+  }
+  const id = anchorSeq++;
+  const max = inputEl ? inputEl.value.length : pos;
+  anchors.set(id, Math.min(pos, max));
+  return id;
+}
+
+/** Drop an anchor without using it (recording cancelled, item dropped). */
+export function releaseAnchor(id: number | null | undefined): void {
+  if (typeof id === 'number') anchors.delete(id);
+}
+
 /** Append dictation final at the cursor position. Adds a leading space if
  *  the cursor is right after a non-whitespace character, so words don't
  *  concatenate ("hellohow" → "hello how"). Dispatches 'input' so the
@@ -141,10 +206,64 @@ function insertAtCursor(text: string, fallbackCaret: number) {
   onChange();
 }
 
-export function appendText(text: string) {
+/** Insert `text` at an ANCHORED position while keeping the user's own
+ *  selection where they put it. Same undo-stack rationale as
+ *  insertAtCursor (execCommand routes through the browser's edit
+ *  pipeline), but instead of inserting at the live selection it: saves
+ *  the user's selection, moves the range to the anchor, inserts, then
+ *  restores the saved selection — adjusted by the inserted length when
+ *  it sat at/after the anchor. The user keeps editing at their caret;
+ *  the dictated text lands where the utterance started. */
+function insertAtAnchor(text: string, pos: number) {
+  const el = inputEl;
+  if (!el) return;
+  const savedStart = el.selectionStart;
+  const savedEnd = el.selectionEnd;
+  el.focus();
+  el.setSelectionRange(pos, pos);
+  let ok = false;
+  try {
+    ok = document.execCommand('insertText', false, text);
+  } catch {
+    ok = false;
+  }
+  if (!ok) {
+    const val = el.value;
+    el.value = val.slice(0, pos) + text + val.slice(pos);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  // Restore the user's selection, slid past the insert when it was
+  // at/after the anchor (matches typing-at-a-point semantics: a caret
+  // parked exactly at the anchor ends up after the inserted text, which
+  // is also the legacy behavior for a user who never moved it).
+  const adjust = (p: number | null) =>
+    (typeof p === 'number' ? (p >= pos ? p + text.length : p) : pos + text.length);
+  el.setSelectionRange(adjust(savedStart), adjust(savedEnd));
+  onChange();
+}
+
+export function appendText(text: string, anchorId?: number | null) {
   if (!inputEl) return;
   const t = text.trim();
   if (!t) return;
+
+  // Anchored insert: land at the position captured when the utterance
+  // started (slid across any edits since), NOT the live caret — and
+  // don't yank the user's caret from wherever they've moved it.
+  if (typeof anchorId === 'number' && anchors.has(anchorId)) {
+    const pos = Math.min(anchors.get(anchorId)!, inputEl.value.length);
+    anchors.delete(anchorId);
+    const val = inputEl.value;
+    const before = val.slice(0, pos);
+    const after = val.slice(pos);
+    const needLead = before.length > 0 && !/\s$/.test(before);
+    const needTrail = after.length > 0 && !/^\s/.test(after);
+    const insert = (needLead ? ' ' : '') + t + (needTrail ? ' ' : ' ');
+    clearInterim();
+    insertAtAnchor(insert, pos);
+    diag('composer append@anchor:', JSON.stringify({ at: pos, len: t.length, text: t.slice(0, 60) }));
+    return;
+  }
 
   const val = inputEl.value;
   const start = inputEl.selectionStart ?? val.length;

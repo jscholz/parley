@@ -1,21 +1,22 @@
 /**
- * @fileoverview Regression test for the post-abandon late-final
- * duplication bug logged 2026-05-07.
+ * @fileoverview Regression tests for late STT events interacting with
+ * user caret moves / edits mid-utterance.
  *
- * Repro from the field log (timestamps 20:50:36 etc.):
- *   1. User dictates an utterance — interim splices into textarea.
- *   2. User clicks elsewhere (or types) BEFORE the bridge sends the
- *      matching final → onUserSelectionChange / onUserInput fires
- *      resetUtterance, anchor=null.
- *   3. The late final arrives. Without suppression, handleContentFinal
- *      ran ensureAnchor() (captures the user's NEW caret) and spliced
- *      the same words there → text appears at BOTH the abandoned
- *      location AND the new caret. Three or four copies if the user
- *      kept clicking around.
+ * Original bug (2026-05-07): user clicks elsewhere before the bridge
+ * sends the matching final; the late final re-anchored at the NEW caret
+ * and spliced the same words there — text at BOTH locations, multiple
+ * copies if the user kept clicking.
  *
- * The fix tracks `abandonedAt` (timestamp of last user-driven reset)
- * and drops STT events arriving within ABANDON_SUPPRESS_MS so they
- * can't re-anchor at the latest caret position.
+ * The original fix dropped every post-move event via a timed abandon
+ * window. The 2026-07-21 field bug ("text lands where I moved to; I
+ * delete it and it comes back") replaced that with ANCHOR semantics:
+ * a caret move mid-utterance detaches the caret (voice stops moving it)
+ * but the utterance KEEPS its anchor — late interims/finals replace
+ * their own in-flight text at the ORIGINAL location, so duplication at
+ * the new caret is structurally impossible and no speech is dropped.
+ * Manual edits outside the utterance span slide the anchor; an edit
+ * INSIDE the span drops the pending utterance (fallback) and arms the
+ * abandon suppression so its late refinements can't re-paste.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -179,7 +180,7 @@ describe('dictate — late final after user-driven reset', () => {
     activeElementRef = null;
   });
 
-  it('drops a late final after onUserSelectionChange reset (the bug)', async () => {
+  it('late final after a caret move lands at the ANCHOR, exactly once (2026-05-07 + 2026-07-21)', async () => {
     // User dictates the start of an utterance — interim splices in.
     userInterim(provider, 'Okay. That was a duplicate. That\'s better. Is');
     assert.equal(textarea.value, 'Okay. That was a duplicate. That\'s better. Is');
@@ -188,6 +189,7 @@ describe('dictate — late final after user-driven reset', () => {
     // the utterance range.  In the real bug the textarea already had
     // earlier committed content; here we just append.
     textarea.value += '\n\n--- end of utterance ---\nclicking somewhere new here:';
+    const tail = '\n\n--- end of utterance ---\nclicking somewhere new here:';
     const newCursor = textarea.value.length;
     textarea.selectionStart = newCursor;
     textarea.selectionEnd = newCursor;
@@ -197,25 +199,30 @@ describe('dictate — late final after user-driven reset', () => {
     const list = docListeners['selectionchange'];
     if (list) for (const fn of list) fn({});
 
-    // The bridge now delivers the final for the abandoned utterance —
-    // its text is a SUBSET of the interim because the user moved on
-    // mid-utterance and Deepgram only had the first sentence finalised.
-    const valueBeforeLateFinal = textarea.value;
+    // The bridge now delivers the final for the utterance — its text is
+    // a SUBSET of the interim because the user moved on mid-utterance
+    // and Deepgram only had the first sentence finalised.
     userFinal(provider, 'Okay. That was a duplicate.');
 
-    // Without the fix: "Okay. That was a duplicate." would be spliced
-    // at newCursor, yielding TWO occurrences (one in the interim that's
-    // still in the textarea, one freshly inserted at the new caret).
-    // With the fix: the late final is dropped, textarea is unchanged.
+    // 2026-05-07 bug shape: the final spliced at newCursor → the words
+    // appeared TWICE (interim still in place + fresh copy at the caret).
+    // Anchor semantics: the final replaces its own interim at the
+    // ORIGINAL location; nothing lands at the new caret.
     assert.equal(
       textarea.value,
-      valueBeforeLateFinal,
-      'late final should not modify the textarea after a user-driven reset',
+      'Okay. That was a duplicate.' + tail,
+      'late final must replace its interim at the anchor, not splice at the new caret',
     );
     assert.equal(
       countOccurrences(textarea.value, 'Okay. That was a duplicate.'),
       1,
       'utterance text should appear exactly once',
+    );
+    // The user's caret must not be yanked back to the utterance.
+    assert.equal(
+      textarea.selectionStart,
+      newCursor,
+      'user caret must stay where the user put it',
     );
   });
 
@@ -234,22 +241,26 @@ describe('dictate — late final after user-driven reset', () => {
     });
   });
 
-  it('drops a late final after onUserInput reset', async () => {
+  it('typing AFTER the span keeps the utterance anchored — late final replaces its interim, no duplicate', async () => {
     userInterim(provider, 'Hello world from voice.');
     assert.equal(textarea.value, 'Hello world from voice.');
 
-    // Simulate the user typing — append a char and dispatch input.
+    // Simulate the user typing after the dictated span — an edit
+    // outside the utterance; the anchor holds (no shift needed) and the
+    // caret detaches.
     textarea.value += 'X';
     textarea.selectionStart = textarea.value.length;
     textarea.selectionEnd = textarea.value.length;
     textarea.dispatchEvent({ type: 'input' });
 
-    const valueBeforeLateFinal = textarea.value;
+    // The late final bakes the same words over its own interim — the
+    // value is unchanged and nothing lands at the user's caret.
     userFinal(provider, 'Hello world from voice.');
-    assert.equal(textarea.value, valueBeforeLateFinal);
+    assert.equal(textarea.value, 'Hello world from voice.X');
+    assert.equal(countOccurrences(textarea.value, 'Hello world from voice.'), 1);
   });
 
-  it('also drops late interims (Deepgram can revise post-reset)', async () => {
+  it('late interims keep revising at the anchor after a caret move (never at the new caret)', async () => {
     userInterim(provider, 'First utterance partial');
     textarea.value += '\n[user clicks elsewhere]';
     const newCursor = textarea.value.length;
@@ -258,45 +269,60 @@ describe('dictate — late final after user-driven reset', () => {
     const list = docListeners['selectionchange'];
     if (list) for (const fn of list) fn({});
 
-    const before = textarea.value;
-    // Late interim revising the same utterance — must not splice at new caret.
+    // Late interim revising the same utterance — replaces the in-flight
+    // interim at the ORIGINAL location; nothing splices at the new caret.
     userInterim(provider, 'First utterance partial revised');
-    assert.equal(textarea.value, before);
+    assert.equal(
+      textarea.value,
+      'First utterance partial revised\n[user clicks elsewhere]',
+      'revision must land at the anchor, replacing the earlier interim',
+    );
+    assert.equal(countOccurrences(textarea.value, 'First utterance partial'), 1);
+    // Caret must not be yanked to the end of the revised interim.
+    assert.equal(textarea.selectionStart, newCursor);
   });
 
-  it('strict cursor-match: cursor move WITHIN the utterance range still resets (bug 2026-05-07)', () => {
-    // Repro: utterance covers the whole textarea (anchor=0, content=
-    // "Hello world."). User arrows to mid-text. Old heuristic said
-    // "pos in [0, 12], no reset" → next utterance kept appending at
-    // end. New gate: pos !== lastSetCursor → reset.
+  it('caret move WITHIN the in-flight utterance detaches the caret; the NEXT utterance anchors there', () => {
+    // Mid-utterance caret moves no longer re-anchor the in-flight
+    // utterance (its speech keeps landing at its own end) — but they DO
+    // detach the caret, and the next utterance (post UtteranceEnd)
+    // anchors wherever the user parked it. This preserves the
+    // 2026-05-07 strict-cursor-match intent (a click inside existing
+    // content is honored for what comes NEXT) without yanking text that
+    // belongs to the current utterance.
     userInterim(provider, 'Hello world.');
     userFinal(provider, 'Hello world.');
     assert.equal(textarea.value, 'Hello world.');
-    // setCursor() landed lastSetCursor at 12 (end of "Hello world.").
     // Simulate user arrowing to position 5 — INSIDE the utterance.
     activeElementRef = textarea;
     textarea.selectionStart = 5;
     textarea.selectionEnd = 5;
     const list = docListeners['selectionchange'];
     if (list) for (const fn of list) fn({});
-    // The old in-range heuristic would have ignored this. With the
-    // strict-match fix, anchor is now null and the next interim
-    // captures fresh at user's caret.
+    // Continuation of the SAME utterance stays at the utterance's end
+    // (anchored) — and must not steal the caret back.
+    userInterim(provider, 'same utterance tail');
+    userFinal(provider, 'same utterance tail');
+    assert.ok(
+      textarea.value.startsWith('Hello world. same utterance tail'),
+      `same-utterance speech continues at the utterance end; got ${JSON.stringify(textarea.value)}`,
+    );
+    assert.equal(textarea.selectionStart, 5, 'caret stays where the user put it');
+    // Utterance ends → the NEXT utterance captures fresh at the user's
+    // caret (position 5).
+    userFinal(provider, '');           // UtteranceEnd
     userInterim(provider, 'Inserted mid-text');
-    // Should have spliced "Inserted mid-text" starting at position 5,
-    // not at the end. Verify by checking the inserted text is
-    // BEFORE the original "world.".
     const insertIdx = textarea.value.indexOf('Inserted');
     const worldIdx = textarea.value.indexOf('world');
     assert.ok(insertIdx >= 0, 'inserted text should appear in textarea');
-    assert.ok(insertIdx < worldIdx, 'insert should land before "world", not at end');
+    assert.ok(insertIdx < worldIdx, 'next utterance lands at the user caret, before "world"');
   });
 
-  it('content-aware suppression lets new utterances through within the time window', async () => {
-    // Repro: user abandons utterance "Hello world", then within the
-    // 2500ms window says a NEW utterance "Goodbye now". Time-only
-    // suppression would drop "Goodbye now" too (same window). Content
-    // matching: prefix "Goodbye " differs from "Hello wo" → not dropped.
+  it('continued speech after a caret move keeps flowing (revises the anchored interim)', async () => {
+    // User moves the caret mid-utterance, then keeps talking. The
+    // utterance stays anchored: the refined transcript replaces the
+    // in-flight interim at the original location — speech is never
+    // dropped, and never lands at the new caret.
     userInterim(provider, 'Hello world');
     activeElementRef = textarea;
     textarea.value += '\n[click outside]';
@@ -368,19 +394,25 @@ describe('dictate — late final after user-driven reset', () => {
     assert.equal(countOccurrences(textarea.value, 'jumps over'), 1);
   });
 
-  it('suppression window expires — new utterance after grace lands normally', async () => {
+  it('in-span edit drops the pending utterance (fallback); suppression expires; next utterance lands normally', async () => {
     userInterim(provider, 'First utterance.');
-    // Trigger user-driven reset.
-    textarea.selectionStart = textarea.value.length + 1;
-    textarea.selectionEnd = textarea.selectionStart;
-    // We need the cursor to be OUTSIDE the utterance range to trigger
-    // user-cursor-outside.  Append a char to the textarea so there's
-    // somewhere outside to be.
-    textarea.value += ' ';
-    textarea.selectionStart = textarea.value.length;
-    textarea.selectionEnd = textarea.selectionStart;
-    const list = docListeners['selectionchange'];
-    if (list) for (const fn of list) fn({});
+    assert.equal(textarea.value, 'First utterance.');
+
+    // The user edits INSIDE the dictated span — anchor bookkeeping
+    // through that is unreliable, so the pending utterance is dropped
+    // in place (the user's edit is the truth) and abandon suppression
+    // arms against its late refinements.
+    textarea.value = 'First utter.';   // deleted "ance" mid-word
+    textarea.selectionStart = 11;
+    textarea.selectionEnd = 11;
+    textarea.dispatchEvent({ type: 'input' });
+
+    // A late refinement of the dropped utterance inside the window is
+    // suppressed — it must not re-paste at the caret ("I delete it and
+    // it comes back").
+    const afterEdit = textarea.value;
+    userInterim(provider, 'First utterance. Extra');
+    assert.equal(textarea.value, afterEdit, 'late refinement of a dropped utterance is suppressed');
 
     // Wait past the suppression window (2500ms) — use 2600ms to avoid
     // flakiness on slow CI.

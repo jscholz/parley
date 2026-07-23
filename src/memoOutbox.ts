@@ -62,6 +62,26 @@ export function setChunkTimeoutMsForTest(ms: number): void {
   if (typeof ms === 'number' && ms > 0) chunkTimeoutMs = ms;
 }
 
+// Queue items whose transcript already reached its destination once.
+// queue.flush deletes the IDB row only AFTER the handler returns — a
+// failed delete (mobile IDB flakiness, tab suspension) leaves the row
+// 'pending' and the 30s poller re-delivers it. Without this guard the
+// retry re-ran /transcribe and RE-INSERTED text the user may have
+// already deleted by hand ("I'll delete it, and then it'll come back" —
+// Jonathan field bug 2026-07-21). A re-delivered id skips the insert
+// but still returns cleanly so the stale row drains. In-memory is the
+// right scope: the resurrection loop is within-session (poller-driven);
+// a reload clears both the set and the half-flushed handler state.
+const deliveredIds = new Set<string>();
+const DELIVERED_IDS_MAX = 500;
+function markDelivered(id: string): void {
+  deliveredIds.add(id);
+  if (deliveredIds.size > DELIVERED_IDS_MAX) {
+    const oldest = deliveredIds.values().next().value;
+    if (oldest !== undefined) deliveredIds.delete(oldest);
+  }
+}
+
 /** Chunked path for long clips: decode the stored blob to 16k mono PCM,
  *  slice with overlap, transcribe each slice as a WAV, stitch with seam
  *  dedup. Returns null when the blob can't be decoded (caller falls back
@@ -138,6 +158,21 @@ export async function flushOutbox() {
     },
     async (blob, mimeType, id, autoSend, toComposer, durationMs, item) => {
       const listenTurn = !!(item && item.listenTurn);
+      // Re-delivered item (a prior flush inserted its transcript but the
+      // IDB row survived — see deliveredIds). The user's buffer already
+      // received this text once; if they deleted it, that's their edit
+      // and it stays deleted. Return cleanly so queue.flush drains the
+      // stale row instead of retrying it forever. Guard covers the
+      // composer-bound routes (dictation + memo) — listen turns mark
+      // delivered only at their non-throwing terminal (see below).
+      if (id && deliveredIds.has(id)) {
+        log('outbox: skipping already-delivered item', id);
+        if (toComposer) {
+          composer.clearInterim();
+          status.setStatus('', null);
+        }
+        return;
+      }
       // Per-user keyterm biasing for batch transcribe. Same IDB list the
       // WebRTC offer ships; bridge accepts repeated `?keyterms=…&keyterms=…`
       // and merges into the Deepgram spec like the streaming path does.
@@ -246,6 +281,7 @@ export async function flushOutbox() {
             // narrate softly. The blob drops from the queue (return, no
             // throw) since retrying a corrupt clip is futile.
             composer.clearInterim();
+            composer.releaseAnchor(item?.anchorId);
             status.setStatus('Dictation unprocessable — tap mic to retry', 'err');
           } else {
             const transcriptEl = document.getElementById('transcript');
@@ -280,6 +316,7 @@ export async function flushOutbox() {
           // Dictation: no card to annotate — clear the ghost line and
           // tell the user softly. Item drops from queue (return, no throw).
           composer.clearInterim();
+          composer.releaseAnchor(item?.anchorId);
           status.setStatus('No speech detected', null);
           return;
         }
@@ -301,6 +338,7 @@ export async function flushOutbox() {
           const m = handsfree.matchSendword(body, sendwordPhrase);
           if (m.matched) body = m.cleaned;
         }
+        if (id) markDelivered(id);
         routeListenTurnText(body, item);
         return;
       }
@@ -314,12 +352,14 @@ export async function flushOutbox() {
       // → composer.submit, which is the same codepath as clicking Send.
       if (toComposer) {
         // Batch dictation: transcript is INPUT, not a message. appendText
-        // lands it at the cursor (preserving anything already typed) and
-        // clears the ghost interim line. No card, no voice-memo record, no
-        // submit, no chat bubble — exactly the ephemeral-input UX, but the
-        // blob rode the durable queue so a bad-connection upload retried
-        // here instead of evaporating.
-        composer.appendText(text);
+        // lands it at the item's recording-start anchor (falling back to
+        // the cursor when the anchor didn't survive) and clears the ghost
+        // interim line. No card, no voice-memo record, no submit, no chat
+        // bubble — exactly the ephemeral-input UX, but the blob rode the
+        // durable queue so a bad-connection upload retried here instead
+        // of evaporating.
+        if (id) markDelivered(id);
+        composer.appendText(text, typeof item?.anchorId === 'number' ? item.anchorId : null);
         status.setStatus('', null);
         return;
       }
@@ -335,6 +375,7 @@ export async function flushOutbox() {
       }
       memoCard.dropRec(id);
       await voiceMemos.remove(id);
+      if (id) markDelivered(id);
       composer.appendText(text);
       if (autoSend) {
         composer.submit();
@@ -525,7 +566,11 @@ async function renderMemoCard(audioBlob, durationMs, autoSend = false) {
  *  signal returns. The toComposer flag keeps every flush branch
  *  composer-bound (no card, no bubble, no submit). Progress shows as a ghost
  *  line under the composer plus the header pill. */
-export async function transcribeToComposer(audioBlob: Blob | null, durationMs?: number): Promise<void> {
+export async function transcribeToComposer(
+  audioBlob: Blob | null,
+  durationMs?: number,
+  anchorId?: number | null,
+): Promise<void> {
   if (!audioBlob) return;
   // Same hard ceiling as memos: a too-big blob just retries forever and
   // blocks the queue for everything behind it. Drop it up front rather
@@ -535,6 +580,7 @@ export async function transcribeToComposer(audioBlob: Blob | null, durationMs?: 
     const mb = (audioBlob.size / (1024 * 1024)).toFixed(1);
     status.setStatus(`Recording too long (${mb}MB) — try shorter chunks.`, 'err');
     try { playFeedback('error'); } catch {}
+    composer.releaseAnchor(anchorId);
     return;
   }
 
@@ -542,8 +588,14 @@ export async function transcribeToComposer(audioBlob: Blob | null, durationMs?: 
   // network. This is the whole point of the fix — if the upload times out
   // or we're offline, the blob survives in IndexedDB and a poller retries
   // it. toComposer:true routes every flush branch back to the composer.
+  // anchorId: the composer anchor captured at RECORDING START (see
+  // composer.createAnchor). Rides the queue item so a delayed/retried
+  // flush still lands the transcript where the utterance was aimed.
+  // In-memory only — after a reload the registry is gone and appendText
+  // falls back to the at-caret insert.
   await queue.enqueue({
     type: 'audio', blob: audioBlob, mimeType: audioBlob.type, durationMs, toComposer: true,
+    anchorId: typeof anchorId === 'number' ? anchorId : undefined,
   });
   log('dictate: queued audio blob (' + Math.round(audioBlob.size / 1024) + 'KB) toComposer');
 

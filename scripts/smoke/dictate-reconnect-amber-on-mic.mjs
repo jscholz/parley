@@ -21,7 +21,7 @@
 // would displace the controls.ts listener that toggles the classes under
 // test. All observation is via the buttons' classLists.
 
-import { waitForReady, resetServerSettings, assert } from './lib.mjs';
+import { waitForReady, resetServerSettings, assert, pollUntil } from './lib.mjs';
 
 export const NAME = 'dictate-reconnect-amber-on-mic';
 export const DESCRIPTION = 'soft-recovery amber pulse lands on the mic button for dictation-owned calls, on the call button for calls';
@@ -145,7 +145,11 @@ export default async function run({ page, log }) {
     const dict = await import('/build/audio/realtime/dictate.mjs');
     await dict.stop();
   });
-  const toreDown = await page.waitForFunction(async () => {
+  // pollUntil (NOT waitForFunction): the predicate needs an in-page
+  // `await import(...)`, and an async waitForFunction predicate returns
+  // a truthy Promise — it "passes" immediately and vacuously. pollUntil
+  // evaluates (and awaits) the predicate per tick via page.evaluate.
+  const toreDown = await pollUntil(page, async () => {
     const controls = await import('/build/audio/realtime/controls.mjs');
     return !controls.isOpen()
       && !document.getElementById('btn-mic')?.classList.contains('active');
