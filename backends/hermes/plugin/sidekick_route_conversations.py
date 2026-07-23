@@ -724,6 +724,21 @@ def delete_conversation_sync(
     except Exception as exc:
         logger.warning("[sidekick] state.db delete failed for chat_id=%s: %s", chat_id, exc)
         return "error"
+    # Turn-linker shadow tables (transcript v3 Phase 1): scrub this
+    # chat's observations + claims alongside the state.db cascade so
+    # the dark-launch compare sweep stops judging windows whose
+    # session chain no longer exists. Best-effort — the linker's data
+    # is droppable at any time by design.
+    sk_db = getattr(adapter, "_sidekick_db", None)
+    if sk_db is not None:
+        try:
+            from .sidekick_turn_linker import purge_chat_sync  # noqa: WPS433
+            purge_chat_sync(sk_db, chat_id)
+        except Exception as exc:
+            logger.warning(
+                "[sidekick] turn-linker purge failed for chat_id=%s: %s",
+                chat_id, exc,
+            )
     # sessions.json: scrub the sidekick key. SESSION_KEY_PREFIX is
     # the sidekick-namespaced prefix; for non-sidekick deletes the
     # sessions.json entry (if any) belongs to a different platform

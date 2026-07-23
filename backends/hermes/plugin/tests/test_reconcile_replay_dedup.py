@@ -356,6 +356,123 @@ def test_order_fallback_skips_ahead_past_incompatible_state_rows(db, state_db):
     assert links["umsg_real"] == str(rid)
 
 
+def test_status_bubble_never_zipped_onto_orchestration_row(db, state_db):
+    """v3 soak forensics (31-case mislink class): ephemeral gateway
+    status envelopes ("⏳ Working — 3 min…", "💾 Self-improvement
+    review", "📦 Pre-API compression") have NO state.db twin. Pass 1.b
+    zipped them onto empty-content ORCHESTRATION rows (tool_calls set),
+    then Pass 2.5 healed tool_calls onto the envelope row — corrupting
+    durable identity. Orchestration rows must never be order-fallback
+    candidates; the status envelope stays unlinked."""
+    _add_msg(state_db, "user", "write the file", 1000.0)
+    orch = _add_msg(state_db, "assistant", "", 1001.0,
+                    tool_calls=TOOL_CALLS_JSON)
+    _add_msg(state_db, "tool", '{"ok": true}', 1002.0, tool_name="terminal",
+             tool_call_id="call_46T4xvOhMXM2qSfhifOLtoPQ")
+    _add_msg(state_db, "assistant", "done, file written", 1003.0)
+    # The heartbeat bubble — nothing in state.db corresponds to it.
+    state.record_envelope(db, {
+        "type": "reply_final", "chat_id": CHAT_ID,
+        "message_id": "msg_status",
+        "text": "⏳ Working — 3 min — iteration 3/60, terminal",
+    })
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    links = _links_by_id(db)
+    assert links["msg_status"] is None, \
+        "status bubble must not zip onto the orchestration row"
+    row = db.fetchone(
+        "SELECT tool_calls, agent_row_id FROM msg_links WHERE id = ?",
+        ("msg_status",),
+    )
+    assert row["tool_calls"] is None, \
+        "Pass 2.5 must not heal tool_calls onto a status bubble"
+    # The orchestration row still gets its legacy: twin.
+    assert links.get(f"legacy:{orch}") == str(orch)
+
+
+def test_empty_state_content_requires_empty_envelope(db, state_db):
+    """_order_fallback_content_compatible tightening: an empty STATE
+    content only matches an empty/whitespace envelope (the
+    empty-final-reply path it was built for) — never arbitrary envelope
+    text. The envelope-empty side keeps its documented permissiveness."""
+    assert state._order_fallback_content_compatible("", "") is True
+    assert state._order_fallback_content_compatible("   \n", "") is True
+    assert state._order_fallback_content_compatible(None, "") is True
+    assert state._order_fallback_content_compatible(
+        "⏳ Working — 3 min — iteration 3/60, terminal", "") is False
+    assert state._order_fallback_content_compatible(
+        "💾 Self-improvement review", "  ") is False
+    # Envelope-empty side unchanged (empty-final-reply drift path).
+    assert state._order_fallback_content_compatible("", "some text") is True
+
+    # Integration: a plain empty-content assistant state row (no
+    # tool_calls) must not swallow a non-empty envelope either.
+    e = _add_msg(state_db, "assistant", "", 1000.0)
+    state.record_envelope(db, {
+        "type": "reply_final", "chat_id": CHAT_ID,
+        "message_id": "msg_hb", "text": "💾 Self-improvement review — 2 files",
+    })
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    links = _links_by_id(db)
+    assert links["msg_hb"] is None
+    assert links.get(f"legacy:{e}") == str(e)
+
+
+def test_tool_rows_link_by_exact_call_id_not_content(db, state_db):
+    """Field collision: two tool results with identical content
+    ({"total_count": 0}) across DIFFERENT call ids. The (role, content)
+    fingerprint cross-linked them when envelope order differed from
+    state order. tr:<call_id> envelopes must link ONLY to the state row
+    carrying that exact tool_call_id."""
+    a = _add_msg(state_db, "tool", '{"total_count": 0}', 1000.0,
+                 tool_name="search", tool_call_id="call_A")
+    b = _add_msg(state_db, "tool", '{"total_count": 0}', 1001.0,
+                 tool_name="search", tool_call_id="call_B")
+    # Envelopes recorded in REVERSE id order — the fingerprint queue
+    # pops state rows in id order, so the old code crossed the links.
+    state.record_envelope(db, {
+        "type": "tool_result", "chat_id": CHAT_ID, "call_id": "call_B",
+        "tool_name": "search", "result": '{"total_count": 0}',
+    })
+    state.record_envelope(db, {
+        "type": "tool_result", "chat_id": CHAT_ID, "call_id": "call_A",
+        "tool_name": "search", "result": '{"total_count": 0}',
+    })
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    links = _links_by_id(db)
+    assert links["tr:call_A"] == str(a)
+    assert links["tr:call_B"] == str(b)
+
+
+def test_tr_envelope_with_absent_call_id_stays_unlinked(db, state_db):
+    """A tr: envelope whose call id has no state row must stay unlinked
+    — content coincidence with a DIFFERENT call's row is not identity."""
+    _add_msg(state_db, "tool", '{"total_count": 0}', 1000.0,
+             tool_name="search", tool_call_id="call_present")
+    state.record_envelope(db, {
+        "type": "tool_result", "chat_id": CHAT_ID, "call_id": "call_absent",
+        "tool_name": "search", "result": '{"total_count": 0}',
+    })
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    assert _links_by_id(db)["tr:call_absent"] is None
+
+
+def test_tc_envelope_never_content_matches_tool_row(db, state_db):
+    """tc:<call_id> (the call-args row) legitimately has no state twin —
+    state.db keeps ONE tool row per call, claimed by tr:. Args JSON that
+    coincides with some result content must not link."""
+    t = _add_msg(state_db, "tool", '{"query": "foo"}', 1000.0,
+                 tool_name="search", tool_call_id="call_X")
+    state.record_envelope(db, {
+        "type": "tool_call", "chat_id": CHAT_ID, "call_id": "call_Y",
+        "tool_name": "search", "args": {"query": "foo"},
+    })
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    links = _links_by_id(db)
+    assert links["tc:call_Y"] is None
+    assert links.get(f"legacy:{t}") == str(t)
+
+
 # ── [PRIOR CONTEXT header is compaction machinery ─────────────────────
 
 

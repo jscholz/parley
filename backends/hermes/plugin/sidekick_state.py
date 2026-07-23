@@ -735,8 +735,21 @@ def _order_fallback_content_compatible(env_content, state_content) -> bool:
     """
     a = (env_content or "").strip()
     b = (state_content or "").strip()
-    if not a or not b:
-        return True  # empty-final-reply path: nothing to contradict.
+    if not b:
+        # Empty STATE content matches ONLY an empty/whitespace envelope.
+        # Ephemeral gateway status bubbles ("⏳ Working — 3 min…",
+        # "💾 Self-improvement review", "📦 Pre-API compression") have
+        # no state twin; letting them match empty state rows zipped
+        # durable ids onto orchestration rows (v3 soak forensics
+        # 2026-07: the 31-case RECONCILE mislink class — every true
+        # divergence in the 3-day window).
+        return not a
+    if not a:
+        # Empty ENVELOPE, non-empty state: the empty-final-reply path
+        # (reply_final with no text while state holds the flushed
+        # body) — deliberately kept permissive, pinned by
+        # test_order_fallback_still_links_under_benign_drift.
+        return True
     if a == b:
         return True
     na = " ".join(a.split())
@@ -1591,23 +1604,69 @@ def reconcile_from_state_db(
     # push tag, projection key) had to deal with two id shapes for
     # one logical message. The shim closes that class.
     unlinked = db.fetchall(
-        "SELECT id, role, content FROM msg_links "
+        "SELECT id, role, content, tool_call_id FROM msg_links "
         "WHERE chat_id = ? AND agent_row_id IS NULL "
         "ORDER BY created_at ASC, rowid ASC",
         (chat_id,),
     )
     links = 0
     if unlinked:
-        # Pass 1.a — exact (role, content) match.
+        # Pass 1.a — exact identity match. TOOL rows pair by exact
+        # tool_call_id ONLY: a ``tr:<call_id>`` envelope links to the
+        # state row carrying that call id, never by content — tool
+        # CONTENT is not identity (field, v3 soak forensics: two
+        # ``{"total_count": 0}`` results collided across different
+        # call ids and the fingerprint crossed the links). Of the
+        # rows carrying the call id, prefer the copy the read path
+        # serves: the first occurrence (later same-call-id copies are
+        # replay dups the v2 read drops). ``tc:<call_id>`` (call-args)
+        # envelopes legitimately have NO state twin — state.db keeps
+        # one tool row per call — and never link here. Everything
+        # else pairs by exact (role, content) fingerprint.
         candidates: Dict[tuple, List[str]] = {}
+        tool_by_call_id: Dict[str, List[str]] = {}
         for r in state_rows:
             sid = str(r["id"])
             if sid in claimed_state_ids:
+                continue
+            if r["role"] == "tool":
+                cid = r["tool_call_id"] or ""
+                if cid:
+                    tool_by_call_id.setdefault(cid, []).append(sid)
                 continue
             key = (r["role"], r["content"] or "")
             candidates.setdefault(key, []).append(sid)
         still_unlinked: List[Dict[str, Any]] = []
         for sk in unlinked:
+            sk_id = str(sk["id"])
+            if sk["role"] == "tool":
+                # Tool envelopes never enter the fingerprint map or
+                # order-fallback: tr: links by exact call id or not
+                # at all; tc:/other shapes stay unlinked by design.
+                if not sk_id.startswith("tr:"):
+                    continue
+                cid = (sk["tool_call_id"] or "") or sk_id[3:]
+                queue = [
+                    s for s in tool_by_call_id.get(cid, ())
+                    if s not in claimed_state_ids
+                ]
+                preferred = [
+                    s for s in queue if s not in replay_dup_ids
+                ] or queue
+                if not preferred:
+                    continue
+                state_id = preferred[0]
+                try:
+                    db.exec(
+                        "UPDATE msg_links SET agent_row_id = ?, updated_at = ? "
+                        "WHERE id = ?",
+                        (state_id, time.time(), sk["id"]),
+                    )
+                    claimed_state_ids.add(state_id)
+                    links += 1
+                except Exception:
+                    pass
+                continue
             key = (sk["role"], sk["content"] or "")
             queue = candidates.get(key)
             if not queue:
@@ -1638,6 +1697,14 @@ def reconcile_from_state_db(
         # rows). A refused pairing does not consume the state row, so
         # a later envelope can still claim it; the scan pointer only
         # moves forward, preserving append-only order.
+        #
+        # Orchestration rows (non-empty tool_calls) are NEVER
+        # candidates: they have no envelope twin by construction (the
+        # linker treats them as msg_id=NULL machinery), and their
+        # typically-empty content made them zip targets for ephemeral
+        # gateway status bubbles — Pass 2.5 then healed tool_calls
+        # onto the mislinked envelope row, corrupting durable identity
+        # (v3 soak forensics 2026-07: the 31-case mislink class).
         for role_to_fallback in ("user", "assistant"):
             env_queue = [sk for sk in still_unlinked if sk["role"] == role_to_fallback]
             state_queue = [
@@ -1645,6 +1712,7 @@ def reconcile_from_state_db(
                 if r["role"] == role_to_fallback
                 and str(r["id"]) not in claimed_state_ids
                 and str(r["id"]) not in replay_dup_ids
+                and not ((r["tool_calls"] if "tool_calls" in r.keys() else None) or "")
             ]
             next_idx = 0
             for sk in env_queue:

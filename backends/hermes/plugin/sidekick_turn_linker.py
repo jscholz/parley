@@ -582,6 +582,29 @@ def _open_sync(
         if last_hwm is not None and hwm > int(last_hwm):
             lo = int(last_hwm)
             gap_count = count - _chain_stats(conn, chat_id, source, upto=lo)[1]
+            gap_flags: Dict[str, Any] = {"gap": [lo, hwm]}
+            # Compaction detection inside the gap (v3 soak forensics:
+            # ALL organic compactions in the 3-day window landed in
+            # unobserved gaps — hermes-core's flush happens between
+            # observed turns — leaving the linker's compaction
+            # detection with zero live coverage; the Phase-2 gate
+            # requires "linker observed an organic compaction").
+            # Bounded read: the window (lo, hwm] only, same mode=ro
+            # connection the stats came from. Machinery-seed presence
+            # sets compaction_flush; the soft-deleted-row count rides
+            # along as `inactive` (compaction deactivates originals).
+            try:
+                gap_rows = _window_rows(conn, chat_id, source, lo, hwm)
+            except Exception:
+                gap_rows = []
+            inactive_n = 0
+            for r in gap_rows:
+                if _is_compaction_seed(_row_get(r, "content") or ""):
+                    gap_flags["flags"] = ["compaction_flush"]
+                if _row_get(r, "active", 1) in (0, "0", False):
+                    inactive_n += 1
+            if inactive_n:
+                gap_flags["inactive"] = inactive_n
             db.exec(
                 "INSERT OR REPLACE INTO turn_observations "
                 "(chat_id, turn_id, hwm_open, hwm_close, count_at_open, status, "
@@ -590,7 +613,7 @@ def _open_sync(
                 "VALUES (?, ?, ?, ?, NULL, 'unobserved', ?, NULL, ?, 0, ?, ?, ?)",
                 (
                     chat_id, f"gap:{lo}-{hwm}", lo, hwm,
-                    json.dumps({"gap": [lo, hwm]}),
+                    json.dumps(gap_flags),
                     gap_count, gap_count, now, now,
                 ),
             )
@@ -740,7 +763,7 @@ def compare_and_log(
     if not obs_rows:
         return None
 
-    agree = diverge = linker_only = reconcile_only = 0
+    agree = diverge = linker_only = reconcile_only = gap_rows = 0
     first_detail = ""
     for o in obs_rows:
         try:
@@ -750,6 +773,30 @@ def compare_and_log(
         except Exception:
             flags_obj = {}
         prelinked = set(flags_obj.get("prelinked_ids") or [])
+        if o["status"] in ("unobserved", "background"):
+            # Gap/background windows claim nothing BY DESIGN (zero
+            # claims, no envelope ids), so reconcile's links inside
+            # them are not divergence — counting them as
+            # reconcile_only manufactured the huge counters the v3
+            # soak forensics traced to compare-side artifacts. Report
+            # the linked-row volume separately so gap coverage stays
+            # visible on the soak line.
+            if o["hwm_open"] is not None and o["hwm_close"] is not None:
+                recon_rows = db.fetchall(
+                    "SELECT agent_row_id FROM msg_links "
+                    "WHERE chat_id = ? AND agent_row_id IS NOT NULL "
+                    "AND CAST(agent_row_id AS INTEGER) > ? "
+                    "AND CAST(agent_row_id AS INTEGER) <= ?",
+                    (chat_id, int(o["hwm_open"]), int(o["hwm_close"])),
+                )
+                gap_rows += sum(
+                    1 for r in recon_rows
+                    if str(r["agent_row_id"]) not in prelinked
+                )
+            _compare_hwm[chat_id] = max(
+                _compare_hwm.get(chat_id, 0.0), float(o["closed_at"]),
+            )
+            continue
         claims = db.fetchall(
             "SELECT msg_id, agent_row_id, method FROM turn_links "
             "WHERE chat_id = ? AND turn_id = ?",
@@ -803,15 +850,24 @@ def compare_and_log(
                         linker_only += 1
         # Reconcile linked rows in this window the linker didn't claim
         # (and didn't pre-exclude as already-linked at capture time).
+        # state.db session_meta rows are hermes machinery: the linker
+        # leaves them unclaimed (unrecognized_role) while reconcile
+        # links a legacy: twin — a permanent structural disagreement,
+        # not divergence. Skipped here (compare-side) rather than as
+        # classify machinery because reconcile keeps linking them
+        # regardless, so a linker-side exclusion alone would still
+        # count them reconcile_only forever.
         if o["hwm_open"] is not None and o["hwm_close"] is not None:
             recon_rows = db.fetchall(
-                "SELECT agent_row_id FROM msg_links "
+                "SELECT agent_row_id, role FROM msg_links "
                 "WHERE chat_id = ? AND agent_row_id IS NOT NULL "
                 "AND CAST(agent_row_id AS INTEGER) > ? "
                 "AND CAST(agent_row_id AS INTEGER) <= ?",
                 (chat_id, int(o["hwm_open"]), int(o["hwm_close"])),
             )
             for r in recon_rows:
+                if (r["role"] or "") == "session_meta":
+                    continue
                 a = str(r["agent_row_id"])
                 if a not in claimed_arids and a not in prelinked:
                     reconcile_only += 1
@@ -822,22 +878,30 @@ def compare_and_log(
     counts = {
         "turns": len(obs_rows), "agree": agree, "diverge": diverge,
         "linker_only": linker_only, "reconcile_only": reconcile_only,
+        "gap_rows": gap_rows,
     }
     line = (
         f"[sidekick] linker-soak chat={chat_id} turns={counts['turns']} "
         f"agree={agree} diverge={diverge} linker_only={linker_only} "
-        f"reconcile_only={reconcile_only}{first_detail}"
+        f"reconcile_only={reconcile_only} gap_rows={gap_rows}{first_detail}"
     )
-    # Clean lines go to stderr in the perf-trace style: the gateway's
+    # Soak lines go to stderr in the perf-trace style: the gateway's
     # stdlib logging handler drops sub-WARNING records, so a
     # logger.info soak line never reaches journalctl — and an
     # invisible soak defeats the Phase-1 gate (field 2026-07-20: the
-    # first live soak line was emitted and filtered). Divergence ALSO
-    # goes through logger.warning so alert grep patterns keyed on the
-    # heal line's channel catch it.
+    # first live soak line was emitted and filtered). This perf-trace
+    # line is the ONLY one carrying full counts (aggregation-
+    # canonical); divergence additionally raises a distinct
+    # `linker-soak-diverge` WARNING for alerting, deliberately WITHOUT
+    # the counts so grep aggregations never double-count a divergent
+    # chat (v3 soak forensics: the double-logged full line inflated
+    # count recipes).
     print(f"[perf-trace INFO] {line}", flush=True, file=sys.stderr)
     if diverge:
-        logger.warning("%s", line)
+        logger.warning(
+            "[sidekick] linker-soak-diverge chat=%s diverge=%d%s",
+            chat_id, diverge, first_detail,
+        )
     return counts
 
 
@@ -863,6 +927,24 @@ def _divergence_detail(state_db_path, msg_id, linker_arid, recon_arid) -> str:
         " first_diverge=(msg_id=%s linker=%s reconcile=%s content_equal=%s)"
         % (msg_id, linker_arid, recon_arid, content_equal)
     )
+
+
+def purge_chat_sync(db, chat_id: str) -> int:
+    """Chat-delete cascade for the linker's shadow tables. Called from
+    sidekick_route_conversations.delete_conversation_sync (worker
+    thread) — without it, a deleted chat leaves orphan observations /
+    claims that the compare sweep keeps judging against an empty
+    session chain (v3 soak forensics: dead chats polluted the
+    counters). Best-effort per table; returns rows removed."""
+    removed = 0
+    for table in ("turn_links", "turn_observations"):
+        try:
+            cur = db.exec(f"DELETE FROM {table} WHERE chat_id = ?", (chat_id,))
+            removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        except Exception:
+            continue
+    _compare_hwm.pop(chat_id, None)
+    return removed
 
 
 # ── public async API (loop thread) ────────────────────────────────────

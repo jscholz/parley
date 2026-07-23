@@ -679,7 +679,7 @@ def test_compare_and_log_agreement(db, state_db, capsys):
     counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
     assert counts == {
         "turns": 1, "agree": 2, "diverge": 0,
-        "linker_only": 0, "reconcile_only": 0,
+        "linker_only": 0, "reconcile_only": 0, "gap_rows": 0,
     }
     # Clean lines ride the perf-trace stderr channel — the gateway's
     # stdlib handler drops sub-WARNING records, so logger.info soak
@@ -727,6 +727,202 @@ def test_compare_orchestration_legacy_twin_agreement(db, state_db):
     assert counts["diverge"] == 0 and counts["reconcile_only"] == 0
     # linker_only when reconcile has no opinion yet.
     assert counts["linker_only"] == 1  # the user claim: umsg_o1 not in msg_links
+
+
+def test_compare_sweep_skips_gap_windows_emits_gap_rows(db, state_db, capsys):
+    """v3 soak forensics: 'unobserved' gap windows claim nothing by
+    design, so counting reconcile's links inside them as reconcile_only
+    manufactured divergence noise (the large counters were compare-side
+    artifacts). Gap windows must be skipped from the opinion counters
+    and reported as raw linked-row volume (gap_rows)."""
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_gr1", user_text="hi")
+    u = _add_msg(state_db, "user", "hi", 100.0)
+    f = _add_msg(state_db, "assistant", "hello there", 101.0)
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_gr1"},
+        entry_snapshot=_snap("umsg_gr1", "hi", "msg_gr1"),
+    )
+    state.upsert_msg_link(db, id="umsg_gr1", chat_id=CHAT_ID, role="user",
+                          content="hi", agent_row_id=str(u))
+    state.upsert_msg_link(db, id="msg_gr1", chat_id=CHAT_ID, role="assistant",
+                          content="hello there", agent_row_id=str(f))
+    # Plugin down: two rows land unobserved; reconcile links them.
+    g1 = _add_msg(state_db, "user", "typed in terminal", 200.0)
+    g2 = _add_msg(state_db, "assistant", "terminal reply", 201.0)
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_gr2", user_text="back")
+    state.upsert_msg_link(db, id=f"legacy:{g1}", chat_id=CHAT_ID, role="user",
+                          content="typed in terminal", agent_row_id=str(g1))
+    state.upsert_msg_link(db, id=f"legacy:{g2}", chat_id=CHAT_ID,
+                          role="assistant", content="terminal reply",
+                          agent_row_id=str(g2))
+    counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts["agree"] == 2 and counts["diverge"] == 0
+    assert counts["reconcile_only"] == 0, \
+        "gap-window links are volume, not divergence"
+    assert counts["gap_rows"] == 2
+    err = capsys.readouterr().err
+    assert "gap_rows=2" in err
+
+
+def test_compare_sweep_skips_background_windows(db, state_db):
+    """'background' windows claim nothing beyond rule-1 pre-exclusions;
+    reconcile's links inside them count as gap_rows, never
+    reconcile_only. The prelinked notification row counts as neither."""
+    base = _add_msg(state_db, "user", "seed", 50.0)
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_bg0", user_text="seed")
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_bg0"},
+        entry_snapshot=_snap("umsg_bg0", "seed", "msg_bg0"),
+    )
+    counts0 = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts0 is not None  # drain the seed turn from the sweep
+    bg_a = _add_msg(state_db, "assistant", "cron working", 300.0)
+    notif = _add_msg(state_db, "assistant", "cron says hi", 301.0)
+    state.record_envelope(db, {
+        "type": "notification", "chat_id": CHAT_ID,
+        "sidekick_id": "notif_1784900000001_bg",
+        "content": "cron says hi", "kind": "cron",
+        "agent_row_id": str(notif),
+    })
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "notification", "sidekick_id": "notif_1784900000001_bg",
+         "chat_id": CHAT_ID, "content": "cron says hi"},
+    )
+    # Reconcile linked the stray background row too.
+    state.upsert_msg_link(db, id=f"legacy:{bg_a}", chat_id=CHAT_ID,
+                          role="assistant", content="cron working",
+                          agent_row_id=str(bg_a))
+    counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts["reconcile_only"] == 0
+    assert counts["gap_rows"] == 1  # bg_a only; notif was prelinked
+    assert base is not None
+
+
+def test_compare_excludes_session_meta_rows(db, state_db):
+    """state.db session_meta rows are hermes machinery: the linker
+    leaves them unclaimed (unrecognized_role) while reconcile links a
+    legacy: twin — that structural disagreement must not count as
+    reconcile_only. Compare-side skip (not classify-side machinery)
+    because reconcile keeps linking them regardless."""
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_sm1", user_text="hi")
+    u = _add_msg(state_db, "user", "hi", 100.0)
+    meta = _add_msg(state_db, "session_meta", '{"model": "opus"}', 100.5)
+    f = _add_msg(state_db, "assistant", "hello", 101.0)
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_sm1"},
+        entry_snapshot=_snap("umsg_sm1", "hi", "msg_sm1"),
+    )
+    state.upsert_msg_link(db, id="umsg_sm1", chat_id=CHAT_ID, role="user",
+                          content="hi", agent_row_id=str(u))
+    state.upsert_msg_link(db, id="msg_sm1", chat_id=CHAT_ID, role="assistant",
+                          content="hello", agent_row_id=str(f))
+    state.upsert_msg_link(db, id=f"legacy:{meta}", chat_id=CHAT_ID,
+                          role="session_meta", content='{"model": "opus"}',
+                          agent_row_id=str(meta))
+    counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts["agree"] == 2
+    assert counts["reconcile_only"] == 0, \
+        "session_meta machinery must not count as reconcile_only"
+
+
+def test_divergence_logged_once_with_counts_on_perf_trace_only(
+    db, state_db, capsys, caplog,
+):
+    """The full-count soak line must appear exactly once (the
+    aggregation-canonical [perf-trace INFO] stderr line); the WARNING is
+    a distinct linker-soak-diverge alert without the counts, so grep
+    aggregations never double-count a divergent chat."""
+    _seed_compared_turn(db, state_db, reconcile_agrees=False)
+    with caplog.at_level(logging.WARNING, logger=linker.logger.name):
+        counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts["diverge"] == 1
+    err = capsys.readouterr().err
+    assert "linker-soak chat=" in err and "agree=" in err
+    assert len(caplog.records) == 1
+    assert "linker-soak-diverge" in caplog.text
+    assert "agree=" not in caplog.text, \
+        "WARNING must not duplicate the full-count aggregation line"
+    assert "first_diverge=" in caplog.text
+
+
+def test_gap_window_compaction_flag(db, state_db):
+    """(Phase-2 gate) organic compactions land in unobserved gap
+    windows in the field — the gap observation must carry the
+    compaction_flush flag (+ inactive count) so the linker has live
+    compaction coverage."""
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_gc1", user_text="hi")
+    _add_msg(state_db, "user", "hi", 100.0)
+    f = _add_msg(state_db, "assistant", "hello", 101.0)
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_gc1"},
+        entry_snapshot=_snap("umsg_gc1", "hi", "msg_gc1"),
+    )
+    # Organic compaction while unobserved: machinery seed + a
+    # deactivated replay copy land in the gap.
+    _add_msg(state_db, "assistant",
+             "[CONTEXT COMPACTION — REFERENCE ONLY] earlier turns", 200.0)
+    d = _add_msg(state_db, "assistant", "replayed copy", 200.0, active=0)
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_gc2", user_text="next")
+    gap_id = f"gap:{f}-{d}"
+    o = _obs(db, gap_id)
+    assert o is not None and o["status"] == "unobserved"
+    flags = _obs_flags(db, gap_id)
+    assert "compaction_flush" in flags.get("flags", []), \
+        "gap windows must detect compaction machinery rows"
+    assert flags.get("inactive") == 1
+    # A machinery-free gap stays unflagged.
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_gc2"},
+        entry_snapshot=_snap("umsg_gc2", "next", "msg_gc2"),
+    )
+    _add_msg(state_db, "user", "typed in terminal", 300.0)
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_gc3", user_text="more")
+    plain_gaps = db.fetchall(
+        "SELECT flags FROM turn_observations "
+        "WHERE chat_id = ? AND status = 'unobserved' AND turn_id != ?",
+        (CHAT_ID, gap_id),
+    )
+    assert len(plain_gaps) == 1
+    plain_flags = json.loads(plain_gaps[0]["flags"] or "{}")
+    assert "compaction_flush" not in plain_flags.get("flags", [])
+
+
+def test_delete_conversation_purges_turn_tables(db, state_db, monkeypatch):
+    """Chat delete must cascade to the linker's shadow tables — without
+    it, deleted chats leave orphan observations/claims that the compare
+    sweep keeps judging against an empty session chain."""
+    from ..sidekick_route_conversations import delete_conversation_sync
+
+    monkeypatch.delenv("HINDSIGHT_URL", raising=False)
+    monkeypatch.delenv("SIDEKICK_HINDSIGHT_URL", raising=False)
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_d1", user_text="hi")
+    _add_msg(state_db, "user", "hi", 100.0)
+    _add_msg(state_db, "assistant", "bye", 101.0)
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_d1"},
+        entry_snapshot=_snap("umsg_d1", "hi", "msg_d1"),
+    )
+    assert db.fetchone(
+        "SELECT 1 FROM turn_links WHERE chat_id = ?", (CHAT_ID,)) is not None
+    linker._compare_hwm[CHAT_ID] = 123.0
+
+    class _Adapter:
+        _sidekick_db = db
+        _state_db_path = state_db
+
+    assert delete_conversation_sync(_Adapter(), CHAT_ID, SRC) == "ok"
+    assert db.fetchone(
+        "SELECT 1 FROM turn_links WHERE chat_id = ?", (CHAT_ID,)) is None
+    assert db.fetchone(
+        "SELECT 1 FROM turn_observations WHERE chat_id = ?", (CHAT_ID,)) is None
+    assert CHAT_ID not in linker._compare_hwm
 
 
 # ── async wiring sanity ───────────────────────────────────────────────
