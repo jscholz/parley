@@ -9,6 +9,7 @@ Keep this module pure: storage operations only. Dispatch logic
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Any, Dict, List, Optional
@@ -191,6 +192,79 @@ def list_prefs(db) -> Dict[str, Any]:
         except Exception:
             out[row["key"]] = None
     return out
+
+
+# ── Legacy push-prefs shape migration ──────────────────────────────────
+#
+# Two pref shapes historically coexisted in push_prefs:
+#   canonical: one row per kind — key `push_kind_<kind>`, value bool.
+#              This is the ONLY shape the dispatcher reads
+#              (sidekick_dispatcher._kind_pref_enabled).
+#   legacy:    one row keyed `kinds` holding a JSON object (the proxy's
+#              PushKinds blob, pre-2026-05-20 delegate which forwarded
+#              the nested object unflattened). Dead on every read path —
+#              the delegate's normalizePluginPrefs overwrites `kinds`
+#              from the per-key rows — but a live-DB row of this shape
+#              survived into 2026-07 (push-outage audit).
+#
+# expand_kinds_pref_value + migrate_legacy_push_prefs converge writes
+# and stored rows onto the canonical shape. Idempotent: per-key rows
+# already present always win; a second run is a no-op.
+
+LEGACY_KINDS_PREF_KEY = "kinds"
+
+# Proxy-side legacy semantics (prefs.ts mergeWithDefaults): the broad
+# `notification` toggle drove cron + approval; agent_reply was its own
+# key even back then.
+_LEGACY_BROAD_KIND_TARGETS = ("cron", "approval")
+_CANONICAL_KIND_NAMES = ("agent_reply", "cron", "approval")
+
+
+def expand_kinds_pref_value(value: Any) -> Dict[str, bool]:
+    """Flatten a legacy `kinds` object into canonical per-kind bools.
+    Unknown kind names are dropped (conservative: never mint pref rows
+    the dispatcher would not read)."""
+    out: Dict[str, bool] = {}
+    if not isinstance(value, dict):
+        return out
+    for kind, enabled in value.items():
+        if kind == "notification":
+            for target in _LEGACY_BROAD_KIND_TARGETS:
+                out[target] = bool(enabled)
+        elif kind in _CANONICAL_KIND_NAMES:
+            out[kind] = bool(enabled)
+    return out
+
+
+def migrate_legacy_push_prefs(db) -> bool:
+    """One-shot (idempotent) convergence of push_prefs onto the
+    canonical per-key shape. Translates a legacy `kinds` row into
+    `push_kind_*` rows — only for kinds with NO existing per-key row,
+    so a user's live per-key toggles are never clobbered — then deletes
+    the legacy row. Returns True when a legacy row was found."""
+    row = db.fetchone(
+        "SELECT value_json FROM push_prefs WHERE key = ?", (LEGACY_KINDS_PREF_KEY,)
+    )
+    if row is None:
+        return False
+    try:
+        legacy_value = json.loads(row["value_json"])
+    except Exception:
+        legacy_value = None
+    migrated = []
+    for kind, enabled in expand_kinds_pref_value(legacy_value).items():
+        per_key = f"push_kind_{kind}"
+        existing = db.fetchone("SELECT 1 FROM push_prefs WHERE key = ?", (per_key,))
+        if existing is None:
+            set_pref(db, per_key, enabled)
+            migrated.append(f"{per_key}={enabled}")
+    db.exec("DELETE FROM push_prefs WHERE key = ?", (LEGACY_KINDS_PREF_KEY,))
+    logging.getLogger("hermes.sidekick.push").info(
+        "[sidekick] migrated legacy push_prefs `kinds` row → canonical shape "
+        "(wrote: %s; existing per-key rows preserved)",
+        ", ".join(migrated) or "nothing — all per-key rows already present",
+    )
+    return True
 
 
 # ── User settings (synced, cross-device) ──────────────────────────────

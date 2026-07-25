@@ -21,8 +21,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import time
-from typing import Callable, Dict, Optional
+from collections import deque
+from typing import Callable, Deque, Dict, Optional, Tuple
 from urllib.parse import quote
 
 from pywebpush import webpush, WebPushException  # type: ignore
@@ -345,6 +347,21 @@ _PREF_PUSH_KIND_PREFIX = "push_kind_"
 _SUPPORTED_PUSH_KINDS = {"agent_reply", "cron", "approval"}
 
 
+def _kind_pref_enabled(db, kind_name: str) -> bool:
+    """Effective enablement for one push-kind pref key. Defaults to
+    enabled when the pref is unset so a fresh install still pushes."""
+    pref_key = f"{_PREF_PUSH_KIND_PREFIX}{kind_name}"
+    val = get_pref(db, pref_key)
+    if val is None:
+        return True
+    if isinstance(val, bool):
+        return val
+    # Pref store may serialize as "true"/"false" strings.
+    if isinstance(val, str):
+        return val.lower() not in ("false", "0", "off", "no")
+    return True
+
+
 def _is_kind_enabled(db, env: Dict) -> bool:
     """Pull the relevant pref key for this envelope. Defaults to
     enabled when the pref is unset so a fresh install still pushes."""
@@ -359,16 +376,129 @@ def _is_kind_enabled(db, env: Dict) -> bool:
         kind_name = env_kind if env_kind in _SUPPORTED_PUSH_KINDS else None
     if not kind_name:
         return True  # not a user-facing category; another gate will catch it
-    pref_key = f"{_PREF_PUSH_KIND_PREFIX}{kind_name}"
-    val = get_pref(db, pref_key)
-    if val is None:
-        return True
-    if isinstance(val, bool):
-        return val
-    # Pref store may serialize as "true"/"false" strings.
-    if isinstance(val, str):
-        return val.lower() not in ("false", "0", "off", "no")
-    return True
+    return _kind_pref_enabled(db, kind_name)
+
+
+# ── Push-health monitor ────────────────────────────────────────────────
+#
+# Field incident 2026-07: push_kind_* prefs sat at all-false in the live
+# sidekick.db for 9+ days. The dispatcher dutifully logged
+# `skip … reason=kind_disabled` per envelope, but nobody tails journals
+# — so pushes were silently dead the whole time. This monitor turns the
+# per-skip whisper into two aggregate shouts:
+#
+#   1. Startup: if EVERY supported push kind is disabled when the
+#      dispatcher comes up, emit one prominent stderr line.
+#   2. Runtime: if pref-driven skips (kind_disabled / quiet_hours)
+#      exceed a threshold within a rolling window, emit one prominent
+#      stderr line per window (not per skip).
+#
+# The stderr `print` deliberately bypasses the stdlib logger — same
+# rationale as sidekick_perf_trace._log: the gateway's default handler
+# config drops sub-WARNING records and journalctl always captures
+# stderr. Snapshot() feeds /v1/push/health → the proxy's diagnostics
+# endpoint → the PWA settings panel.
+
+PUSH_HEALTH_WINDOW_SEC = 3600
+PUSH_HEALTH_SKIP_ALERT_THRESHOLD = 5
+
+# Skip reasons caused by user prefs (vs transient gates like
+# user_engaged): a burst of these means "the user thinks pushes are on,
+# the store says off" — exactly the silent-outage shape.
+_PREF_SKIP_REASONS = ("kind_disabled", "quiet_hours")
+
+
+def _push_health_alert(msg: str) -> None:
+    """One prominent journal line. Matches the perf-trace stderr
+    pattern so it survives the gateway's WARN-and-up logging config."""
+    print(f"[push-health ALERT] {msg}", flush=True, file=sys.stderr)
+
+
+class PushHealthMonitor:
+    """Rolling-window skip aggregator + all-kinds-disabled tripwire."""
+
+    def __init__(
+        self,
+        *,
+        window_sec: float = PUSH_HEALTH_WINDOW_SEC,
+        alert_threshold: int = PUSH_HEALTH_SKIP_ALERT_THRESHOLD,
+    ) -> None:
+        self.window_sec = window_sec
+        self.alert_threshold = alert_threshold
+        self._skips: Deque[Tuple[float, str]] = deque()
+        self._last_alert_at: Optional[float] = None
+        self.startup_all_kinds_disabled = False
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_sec
+        while self._skips and self._skips[0][0] < cutoff:
+            self._skips.popleft()
+
+    def record_skip(self, reason: str, *, now: Optional[float] = None) -> None:
+        """Track one skip decision. Alerts (at most once per window)
+        when pref-driven skips cross the threshold."""
+        ts = time.time() if now is None else now
+        self._prune(ts)
+        self._skips.append((ts, reason))
+        pref_skips = sum(1 for _, r in self._skips if r in _PREF_SKIP_REASONS)
+        if pref_skips < self.alert_threshold:
+            return
+        if self._last_alert_at is not None and ts - self._last_alert_at < self.window_sec:
+            return
+        self._last_alert_at = ts
+        _push_health_alert(
+            f"{pref_skips} pushes suppressed by user prefs "
+            f"(kind_disabled/quiet_hours) within {int(self.window_sec)}s — "
+            f"check Settings → Notifications push categories "
+            f"(push_kind_* rows in sidekick.db push_prefs)"
+        )
+
+    def check_startup(self, db) -> bool:
+        """All supported kinds disabled at dispatcher construction →
+        pushes are structurally dead; say so ONCE, loudly."""
+        disabled = [k for k in sorted(_SUPPORTED_PUSH_KINDS) if not _kind_pref_enabled(db, k)]
+        self.startup_all_kinds_disabled = len(disabled) == len(_SUPPORTED_PUSH_KINDS)
+        if self.startup_all_kinds_disabled:
+            _push_health_alert(
+                "ALL push kinds disabled at startup "
+                f"({', '.join(sorted(_SUPPORTED_PUSH_KINDS))}) — every push will be "
+                "skipped with reason=kind_disabled until push_kind_* prefs are re-enabled"
+            )
+        return self.startup_all_kinds_disabled
+
+    def snapshot(self, *, now: Optional[float] = None) -> Dict:
+        ts = time.time() if now is None else now
+        self._prune(ts)
+        counts: Dict[str, int] = {}
+        for _, reason in self._skips:
+            counts[reason] = counts.get(reason, 0) + 1
+        return {
+            "window_sec": int(self.window_sec),
+            "skips_in_window": counts,
+            "pref_skips_in_window": sum(
+                n for r, n in counts.items() if r in _PREF_SKIP_REASONS
+            ),
+            "alert_threshold": self.alert_threshold,
+            "last_alert_at": self._last_alert_at,
+            "startup_all_kinds_disabled": self.startup_all_kinds_disabled,
+        }
+
+
+def build_push_health(db, dispatcher: Optional["PushDispatcher"] = None) -> Dict:
+    """Assemble the push_health blob served by /v1/push/health and
+    surfaced through the proxy's notifications/diagnostics response."""
+    kinds = {k: _kind_pref_enabled(db, k) for k in sorted(_SUPPORTED_PUSH_KINDS)}
+    disabled = sorted(k for k, on in kinds.items() if not on)
+    out: Dict = {
+        "kinds": kinds,
+        "disabled_kinds": disabled,
+        "all_kinds_disabled": len(disabled) == len(kinds),
+        "quiet_hours": get_pref(db, "quiet_hours"),
+        "subscriptions": len(list_subscriptions(db)),
+    }
+    if dispatcher is not None and getattr(dispatcher, "health", None) is not None:
+        out["monitor"] = dispatcher.health.snapshot()
+    return out
 
 
 def _is_push_eligible(env: Dict) -> bool:
@@ -400,6 +530,16 @@ class PushDispatcher:
         # payloads simply omit badge and sw.js leaves the OS badge to
         # the page-side reconciler.
         self.unread_total_fn = unread_total_fn
+        # Aggregate skip observability (field incident 2026-07: all
+        # push kinds silently disabled for days). The startup check
+        # emits its one loud line right here, before the first
+        # envelope, so a structurally-dead config is visible in the
+        # journal from boot.
+        self.health = PushHealthMonitor()
+        try:
+            self.health.check_startup(db)
+        except Exception as err:  # pragma: no cover — diagnostics never block boot
+            logger.warning("push-health startup check failed: %s", err)
 
     def _ensure_vapid(self) -> Dict[str, str]:
         if self._vapid is None:
@@ -451,12 +591,15 @@ class PushDispatcher:
         # so a silenced kind doesn't even consume an engagement slot.
         if not _is_kind_enabled(self.db, env):
             logger.warning("skip type=%s chat=%s reason=kind_disabled", env_type, chat_id)
+            self.health.record_skip("kind_disabled")
             return {"delivered": 0, "pruned": 0, "skipped": "kind_disabled"}
         if self.engagement.is_engaged(chat_id):
             logger.warning("skip type=%s chat=%s reason=user_engaged", env_type, chat_id)
+            self.health.record_skip("user_engaged")
             return {"delivered": 0, "pruned": 0, "skipped": "user_engaged"}
         if is_muted(self.db, chat_id):
             logger.warning("skip type=%s chat=%s reason=muted", env_type, chat_id)
+            self.health.record_skip("muted")
             return {"delivered": 0, "pruned": 0, "skipped": "muted"}
         vapid = self._ensure_vapid()
         subs = list_subscriptions(self.db)

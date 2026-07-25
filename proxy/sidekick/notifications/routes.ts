@@ -29,7 +29,7 @@ import {
 import { dispatchPush } from './dispatch.ts';
 import { setMuted, listMutedChats } from './mutes.ts';
 import { recordVisibility } from './visibility.ts';
-import { getPrefs, updatePrefs, type Prefs } from './prefs.ts';
+import { getPrefs, updatePrefs, computeLocalPushHealth, type Prefs } from './prefs.ts';
 import { getRecentDecisions } from './diagnostics.ts';
 import {
   isPushOwnedByPlugin,
@@ -37,6 +37,7 @@ import {
   delegateListMutes, delegateSetMute,
   delegateGetPrefs, delegateSetPrefs,
   delegateVisibility, delegateTest,
+  fetchPluginPushHealth,
 } from './delegate.ts';
 
 const MAX_BODY_BYTES = 8 * 1024;  // subscriptions are tiny, generous
@@ -240,18 +241,34 @@ export async function handleSidekickVisibility(req: any, res: any): Promise<void
 
 /** GET /api/sidekick/notifications/diagnostics
  *  Return the recent dispatch decisions (in-process ring, capped at
- *  50 entries). Used by the Notifications settings panel for the
- *  "last decisions" readout — lets users see "why didn't my last
- *  push fire" without having to tail the proxy journal. Optional
- *  `?limit=N` to clip the result. */
-export function handleSidekickDiagnostics(req: any, res: any): void {
+ *  50 entries) plus an aggregate `push_health` blob. Used by the
+ *  Notifications settings panel for the "last decisions" readout —
+ *  lets users see "why didn't my last push fire" without having to
+ *  tail the proxy journal. Optional `?limit=N` to clip the result.
+ *
+ *  push_health (added after the 2026-07 outage where every push kind
+ *  sat disabled for days): per-kind effective enablement, the
+ *  all-kinds-disabled tripwire, and quiet-hours state. Plugin-owned
+ *  push pulls it from /v1/push/health; otherwise computed from the
+ *  proxy's local prefs. Upstream failure degrades to
+ *  `{available:false}` — diagnostics itself never 5xxes over it. */
+export async function handleSidekickDiagnostics(req: any, res: any): Promise<void> {
   let limit = 10;
   try {
     const u = new URL(req.url, 'http://x');
     const raw = u.searchParams.get('limit');
     if (raw) limit = Math.max(1, Math.min(50, parseInt(raw, 10) || 10));
   } catch { /* fall through to default */ }
-  sendJson(res, 200, { decisions: getRecentDecisions(limit) });
+  let pushHealth: any;
+  if (isPushOwnedByPlugin()) {
+    const upstream = await fetchPluginPushHealth();
+    pushHealth = upstream
+      ? { owner: 'plugin', ...upstream }
+      : { owner: 'plugin', available: false };
+  } else {
+    pushHealth = computeLocalPushHealth();
+  }
+  sendJson(res, 200, { decisions: getRecentDecisions(limit), push_health: pushHealth });
 }
 
 /** POST /api/sidekick/notifications/test

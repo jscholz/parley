@@ -115,8 +115,35 @@ async def handle_prefs(ctx, request: web.Request) -> web.Response:
     key = body.get("key")
     if not key:
         return _json({"error": "invalid_request", "message": "key required"}, status=400)
+    # Canonical-shape convergence: a legacy nested `kinds` object is
+    # never stored as-is (the dispatcher only reads per-key
+    # `push_kind_*` rows — see migrate_legacy_push_prefs). Expand it
+    # into the per-key rows the read path actually consults.
+    if key == state.LEGACY_KINDS_PREF_KEY:
+        expanded = state.expand_kinds_pref_value(body.get("value"))
+        if not expanded:
+            return _json(
+                {"error": "invalid_request",
+                 "message": "kinds must be an object of known kind → bool"},
+                status=400,
+            )
+        for kind, enabled in expanded.items():
+            state.set_pref(ctx.db, f"push_kind_{kind}", enabled)
+        return _json({"ok": True, "key": key, "value": expanded, "canonicalized": True})
     state.set_pref(ctx.db, key, body.get("value"))
     return _json({"ok": True, "key": key, "value": state.get_pref(ctx.db, key)})
+
+
+async def handle_push_health(ctx, request: web.Request) -> web.Response:
+    """Aggregate push-delivery health: effective per-kind enablement,
+    the all-kinds-disabled tripwire, quiet-hours pref, subscription
+    count, and the dispatcher's rolling skip-counter snapshot. The
+    proxy folds this into /api/sidekick/notifications/diagnostics so
+    the PWA settings panel can surface 'pushes are disabled' without
+    journal access. (Push-outage audit, 2026-07-25.)"""
+    from .sidekick_dispatcher import build_push_health
+
+    return _json({"push_health": build_push_health(ctx.db, ctx.dispatcher)})
 
 
 async def handle_user_settings(ctx, request: web.Request) -> web.Response:
@@ -423,6 +450,7 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_post("/v1/push/mute", lambda r: handle_mute(ctx, r))
     app.router.add_get("/v1/push/prefs", lambda r: handle_prefs(ctx, r))
     app.router.add_post("/v1/push/prefs", lambda r: handle_prefs(ctx, r))
+    app.router.add_get("/v1/push/health", lambda r: handle_push_health(ctx, r))
     app.router.add_post("/v1/push/visibility", lambda r: handle_visibility(ctx, r))
     app.router.add_post("/v1/push/test", lambda r: handle_test(ctx, r))
 

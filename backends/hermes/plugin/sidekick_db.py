@@ -283,6 +283,38 @@ CREATE TABLE IF NOT EXISTS user_settings (
 """
 
 
+# ── Test-isolation guard ───────────────────────────────────────────────
+#
+# Field incident 2026-07: live push_prefs rows were corrupted during a
+# dev/test session running against the production instance — days of
+# silently-dropped pushes. Belt-and-braces: any process that sets
+# SIDEKICK_TEST_GUARD (the pytest conftest does, unconditionally)
+# refuses to open a sidekick DB inside the real state directories.
+# Tests operate on tmp paths exclusively; a fixture or helper that
+# accidentally resolves to ~/.hermes fails LOUDLY at open, before any
+# write can land.
+
+_GUARDED_STATE_DIRS = (".hermes", ".sidekick", ".openclaw-sk-integ")
+
+
+def _assert_not_live_db_under_test_guard(path: Path) -> None:
+    if not os.environ.get("SIDEKICK_TEST_GUARD"):
+        return
+    try:
+        resolved = Path(path).expanduser().resolve()
+        home = Path.home().resolve()
+    except Exception:  # pragma: no cover — unresolvable paths can't hit live dirs
+        return
+    for name in _GUARDED_STATE_DIRS:
+        guarded = home / name
+        if resolved == guarded or guarded in resolved.parents:
+            raise RuntimeError(
+                f"SIDEKICK_TEST_GUARD is set but SidekickDB path {resolved} "
+                f"resolves inside the live state dir {guarded}. Tests must "
+                "use tmp paths — refusing to open the production DB."
+            )
+
+
 # Thread-safe shared connection. sqlite3 in Python is locked across
 # threads by default unless `check_same_thread=False` is passed; we
 # add an explicit lock so concurrent route handlers (aiohttp worker
@@ -290,6 +322,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 # of ops per turn) so a single lock is fine.
 class SidekickDB:
     def __init__(self, path: Path):
+        _assert_not_live_db_under_test_guard(path)
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()

@@ -199,6 +199,19 @@ export async function delegateSetPrefs(req: http.IncomingMessage, res: http.Serv
   } catch (e: any) { sendUpstreamUnavailable(res, e); }
 }
 
+/** GET the plugin's /v1/push/health blob for the diagnostics fold-in.
+ *  Returns null on any upstream failure — push health is a diagnostic
+ *  garnish; it must never break the diagnostics endpoint itself. */
+export async function fetchPluginPushHealth(): Promise<any | null> {
+  try {
+    const r = await forwardRaw('/v1/push/health', 'GET', null);
+    if (r.status >= 400) return null;
+    return r.body?.push_health ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function delegateVisibility(req: http.IncomingMessage, res: http.ServerResponse) {
   try {
     const body = await readBody(req);

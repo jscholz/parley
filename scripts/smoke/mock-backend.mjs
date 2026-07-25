@@ -809,6 +809,58 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 
+  // ── Notification prefs + mutes isolation (push-prefs incident,
+  // 2026-07-25) ──
+  //
+  // These endpoints write through the live proxy into the REAL
+  // sidekick.db (push_prefs / push_mutes) — the only notifications
+  // routes with durable server state that mocked smokes could
+  // corrupt. Serve them from in-memory state so no mocked scenario
+  // can EVER touch production push prefs, no matter what UI it
+  // clicks. Shape mirrors the proxy's preferences response
+  // (prefs.ts DEFAULT_PREFS + normalizePluginPrefs).
+  const pushPrefs = {
+    quiet_hours: { enabled: false, start: '22:00', end: '07:00' },
+    kinds: { agent_reply: true, cron: true, approval: true },
+  };
+  await page.route(/.*\/api\/sidekick\/notifications\/preferences$/, async (route) => {
+    const method = route.request().method();
+    if (method === 'POST') {
+      let body; try { body = JSON.parse(route.request().postData() || '{}'); }
+      catch { body = {}; }
+      if (body.quiet_hours && typeof body.quiet_hours === 'object') {
+        Object.assign(pushPrefs.quiet_hours, body.quiet_hours);
+      }
+      if (body.kinds && typeof body.kinds === 'object') {
+        Object.assign(pushPrefs.kinds, body.kinds);
+      }
+    } else if (method !== 'GET') {
+      return route.fallback();
+    }
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify(pushPrefs),
+    });
+  });
+  const mutedChats = new Set();
+  await page.route(/.*\/api\/sidekick\/notifications\/mutes$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ muted_chats: Array.from(mutedChats) }),
+    });
+  });
+  await page.route(/.*\/api\/sidekick\/notifications\/mute$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    let body; try { body = JSON.parse(route.request().postData() || '{}'); }
+    catch { body = {}; }
+    if (body.chat_id) {
+      if (body.muted) mutedChats.add(body.chat_id);
+      else mutedChats.delete(body.chat_id);
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+  });
+
   // ── Server-driven pin state (SSOT after the 2026-05 refactor) ──
   //
   // Real plugin owns the `pins` table in sidekick.db; the proxy

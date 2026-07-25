@@ -178,6 +178,32 @@ function hhmmToMinutes(hhmm: string): number {
   return h * 60 + m;
 }
 
+/** Aggregate push-delivery health for the proxy-owned prefs store
+ *  (hermes delegates this to the plugin's /v1/push/health instead —
+ *  see delegate.fetchPluginPushHealth). Surfaced through the
+ *  notifications/diagnostics endpoint so the PWA can show "pushes are
+ *  disabled" without journal access. Push-outage audit 2026-07-25:
+ *  all kinds sat disabled for days with only per-skip journal lines. */
+export function computeLocalPushHealth(now: Date = new Date()): {
+  owner: 'proxy';
+  kinds: PushKinds;
+  disabled_kinds: string[];
+  all_kinds_disabled: boolean;
+  quiet_hours: QuietHours & { active: boolean };
+} {
+  const prefs = getPrefs();
+  const disabled = (Object.keys(prefs.kinds) as Array<keyof PushKinds>)
+    .filter((k) => prefs.kinds[k] === false)
+    .sort();
+  return {
+    owner: 'proxy',
+    kinds: prefs.kinds,
+    disabled_kinds: disabled,
+    all_kinds_disabled: disabled.length === Object.keys(prefs.kinds).length,
+    quiet_hours: { ...prefs.quiet_hours, active: inQuietHours(now) },
+  };
+}
+
 /** Test-only seam — clears cache + path so the next test starts fresh. */
 export function __resetPrefsForTest(): void {
   cache = null;

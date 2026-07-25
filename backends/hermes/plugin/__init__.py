@@ -531,6 +531,15 @@ class SidekickAdapter(BasePlatformAdapter):
         # JSON file into the supplemental DB. Idempotent — subsequent
         # starts see the rows already there and skip silently.
         self._maybe_migrate_legacy_push_subs()
+        # Idempotent shape convergence: translate a legacy `kinds`
+        # push_prefs row (pre-2026-05-20 delegate shape, dead on read)
+        # into the canonical per-key push_kind_* rows and drop it.
+        # No-op when no legacy row exists. Never blocks boot.
+        try:
+            from . import sidekick_state as _sstate  # noqa: WPS433
+            _sstate.migrate_legacy_push_prefs(self._sidekick_db)
+        except Exception as _mig_err:
+            logger.warning("[sidekick] legacy push_prefs migration failed: %s", _mig_err)
         vapid_subject = os.environ.get("VAPID_SUBJECT") or "mailto:jscholz@reimaginerobotics.ai"
         # unread_total_fn: server-truth badge count for push payloads
         # (sw.js → setAppBadge). Deferred closure — _state_db_path is

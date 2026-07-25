@@ -242,6 +242,25 @@ async function main() {
     }
   } catch { /* dev proxy down — skip */ }
 
+  // Notification push-prefs tripwire (incident 2026-07-25: push_kind_*
+  // rows in the LIVE sidekick.db were flipped to all-false during a
+  // dev/test session and stayed that way for 9 days — zero pushes,
+  // zero alarms). Mocked scenarios are now fully intercepted
+  // (mock-backend.mjs serves preferences in-memory), so any drift seen
+  // here came from a real-backend scenario or a bug. Snapshot before
+  // the suite; after the suite compare + RESTORE + shout, so a single
+  // run can never leave production push prefs corrupted.
+  let pushPrefsSnapshot = null;
+  try {
+    const r = await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`);
+    if (r.ok) {
+      const j = await r.json();
+      if (j && typeof j === 'object' && !j.error) {
+        pushPrefsSnapshot = { quiet_hours: j.quiet_hours, kinds: j.kinds };
+      }
+    }
+  } catch { /* push feature off / proxy down — skip the tripwire */ }
+
   // One Chromium process for the whole run; each scenario gets its own
   // BrowserContext (isolated storage, IDB, SW). Skips ~2-3s of per-
   // scenario Chromium boot.
@@ -274,6 +293,33 @@ async function main() {
           body: JSON.stringify({ value }),
         });
       } catch { /* shrug */ }
+    }
+    // Push-prefs drift check + restore (see snapshot above). LOUD on
+    // drift: this is exactly the write pattern that caused the July
+    // outage, and silent restoration would hide the offending scenario.
+    if (pushPrefsSnapshot) {
+      try {
+        const r = await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`);
+        const after = r.ok ? await r.json() : null;
+        const afterSlim = after && !after.error
+          ? { quiet_hours: after.quiet_hours, kinds: after.kinds }
+          : null;
+        if (afterSlim && JSON.stringify(afterSlim) !== JSON.stringify(pushPrefsSnapshot)) {
+          console.error('');
+          console.error('!'.repeat(70));
+          console.error('[smoke] WARNING: notification push prefs DRIFTED during this run.');
+          console.error(`[smoke]   before: ${JSON.stringify(pushPrefsSnapshot)}`);
+          console.error(`[smoke]   after:  ${JSON.stringify(afterSlim)}`);
+          console.error('[smoke] Some scenario wrote LIVE push prefs (2026-07 outage pattern).');
+          console.error('[smoke] Restoring the pre-suite snapshot; find and fix the writer.');
+          console.error('!'.repeat(70));
+          await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pushPrefsSnapshot),
+          });
+        }
+      } catch { /* proxy went away mid-run — nothing to restore against */ }
     }
   }
 

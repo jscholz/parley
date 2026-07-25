@@ -1168,9 +1168,30 @@ export function hydrate(handlers: {
         return;
       }
       const body = await r.json();
+      // Aggregate health banner (2026-07 outage: every push kind sat
+      // disabled for days and only per-skip journal lines said so).
+      // Render the "pushes are structurally off" states ABOVE the
+      // decision rows so they can't be missed.
+      const healthLines: string[] = [];
+      const health = body?.push_health;
+      if (health && health.available !== false) {
+        if (health.all_kinds_disabled) {
+          healthLines.push('⚠ ALL push categories are OFF — no pushes will be delivered.');
+          healthLines.push('  Re-enable them under Push categories above.');
+        } else if (Array.isArray(health.disabled_kinds) && health.disabled_kinds.length) {
+          healthLines.push(`⚠ disabled push categories: ${health.disabled_kinds.join(', ')}`);
+        }
+        const qh = health.quiet_hours;
+        if (qh && qh.enabled) {
+          healthLines.push(`⚠ quiet hours enabled (${qh.start}–${qh.end})${qh.active ? ' — ACTIVE NOW' : ''}`);
+        }
+      }
       const rows: any[] = body?.decisions || [];
       if (!rows.length) {
-        setPushDiagnosticsOut.textContent = '(no decisions yet — try sending a message or the test push)';
+        setPushDiagnosticsOut.textContent = [
+          ...healthLines,
+          '(no decisions yet — try sending a message or the test push)',
+        ].join('\n');
         return;
       }
       // Newest-first ordering reads better in a small box.
@@ -1186,7 +1207,9 @@ export function hydrate(handlers: {
         const urgent = d.urgent ? ' urgent' : '';
         return `${hh}:${mm}:${ss}  ${d.envelope_type.padEnd(14)}  ${chat.padEnd(12)}  ${outcome}${urgent}`;
       }).join('\n');
-      setPushDiagnosticsOut.textContent = formatted;
+      setPushDiagnosticsOut.textContent = healthLines.length
+        ? `${healthLines.join('\n')}\n\n${formatted}`
+        : formatted;
     } catch (e: any) {
       setPushDiagnosticsOut.textContent = `error: ${e?.message ?? e}`;
     }
