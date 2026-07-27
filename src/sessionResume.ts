@@ -449,8 +449,20 @@ function scheduleAtBottomRepin(): void {
   // to the bottom (field 2026-05-27: scroll-up didn't stick). Follow-the-
   // tail during streaming is handled by autoScroll() on each append; this
   // RO just covers async height growth (play-bars, late images) post-restore.
+  // ALSO yield once the user has scroll-gestured on the transcript since
+  // this repin was armed (field 2026-07-27, scroll-jump-diag-harness
+  // variant 1): a wheel-up's first ~300px keeps isPinnedToBottom() true
+  // (PINNED_THRESHOLD_PX is generous by design), so within that window a
+  // late server render's height growth woke this RO and yanked the view
+  // +135px DOWN against the user's active wheel. The gesture timestamp is
+  // the same #202 signal that cancels anchor restores; arming time is
+  // captured here so gestures BEFORE the restore (e.g. scrolling around,
+  // then clicking jump-to-bottom — a button click is not a transcript
+  // gesture) don't starve a legitimate repin.
+  const armedAt = Date.now();
   const ro = new ResizeObserver(() => {
     if (!chat.isPinnedToBottom()) return;
+    if (chat.lastUserScrollGestureAt() >= armedAt) return;
     transcriptEl.scrollTo({ top: transcriptEl.scrollHeight, behavior: 'instant' as ScrollBehavior });
   });
   ro.observe(transcriptEl);
@@ -543,6 +555,11 @@ function drillScrollTo(target: HTMLElement): void {
     const prevBehavior = transcriptEl.style.scrollBehavior;
     transcriptEl.style.scrollBehavior = 'auto';
     const desired = transcriptEl.scrollTop + (tg.top - tr.top) - 8;
+    // Absolute target seat — re-baseline chat's relative settle
+    // compensator so it can't add its own delta for a shift this apply
+    // just absorbed (belt over the holdUnpinnedFor gate: the settle
+    // watchers below outlive the hold by ~50ms).
+    chat.noteAbsoluteScrollSeat();
     transcriptEl.scrollTop = Math.max(0, desired);
     transcriptEl.style.scrollBehavior = prevBehavior;
   };

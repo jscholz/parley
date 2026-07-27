@@ -194,7 +194,10 @@ export function restoreDomAnchor(anchor: { key: string; offsetPx: number }): boo
     if (transcriptEl !== el || gen !== _restoreAnchorGen || !target.isConnected) return;
     const ct = el.getBoundingClientRect().top;
     const delta = (target.getBoundingClientRect().top - ct) - anchor.offsetPx;
-    if (Math.abs(delta) >= 1) { el.scrollTop += delta; stable = 0; }
+    // Each re-seat absorbs whatever layout shifted since the last frame —
+    // tell the relative settle compensator so it re-baselines instead of
+    // adding its own delta for the same shift.
+    if (Math.abs(delta) >= 1) { noteAbsoluteScrollSeat(); el.scrollTop += delta; stable = 0; }
     else stable++;
     // Don't bail on the first zero-delta: the rows ABOVE the anchor start
     // as 100px `content-visibility` placeholders and render to real height
@@ -218,6 +221,188 @@ export function restoreDomAnchor(anchor: { key: string; offsetPx: number }): boo
 let lastUserGestureAt = 0;
 export function lastUserScrollGestureAt(): number { return lastUserGestureAt; }
 export function cancelPendingScrollRestores(): void { _restoreAnchorGen++; }
+
+/** ── [scroll-jump] Relative settle compensator (field 2026-07-27) ──────
+ *  "when I'm scrolling in sessions the scroll often JUMPS … goes away
+ *  when everything is loaded."
+ *
+ *  The app leans on the browser's native CSS scroll anchoring
+ *  (`overflow-anchor: auto`, styles/app.css "our scroll-jump fix") to keep
+ *  the viewport stable while content ABOVE it changes height — which it
+ *  does constantly during scroll-up backfill: `.line` rows start as 100px
+ *  `contain-intrinsic-size` placeholders and settle to real heights as
+ *  they become render-relevant, churning scrollHeight ±30–105px/frame.
+ *  iOS WKWebView (the CAP app — the field platform) implements NO CSS
+ *  scroll anchoring, and the one app-level compensator on this path
+ *  (prependHistory → restoreDomAnchor) is an ABSOLUTE re-seat whose
+ *  convergence loop is gesture-cancelled (#202) — correct for
+ *  saved-position restores, dead for the whole momentum fling. Every
+ *  settle above the viewport then lands uncompensated: 53–104px eye-level
+ *  jumps, repeatedly, until every row has rendered once (measured 19×/run
+ *  by scripts/scroll-jump-diag-harness.mjs --no-anchor; 0× with Chromium
+ *  anchoring on).
+ *
+ *  This loop is the RELATIVE compensator that survives gestures: track
+ *  the first-visible bubble's CONTENT-SPACE offset (rect.top − transcript
+ *  rect.top + scrollTop — pure layout, unchanged by any scrolling); when
+ *  it moves by d, content above the viewport changed height, so apply
+ *  scrollTop += d. Relative deltas compose with concurrent user scrolling
+ *  — user input changes scrollTop, never a bubble's content offset — so
+ *  unlike restoreDomAnchor this loop must NOT be gesture-cancelled;
+ *  that's the whole point.
+ *
+ *  Interplay (don't fight the existing scroll owners):
+ *   - Native anchoring: the correction is applied ONLY while the
+ *     transcript's effective `overflow-anchor` is none (WebKit — or the
+ *     harness emulating it). Under Chromium's anchoring the browser has
+ *     ALREADY moved scrollTop by d when we'd measure, so adding our own d
+ *     would double-compensate (content offset is layout truth and shifts
+ *     by d regardless of who fixed scrollTop). Gated per-frame on
+ *     computed style, not a boot-time capability check, so the harness's
+ *     injected `overflow-anchor: none` engages it on Chromium too.
+ *   - Pinned-to-bottom: while pinned AT the live edge, bottom-following
+ *     (autoScroll / forceScrollToBottom / at-bottom repin) is the desired
+ *     behavior and owns scrollTop — the loop stands down there and
+ *     re-arms on the next transcript gesture / unpinned scroll. The
+ *     stand-down is the LITERAL bottom edge (≤8px), not the generous
+ *     300px pinned flag: a wheel-up's first ~300px keeps the flag true,
+ *     and the near-tail placeholders settling right at drive start were
+ *     the one jump that survived the flag-gated version (smoke, t≈150ms
+ *     into the drive). Off the edge, compensating composes fine with
+ *     bottom-following — its writes are scroll-only and never move a
+ *     bubble's content offset, so they can't trigger us.
+ *   - Absolute re-seats (restoreDomAnchor step writes, prependHistory's
+ *     scrollHeight-diff fallback, drillScrollTo's target seat): each one
+ *     bumps a generation via noteAbsoluteScrollSeat(); the first
+ *     correction that observes a new generation ADOPTS the current layout
+ *     as its new baseline instead of adding its own delta — the seat
+ *     already accounted for the shift. One-shot: the very next settle is
+ *     compensated again (a fixed time window here would eat the settle
+ *     burst that follows a prepend and let jumps through).
+ *   - Drill anchor defense (holdUnpinnedFor window): drillScrollTo's
+ *     MO/RO/poll re-seats a SPECIFIC target at a fixed offset for
+ *     DRILL_SETTLE_MS — same horizon as the unpinned hold — so while the
+ *     hold is live the loop only re-baselines. A user gesture clears the
+ *     hold AND stands the drill defense down, handing settles to us.
+ *
+ *  Corrections run from a ResizeObserver on the rows (fires post-layout,
+ *  pre-paint — the settle is corrected in the SAME rendering update, so
+ *  neither the user nor a rAF sampler ever sees the shifted frame) with a
+ *  per-frame rAF tick as backstop + anchor/baseline maintenance. Writes
+ *  go through el.scrollTop and are therefore visible to the [scroll-write]
+ *  debug trace; each correction also emits a [scroll-jump] diag line. */
+const NATIVE_ANCHORING_SUPPORTED =
+  typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
+  && CSS.supports('overflow-anchor: auto');
+
+let _absoluteSeatGen = 0;
+/** Called by every ABSOLUTE scroll re-seat that compensates a layout shift
+ *  itself (restoreDomAnchor, prependHistory fallback, drillScrollTo). The
+ *  settle compensator re-baselines instead of double-correcting the shift
+ *  that seat already absorbed. Scroll-only writes (autoScroll, saved
+ *  scrollTop restores) never need this — they don't change any bubble's
+ *  content offset, so the compensator is inherently a no-op for them. */
+export function noteAbsoluteScrollSeat(): void { _absoluteSeatGen++; }
+
+let settleCompensatorRunning = false;
+function ensureSettleCompensator(): void {
+  if (settleCompensatorRunning || !transcriptEl) return;
+  if (typeof requestAnimationFrame === 'undefined') return;
+  const el = transcriptEl;
+  settleCompensatorRunning = true;
+
+  /** Bottom-follow owns the viewport only when the user is pinned AND the
+   *  scrollbar is at the literal edge — there the browser's own clamp
+   *  keeps the tail anchored and a compensation write could pull the view
+   *  up off the live edge. Everywhere else (including pinned-but-300px-up)
+   *  the reading position is the thing to defend. */
+  const bottomFollowOwns = (): boolean =>
+    pinnedToBottom && el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+
+  let anchorEl: HTMLElement | null = null;
+  let anchorContentY = 0;
+  let seatGenSeen = _absoluteSeatGen;
+  // Refreshed once per rAF tick; RO callbacks between ticks reuse it.
+  let nativeAnchoringActive = NATIVE_ANCHORING_SUPPORTED;
+
+  /** Layout-truth offset of a row: scroll-independent, so user input can
+   *  never masquerade as a settle (and vice versa). */
+  const contentYOf = (node: HTMLElement): number =>
+    node.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+
+  const pickAnchor = (): void => {
+    anchorEl = null;
+    const ct = el.getBoundingClientRect().top;
+    for (const line of Array.from(el.querySelectorAll('.line[data-key]')) as HTMLElement[]) {
+      const r = line.getBoundingClientRect();
+      if (r.bottom > ct + 1) { anchorEl = line as HTMLElement; break; }
+    }
+    if (anchorEl) anchorContentY = contentYOf(anchorEl);
+  };
+
+  const correct = (src: string): void => {
+    if (transcriptEl !== el || nativeAnchoringActive) return;
+    if (!anchorEl || !anchorEl.isConnected) { pickAnchor(); return; }
+    const y = contentYOf(anchorEl);
+    if (bottomFollowOwns()) {
+      // The at-bottom clamp already absorbed this shift — sanction it, so
+      // a wheel-up in the next frame can't get it applied a second time.
+      anchorContentY = y;
+      return;
+    }
+    if (seatGenSeen !== _absoluteSeatGen || Date.now() < unpinnedHoldUntil) {
+      // An absolute seat / drill defense owns this shift — adopt, don't add.
+      seatGenSeen = _absoluteSeatGen;
+      anchorContentY = y;
+      return;
+    }
+    const d = y - anchorContentY;
+    if (Math.abs(d) >= 1) {
+      el.scrollTop += d;
+      anchorContentY = y;
+      diag(`[scroll-jump] settle-compensate d=${Math.round(d)} src=${src} anchor=${(anchorEl.getAttribute('data-key') || '').slice(0, 24)}`);
+    }
+  };
+
+  // RO on every row: a content-visibility placeholder settling to real
+  // height is a border-box change on that .line; the callback runs after
+  // layout in the same rendering update, so the correction is painted
+  // atomically with the settle. (The transcript's own box never changes —
+  // observing rows, not the scroller, is load-bearing.)
+  const observed = new WeakSet<Element>();
+  const ro = typeof ResizeObserver !== 'undefined'
+    ? new ResizeObserver(() => correct('ro'))
+    : null;
+
+  const tick = () => {
+    if (transcriptEl !== el || bottomFollowOwns()) {
+      // Back at the live edge (or torn down): bottom-following owns the
+      // viewport; the resting state costs nothing. Gestures / unpinned
+      // scrolls / mid-chat restores re-arm us.
+      settleCompensatorRunning = false;
+      ro?.disconnect();
+      return;
+    }
+    nativeAnchoringActive = NATIVE_ANCHORING_SUPPORTED
+      && getComputedStyle(el).getPropertyValue('overflow-anchor') !== 'none';
+    if (nativeAnchoringActive) {
+      // Browser owns settle compensation; drop state so a later flip to
+      // `none` (harness emulation) re-baselines fresh instead of applying
+      // a stale delta.
+      anchorEl = null;
+    } else {
+      correct('raf');   // backstop for shifts the RO can't see (node inserts)
+      if (ro) {
+        for (const line of Array.from(el.querySelectorAll('.line'))) {
+          if (!observed.has(line)) { observed.add(line); ro.observe(line); }
+        }
+      }
+      pickAnchor();     // follow the user's reading position frame-to-frame
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
 
 /** #227: true when the on-screen transcript is NOT a clean tail-anchored
  *  view — either a floating deep `around` window (hasMoreNewer) or a
@@ -499,6 +684,9 @@ export function isPinnedToBottom(): boolean {
 export function setPinnedToBottom(v: boolean): void {
   if (v) unpinnedHoldUntil = 0; // explicit re-pin overrides any drill hold
   pinnedToBottom = v;
+  // A mid-chat restore unpins without any scroll event having fired yet —
+  // arm the settle compensator here too, not just in the scroll listener.
+  if (!v) ensureSettleCompensator();
   updateButton();
 }
 
@@ -512,6 +700,10 @@ export function setPinnedToBottom(v: boolean): void {
 export function holdUnpinnedFor(ms: number): void {
   unpinnedHoldUntil = Date.now() + ms;
   pinnedToBottom = false;
+  // Unpinned by a drill: run the compensator loop (it only re-baselines
+  // while the hold is live — the drill defense owns the viewport — and
+  // takes over the instant the hold clears / a gesture releases it).
+  ensureSettleCompensator();
   updateButton();
 }
 
@@ -646,6 +838,10 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
       const wasPinned = pinnedToBottom;
       pinnedToBottom = Date.now() < unpinnedHoldUntil ? false : isPinned();
       if (pinnedToBottom && !wasPinned) missedWhileScrolled = 0;
+      // Off the live edge → the settle compensator guards the reading
+      // position (no-op where native scroll anchoring is active; see its
+      // header). Idempotent — cheap to call on every unpinned scroll.
+      if (!pinnedToBottom) ensureSettleCompensator();
       updateButton();
     }, { passive: true });
     // #202: real input events (NOT 'scroll', which JS writes also fire)
@@ -655,6 +851,13 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
         lastUserGestureAt = Date.now();
         unpinnedHoldUntil = 0; // user reclaims the scroll — drop any drill hold
         cancelPendingScrollRestores();
+        // Arm the settle compensator on the GESTURE, not the later unpin
+        // flip: the first wheel ticks of a scroll-up stay inside the
+        // generous pinned threshold, and near-tail placeholders settling
+        // in exactly that window were the one jump the unpin-armed
+        // version let through. Gesture-cancelling restores + arming the
+        // gesture-immune compensator here is the #202 handoff.
+        ensureSettleCompensator();
       }, { passive: true });
     }
     // #214 TFC-E: lazy-load NEWER on a pull-up gesture at the bottom of a
@@ -1455,6 +1658,9 @@ export function prependHistory(renderFn: () => void) {
   const oldScrollHeight = transcriptEl.scrollHeight;
   renderFn();
   if (!(anchor && restoreDomAnchor(anchor))) {
+    // scrollHeight-diff fallback is itself an absolute compensation for
+    // the prepend's layout shift — re-baseline the settle compensator.
+    noteAbsoluteScrollSeat();
     transcriptEl.scrollTop = oldScrollTop + (transcriptEl.scrollHeight - oldScrollHeight);
   }
   persist();
