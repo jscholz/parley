@@ -1133,7 +1133,99 @@ function repaintSessionsLocal(): void {
 }
 
 /** Re-render the visible session list with the current filter applied. */
+// ── Tap-gesture rebuild hold (field bug 2026-07: "first click misses")
+//
+// renderList's full rebuild does innerHTML='' — every <li> replaced.
+// If that lands INSIDE a tap gesture (between pointerdown and
+// pointerup), the browser cancels the click outright: Chromium drops a
+// click whose mousedown target was detached (probed: it fires on
+// NOTHING — not the replacement node, not the <ul>, so even event
+// delegation can't catch it), and iOS Safari drops the synthesized
+// click when the touchstart target is detached. The user's tap simply
+// vanishes; the second tap (DOM now stable) works — hence the
+// habitual double-tap. Rebuilds cluster exactly around first-tap
+// moments: the slow server list landing after the drawer opens, the
+// badge refresh landing ~1.5s after foregrounding, unread-first
+// re-sorts on any unread change.
+//
+// The hold: while a pointer is down on a row, destructive rebuilds
+// DEFER (in-place patches — .active toggles, unread chips — stay
+// live; they don't detach nodes). Released after the gesture's click
+// has dispatched (the click-capture listener schedules a 0ms timer,
+// which runs on the task AFTER the click's synchronous handlers —so
+// the tap's own unread-clear resort also lands after resume() is
+// dispatched), with a pointerup/-cancel grace for gestures that never
+// produce a click (scroll pans, drags) and a max-hold backstop for
+// lost pointerups. Same gesture-yield shape as pinDragActive above /
+// chat.ts holdUnpinnedFor.
+let tapGestureWired = false;
+let tapGestureHeld = false;
+let tapGestureRebuildDeferred = false;
+let tapGestureReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+const TAP_GESTURE_MAX_HOLD_MS = 1_500;      // lost pointerup backstop
+const TAP_GESTURE_RELEASE_GRACE_MS = 350;   // pointerup → trailing click window
+
+/** True (and remembers a flush is owed) when a destructive rebuild must
+ *  wait for the in-progress row gesture to end. Call at every site that
+ *  is about to replace the list's <li> nodes. */
+function deferRebuildDuringTapGesture(): boolean {
+  if (!tapGestureHeld) return false;
+  tapGestureRebuildDeferred = true;
+  return true;
+}
+
+function releaseTapGestureHold(): void {
+  if (tapGestureReleaseTimer != null) {
+    clearTimeout(tapGestureReleaseTimer);
+    tapGestureReleaseTimer = null;
+  }
+  if (!tapGestureHeld) return;
+  tapGestureHeld = false;
+  if (tapGestureRebuildDeferred) {
+    tapGestureRebuildDeferred = false;
+    // Re-derive from current state rather than replaying stale args —
+    // the deferred rebuild may itself be superseded by what the tap
+    // changed (unread cleared, optimistic active moved).
+    const listEl = document.getElementById('sessions-list');
+    if (listEl) renderListFiltered(listEl, activeRowId());
+  }
+}
+
+function scheduleTapGestureRelease(ms: number): void {
+  if (tapGestureReleaseTimer != null) clearTimeout(tapGestureReleaseTimer);
+  tapGestureReleaseTimer = setTimeout(() => {
+    tapGestureReleaseTimer = null;
+    releaseTapGestureHold();
+  }, ms);
+}
+
+function installTapGestureGuard(listEl: HTMLElement): void {
+  if (tapGestureWired) return;
+  tapGestureWired = true;
+  if (typeof window === 'undefined') return;
+  listEl.addEventListener('pointerdown', (ev: Event) => {
+    const t = ev.target as HTMLElement | null;
+    if (!t?.closest?.('li[data-chat-id]')) return;
+    tapGestureHeld = true;
+    scheduleTapGestureRelease(TAP_GESTURE_MAX_HOLD_MS);
+  }, true);
+  // pointerup can land outside the list (drag out and release) and a
+  // pan converts to pointercancel — window-level, capture, so the hold
+  // always drains. The grace keeps the hold across the up→click gap.
+  const endSoon = () => { if (tapGestureHeld) scheduleTapGestureRelease(TAP_GESTURE_RELEASE_GRACE_MS); };
+  window.addEventListener('pointerup', endSoon, true);
+  window.addEventListener('pointercancel', endSoon, true);
+  // The gesture's own click ends the hold — on a FRESH task (0ms timer),
+  // so the row's click handler (and the resort its unread-clear
+  // triggers) runs to completion first, then the deferred rebuild
+  // flushes.
+  listEl.addEventListener('click', () => {
+    if (tapGestureHeld) scheduleTapGestureRelease(0);
+  }, true);
+}
+
 function renderListFiltered(listEl: HTMLElement, activeId: string) {
+  installTapGestureGuard(listEl);
   // Strip recently-deleted ids before merge. cachedSessions can briefly
   // include a deleted id when an in-flight pre-delete listSessions fetch
   // resolves AFTER our delete + cache patch — its response overwrites
@@ -1159,10 +1251,12 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   // the generic "No past sessions yet." so the user knows it's the filter
   // (not an empty server) hiding everything.
   if (filtered.length === 0 && meetingsOnly && merged.length > 0) {
+    if (deferRebuildDuringTapGesture()) return;
     listEl.innerHTML = '<li class="sess-empty">No sessions with recordings yet.</li>';
     return;
   }
   if (filtered.length === 0 && currentFilter && merged.length > 0) {
+    if (deferRebuildDuringTapGesture()) return;
     listEl.innerHTML = '<li class="sess-empty">No matches.</li>';
     return;
   }
@@ -1279,6 +1373,13 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
     }
     return;
   }
+
+  // Rows changed → this call would rebuild (innerHTML='' below). While
+  // a pointer is down on a row that would cancel the user's click —
+  // defer; the tap-gesture guard flushes a fresh render at gesture end.
+  // (The tier-2 active patch above stays live during the hold: class
+  // toggles don't detach the node under the finger.)
+  if (deferRebuildDuringTapGesture()) return;
 
   if (sessions.length === 0 && !showPlaceholder) {
     listEl.innerHTML = '<li class="sess-empty">No past sessions yet.</li>';
