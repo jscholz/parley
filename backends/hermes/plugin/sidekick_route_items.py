@@ -89,6 +89,20 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
                 _sstate.reconcile_from_state_db,
                 adapter._sidekick_db, adapter._state_db_path, chat_id, source,
             )
+            # Transcript v3 Phase 2 (dark): one-time legacy import +
+            # migration marker for this chat. Runs BEFORE the compare
+            # so the sweep judges post-heal links (the pre-fix
+            # status-bubble mislinks it heals were exactly the stale
+            # diverge noise). One indexed marker lookup once migrated;
+            # serving is untouched until Phase 3 consults the marker.
+            # No-op when SIDEKICK_CHAT_MIGRATION=0.
+            from . import sidekick_chat_migration as _migration  # noqa: WPS433
+            if _migration.enabled() and adapter._sidekick_db is not None:
+                await _perf.run_in_sidekick_worker(
+                    _migration.backfill_chat_sync,
+                    adapter._sidekick_db, adapter._state_db_path,
+                    chat_id, source,
+                )
             # Transcript v3 Phase 1 (dark launch): diff the turn
             # linker's shadow links against the reconcile pass that
             # just ran and emit one linker-soak journal line per chat

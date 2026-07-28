@@ -72,8 +72,49 @@ _close_tasks: Set["asyncio.Task"] = set()
 
 # Per-chat high-water mark of already-compared observations
 # (closed_at). compare_and_log only reports NEW turns / divergences so
-# the soak line doesn't spam every items poll.
+# the soak line doesn't spam every items poll. Process-level CACHE
+# only — the durable copy lives in sidekick.db linker_compare_state
+# (see _load_compare_hwm): in-memory-only marks reset on every gateway
+# restart, so compare re-swept full history and re-WARNed stale
+# pre-fix links forever (2026-07-28 re-soak forensics).
 _compare_hwm: Dict[str, float] = {}
+
+
+def _load_compare_hwm(db, chat_id: str) -> float:
+    """Compared-through mark for one chat: process cache first, then
+    the durable linker_compare_state row (0.0 for a never-compared
+    chat)."""
+    cached = _compare_hwm.get(chat_id)
+    if cached is not None:
+        return cached
+    hwm = 0.0
+    try:
+        row = db.fetchone(
+            "SELECT compared_through FROM linker_compare_state WHERE chat_id = ?",
+            (chat_id,),
+        )
+        if row and row["compared_through"] is not None:
+            hwm = float(row["compared_through"])
+    except Exception:
+        pass
+    _compare_hwm[chat_id] = hwm
+    return hwm
+
+
+def _store_compare_hwm(db, chat_id: str, value: float) -> None:
+    """Durable write-through of the compare mark. The MAX() guard keeps
+    a stale writer from ever moving the mark backwards."""
+    _compare_hwm[chat_id] = value
+    try:
+        db.exec(
+            "INSERT INTO linker_compare_state (chat_id, compared_through) "
+            "VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET "
+            "compared_through = MAX(linker_compare_state.compared_through, "
+            "excluded.compared_through)",
+            (chat_id, value),
+        )
+    except Exception:
+        pass
 
 
 def enabled() -> bool:
@@ -748,7 +789,7 @@ def compare_and_log(
     """
     if not enabled():
         return None
-    hwm = _compare_hwm.get(chat_id, 0.0)
+    hwm = _load_compare_hwm(db, chat_id)
     cutoff = closed_before if closed_before is not None else time.time()
     try:
         obs_rows = db.fetchall(
@@ -763,7 +804,7 @@ def compare_and_log(
     if not obs_rows:
         return None
 
-    agree = diverge = linker_only = reconcile_only = gap_rows = 0
+    agree = diverge = linker_only = reconcile_only = gap_rows = dup_call = 0
     first_detail = ""
     for o in obs_rows:
         try:
@@ -819,6 +860,17 @@ def compare_and_log(
                     agree += 1
                 elif recon is None:
                     linker_only += 1
+                elif _same_tool_call_id(state_db_path, arid, recon):
+                    # Superseded-by-compaction: state.db holds BOTH the
+                    # original tool row (active=0 compacted=1) and the
+                    # re-flush copy under ONE tool_call_id; reconcile
+                    # prefers the re-flushed copy while the linker's
+                    # append-only claim named the original. Row
+                    # identity migrated under compaction — agreement,
+                    # not divergence (54 of the 82 divergences in the
+                    # 2026-07-28 re-soak were this class).
+                    agree += 1
+                    dup_call += 1
                 else:
                     diverge += 1
                     if not first_detail:
@@ -875,15 +927,20 @@ def compare_and_log(
             _compare_hwm.get(chat_id, 0.0), float(o["closed_at"]),
         )
 
+    # One durable write per sweep (not per observation) — the loop
+    # above advanced the in-memory mark; restarts resume from here.
+    _store_compare_hwm(db, chat_id, _compare_hwm.get(chat_id, 0.0))
+
     counts = {
         "turns": len(obs_rows), "agree": agree, "diverge": diverge,
         "linker_only": linker_only, "reconcile_only": reconcile_only,
-        "gap_rows": gap_rows,
+        "gap_rows": gap_rows, "dup_call": dup_call,
     }
     line = (
         f"[sidekick] linker-soak chat={chat_id} turns={counts['turns']} "
         f"agree={agree} diverge={diverge} linker_only={linker_only} "
-        f"reconcile_only={reconcile_only} gap_rows={gap_rows}{first_detail}"
+        f"reconcile_only={reconcile_only} gap_rows={gap_rows} "
+        f"dup_call={dup_call}{first_detail}"
     )
     # Soak lines go to stderr in the perf-trace style: the gateway's
     # stdlib logging handler drops sub-WARNING records, so a
@@ -903,6 +960,27 @@ def compare_and_log(
             chat_id, diverge, first_detail,
         )
     return counts
+
+
+def _same_tool_call_id(state_db_path, arid_a, arid_b) -> bool:
+    """True when both state rows exist and carry the SAME non-empty
+    tool_call_id — the superseded-by-compaction shape (original +
+    re-flush copy of one tool call). Content is deliberately not
+    consulted: the compressor rewrites replayed tool results."""
+    if state_db_path is None:
+        return False
+    try:
+        with contextlib.closing(_connect_state_ro(state_db_path)) as conn:
+            rows = conn.execute(
+                "SELECT id, tool_call_id FROM messages WHERE id IN (?, ?)",
+                (arid_a, arid_b),
+            ).fetchall()
+    except Exception:
+        return False
+    if len(rows) != 2:
+        return False
+    call_ids = [r["tool_call_id"] or "" for r in rows]
+    return bool(call_ids[0]) and call_ids[0] == call_ids[1]
 
 
 def _divergence_detail(state_db_path, msg_id, linker_arid, recon_arid) -> str:
@@ -935,9 +1013,15 @@ def purge_chat_sync(db, chat_id: str) -> int:
     thread) — without it, a deleted chat leaves orphan observations /
     claims that the compare sweep keeps judging against an empty
     session chain (v3 soak forensics: dead chats polluted the
-    counters). Best-effort per table; returns rows removed."""
+    counters). Phase-2 state rides the same cascade: the durable
+    compare mark and the migration marker must die with the chat so a
+    re-created chat_id re-compares / re-migrates from scratch.
+    Best-effort per table; returns rows removed."""
     removed = 0
-    for table in ("turn_links", "turn_observations"):
+    for table in (
+        "turn_links", "turn_observations",
+        "linker_compare_state", "chat_migrations",
+    ):
         try:
             cur = db.exec(f"DELETE FROM {table} WHERE chat_id = ?", (chat_id,))
             removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0

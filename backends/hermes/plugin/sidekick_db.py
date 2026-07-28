@@ -201,6 +201,33 @@ CREATE TABLE IF NOT EXISTS turn_observations (
   PRIMARY KEY (chat_id, turn_id)
 );
 
+-- ── Transcript v3 Phase 2 — backfill + chat migration marker ─────────
+-- chat_migrations: one durable row per chat whose pre-write-through
+-- history has been imported into msg_links (every live state.db chain
+-- row linked or legacy:<id>-imported) and healed of pre-fix
+-- orchestration mislinks. Phase 3's read flip (SIDEKICK_ITEMS_V3)
+-- serves sidekick.db bodies ONLY for chats holding a row at the
+-- current schema_version — see sidekick_chat_migration.py for the
+-- mint criteria ("cleanly"). stats is the JSON audit snapshot taken
+-- at mint time (state_rows/linked/unresolved/mislinks_healed/…).
+CREATE TABLE IF NOT EXISTS chat_migrations (
+  chat_id         TEXT PRIMARY KEY,
+  migrated_at     REAL NOT NULL,
+  schema_version  INTEGER NOT NULL,
+  stats           TEXT
+);
+
+-- linker_compare_state: durable per-chat compared-through mark
+-- (turn_observations.closed_at watermark) for the Phase-1 soak sweep.
+-- The in-memory _compare_hwm dies with the process, so every gateway
+-- restart re-swept full history and re-WARNed already-judged stale
+-- links forever (2026-07-28 re-soak forensics — the standing
+-- diverge=0 alert bar was unusable).
+CREATE TABLE IF NOT EXISTS linker_compare_state (
+  chat_id           TEXT PRIMARY KEY,
+  compared_through  REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pins (
   chat_id    TEXT NOT NULL,
   msg_id     TEXT NOT NULL,

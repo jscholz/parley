@@ -679,7 +679,7 @@ def test_compare_and_log_agreement(db, state_db, capsys):
     counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
     assert counts == {
         "turns": 1, "agree": 2, "diverge": 0,
-        "linker_only": 0, "reconcile_only": 0, "gap_rows": 0,
+        "linker_only": 0, "reconcile_only": 0, "gap_rows": 0, "dup_call": 0,
     }
     # Clean lines ride the perf-trace stderr channel — the gateway's
     # stdlib handler drops sub-WARNING records, so logger.info soak
@@ -891,6 +891,61 @@ def test_gap_window_compaction_flag(db, state_db):
     assert len(plain_gaps) == 1
     plain_flags = json.loads(plain_gaps[0]["flags"] or "{}")
     assert "compaction_flush" not in plain_flags.get("flags", [])
+
+
+def test_compare_hwm_persists_across_restart(db, state_db, capsys):
+    """(2026-07-28 re-soak) The in-memory _compare_hwm dies with the
+    process, so every gateway restart re-swept full history and
+    re-WARNed already-judged stale links forever — the standing
+    diverge=0 alert bar was unusable. The per-chat compared-through
+    mark must be durable in sidekick.db."""
+    _seed_compared_turn(db, state_db, reconcile_agrees=True)
+    assert linker.compare_and_log(db, CHAT_ID, state_db_path=state_db) is not None
+    capsys.readouterr()
+    # Simulated gateway restart: the process cache is gone; the durable
+    # mark must keep the already-compared turn out of the sweep.
+    linker._compare_hwm.clear()
+    assert linker.compare_and_log(db, CHAT_ID, state_db_path=state_db) is None
+    assert "linker-soak" not in capsys.readouterr().err
+
+
+def test_compare_same_tool_call_id_counts_agreement(db, state_db, caplog):
+    """(2026-07-28 re-soak) hermes compaction re-flushes a COPY of a
+    tool row under the SAME tool_call_id (original kept, active=0
+    compacted=1). Reconcile points the tr: msg at the re-flushed copy
+    while the linker's append-only claim names the original — row
+    identity migrated under compaction, neither side is wrong. Same-
+    call-id claims must count as agreement (54 of the 82 forensic
+    divergences were this class)."""
+    linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_dc1", user_text="go")
+    u = _add_msg(state_db, "user", "go", 100.0)
+    orig = _add_msg(state_db, "tool", "result", 101.0, tool_call_id="cD")
+    f = _add_msg(state_db, "assistant", "done", 102.0)
+    linker._close_sync(
+        db, state_db, CHAT_ID, SRC,
+        {"type": "reply_final", "message_id": "msg_dc1"},
+        entry_snapshot=_snap("umsg_dc1", "go", "msg_dc1", {"cD"}),
+    )
+    # Compaction re-flush AFTER the window closed: a summarized copy of
+    # the tool row re-appended under the same call id; reconcile's
+    # call-id linking prefers the re-flushed copy.
+    copy = _add_msg(state_db, "tool", "result (summarized)", 200.0,
+                    tool_call_id="cD")
+    state.upsert_msg_link(db, id="umsg_dc1", chat_id=CHAT_ID, role="user",
+                          content="go", agent_row_id=str(u))
+    state.upsert_msg_link(db, id="msg_dc1", chat_id=CHAT_ID, role="assistant",
+                          content="done", agent_row_id=str(f))
+    state.upsert_msg_link(db, id="tr:cD", chat_id=CHAT_ID, role="tool",
+                          content="result (summarized)", tool_call_id="cD",
+                          agent_row_id=str(copy))
+    with caplog.at_level(logging.WARNING, logger=linker.logger.name):
+        counts = linker.compare_and_log(db, CHAT_ID, state_db_path=state_db)
+    assert counts["diverge"] == 0, \
+        "same-tool_call_id claims are compaction-migrated identity, not divergence"
+    assert counts["dup_call"] == 1
+    assert counts["agree"] == 3
+    assert not caplog.records, "no linker-soak-diverge alert for this class"
+    assert orig is not None
 
 
 def test_delete_conversation_purges_turn_tables(db, state_db, monkeypatch):
