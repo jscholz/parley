@@ -1726,6 +1726,50 @@ def list_messages_after_for_chat_v3(
     }
 
 
+def _legacy_row_get(row, key, default=None):
+    """Field access for sqlite3.Row AND plain dicts, tolerating absent
+    columns (the linker's window rows don't select tool_name)."""
+    try:
+        if key in row.keys():
+            return row[key]
+    except AttributeError:
+        pass
+    return default
+
+
+def insert_legacy_twin(db, chat_id: str, row) -> bool:
+    """Insert the ``legacy:<state_id>`` msg_links twin for ONE state.db
+    row — THE single legacy-import representation. Reconcile's Pass 2,
+    the Phase-2 backfill (via reconcile), the Phase-4 linker's
+    orchestration mint, and the Phase-5 orphan-adopt all share this
+    shape so there is exactly one importer to reason about.
+
+    INSERT OR IGNORE keyed on the legacy id — idempotent by
+    construction. Returns True when a new row was actually written
+    (rowcount > 0), False when the twin already existed. sqlite errors
+    propagate; callers own their best-effort policy.
+    """
+    state_id = str(_legacy_row_get(row, "id"))
+    ts_raw = _legacy_row_get(row, "timestamp")
+    ts = float(ts_raw) if ts_raw is not None else time.time()
+    cur = db.exec(
+        "INSERT OR IGNORE INTO msg_links "
+        "(id, chat_id, role, content, kind, tool_name, tool_call_id, "
+        " tool_calls, created_at, updated_at, status, agent_row_id) "
+        "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?)",
+        (
+            f"legacy:{state_id}", chat_id,
+            _legacy_row_get(row, "role") or "",
+            _legacy_row_get(row, "content") or "",
+            _legacy_row_get(row, "tool_name"),
+            _legacy_row_get(row, "tool_call_id"),
+            _legacy_row_get(row, "tool_calls"),
+            ts, ts, state_id,
+        ),
+    )
+    return bool(cur.rowcount and cur.rowcount > 0)
+
+
 def reconcile_from_state_db(
     db, state_db_path, chat_id: str, source: str = "sidekick",
     *, force_full: bool = False,
@@ -2179,26 +2223,13 @@ def reconcile_from_state_db(
         if state_id in replay_dup_ids:
             dup_skipped += 1
             continue
-        sk_id = f"legacy:{state_id}"
-        ts = float(r["timestamp"]) if r["timestamp"] is not None else time.time()
-        # state.db's tool_calls column lives on assistant rows that
-        # orchestrated tool calls. Propagating it to sidekick.db means
-        # PWA projection's parseToolCalls() can populate tool-row
-        # names + args on reload — without this, reconciled chats
-        # render as "(unknown)" + args="{}".
-        tool_calls_raw = r["tool_calls"] if "tool_calls" in r.keys() else None
+        # Shared legacy-import representation (insert_legacy_twin) —
+        # state.db's tool_calls column rides along so the PWA
+        # projection's parseToolCalls() can populate tool-row names +
+        # args on reload; without it, reconciled chats render as
+        # "(unknown)" + args="{}".
         try:
-            db.exec(
-                "INSERT OR IGNORE INTO msg_links "
-                "(id, chat_id, role, content, kind, tool_name, tool_call_id, "
-                " tool_calls, created_at, updated_at, status, agent_row_id) "
-                "VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 'final', ?)",
-                (
-                    sk_id, chat_id, r["role"], r["content"] or "",
-                    r["tool_name"], r["tool_call_id"], tool_calls_raw,
-                    ts, ts, state_id,
-                ),
-            )
+            insert_legacy_twin(db, chat_id, r)
             inserted += 1
         except Exception:
             continue

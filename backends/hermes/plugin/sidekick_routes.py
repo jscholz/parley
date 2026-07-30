@@ -140,10 +140,78 @@ async def handle_push_health(ctx, request: web.Request) -> web.Response:
     count, and the dispatcher's rolling skip-counter snapshot. The
     proxy folds this into /api/sidekick/notifications/diagnostics so
     the PWA settings panel can surface 'pushes are disabled' without
-    journal access. (Push-outage audit, 2026-07-25.)"""
-    from .sidekick_dispatcher import build_push_health
+    journal access. (Push-outage audit, 2026-07-25.)
 
-    return _json({"push_health": build_push_health(ctx.db, ctx.dispatcher)})
+    ``transcript_health`` (transcript v3 Phase 5) rides the same
+    diagnostics surface: the divergence monitor's aggregate — degraded
+    chats, sweep coverage, migrated-chat count — so transcript drift is
+    visible without journal access, same pattern as push_health."""
+    from .sidekick_dispatcher import build_push_health
+    from .sidekick_transcript_monitor import build_transcript_health
+
+    return _json({
+        "push_health": build_push_health(ctx.db, ctx.dispatcher),
+        "transcript_health": build_transcript_health(ctx.db),
+    })
+
+
+# ── Transcript v3 diagnostics + repair (Phases 4/5) ──────────────────
+
+
+async def handle_transcript_health(ctx, request: web.Request) -> web.Response:
+    """GET /v1/transcript/health — the divergence monitor's aggregate
+    on its own path (also folded into /v1/push/health above)."""
+    from .sidekick_transcript_monitor import build_transcript_health
+
+    return _json({"transcript_health": build_transcript_health(ctx.db)})
+
+
+async def handle_transcript_repair(ctx, request: web.Request) -> web.Response:
+    """POST /v1/transcript/repair {chat_id} — the OFFLINE repair entry
+    point (transcript v3 Phase 4): force_full content reconcile +
+    re-audit + re-mint for ONE chat. Explicit and operator-triggered
+    only; O(history), so it runs on the bounded worker pool."""
+    from .sidekick_chat_migration import repair_chat_sync
+    from .sidekick_perf_trace import run_in_sidekick_worker
+
+    body = await _read_json(request)
+    chat_id = _strip_source_prefix(body.get("chat_id") or body.get("chatId"))
+    if not chat_id:
+        return _json({"error": "invalid_request", "message": "chat_id required"},
+                     status=400)
+    result = await run_in_sidekick_worker(
+        repair_chat_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
+    )
+    return _json({
+        "ok": bool(result and result.get("migrated")),
+        "chat_id": chat_id,
+        "result": result,
+    })
+
+
+async def handle_transcript_adopt(ctx, request: web.Request) -> web.Response:
+    """POST /v1/transcript/adopt-orphans {chat_id, confirm?} — the
+    orphan-adopt repair (transcript v3 Phase 5): import unlinked live
+    state rows as legacy:<id> twins. Assisted, never automatic —
+    without ``confirm: true`` this is a DRY RUN returning the
+    would-adopt candidate list; unmarked chats are refused (409, the
+    legacy reconcile path owns them)."""
+    from .sidekick_perf_trace import run_in_sidekick_worker
+    from .sidekick_transcript_monitor import adopt_orphans_sync
+
+    body = await _read_json(request)
+    chat_id = _strip_source_prefix(body.get("chat_id") or body.get("chatId"))
+    if not chat_id:
+        return _json({"error": "invalid_request", "message": "chat_id required"},
+                     status=400)
+    result = await run_in_sidekick_worker(
+        adopt_orphans_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
+        confirm=body.get("confirm") is True,
+    )
+    if not result.get("ok"):
+        status = 409 if result.get("error") == "chat_not_migrated" else 503
+        return _json(result, status=status)
+    return _json(result)
 
 
 async def handle_user_settings(ctx, request: web.Request) -> web.Response:
@@ -453,6 +521,10 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_get("/v1/push/health", lambda r: handle_push_health(ctx, r))
     app.router.add_post("/v1/push/visibility", lambda r: handle_visibility(ctx, r))
     app.router.add_post("/v1/push/test", lambda r: handle_test(ctx, r))
+
+    app.router.add_get("/v1/transcript/health", lambda r: handle_transcript_health(ctx, r))
+    app.router.add_post("/v1/transcript/repair", lambda r: handle_transcript_repair(ctx, r))
+    app.router.add_post("/v1/transcript/adopt-orphans", lambda r: handle_transcript_adopt(ctx, r))
 
     app.router.add_get("/v1/user-settings", lambda r: handle_user_settings(ctx, r))
     app.router.add_post("/v1/user-settings", lambda r: handle_user_settings(ctx, r))

@@ -146,15 +146,19 @@ CREATE TABLE IF NOT EXISTS replay_dups (
   PRIMARY KEY (chat_id, agent_row_id)
 );
 
--- ── Transcript v3 Phase 1 (dark launch) — turn-end deterministic linker ──
--- SHADOW tables only. The turn linker (sidekick_turn_linker.py) records
--- its envelope↔state.db-row decisions here so they can be soak-compared
--- against the content-matching reconcile's msg_links.agent_row_id
--- opinions in the journal. NOTHING reads these tables on a serving
--- path, and the linker never writes msg_links — writing agent_row_id
--- there would blind reconcile's independent opinion and un-dark the
--- launch. Phase 3 flips reads onto these links; until then they are
--- droppable at any time.
+-- ── Transcript v3 — turn-end deterministic linker tables ─────────────
+-- The turn linker (sidekick_turn_linker.py) records its
+-- envelope↔state.db-row decisions here. Phase 1 ran them DARK
+-- (soak-compared against the content reconcile's opinions, never
+-- touching msg_links). Since Phase 4 (SIDEKICK_RECONCILE_RETIRED,
+-- 2026-07-30) the linker is the real link writer for migrated chats:
+-- turn-close claims stamp msg_links.agent_row_id (and mint the
+-- orchestration legacy:<id> twins), so these tables are the durable
+-- provenance of every write-time link — the stamp precedence check
+-- ("never overwrite another linker claim") and Phase 5's divergence
+-- monitor (claimed-but-unrepresented detection) both read them. For
+-- UNMARKED chats the linker is still dark and reconcile stays
+-- authoritative.
 --
 -- turn_links: one row per state.db message row claimed by an observed
 -- turn. msg_id is the envelope-space id (umsg_*/msg_*/tr:<call_id>) or

@@ -26,10 +26,22 @@ Phase 1 is a dark launch:
     deliberately NOT required — hermes post-persist mutations like
     explainer footers made content matching the bug, not the fix).
   * Links land in SHADOW tables (``turn_links`` / ``turn_observations``,
-    see sidekick_db.py). The old content-matching reconcile stays fully
-    authoritative; ``compare_and_log`` diffs the two opinions after each
-    background reconcile and emits ONE ``linker-soak`` journal line per
-    chat with anything to report.
+    see sidekick_db.py). For unmarked chats the content-matching
+    reconcile stays authoritative and ``compare_and_log`` diffs the two
+    opinions after each background reconcile (ONE ``linker-soak``
+    journal line per chat with anything to report).
+
+Phase 4 (2026-07-30, ``SIDEKICK_RECONCILE_RETIRED``, default ON): for
+chats holding a current-version ``chat_migrations`` marker the linker
+is the REAL link writer — turn-close claims stamp
+``msg_links.agent_row_id`` directly (``_stamp_claims_sync``: linker
+claim fills NULL, wins over a reconcile-minted value, never overwrites
+another linker claim) and mint the orchestration ``legacy:<id>`` twins.
+The background chain (sidekick_route_items) retires the content
+reconcile for those chats; Phase 5's divergence monitor
+(sidekick_transcript_monitor) replaces both the reconcile safety net
+and the linker-soak compare there. Reconcile survives untouched as the
+offline repair tool (sidekick_chat_migration.repair_chat_sync).
 
 Interrupted turns are closed by the *next-turn-start barrier*
 (``flush_pending_capture``): opening a new watermark first captures any
@@ -123,6 +135,25 @@ def enabled() -> bool:
     return os.environ.get("SIDEKICK_TURN_LINKER", "1").strip().lower() not in (
         "0", "false", "no",
     )
+
+
+def reconcile_retired() -> bool:
+    """Transcript v3 Phase 4 flag: ``SIDEKICK_RECONCILE_RETIRED``,
+    default ON (approved 2026-07-30). While set, the linker is promoted
+    from dark shadow-writer to the REAL link writer: for migrated
+    ("marked") chats its turn-close claims stamp
+    ``msg_links.agent_row_id`` (and mint the orchestration rows'
+    ``legacy:<id>`` twins), and the background items-poll chain retires
+    the content reconcile for chats v3 actually serves — Phase 5's
+    divergence monitor takes reconcile's slot there.
+
+    Independently revertible: '0' restores the full Phase-3 posture
+    (reconcile maintains links, linker back to shadow tables only)
+    WITHOUT touching ``SIDEKICK_ITEMS_V3`` serving — the v3 read never
+    cares who wrote agent_row_id."""
+    return os.environ.get(
+        "SIDEKICK_RECONCILE_RETIRED", "1",
+    ).strip().lower() not in ("0", "false", "no")
 
 
 # ── Slash-command gate ────────────────────────────────────────────────
@@ -487,6 +518,96 @@ def _entry_snapshot(entry: Any) -> Optional[Dict[str, Any]]:
 
 # ── sync internals (worker thread only) ───────────────────────────────
 
+def _stamp_claims_sync(db, chat_id: str, claims, window_rows) -> Dict[str, int]:
+    """Phase 4 — the deterministic write-time link becomes the REAL
+    link: project one closed window's claims into ``msg_links`` for a
+    MARKED chat (callers gate on the marker + ``reconcile_retired()``).
+
+    Precedence, per claim (deliberate — see the Phase-4 plan):
+
+      * envelope link NULL → fill it (the steady-state write-through
+        case: the envelope row exists, the link doesn't yet);
+      * envelope link differs and the existing value is NOT a linker
+        claim for this envelope (no ``turn_links`` row pairs them) →
+        the value is reconcile-minted content inference — the
+        deterministic claim WINS and overwrites it;
+      * envelope link differs but ``turn_links`` shows an earlier
+        linker claim paired exactly (existing_row ↔ this envelope) →
+        NEVER overwrite another linker claim: first stamp stands;
+      * missing envelope row → skip. Write-through owns envelope
+        bodies; the stamp never invents one (decision memo 3 —
+        invisibility over invention). The divergence monitor flags the
+        resulting unrepresented row.
+      * orchestration claims (msg_id=None — no envelope exists by
+        construction) → mint the ``legacy:<id>`` twin via the SHARED
+        legacy-import representation (sidekick_state.insert_legacy_twin,
+        the same shape reconcile's Pass 2 / the backfill import mint).
+        Exact-id, zero content inference. Without this, every fresh
+        tool-using turn on a retired chat would lose its orchestration
+        row (the PWA's tool-name/args source on reload).
+
+    Returns counters (filled/overrode/kept/minted/skipped) for the
+    perf-trace breadcrumb. Worker thread only (sqlite writes)."""
+    from .sidekick_state import insert_legacy_twin  # noqa: WPS433
+
+    row_map = {str(_row_get(r, "id")): r for r in window_rows}
+    counts = {"filled": 0, "overrode": 0, "kept": 0, "minted": 0, "skipped": 0}
+    now = time.time()
+    for c in claims:
+        arid = str(c["agent_row_id"])
+        msg_id = c["msg_id"]
+        if msg_id is None:
+            row = row_map.get(arid)
+            if row is None:
+                counts["skipped"] += 1
+                continue
+            try:
+                if insert_legacy_twin(db, chat_id, row):
+                    counts["minted"] += 1
+            except Exception:
+                counts["skipped"] += 1
+            continue
+        link = db.fetchone(
+            "SELECT agent_row_id FROM msg_links WHERE id = ? AND chat_id = ?",
+            (msg_id, chat_id),
+        )
+        if link is None:
+            counts["skipped"] += 1
+            continue
+        existing = link["agent_row_id"]
+        if existing is not None and str(existing) == arid:
+            continue  # already the deterministic link — nothing to do.
+        if existing is not None:
+            prior = db.fetchone(
+                "SELECT msg_id FROM turn_links "
+                "WHERE chat_id = ? AND agent_row_id = ?",
+                (chat_id, str(existing)),
+            )
+            if prior is not None and prior["msg_id"] == msg_id:
+                counts["kept"] += 1  # an earlier linker claim owns this pair.
+                continue
+        try:
+            db.exec(
+                "UPDATE msg_links SET agent_row_id = ?, updated_at = ? "
+                "WHERE id = ?",
+                (arid, now, msg_id),
+            )
+            counts["overrode" if existing is not None else "filled"] += 1
+        except Exception:
+            counts["skipped"] += 1
+    return counts
+
+
+def _chat_is_marked(db, chat_id: str) -> bool:
+    """Current-SCHEMA_VERSION migration marker present? (Lazy import —
+    sidekick_chat_migration imports from this module at load time.)"""
+    from . import sidekick_chat_migration as _migration  # noqa: WPS433
+    try:
+        return _migration.get_migration(db, chat_id) is not None
+    except Exception:
+        return False
+
+
 def _capture_window_sync(
     db, state_db_path, chat_id: str, source: str, obs_row: Any,
     *, trigger: Optional[Dict[str, Any]], entry_snapshot: Optional[Dict[str, Any]],
@@ -546,6 +667,30 @@ def _capture_window_sync(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (chat_id, c["msg_id"], c["agent_row_id"], turn_id, c["method"], now),
         )
+    # Phase 4 (2026-07-30, SIDEKICK_RECONCILE_RETIRED): for marked
+    # chats the claims ALSO stamp msg_links — the deterministic
+    # write-time link is the real link now that the content reconcile
+    # no longer maintains it for these chats. Aborted windows stamp
+    # too (an interrupted turn's rows keep their liveness links);
+    # background/gap windows have no claims by design. Unmarked chats
+    # stay dark (reconcile owns their links until migration).
+    if result["claims"] and reconcile_retired() and _chat_is_marked(db, chat_id):
+        try:
+            stamped = _stamp_claims_sync(db, chat_id, result["claims"], rows)
+            if any(stamped.values()):
+                print(
+                    f"[perf-trace INFO] [sidekick] linker-stamp "
+                    f"chat={chat_id} turn={turn_id} "
+                    f"filled={stamped['filled']} minted={stamped['minted']} "
+                    f"overrode={stamped['overrode']} kept={stamped['kept']} "
+                    f"skipped={stamped['skipped']}",
+                    flush=True, file=sys.stderr,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[sidekick] linker-stamp failed chat=%s turn=%s: %s",
+                chat_id, turn_id, exc,
+            )
     flags_obj = dict(prev_flags)
     for key, value in (
         ("flags", result["flags"]),
@@ -1028,6 +1173,14 @@ def purge_chat_sync(db, chat_id: str) -> int:
         except Exception:
             continue
     _compare_hwm.pop(chat_id, None)
+    # Phase-5 monitor state dies with the chat too (a lingering entry
+    # would keep a deleted chat in the transcript_health diagnostics).
+    try:
+        from . import sidekick_transcript_monitor as _monitor  # noqa: WPS433
+        _monitor._health.pop(chat_id, None)
+        _monitor._warned.pop(chat_id, None)
+    except Exception:
+        pass
     return removed
 
 

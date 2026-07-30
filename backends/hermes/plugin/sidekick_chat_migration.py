@@ -493,3 +493,50 @@ def backfill_chat_sync(
         flush=True, file=sys.stderr,
     )
     return {"migrated": True, "already": False, **stats}
+
+
+def repair_chat_sync(
+    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+) -> Optional[Dict[str, Any]]:
+    """OFFLINE repair entry point — transcript v3 Phase 4. With the
+    content reconcile retired from the serving chain
+    (``SIDEKICK_RECONCILE_RETIRED``), this is the ONE deliberate place
+    it still runs: an operator-invoked (POST /v1/transcript/repair, or
+    script-called) full re-migration of a single damaged chat.
+
+    Sequence: drop the chat's marker (so the backfill can't
+    short-circuit) → mislink heals → force_full content reconcile (the
+    legacy import: relink by exact identity, re-import missing twins,
+    orphan-drop) → re-audit → re-mint iff provably clean. Everything
+    reuses ``backfill_chat_sync`` verbatim — repair IS a re-migration,
+    not a second code path. Worker thread only (O(history)).
+
+    Explicitly never automatic: nothing on any serving or background
+    path calls this. Returns the backfill outcome dict (marker
+    withheld + WARNed when the audit stays unclean), or a refusal dict
+    when the migration kill switch is off."""
+    if not enabled():
+        return {"migrated": False, "reason": "migration_disabled"}
+    if db is None or state_db_path is None:
+        return None
+    logger.warning(
+        "[sidekick] transcript-repair chat=%s starting — marker dropped, "
+        "force_full reconcile + re-audit + re-mint", chat_id,
+    )
+    try:
+        db.exec("DELETE FROM chat_migrations WHERE chat_id = ?", (chat_id,))
+    except Exception as exc:
+        logger.warning(
+            "[sidekick] transcript-repair chat=%s marker drop failed: %s",
+            chat_id, exc,
+        )
+        return {"migrated": False, "reason": "marker_drop_failed"}
+    result = backfill_chat_sync(db, state_db_path, chat_id, source)
+    logger.warning(
+        "[sidekick] transcript-repair chat=%s finished migrated=%s%s",
+        chat_id,
+        bool(result and result.get("migrated")),
+        "" if result and result.get("migrated")
+        else f" reason={result.get('reason') if result else 'disabled'}",
+    )
+    return result

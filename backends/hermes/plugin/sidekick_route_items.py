@@ -60,6 +60,13 @@ _reconcile_inflight: set = set()
 _reconcile_tasks: set = set()
 
 
+def _items_v3_flag() -> bool:
+    """SIDEKICK_ITEMS_V3 read-flip flag (Phase 3, B2 playbook)."""
+    return os.environ.get("SIDEKICK_ITEMS_V3", "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
 def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
     """Fire reconcile_from_state_db off the read path (see notes above).
     No-ops if a pass for this chat is already running."""
@@ -79,6 +86,42 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
 
     async def _run() -> None:
         try:
+            # Transcript v3 Phase 4 (2026-07-30): for chats v3 actually
+            # serves — SIDEKICK_ITEMS_V3 on + a current-version
+            # migration marker + SIDEKICK_RECONCILE_RETIRED (default
+            # on) — the content reconcile is RETIRED from this chain.
+            # Steady state is covered by write-through bodies + the
+            # turn linker's write-time links (it stamps
+            # msg_links.agent_row_id at turn close now); Phase 5's
+            # divergence monitor takes reconcile's slot here (alert
+            # only, no timers — same items-poll cadence + throttle) and
+            # replaces the linker-soak compare for these chats. The
+            # legacy chain below keeps running unchanged for unmarked
+            # chats — including the one-shot force_full legacy import
+            # inside the migration backfill — and is the instant revert
+            # path: flip SIDEKICK_RECONCILE_RETIRED=0 (or unset
+            # SIDEKICK_ITEMS_V3) and every chat is back on the Phase-3
+            # chain without touching serving. Reconcile itself survives
+            # as the offline repair tool
+            # (sidekick_chat_migration.repair_chat_sync).
+            from . import sidekick_chat_migration as _migration  # noqa: WPS433
+            from . import sidekick_turn_linker as _linker  # noqa: WPS433
+            if (
+                adapter._sidekick_db is not None
+                and _items_v3_flag()
+                and _linker.reconcile_retired()
+            ):
+                _marked = await _perf.run_in_sidekick_worker(
+                    _migration.get_migration, adapter._sidekick_db, chat_id,
+                )
+                if _marked is not None:
+                    from . import sidekick_transcript_monitor as _monitor  # noqa: WPS433
+                    await _perf.run_in_sidekick_worker(
+                        _monitor.sweep_chat_sync,
+                        adapter._sidekick_db, adapter._state_db_path,
+                        chat_id, source,
+                    )
+                    return
             # The turn linker's soak comparison (below) only judges
             # observations closed before reconcile started — a turn
             # closing DURING the pass would be diffed against stale
@@ -465,10 +508,11 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # OFF; flag on + unmarked (or stale-version) chat falls through to
     # the legacy read untouched. Per-chat automatic fallback; global
     # instant revert by unsetting SIDEKICK_ITEMS_V3 (B2 playbook). The
-    # background reconcile chain above keeps running unchanged — it is
-    # the linker-soak safety net (and the msg_links link maintainer)
-    # while v3 serves.
-    _v3_flag = os.environ.get("SIDEKICK_ITEMS_V3", "").strip().lower() in ("1", "true", "yes")
+    # background chain above runs the Phase-5 divergence monitor for
+    # chats this flag serves (Phase 4 retired the content reconcile
+    # there — the turn linker writes the links at turn close now) and
+    # the unchanged legacy chain for everything else.
+    _v3_flag = _items_v3_flag()
     _use_v3 = False
     if _v3_flag and adapter._sidekick_db is not None:
         from . import sidekick_chat_migration as _migration  # noqa: WPS433
