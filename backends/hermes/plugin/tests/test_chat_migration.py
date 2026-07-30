@@ -262,6 +262,163 @@ def test_backfill_preserves_legacy_twin_on_orchestration_row(db, state_db):
     assert str(_link(db, f"legacy:{orch}")["agent_row_id"]) == str(orch)
 
 
+# ── tr:/tc: wrong-call-id mislink heal (field 2026-07-29, bf6edbf4) ───
+#
+# Pre-fix content-fingerprint linking could zip a ``tr:<call_X>``
+# envelope onto the state row of a DIFFERENT call whose result content
+# happened to collide (live instance: tr:call_PZOY… → row 78913
+# carrying call_0T3z… while the true row 81447 existed). tool_call_ids
+# are unique per call by construction, so a tr:/tc: row whose linked
+# state row carries a different non-empty tool_call_id is a provable
+# mislink. Heal = NULL it; reconcile Pass 1.a relinks tr:* by exact
+# call id; tc:* stays unlinked by design.
+
+
+def _seed_two_tool_calls(state_db):
+    """The bf6edbf4 shape: two tool calls whose results are identical
+    strings — the exact collision that crossed the old fingerprint."""
+    u = _add_msg(state_db, "user", "check both", 100.0)
+    orch = _add_msg(state_db, "assistant", "", 101.0, tool_calls=_orch("cX", "cY"))
+    tx = _add_msg(state_db, "tool", '{"total_count": 0}', 102.0,
+                  tool_call_id="cX", tool_name="search_files")
+    ty = _add_msg(state_db, "tool", '{"total_count": 0}', 103.0,
+                  tool_call_id="cY", tool_name="search_files")
+    f = _add_msg(state_db, "assistant", "nothing found", 104.0)
+    return u, orch, tx, ty, f
+
+
+def test_backfill_heals_wrong_call_id_tr_mislink(db, state_db):
+    """tr:cY mislinked onto cX's state row → healed (NULLed) and
+    relinked by the follow-up reconcile to the row carrying cY. The
+    correctly-linked tr:cX is untouched."""
+    _, _, tx, ty, _ = _seed_two_tool_calls(state_db)
+    state.upsert_msg_link(
+        db, id="tr:cX", chat_id=CHAT_ID, role="tool",
+        content='{"total_count": 0}', tool_call_id="cX", agent_row_id=str(tx))
+    state.upsert_msg_link(
+        db, id="tr:cY", chat_id=CHAT_ID, role="tool",
+        content='{"total_count": 0}', tool_call_id="cY", agent_row_id=str(tx))
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is True, res
+    assert res["mislinks_healed"] == 1
+    assert str(_link(db, "tr:cX")["agent_row_id"]) == str(tx)
+    assert str(_link(db, "tr:cY")["agent_row_id"]) == str(ty)
+
+
+def test_backfill_heals_wrong_call_id_tc_mislink(db, state_db):
+    """A tc:* (call-args) row mislinked onto another call's state row is
+    the same provable class. tc:* has no state twin by design, so it
+    heals to NULL and STAYS unlinked."""
+    _, _, tx, _, _ = _seed_two_tool_calls(state_db)
+    state.upsert_msg_link(
+        db, id="tc:cY", chat_id=CHAT_ID, role="tool",
+        content='{"path": "x"}', tool_call_id="cY", agent_row_id=str(tx))
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is True, res
+    assert res["mislinks_healed"] == 1
+    assert _link(db, "tc:cY")["agent_row_id"] is None
+
+
+def test_wrong_call_id_mislink_counts_as_residual(db, state_db, monkeypatch):
+    """The audit must re-detect the class post-heal: with the heal
+    disabled, the mislink survives the import and the marker is
+    withheld (residual_mislinks != 0) — Phase 3 never flips onto a
+    store carrying a known-wrong link."""
+    _, _, tx, _, _ = _seed_two_tool_calls(state_db)
+    state.upsert_msg_link(
+        db, id="tr:cY", chat_id=CHAT_ID, role="tool",
+        content='{"total_count": 0}', tool_call_id="cY", agent_row_id=str(tx))
+    monkeypatch.setattr(
+        migration, "heal_tool_call_mislinks_sync", lambda *a, **k: 0)
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is False and res["reason"] == "not_clean"
+    assert res["residual_mislinks"] == 1
+    assert migration.get_migration(db, CHAT_ID) is None
+
+
+def test_backfill_heals_content_incompatible_mislinks(db, state_db):
+    """Pre-fix zips onto NON-orchestration rows (2026-07-30 flip-prep
+    sweep of live msg_links: 213 links across 32 chats — status
+    bubbles onto real assistant replies, /approve//steer envelopes
+    onto real user rows). The envelope content can never legitimately
+    be content-INCOMPATIBLE with its linked state row (compatibility
+    is the post-fix linker's own mint rule; exact-match links start
+    equal and hermes never updates content) — so incompatibility is
+    provable damage. Heal = NULL; the state row re-imports as its
+    legacy twin, the envelope serves as itself."""
+    u, orch, t, f = _seed_legacy_history(state_db)
+    state.upsert_msg_link(
+        db, id="msg_bubble2", chat_id=CHAT_ID, role="assistant",
+        content="⏳ Still working... (15 min elapsed)", agent_row_id=str(f))
+    state.upsert_msg_link(
+        db, id="umsg_cmd", chat_id=CHAT_ID, role="user",
+        content="/approve", agent_row_id=str(u))
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is True, res
+    assert res["mislinks_healed"] == 2
+    assert _link(db, "msg_bubble2")["agent_row_id"] is None
+    assert _link(db, "umsg_cmd")["agent_row_id"] is None
+    # The wrongly-claimed rows re-import with their true content.
+    assert str(_link(db, f"legacy:{u}")["agent_row_id"]) == str(u)
+    assert str(_link(db, f"legacy:{f}")["agent_row_id"]) == str(f)
+
+
+def test_content_compatible_drift_is_not_healed(db, state_db):
+    """Whitespace / truncation / post-edit drift stays linked — the heal
+    uses the SAME compatibility predicate the linker mints by, so only
+    pairings the current linker could never produce are touched."""
+    u, _, _, f = _seed_legacy_history(state_db)
+    state.upsert_msg_link(
+        db, id="umsg_ok", chat_id=CHAT_ID, role="user",
+        content="hello", agent_row_id=str(u))
+    state.upsert_msg_link(
+        db, id="msg_ok", chat_id=CHAT_ID, role="assistant",
+        content="done — and one more thing", agent_row_id=str(f))
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is True, res
+    assert res["mislinks_healed"] == 0
+    assert str(_link(db, "umsg_ok")["agent_row_id"]) == str(u)
+    assert str(_link(db, "msg_ok")["agent_row_id"]) == str(f)
+
+
+def test_content_mislink_counts_as_residual(db, state_db, monkeypatch):
+    """Audit-side re-detection: with the heal disabled the marker is
+    withheld — a known-wrong body never rides a read flip."""
+    u, _, _, _ = _seed_legacy_history(state_db)
+    state.upsert_msg_link(
+        db, id="umsg_cmd", chat_id=CHAT_ID, role="user",
+        content="/approve", agent_row_id=str(u))
+    monkeypatch.setattr(
+        migration, "heal_content_mislinks_sync", lambda *a, **k: 0)
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is False and res["reason"] == "not_clean"
+    assert res["residual_mislinks"] == 1
+    assert migration.get_migration(db, CHAT_ID) is None
+
+
+def test_schema_version_2_forces_lazy_remigration(db, state_db):
+    """The stronger criteria (wrong-call-id detection) require already-
+    minted chats to re-migrate: SCHEMA_VERSION is bumped to 2 and a
+    version-1 marker no longer gates — the next backfill re-runs the
+    heal and re-mints at the current version."""
+    assert migration.SCHEMA_VERSION == 2
+    _, _, tx, ty, _ = _seed_two_tool_calls(state_db)
+    state.upsert_msg_link(
+        db, id="tr:cY", chat_id=CHAT_ID, role="tool",
+        content='{"total_count": 0}', tool_call_id="cY", agent_row_id=str(tx))
+    db.exec(
+        "INSERT INTO chat_migrations (chat_id, migrated_at, schema_version, "
+        "stats) VALUES (?, ?, 1, '{}')",
+        (CHAT_ID, time.time()),
+    )
+    assert migration.get_migration(db, CHAT_ID) is None
+    res = migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC)
+    assert res["migrated"] is True and res["already"] is False
+    assert res["mislinks_healed"] == 1
+    assert str(_link(db, "tr:cY")["agent_row_id"]) == str(ty)
+    assert migration.get_migration(db, CHAT_ID)["schema_version"] == 2
+
+
 # ── flag / purge / wiring ─────────────────────────────────────────────
 
 

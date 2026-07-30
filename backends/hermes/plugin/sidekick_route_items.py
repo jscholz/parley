@@ -458,33 +458,72 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # SIDEKICK_ITEMS_READ_FROM_STATE_DB=0 to fall back to the legacy v1
     # path (mirrors bodies in sidekick.db; dupes on link miss).
     _b2_enabled = os.environ.get("SIDEKICK_ITEMS_READ_FROM_STATE_DB", "1").lower() in ("1", "true", "yes")
-    _trace("query-start", f"limit={limit} before={before_id} after={after_id} around={around or ''} b2={_b2_enabled}")
+    # Transcript v3 read flip (Phase 3, 2026-07-30): for chats holding a
+    # current-SCHEMA_VERSION chat_migrations marker, serve sidekick.db
+    # bodies + identity (msg_links), consulting state.db only through
+    # links for liveness — see sidekick_state._build_v3_items. Default
+    # OFF; flag on + unmarked (or stale-version) chat falls through to
+    # the legacy read untouched. Per-chat automatic fallback; global
+    # instant revert by unsetting SIDEKICK_ITEMS_V3 (B2 playbook). The
+    # background reconcile chain above keeps running unchanged — it is
+    # the linker-soak safety net (and the msg_links link maintainer)
+    # while v3 serves.
+    _v3_flag = os.environ.get("SIDEKICK_ITEMS_V3", "").strip().lower() in ("1", "true", "yes")
+    _use_v3 = False
+    if _v3_flag and adapter._sidekick_db is not None:
+        from . import sidekick_chat_migration as _migration  # noqa: WPS433
+        _use_v3 = (
+            await _perf.run_in_sidekick_worker(
+                _migration.get_migration, adapter._sidekick_db, chat_id,
+            )
+        ) is not None
+    _trace("query-start", f"limit={limit} before={before_id} after={after_id} around={around or ''} b2={_b2_enabled} v3={_use_v3}")
     target_found = None
     last_id = None
     has_more_newer = None
-    if around is not None and _b2_enabled:
+    if around is not None and (_b2_enabled or _use_v3):
         # Deep-target drill: one BOUNDED window centered on the target.
-        # Only on the B2 path (the v1 fallback's millis cursor doesn't map
-        # cleanly to an "around" window; the PWA falls back to its serial
-        # load-earlier drill when target_found is False / the field is
-        # absent).
-        result = await _perf.run_in_sidekick_worker(
-            _sstate.list_messages_around_for_chat_with_state_db_source,
-            adapter._sidekick_db, adapter._state_db_path, chat_id, source,
-            target=around, limit=limit,
-        )
+        # Only on the B2/v3 paths (the v1 fallback's millis cursor doesn't
+        # map cleanly to an "around" window; the PWA falls back to its
+        # serial load-earlier drill when target_found is False / the field
+        # is absent).
+        if _use_v3:
+            result = await _perf.run_in_sidekick_worker(
+                _sstate.list_messages_around_for_chat_v3,
+                adapter._sidekick_db, adapter._state_db_path, chat_id,
+                target=around, limit=limit,
+            )
+        else:
+            result = await _perf.run_in_sidekick_worker(
+                _sstate.list_messages_around_for_chat_with_state_db_source,
+                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+                target=around, limit=limit,
+            )
         target_found = bool(result.get("target_found"))
         last_id = result.get("last_id")
         has_more_newer = bool(result.get("has_more_newer"))
-    elif after_id is not None and _b2_enabled:
+    elif after_id is not None and (_b2_enabled or _use_v3):
         # Load-newer page (symmetric counterpart of before paging).
-        result = await _perf.run_in_sidekick_worker(
-            _sstate.list_messages_after_for_chat_with_state_db_source,
-            adapter._sidekick_db, adapter._state_db_path, chat_id, source,
-            after_id=after_id, limit=limit,
-        )
+        if _use_v3:
+            result = await _perf.run_in_sidekick_worker(
+                _sstate.list_messages_after_for_chat_v3,
+                adapter._sidekick_db, adapter._state_db_path, chat_id,
+                after_id=after_id, limit=limit,
+            )
+        else:
+            result = await _perf.run_in_sidekick_worker(
+                _sstate.list_messages_after_for_chat_with_state_db_source,
+                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+                after_id=after_id, limit=limit,
+            )
         last_id = result.get("last_id")
         has_more_newer = bool(result.get("has_more_newer"))
+    elif _use_v3:
+        result = await _perf.run_in_sidekick_worker(
+            _sstate.list_messages_for_chat_v3,
+            adapter._sidekick_db, adapter._state_db_path, chat_id,
+            limit=limit, before_id=before_id,
+        )
     elif _b2_enabled:
         result = await _perf.run_in_sidekick_worker(
             _sstate.list_messages_for_chat_with_state_db_source,

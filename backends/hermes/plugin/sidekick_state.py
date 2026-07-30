@@ -1375,6 +1375,357 @@ def _build_chronological_items(
     return items
 
 
+# ── Transcript v3 read path (Phase 3, SIDEKICK_ITEMS_V3) ──────────────
+#
+# sidekick.db owns bodies + identity; state.db is consulted ONLY through
+# msg_links.agent_row_id, as a liveness oracle (v3 design core moves
+# 2/3/6). Serving rule, per msg_links row of the chat:
+#
+#   * linked (agent_row_id set): serve iff the state row still exists
+#     and was not user-retracted. hermes-core's mutations map to:
+#       - /retry, explicit delete, prune → rows DELETEd → the link
+#         orphans → retracted. The rewrite turn's rows arrive via fresh
+#         links (relink-forward, decision memo 2026-07-28 — no content
+#         re-adoption, ever).
+#       - /undo → soft-delete: active=0 AND compacted=0 → retracted.
+#       - in-place compaction → active=0 AND compacted=1 on the archived
+#         ORIGINALS (hermes_state.archive_and_compact) — those are the
+#         user's real scrollback and keep serving; the re-flushed copies
+#         have no envelope → no link → invisible by construction.
+#     Additionally hidden, for exact v2-read parity: provable replay
+#     duplicates (the persisted replay_dups set) and compaction-child
+#     seed-block rows (id <= the child session's [CONTEXT COMPACTION]
+#     marker — the one v2 elision a linked row can still fall in).
+#   * unlinked (agent_row_id NULL): serve iff status='final' — the
+#     envelope-only set (slash-command replies, gateway status bubbles,
+#     rows in the envelope→flush window, notifications pre-link).
+#     Streaming rows (tc:* call-args, an aborted reply_delta) never
+#     serve; the in-flight turn overlays via the TurnBuffer at the
+#     route, exactly as on the legacy read.
+#   * unlinked STATE rows are never served — invisible by construction.
+#     Failure direction is invisibility + alert, never invention
+#     (decision memo 2026-07-28, decision 3).
+#
+# Ordering: sidekick.db's own FROZEN per-row key (created_at, rowid) —
+# both columns are write-once in msg_links (upsert never touches
+# created_at), so nothing hermes-core does after import can reorder
+# served items; the 07-16 class (state.db re-stamps reordering the
+# transcript at read time) is dead because state.db timestamps are
+# never consulted. Raw rowid alone is NOT usable as the sequence:
+# reconcile mints rows LATE relative to message time — the whole legacy
+# backfill of a pre-write-through chat (live chat ae6435b5: 518 rows
+# displaced past later turns) and every turn's orchestration legacy
+# twin (minted at the post-turn reconcile, after the turn's envelope
+# rows) — which would scramble transcripts and break the PWA's
+# activity-row fold (tool args attach only when the orchestration row
+# precedes its tool results). Same trap v1 documented in
+# list_messages_for_chat.
+#
+# Wire shape is byte-identical to the v2 reader for a healthy migrated
+# chat (pinned by test_items_v3_read_path): linked rows serve
+# id=int(agent_row_id), envelope-only rows id=int(created_at*1000);
+# same field insertion order. The PWA is untouched.
+
+# IN-clause chunk for the liveness batch — comfortably under every
+# SQLITE_MAX_VARIABLE_NUMBER build default.
+_V3_LIVENESS_CHUNK = 500
+
+
+def _fetch_v3_liveness(state_db_path, linked_ids):
+    """Liveness snapshot for the linked state ids, in one read-only
+    batch (chunked IN queries over the messages PK — no per-row
+    queries, per the ~20ms read budget).
+
+    Returns ``(live, head_end)`` where ``live`` maps state-id-string →
+    ``{active, compacted, session_id, is_child}`` (absent key = row
+    deleted) and ``head_end`` maps compaction-child session_id → the
+    max [CONTEXT COMPACTION] marker id (the v2 seed-block elision
+    bound). Returns ``None`` when state.db is unreachable — callers
+    serve NOTHING rather than guess: a transient hiccup must not
+    resurrect retracted rows (and the legacy reader's unreachable
+    contract is the same empty read).
+
+    ``is_child`` uses (user_id IS NULL AND parent_session_id IS NOT
+    NULL) instead of the recursive chain walk: linked rows belong to
+    the chat's chain by construction (reconcile only ever links chain
+    rows), so chain membership needs no re-proof here."""
+    import contextlib
+    import sqlite3
+
+    if state_db_path is None or not state_db_path.exists():
+        return None
+    live: Dict[str, Dict[str, Any]] = {}
+    child_sessions: set = set()
+    head_end: Dict[str, int] = {}
+    # Dedupe (a pre-heal mislink can double-claim one state id) while
+    # keeping non-numeric ids out of the PK batch — a non-numeric link
+    # simply never resolves live and stays hidden.
+    ids = list(dict.fromkeys(i for i in linked_ids if str(i).isdigit()))
+    try:
+        uri = f"file:{state_db_path}?mode=ro"
+        with contextlib.closing(
+            sqlite3.connect(uri, uri=True, timeout=2.0)
+        ) as conn:
+            conn.row_factory = sqlite3.Row
+            for start in range(0, len(ids), _V3_LIVENESS_CHUNK):
+                chunk = ids[start:start + _V3_LIVENESS_CHUNK]
+                placeholders = ",".join("?" * len(chunk))
+                base = (
+                    "SELECT m.id, m.session_id, {cols} "
+                    "(s.user_id IS NULL AND s.parent_session_id IS NOT NULL) "
+                    "AS is_child "
+                    "FROM messages m JOIN sessions s ON s.id = m.session_id "
+                    "WHERE m.id IN (" + placeholders + ")"
+                )
+                try:
+                    got = conn.execute(
+                        base.format(cols="m.active, m.compacted,"), chunk,
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    # Pre-0.18 schema without active/compacted (old
+                    # fixtures): every existing row counts as live.
+                    got = conn.execute(
+                        base.format(cols="1 AS active, 0 AS compacted,"),
+                        chunk,
+                    ).fetchall()
+                for r in got:
+                    live[str(r["id"])] = {
+                        "active": bool(r["active"]),
+                        "compacted": bool(r["compacted"]),
+                        "session_id": r["session_id"],
+                        "is_child": bool(r["is_child"]),
+                    }
+                    if r["is_child"]:
+                        child_sessions.add(r["session_id"])
+            if child_sessions:
+                placeholders = ",".join("?" * len(child_sessions))
+                agg = conn.execute(
+                    "SELECT session_id, MAX(id) AS head_end FROM messages "
+                    f"WHERE session_id IN ({placeholders}) "
+                    "AND content LIKE '[CONTEXT COMPACTION%' "
+                    "GROUP BY session_id",
+                    sorted(child_sessions),
+                ).fetchall()
+                head_end = {
+                    a["session_id"]: int(a["head_end"])
+                    for a in agg if a["head_end"] is not None
+                }
+    except Exception:
+        return None
+    return live, head_end
+
+
+def _build_v3_items(sidekick_db, state_db_path, chat_id: str) -> tuple:
+    """Serve-list build for one chat on the v3 rule (see the block
+    comment above). Returns ``(items, cursor_index)``:
+
+      * ``items`` — full chronological wire-shape list; callers slice
+        (same division of labor as ``_build_chronological_items``).
+      * ``cursor_index`` — served id → list position, ALSO keyed by
+        each row's envelope-space alias ``int(created_at*1000)``. A
+        client cursor minted while a row was envelope-only keeps
+        resolving after reconcile links it (its served id changes to
+        the state id — the raw-compare form of the 2026-07-04
+        vanishing-reply bug otherwise returns in v3 dress).
+    """
+    try:
+        rows = sidekick_db.fetchall(
+            "SELECT id AS sidekick_id, role, content, kind, "
+            "       tool_name, tool_call_id, tool_calls, created_at, "
+            "       status, agent_row_id "
+            "FROM msg_links WHERE chat_id = ? "
+            "ORDER BY created_at ASC, rowid ASC",
+            (chat_id,),
+        )
+    except Exception:
+        return [], {}
+
+    linked_ids = [
+        str(r["agent_row_id"]) for r in rows if r["agent_row_id"] is not None
+    ]
+    live: Dict[str, Dict[str, Any]] = {}
+    head_end: Dict[str, int] = {}
+    if linked_ids:
+        snapshot = _fetch_v3_liveness(state_db_path, linked_ids)
+        if snapshot is None:
+            return [], {}
+        live, head_end = snapshot
+
+    replay_drop: set = set()
+    try:
+        dup_rows = sidekick_db.fetchall(
+            "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
+            (chat_id,),
+        )
+        replay_drop = {str(r["agent_row_id"]) for r in dup_rows}
+    except Exception:
+        pass
+
+    items: list = []
+    cursor_index: Dict[int, int] = {}
+    for r in rows:
+        content = r["content"] or ""
+        # Machinery bodies never serve regardless of linkage (a pre-
+        # filter-era legacy import could carry one).
+        if _is_compaction_seed(content):
+            continue
+        ts = float(r["created_at"]) if r["created_at"] is not None else 0.0
+        arid = r["agent_row_id"]
+        if arid is None:
+            if (r["status"] or "") != "final":
+                continue
+            item_id = int(ts * 1000) if ts else 0
+        else:
+            arid_s = str(arid)
+            st = live.get(arid_s)
+            if st is None:
+                continue  # state row gone → retracted (/retry, prune, delete).
+            if not st["active"] and not st["compacted"]:
+                continue  # /undo soft-delete → retracted.
+            if arid_s in replay_drop:
+                continue  # provable compaction-replay copy (v2 parity).
+            bound = head_end.get(st["session_id"]) if st["is_child"] else None
+            if bound is not None and int(arid_s) <= bound:
+                continue  # compaction-child seed block (v2 parity).
+            item_id = int(arid_s)
+        item: Dict[str, Any] = {
+            "id": item_id,
+            "object": "message",
+            "role": r["role"],
+            "content": content,
+            "created_at": int(ts) if ts else 0,
+            "sidekick_id": r["sidekick_id"],
+        }
+        if r["kind"]:
+            item["kind"] = r["kind"]
+        if r["tool_name"]:
+            item["tool_name"] = r["tool_name"]
+        if r["tool_call_id"]:
+            item["tool_call_id"] = r["tool_call_id"]
+        if r["tool_calls"]:
+            item["tool_calls"] = r["tool_calls"]
+        pos = len(items)
+        cursor_index.setdefault(item_id, pos)
+        alias = int(ts * 1000) if ts else 0
+        cursor_index.setdefault(alias, pos)
+        items.append(item)
+    return items, cursor_index
+
+
+def _v3_cursor_pos(cursor_index: Dict[int, int], cursor) -> Optional[int]:
+    try:
+        return cursor_index.get(int(cursor))
+    except (TypeError, ValueError):
+        return None
+
+
+def list_messages_for_chat_v3(
+    sidekick_db,
+    state_db_path,
+    chat_id: str,
+    *,
+    limit: int = 200,
+    before_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """v3 tail / before-cursor read. Same wire contract as the v2
+    reader (``{items, first_id, has_more}``, tail-side slicing so a
+    before-page returns the ``limit`` items nearest the cursor)."""
+    items, index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    if before_id is not None:
+        pos = _v3_cursor_pos(index, before_id)
+        if pos is not None:
+            items = items[:pos]
+        else:
+            # Cursor row retracted between pages — raw id-space compare
+            # (correct for durable cursors; the epoch alias above covers
+            # the linked-transition case, so this is the residual v2
+            # fallback only).
+            items = [it for it in items if it["id"] < before_id]
+    if len(items) > limit:
+        items = items[-limit:]
+        has_more = True
+    else:
+        has_more = False
+    return {
+        "items": items,
+        "first_id": items[0]["id"] if items else None,
+        "has_more": has_more,
+    }
+
+
+def list_messages_around_for_chat_v3(
+    sidekick_db,
+    state_db_path,
+    chat_id: str,
+    *,
+    target: str,
+    limit: int = 200,
+    context_before: Optional[int] = None,
+    context_after: Optional[int] = None,
+) -> Dict[str, Any]:
+    """v3 deep-target drill — same bounded-window semantics and budget
+    split as ``list_messages_around_for_chat_with_state_db_source``."""
+    items, _index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    empty = {
+        "items": [], "first_id": None, "has_more": False,
+        "last_id": None, "has_more_newer": False, "target_found": False,
+    }
+    if not items:
+        return dict(empty)
+    target_str = str(target)
+    idx = None
+    for i, it in enumerate(items):
+        if str(it.get("sidekick_id") or "") == target_str or str(it["id"]) == target_str:
+            idx = i
+            break
+    if idx is None:
+        return dict(empty)
+    ctx_before = context_before if context_before is not None else max(20, (limit * 2) // 3)
+    ctx_after = context_after if context_after is not None else max(10, limit // 3)
+    start = max(0, idx - ctx_before)
+    end = min(len(items), idx + ctx_after + 1)
+    window = items[start:end]
+    return {
+        "items": window,
+        "first_id": window[0]["id"] if window else None,
+        "has_more": start > 0,
+        "last_id": window[-1]["id"] if window else None,
+        "has_more_newer": end < len(items),
+        "target_found": True,
+    }
+
+
+def list_messages_after_for_chat_v3(
+    sidekick_db,
+    state_db_path,
+    chat_id: str,
+    *,
+    after_id: int,
+    limit: int = 200,
+) -> Dict[str, Any]:
+    """v3 load-newer read — same contract as the v2 after-cursor reader
+    (``has_more`` always present and False; oldest ``limit`` items above
+    the cursor so the prepend side stays contiguous)."""
+    items, index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    pos = _v3_cursor_pos(index, after_id)
+    if pos is not None:
+        items = items[pos + 1:]
+    else:
+        items = [it for it in items if it["id"] > after_id]
+    if len(items) > limit:
+        items = items[:limit]
+        has_more_newer = True
+    else:
+        has_more_newer = False
+    return {
+        "items": items,
+        "first_id": items[0]["id"] if items else None,
+        "has_more": False,
+        "last_id": items[-1]["id"] if items else None,
+        "has_more_newer": has_more_newer,
+    }
+
+
 def reconcile_from_state_db(
     db, state_db_path, chat_id: str, source: str = "sidekick",
     *, force_full: bool = False,
