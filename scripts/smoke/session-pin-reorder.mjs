@@ -60,13 +60,13 @@ export default async function run({ page, log }) {
   await waitForReady(page);
   await openSidebar(page);
 
-  // Pin alpha then beta → newest pin lands on top, so the pinned region
-  // is [beta, alpha].
-  await rowMenuPin(page, ID('alpha'));
+  // Pin beta then alpha → new pins append at the bottom, so the pinned
+  // region is [beta, alpha].
+  await rowMenuPin(page, ID('beta'));
   await page.waitForFunction(
     () => document.querySelectorAll('#sessions-list li.sess-pinned').length === 1,
     null, { timeout: 5_000, polling: 50 });
-  await rowMenuPin(page, ID('beta'));
+  await rowMenuPin(page, ID('alpha'));
   await page.waitForFunction(
     () => document.querySelectorAll('#sessions-list li.sess-pinned').length === 2,
     null, { timeout: 5_000, polling: 50 });

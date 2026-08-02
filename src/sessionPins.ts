@@ -92,12 +92,13 @@ export function topPinned(): string | undefined {
   return order[0];
 }
 
-/** Pin a session. New pins land at the TOP so a freshly-pinned session
- *  becomes the landing default — matches the user's intent ("I care
- *  about this one now"). No-op (and no event) if already pinned. */
+/** Pin a session. New pins land at the BOTTOM of the pinned region so
+ *  existing pins keep their placement — index 0 (the landing default)
+ *  stays whatever the user put on top; drag-reorder promotes. No-op
+ *  (and no event) if already pinned. */
 export function pin(id: string): void {
   if (!id || order.includes(id)) return;
-  order.unshift(id);
+  order.push(id);
   persist();
 }
 

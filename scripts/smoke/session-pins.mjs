@@ -164,9 +164,9 @@ export default async function run({ page, log }) {
     () => document.querySelectorAll('#sessions-list li.sess-pinned').length === 2,
     null, { timeout: 5_000, polling: 50 },
   );
-  // beta pinned last → lands at index 0.
-  assert(JSON.stringify(await persistedPins(page)) === JSON.stringify([ID('beta'), ID('alpha')]),
-    `expected pins [beta,alpha] (newest pin on top); got ${JSON.stringify(await persistedPins(page))}`);
+  // beta pinned last → appends at the bottom of the pinned region.
+  assert(JSON.stringify(await persistedPins(page)) === JSON.stringify([ID('alpha'), ID('beta')]),
+    `expected pins [alpha,beta] (newest pin at bottom); got ${JSON.stringify(await persistedPins(page))}`);
 
   await uiDeleteChat(page, ID('beta'));
   await pollUntil(page,
