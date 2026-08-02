@@ -215,14 +215,42 @@ async def handle_transcript_adopt(ctx, request: web.Request) -> web.Response:
 
 
 async def handle_user_settings(ctx, request: web.Request) -> web.Response:
+    """GET → {settings: {key: value}, updated_at: {key: ts}}.
+    POST {key, value[, base_updated_at]} → upsert, echo + NEW updated_at.
+
+    ``base_updated_at`` opts into compare-and-swap (see
+    state.set_user_setting for the exact null/float semantics); a
+    mismatch returns 409 with the row's current {value, updated_at} so
+    the client can 3-way-merge and retry. Omitting it keeps plain
+    last-write-wins — old clients (stale CAP bundles) stay compatible.
+    Added after the 2026-07-31 keyterms clobber incident."""
     if request.method == "GET":
-        return _json({"settings": state.list_user_settings(ctx.db)})
+        return _json({
+            "settings": state.list_user_settings(ctx.db),
+            "updated_at": state.list_user_settings_meta(ctx.db),
+        })
     body = await _read_json(request)
     key = body.get("key")
     if not key:
         return _json({"error": "invalid_request", "message": "key required"}, status=400)
-    state.set_user_setting(ctx.db, key, body.get("value"))
-    return _json({"ok": True, "key": key, "value": state.get_user_setting(ctx.db, key)})
+    kwargs = {}
+    if "base_updated_at" in body:
+        base = body.get("base_updated_at")
+        # bool is an int subclass — reject it explicitly.
+        if base is not None and (isinstance(base, bool) or not isinstance(base, (int, float))):
+            return _json({"error": "invalid_request",
+                          "message": "base_updated_at must be a number or null"},
+                         status=400)
+        kwargs["base_updated_at"] = base
+    try:
+        new_ts = state.set_user_setting(ctx.db, key, body.get("value"), **kwargs)
+    except state.UserSettingConflict as conflict:
+        return _json({"error": "conflict", "key": key,
+                      "value": conflict.value, "updated_at": conflict.updated_at},
+                     status=409)
+    return _json({"ok": True, "key": key,
+                  "value": state.get_user_setting(ctx.db, key),
+                  "updated_at": new_ts})
 
 
 async def handle_visibility(ctx, request: web.Request) -> web.Response:

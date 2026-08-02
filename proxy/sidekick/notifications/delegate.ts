@@ -382,6 +382,16 @@ export async function delegateActivityDelete(
 // ── User settings (synced cross-device prefs: STT key-terms, …) ───────
 // Plugin stores one JSON value per key in sidekick.db's user_settings.
 // GET returns the whole map; a single-key read/write is one row.
+//
+// Keyterms clobber incident (2026-07-31): the single-key GET used to
+// answer `{key, value: null}` for a missing row — indistinguishable
+// from a transient failure once the client collapsed both to `null`,
+// which made a phone re-upload its stale mirror over newer server
+// state. The shape now carries an explicit `missing` flag plus the
+// row's `updated_at` (the compare-and-swap base for the next PUT);
+// the PUT forwards an optional `base_updated_at` and passes the
+// plugin's 409-conflict body through untouched. All additive — old
+// clients that only read `value` / send no base see LWW as before.
 
 export async function delegateUserSettingsList(
   _req: http.IncomingMessage, res: http.ServerResponse,
@@ -397,8 +407,26 @@ export async function delegateUserSettingGet(
 ) {
   try {
     const r = await forwardRaw('/v1/user-settings', 'GET', null);
-    const settings = (r.body && (r.body as any).settings) || {};
-    sendJson(res, r.status, { key, value: settings[key] ?? null });
+    if (r.status !== 200) {
+      // Upstream failure: pass through so the client sees an ERROR,
+      // never a fabricated "missing" (missing authorizes adoption
+      // writes; a failure must stay read-only).
+      return sendJson(res, r.status, r.body ?? {});
+    }
+    const settings = (r.body as any)?.settings;
+    if (!settings || typeof settings !== 'object') {
+      // A 200 whose body doesn't carry the settings map must NOT be
+      // reported as `missing` — same read-only rule as above.
+      return sendJson(res, 502, { error: 'bad_upstream_shape' });
+    }
+    const meta = (r.body && (r.body as any).updated_at) || {};
+    const missing = !Object.prototype.hasOwnProperty.call(settings, key);
+    sendJson(res, r.status, {
+      key,
+      value: settings[key] ?? null,
+      missing,
+      updated_at: missing ? null : (meta[key] ?? null),
+    });
   } catch (e: any) { sendUpstreamUnavailable(res, e); }
 }
 
@@ -409,7 +437,13 @@ export async function delegateUserSettingSet(
   try { body = await readBody(req); }
   catch (e: any) { return sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
   try {
-    const r = await forwardRaw('/v1/user-settings', 'POST', { key, value: body?.value });
+    const upstream: any = { key, value: body?.value };
+    // Forward the CAS base only when the caller sent one — its ABSENCE
+    // is meaningful upstream (absent = unconditional LWW write).
+    if (body && typeof body === 'object' && 'base_updated_at' in body) {
+      upstream.base_updated_at = body.base_updated_at;
+    }
+    const r = await forwardRaw('/v1/user-settings', 'POST', upstream);
     sendJson(res, r.status, r.body ?? {});
   } catch (e: any) { sendUpstreamUnavailable(res, e); }
 }

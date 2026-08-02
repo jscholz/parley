@@ -282,13 +282,65 @@ def get_user_setting(db, key: str, fallback=None):
         return fallback
 
 
-def set_user_setting(db, key: str, value) -> None:
+class UserSettingConflict(Exception):
+    """Raised by set_user_setting when the caller's ``base_updated_at``
+    doesn't match the row's current updated_at (compare-and-swap
+    failure). Carries the row's CURRENT state so the route can return
+    it in the 409 body — the client 3-way-merges against it and
+    retries. Added after the 2026-07-31 keyterms clobber incident
+    (stale phone mirror overwrote a newer server row via LWW)."""
+
+    def __init__(self, key: str, value, updated_at):
+        super().__init__(f"user_settings CAS conflict on {key!r}")
+        self.key = key
+        self.value = value            # decoded row value, None if row absent
+        self.updated_at = updated_at  # row updated_at, None if row absent
+
+
+# Sentinel distinguishing "caller sent no base" (unconditional write —
+# old-client LWW compatibility) from "caller sent base null" (row must
+# not exist). `None` can't serve both meanings.
+_CAS_UNSET = object()
+
+
+def set_user_setting(db, key: str, value, base_updated_at=_CAS_UNSET) -> float:
+    """Upsert one setting; returns the row's NEW updated_at.
+
+    ``base_updated_at`` opts into compare-and-swap:
+      - omitted        → unconditional write (last-write-wins; what old
+                         clients that predate CAS still get)
+      - None           → write only if the row does NOT exist yet
+                         (first-device adoption of a legacy local list)
+      - float          → write only if it equals the row's current
+                         updated_at EXACTLY (the client echoes the value
+                         it last read; JSON float round-trip is exact)
+    On mismatch raises UserSettingConflict with the current row state.
+    """
+    row = db.fetchone(
+        "SELECT value, updated_at FROM user_settings WHERE key = ?", (key,))
+    if base_updated_at is not _CAS_UNSET:
+        current_ts = row["updated_at"] if row else None
+        if current_ts != base_updated_at:
+            current_value = None
+            if row:
+                try:
+                    current_value = json.loads(row["value"])
+                except Exception:
+                    current_value = None
+            raise UserSettingConflict(key, current_value, current_ts)
+    ts = time.time()
+    # Strictly-increasing guard: updated_at doubles as the CAS token, so
+    # two writes must never share a timestamp (same-tick float collision
+    # would make a stale base "match" the newer row).
+    if row and ts <= row["updated_at"]:
+        ts = row["updated_at"] + 1e-6
     db.exec(
         "INSERT INTO user_settings (key, value, updated_at) VALUES (?, ?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
         "updated_at = excluded.updated_at",
-        (key, json.dumps(value), time.time()),
+        (key, json.dumps(value), ts),
     )
+    return ts
 
 
 def list_user_settings(db) -> Dict[str, Any]:
@@ -299,6 +351,16 @@ def list_user_settings(db) -> Dict[str, Any]:
         except Exception:
             out[row["key"]] = None
     return out
+
+
+def list_user_settings_meta(db) -> Dict[str, float]:
+    """{key: updated_at} companion to list_user_settings. Served as a
+    sibling map in the GET response (additive — old clients ignore it)
+    so clients can track the CAS base for their next write."""
+    return {
+        row["key"]: row["updated_at"]
+        for row in db.fetchall("SELECT key, updated_at FROM user_settings")
+    }
 
 
 # ── Pins ──────────────────────────────────────────────────────────────

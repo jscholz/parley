@@ -915,29 +915,74 @@ export async function installMockBackend(page) {
   // GET/PUT /api/sidekick/prefs/<key> to /v1/user-settings. Mock keys
   // a Map by setting name so cross-device sync tests (e.g. STT
   // key-terms) drive the same server-roundtrip path the PWA uses.
-  // A missing key returns value:null (distinct from an explicit [],
-  // which the key-terms migration relies on).
+  //
+  // Mirrors the post-incident (2026-07-31 keyterms clobber) contract:
+  //   - GET carries an explicit `missing` flag (a missing key is NOT
+  //     the same as a transient failure) plus the row's `updated_at`.
+  //   - PUT honors an optional `base_updated_at` compare-and-swap:
+  //     absent = LWW (old clients); null = "row must not exist";
+  //     number = must equal the row's current updated_at, else 409
+  //     with the current {value, updated_at}.
+  //   - `prefsReadOutage` fails per-key GETs with 503 while leaving
+  //     PUTs working — the exact incident shape (flaky cellular read,
+  //     adoption write then lands). setPrefsReadOutage() flips it.
   const userSettingsByKey = new Map();
+  const userSettingsMeta = new Map(); // key → updated_at (CAS token)
+  let prefsReadOutage = false;
+  let prefsClock = 1_000; // deterministic, strictly-increasing updated_at
+  const stampUserSetting = (key, value) => {
+    prefsClock += 1;
+    userSettingsByKey.set(key, value);
+    userSettingsMeta.set(key, prefsClock);
+    return prefsClock;
+  };
   await page.route(/.*\/api\/sidekick\/prefs\/[^/]+$/, async (route) => {
     const method = route.request().method();
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/prefs\/([^/]+)$/);
     const key = m ? decodeURIComponent(m[1]) : '';
     if (method === 'GET') {
-      const value = userSettingsByKey.has(key) ? userSettingsByKey.get(key) : null;
+      if (prefsReadOutage) {
+        await route.fulfill({
+          status: 503, contentType: 'application/json',
+          body: '{"error":"upstream_unavailable"}',
+        });
+        return;
+      }
+      const missing = !userSettingsByKey.has(key);
       await route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ key, value }),
+        body: JSON.stringify({
+          key,
+          value: missing ? null : userSettingsByKey.get(key),
+          missing,
+          updated_at: missing ? null : userSettingsMeta.get(key),
+        }),
       });
       return;
     }
     if (method === 'PUT') {
       let body; try { body = JSON.parse(route.request().postData() || '{}'); }
       catch { body = {}; }
-      userSettingsByKey.set(key, body?.value ?? null);
+      if (body && typeof body === 'object'
+          && Object.prototype.hasOwnProperty.call(body, 'base_updated_at')) {
+        const current = userSettingsMeta.has(key) ? userSettingsMeta.get(key) : null;
+        if (body.base_updated_at !== current) {
+          await route.fulfill({
+            status: 409, contentType: 'application/json',
+            body: JSON.stringify({
+              error: 'conflict', key,
+              value: userSettingsByKey.has(key) ? userSettingsByKey.get(key) : null,
+              updated_at: current,
+            }),
+          });
+          return;
+        }
+      }
+      const ts = stampUserSetting(key, body?.value ?? null);
       await route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ ok: true, key, value: userSettingsByKey.get(key) }),
+        body: JSON.stringify({ ok: true, key, value: userSettingsByKey.get(key), updated_at: ts }),
       });
       return;
     }
@@ -954,7 +999,10 @@ export async function installMockBackend(page) {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({
       status: 200, contentType: 'application/json',
-      body: JSON.stringify({ settings: Object.fromEntries(userSettingsByKey) }),
+      body: JSON.stringify({
+        settings: Object.fromEntries(userSettingsByKey),
+        updated_at: Object.fromEntries(userSettingsMeta),
+      }),
     });
   });
 
@@ -1173,11 +1221,19 @@ export async function installMockBackend(page) {
     getPinState() { return new Map(pinsByKey); },
     /** Test escape hatch: seed a synced user setting directly in the
      *  mock's server store (simulates a value saved on another device).
-     *  Use for cross-device sync scenarios like STT key-terms. */
-    seedUserSetting(key, value) { userSettingsByKey.set(key, value); },
+     *  Use for cross-device sync scenarios like STT key-terms. Stamps
+     *  an updated_at like a real write so CAS-aware clients get a
+     *  coherent base. */
+    seedUserSetting(key, value) { stampUserSetting(key, value); },
     getUserSetting(key) {
       return userSettingsByKey.has(key) ? userSettingsByKey.get(key) : null;
     },
+    /** Fail per-key GET /api/sidekick/prefs/<key> with 503 while on;
+     *  PUTs keep working. This is the 2026-07-31 incident's network
+     *  shape (flaky cellular: the read times out, the write that a
+     *  buggy client fires right after still lands). The bare-list GET
+     *  stays up so settings boot is unaffected. */
+    setPrefsReadOutage(on) { prefsReadOutage = !!on; },
     getUserSettingsState() { return new Map(userSettingsByKey); },
     seedActivity(item) {
       if (item?.id) activityById.set(item.id, normalizeActivity(item));
