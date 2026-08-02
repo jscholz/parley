@@ -117,6 +117,39 @@ it('enters transcript highlight from a non-empty composer when the caret is at t
   clearHighlight();
 });
 
+it('keeps the MOST RECENT message highlighted when the entry keypress bubbles to document', () => {
+  // Regression: the ArrowUp that enters highlight mode bubbles from the
+  // composer to the document-level handler, which used to see highlight
+  // mode freshly active and move(-1) onto the penultimate message.
+  const doc = new FakeDocument();
+  Object.defineProperty(globalThis, 'document', {
+    value: doc,
+    configurable: true,
+  });
+
+  const composer = new FakeComposer();  // empty → entry gesture armed
+
+  const olderBubble = new FakeElement();
+  olderBubble.dataset.messageId = 'm-older';
+  const latestBubble = new FakeElement();
+  latestBubble.dataset.messageId = 'm-latest';
+  const transcript = new FakeTranscript([olderBubble, latestBubble]);
+
+  initTranscriptHighlight({
+    composer: composer as unknown as HTMLTextAreaElement,
+    transcript: transcript as unknown as HTMLElement,
+  });
+
+  const event = bareArrowUp();
+  composer.dispatchEvent(event);
+  // Same event object reaching the document listener, as bubbling does.
+  doc.dispatchEvent(event);
+
+  assert.equal(latestBubble.classList.contains('transcript-highlight'), true);
+  assert.equal(olderBubble.classList.contains('transcript-highlight'), false);
+  clearHighlight();
+});
+
 it('leaves ArrowUp to the textarea when a non-empty composer caret is not at top-left', () => {
   Object.defineProperty(globalThis, 'document', {
     value: new FakeDocument(),

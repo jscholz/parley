@@ -32,6 +32,12 @@ let composerEl: HTMLTextAreaElement | null = null;
 let transcriptEl: HTMLElement | null = null;
 let highlightedEl: HTMLElement | null = null;
 let hintEl: HTMLElement | null = null;
+// The keydown that ENTERED highlight mode. The composer handler runs
+// first (target phase), sets the highlight, and then the SAME event
+// bubbles to the document-level handler below — which sees highlight
+// mode active and would move(-1) off the most recent message onto the
+// penultimate one. The document handler skips this exact event.
+let entryEvent: Event | null = null;
 
 function bubbles(): HTMLElement[] {
   if (!transcriptEl) return [];
@@ -221,12 +227,14 @@ export function initTranscriptHighlight(opts: {
     e.preventDefault();
     const list = bubbles();
     if (list.length === 0) return;
+    entryEvent = e;
     setHighlight(list[list.length - 1]);   // most recent bubble
   });
 
   // Global keydown — only acts when we're in highlight mode.
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     if (!highlightedEl) return;
+    if (e === entryEvent) return;  // the press that entered the mode — already consumed
     // Modifier keys pass through (Cmd+P should remain print, etc.).
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     // Don't steal keys from other inputs that may be focused (cmdk,
