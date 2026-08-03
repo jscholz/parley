@@ -31,6 +31,28 @@
 import { log, diag } from '../../util/log.ts';
 import * as audioSession from './session.ts';
 import * as wakeLock from '../../wakeLock.ts';
+import * as settings from '../../settings.ts';
+
+/** Merge the user's saved mic selection (the Settings "Input" picker →
+ *  `micDevice`) into a caller's DSP constraints. `exact` on purpose:
+ *  `ideal` falls back to the OS default silently, which is precisely
+ *  the masked-failure shape the picker exists to prevent — acquire()
+ *  instead catches the constraint failure, logs it, and retries on the
+ *  default device so the fallback is visible in the log. */
+export function withPreferredMic(
+  constraints: MediaTrackConstraints,
+  preferred: string,
+): MediaTrackConstraints {
+  if (!preferred) return constraints;
+  return { ...constraints, deviceId: { exact: preferred } };
+}
+
+/** The error shapes getUserMedia raises when an exact deviceId can't be
+ *  satisfied (device unplugged, or ids re-minted after a permissions
+ *  change). Anything else — NotAllowedError above all — must surface. */
+export function isMissingDeviceError(e: any): boolean {
+  return e?.name === 'OverconstrainedError' || e?.name === 'NotFoundError';
+}
 
 let activeStream: MediaStream | null = null;
 let activeOwner: string | null = null;
@@ -76,7 +98,20 @@ export async function acquire(owner: string, constraints: MediaTrackConstraints)
     // BT routing. No-op on non-iOS or if already primed. Cost: ~200 ms on
     // the first capture of a fresh page load.
     await audioSession.ensureIOSAudioSessionPrimed();
-    activeStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    // Honor the Settings "Input" picker. Every capture mode funnels
+    // through here, so this is the ONE place the selection is applied
+    // (it used to be applied nowhere — the picker was decorative, and
+    // capture always ran on the OS default input).
+    const preferred = settings.get().micDevice;
+    try {
+      activeStream = await navigator.mediaDevices.getUserMedia({
+        audio: withPreferredMic(constraints, preferred),
+      });
+    } catch (e: any) {
+      if (!preferred || !isMissingDeviceError(e)) throw e;
+      log(`capture: saved mic ${preferred.slice(0, 8)}… unavailable (${e?.name}); falling back to default input`);
+      activeStream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
+    }
     activeOwner = owner;
   } finally {
     pendingOwner = null;
@@ -88,7 +123,11 @@ export async function acquire(owner: string, constraints: MediaTrackConstraints)
   // forget — the sentinel request itself is async but callers don't need
   // to block on it.
   wakeLock.acquire(owner);
-  log(`capture: acquired by ${owner}`);
+  // Name the physical device we actually bound — the single most useful
+  // line when "no audio through" reports come in (default-vs-picked,
+  // BT-vs-built-in are invisible without it).
+  const track = activeStream.getAudioTracks()[0];
+  log(`capture: acquired by ${owner} (mic="${track?.label || 'unknown'}")`);
   return activeStream;
 }
 
