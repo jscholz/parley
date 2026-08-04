@@ -623,17 +623,13 @@ function readPeak(node: AnalyserNode): number {
 async function commitNow(reason: 'silence' | 'sendword'): Promise<void> {
   if (state !== 'armed') return;
   transition('committing');
+  clearSendwordCommitTimer();
   stopSilenceLoop();
   try { sendwordDetector.stop(); } catch { /* noop */ }
   stopNativeSendword();
-  // Immediate audio feedback the moment the sendword is detected, so a
-  // bike-mode user knows their utterance was captured BEFORE the
-  // /transcribe round-trip (which can take 10+s). Mirrors the realtime
-  // path's chime in dictation.ts:handleUserFinal. Silence-commits don't
-  // chime — the silence itself was the trigger, no surprise to confirm.
-  if (reason === 'sendword') {
-    try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
-  }
+  // The 'commit' chime plays at DETECTION time in commitFromSendword
+  // (before the commitDelaySec grace window), not here — by commit
+  // time the user already got their feedback.
 
   if (armedWithLocal) {
     // LOCAL path — pull the accumulated transcript from the provider.
@@ -710,11 +706,41 @@ async function stopRecorder(): Promise<Blob | null> {
   return new Blob(audioChunks, { type: mimeType });
 }
 
-/** Force a commit now (sendword detector path). Safe to call only from
- *  state==='armed'; otherwise no-op. */
+// Sendword grace window (commitDelaySec): the chime confirms detection
+// immediately; the commit itself waits so a "…over — wait, also" keeps
+// recording into the same turn. commitNow's state guard makes a timer
+// that outlives the armed session a no-op; the explicit clears (here on
+// re-fire, in commitNow, in teardown) keep it from firing into a NEW
+// armed session after an empty-turn re-arm.
+let sendwordCommitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSendwordCommitTimer(): void {
+  if (sendwordCommitTimer !== null) {
+    clearTimeout(sendwordCommitTimer);
+    sendwordCommitTimer = null;
+  }
+}
+
+/** Commit via the sendword detector path. Chimes at detection, commits
+ *  after the commitDelaySec grace window (0 = immediately). Safe to
+ *  call only from state==='armed'; otherwise no-op. */
 export function commitFromSendword(): void {
   if (state !== 'armed') return;
-  void commitNow('sendword');
+  // Immediate audio feedback the moment the sendword is detected, so a
+  // bike-mode user knows their utterance was captured BEFORE the grace
+  // window + /transcribe round-trip (which can take 10+s). Mirrors the
+  // realtime path's chime in dictation.ts:handleUserFinal.
+  try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
+  const { commitDelaySec } = getHandsfreeConfig();
+  if (commitDelaySec <= 0) {
+    void commitNow('sendword');
+    return;
+  }
+  clearSendwordCommitTimer();
+  sendwordCommitTimer = setTimeout(() => {
+    sendwordCommitTimer = null;
+    void commitNow('sendword');
+  }, commitDelaySec * 1000);
 }
 
 /** Cancel without committing (trash button, mic-button-off). Releases
@@ -735,6 +761,7 @@ export function stop(): void {
 
 function teardown(): void {
   stopSilenceLoop();
+  clearSendwordCommitTimer();
   if (cooldownTimer) { clearTimeout(cooldownTimer); cooldownTimer = null; }
   try {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();

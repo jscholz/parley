@@ -86,7 +86,20 @@ def attach(peer, *, voice_config: VoiceConfig, api_server: Any) -> None:
 
 async def _run_tts(peer, voice_config: VoiceConfig, text_queue, track) -> None:
     """Drain the text queue, run TTSProvider.synth, push PCM into the track."""
-    tts = get_tts_provider(voice_config.tts)
+    # Per-peer voice override (PWA Voice-output picker / per-session
+    # voice, forwarded in the offer — signaling.handle_offer sanitizes
+    # + stashes it). Clone the spec rather than mutate shared state,
+    # mirroring stt_bridge's per-peer keyterms clone.
+    tts_spec = voice_config.tts
+    peer_voice = peer.extra.get("voice")
+    if peer_voice:
+        from dataclasses import replace
+        tts_spec = replace(tts_spec, options={**tts_spec.options, "voice": peer_voice})
+        logger.info(
+            "[tts-bridge] peer %s voice=%s (base=%s)",
+            peer.peer_id, peer_voice, voice_config.tts.options.get("voice"),
+        )
+    tts = get_tts_provider(tts_spec)
 
     async def _text_iter() -> AsyncIterator[str]:
         # We don't end after the first None — the agent may produce

@@ -224,8 +224,8 @@ async function main() {
   // `finally` so the proxy ends the run with exactly the values it
   // started with, regardless of crash path.
   const SETTINGS_TO_SNAPSHOT = [
-    'tts', 'realtime', 'streaming', 'autoSend', 'silenceSec',
-    'commitPhrase', 'bargeIn', 'bargeThreshold', 'streamingEngine',
+    'tts', 'realtime', 'streaming', 'silenceSec',
+    'commitPhrase', 'commitDelaySec', 'bargeIn', 'streamingEngine',
     'micAutoSend',
   ];
   const settingsSnapshot = {};

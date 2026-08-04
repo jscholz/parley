@@ -233,11 +233,9 @@ const DEFAULTS = {
   // toggled (load() merges over DEFAULTS, so a yaml-persisted false
   // stays false).
   tts: true,
-  autoSend: true,
   voice: 'aura-2-thalia-en',
   micDevice: '',
   streamingEngine: 'server',
-  autoFallback: true,
   // Dictation mode (mic-button tap). ON (default) = live streaming
   // dictation into the composer cursor as you speak. OFF = record the
   // whole utterance, batch one /transcribe on stop, and drop the clean
@@ -249,14 +247,13 @@ const DEFAULTS = {
   ttsVoiceLocal: '',
   wakeLock: true,
   commitPhrase: 'over',
-  commitDelaySec: 0.5,
+  // Sendword→commit grace window (seconds). 0 = commit the instant the
+  // sendword lands — the lived behavior while the slider was decorative
+  // (2026-08-04 audit: its consumer died with the classic pipeline), so
+  // 0 stays the default and dragging the slider is the opt-in.
+  commitDelaySec: 0,
   silenceSec: 30,
   bargeIn: true,
-  // Legacy RMS-amplitude threshold. No longer used by the barge VAD
-  // (slider now writes bargeVadThreshold below). Survives only as the
-  // turnbased mode's silence-end RMS gate falls back through
-  // voiceTuning.getBargeThreshold(); will retire alongside turnbased.
-  bargeThreshold: 0.10,
   // Silero VAD's positiveSpeechThreshold (0..1). Lower = more
   // sensitive. Library default 0.3, our default 0.5 — slightly stricter
   // to absorb environmental noise. The call-mode slider maps 0..100%
@@ -710,7 +707,6 @@ export function hydrate(handlers: {
 
   const setMic = $sel('set-mic');
   const setStreamEngine = $sel('set-streaming-engine');
-  const setAutoFallback = $inp('set-auto-fallback');
   const setSttKeyterms = document.getElementById('set-stt-keyterms') as HTMLInputElement | null;
   const keytermsChips = document.getElementById('keyterms-chips');
   const setHotkeyCall = $inp('set-hotkey-call');
@@ -788,7 +784,6 @@ export function hydrate(handlers: {
   // path's source of truth is `current`, already updated by load()).
   function applyToDOM() {
     if (setStreamEngine) setStreamEngine.value = current.streamingEngine;
-    if (setAutoFallback) setAutoFallback.checked = current.autoFallback;
     if (setTtsEngine) setTtsEngine.value = current.ttsEngine;
     if (setAudioFeedback) setAudioFeedback.value = String(Math.round(current.audioFeedbackVolume * 100));
     if (setAudioFeedbackVal) setAudioFeedbackVal.textContent = audioFeedbackLabel(current.audioFeedbackVolume);
@@ -848,7 +843,6 @@ export function hydrate(handlers: {
     set('streamingEngine', setStreamEngine.value);
     if (handlers.onStreamingEngineChange) handlers.onStreamingEngineChange();
   };
-  if (setAutoFallback) setAutoFallback.onchange = () => { set('autoFallback', setAutoFallback.checked); };
   // Keyterms: chip-based input, persisted PER USER server-side
   // (sidekick.db user_settings, via src/keyterms.ts) so the list syncs
   // across devices; IDB is a write-through offline mirror. On first boot
@@ -1248,7 +1242,6 @@ export function hydrate(handlers: {
   if (setSilence) setSilence.oninput = () => {
     const val = parseInt(setSilence.value, 10);
     set('silenceSec', val);
-    set('autoSend', val > 0);
     if (setSilenceVal) setSilenceVal.textContent = val === 0 ? 'Off' : `${val}s`;
     if (handlers.onAutoSendChange) handlers.onAutoSendChange();
   };

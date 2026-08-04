@@ -179,6 +179,71 @@ describe('dictation — reconnect buffer preservation (Jonathan bug 2026-06-23)'
   });
 });
 
+describe('dictation — sendword commitDelaySec grace window (2026-08-04 audit fix)', () => {
+  let bubbles: string[];
+  const DELAY_SEC = 0.05;  // 50 ms — fast enough for test timeouts
+
+  beforeEach(() => {
+    bubbles = [];
+    settings.set('silenceSec', 30);       // silence must not be the trigger
+    settings.set('commitPhrase', 'over');
+    settings.set('commitDelaySec', DELAY_SEC);
+    dictation.reset();
+    dictation.setUserBubbleHandler((text: string) => { bubbles.push(text); });
+  });
+
+  afterEach(() => {
+    dictation.reset();
+    dictation.setUserBubbleHandler(() => {});
+    settings.set('silenceSec', 30);
+    settings.set('commitPhrase', 'over');
+    settings.set('commitDelaySec', 0);
+  });
+
+  it('delay=0 dispatches on the sendword immediately (pre-fix behavior preserved)', () => {
+    settings.set('commitDelaySec', 0);
+    dictation.handleUserFinal('hello there over');
+    assert.deepEqual(bubbles, ['hello there']);
+    assert.equal(dictation.__hasCommitTimerForTests(), false);
+  });
+
+  it('delay>0 arms the grace timer instead of dispatching, then dispatches', async () => {
+    dictation.handleUserFinal('hello there over');
+    assert.deepEqual(bubbles, [], 'must NOT dispatch inside the grace window');
+    assert.equal(dictation.__hasCommitTimerForTests(), true);
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, ['hello there'], 'grace expiry must dispatch the cleaned utterance');
+    assert.equal(dictation.__hasCommitTimerForTests(), false);
+  });
+
+  it('a final landing inside the window rides the same dispatch', async () => {
+    dictation.handleUserFinal('hello over');
+    assert.deepEqual(bubbles, []);
+    dictation.handleUserFinal('wait also this');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, ['hello wait also this'],
+      'correction spoken during the grace window must land in the same turn');
+  });
+
+  it('pause during the window holds the commit; resume fires it immediately', async () => {
+    dictation.handleUserFinal('hello over');
+    assert.equal(dictation.__hasCommitTimerForTests(), true);
+    dictation.pauseSilenceTimer();  // 'reconnecting' — channel dead
+    assert.equal(dictation.__hasCommitTimerForTests(), false, 'pause must clear the pending timer');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, [], 'held commit must not dispatch into a dead channel');
+    dictation.resumeSilenceTimer();
+    assert.deepEqual(bubbles, ['hello'], 'resume must fire the held commit immediately');
+  });
+
+  it('reset() during the window drops the pending commit', async () => {
+    dictation.handleUserFinal('hello over');
+    dictation.reset();  // call closed
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, [], 'a closed call must not dispatch a stale pending commit');
+  });
+});
+
 // Restore fetch when the test process exits — defensive in case other
 // suites in the same node:test run expected the real one.
 process.on('exit', () => {

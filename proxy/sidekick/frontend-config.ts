@@ -25,17 +25,17 @@ import YAML from 'yaml';
 export const FRONTEND_SETTINGS = {
   // Streaming (mic + STT + TTS + voice-flow)
   streamingEngine:        { category: 'streaming',       default: 'server' },
-  autoFallback:           { category: 'streaming',       default: true },
   ttsEngine:              { category: 'streaming',       default: 'server' },
   voice:                  { category: 'streaming',       default: 'aura-2-thalia-en' },
   tts:                    { category: 'streaming',       default: false },
-  autoSend:               { category: 'streaming',       default: true },
   silenceSec:             { category: 'streaming',       default: 30 },
   commitPhrase:           { category: 'streaming',       default: 'over' },
-  commitDelaySec:         { category: 'streaming',       default: 0.5 },
+  commitDelaySec:         { category: 'streaming',       default: 0 },
   // Interaction (mic-meter + barge + wake lock + audio feedback)
+  // (autoFallback / autoSend / bargeThreshold retired 2026-08-04 — the
+  // decorative-settings audit found no consumer for any of them; stale
+  // yaml values for removed keys are simply ignored on read.)
   bargeIn:                { category: 'interaction',     default: true },
-  bargeThreshold:         { category: 'interaction',     default: 0.10 },
   // Silero positiveSpeechThreshold (0..1). Replaces bargeThreshold for
   // barge sensitivity now that the BargeDetector is VAD-only. Slider
   // maps 0..100% to 1.0..0.0 inversely; 0% sets bargeIn=false (kill).

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,19 @@ async def handle_offer(request: "web.Request") -> "web.Response":
         peer_id, len(peer.extra["keyterms"]),
         f"first={peer.extra['keyterms'][0]!r}" if peer.extra["keyterms"] else "(empty)",
     )
+    # Per-peer TTS voice, forwarded by the PWA the same way keyterms
+    # are (Voice-output picker / per-session identity override); the
+    # YAML tts options voice stays the fallback. Before this the offer
+    # never carried voice, so calls ignored the picker entirely.
+    # Sanitized to a bare model-id shape so a malformed payload can't
+    # smuggle query params into the provider's TTS URL.
+    peer_voice = payload.get("voice")
+    if isinstance(peer_voice, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", peer_voice.strip()):
+        peer.extra["voice"] = peer_voice.strip()
+    else:
+        peer.extra["voice"] = None
+        if peer_voice:
+            logger.warning("[signaling] peer %s offer voice rejected: %r", peer_id, peer_voice)
 
     # Barge is a split design: the bridge may run server-side Silero VAD
     # (barge_policy, onnxruntime by default) and stream {type:'speech-active'}

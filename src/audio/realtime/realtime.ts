@@ -923,6 +923,18 @@ export async function open(
   // Barge detection runs client-side (BargeWindow over the mic
   // AnalyserNode). The user's `bargeIn` toggle + sensitivity are read
   // locally by realtimeBarge.ts on every frame.
+  // Per-connection TTS voice, same precedence as listen-mode replies
+  // (backendEventHandlers: session-assigned voice, else the global
+  // "Voice output" setting). Forwarded like keyterms — the bridge's
+  // static YAML default is only the last resort. Before this the offer
+  // omitted voice entirely, so realtime calls IGNORED the picker
+  // (decorative-settings audit 2026-08-04).
+  let voice = '';
+  try {
+    const si = await import('../../sessionIdentity.ts');
+    voice = (opts?.sessionId ? si.voiceFor(opts.sessionId) : undefined)
+      ?? settings.get().voice ?? '';
+  } catch { voice = settings.get().voice ?? ''; }
   const offerPayload: Record<string, unknown> = {
     sdp: pc.localDescription?.sdp ?? '',
     type: pc.localDescription?.type ?? 'offer',
@@ -930,6 +942,7 @@ export async function open(
     conv_name: opts?.sessionId || null,
     keyterms,
   };
+  if (voice) offerPayload.voice = voice;
   if (opts?.chatId) offerPayload.chat_id = opts.chatId;
   // #2/#3 diag: a null conv_name here means the bridge mints its own
   // session id → the reply comes back tagged with an id that won't match

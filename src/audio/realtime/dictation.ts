@@ -32,6 +32,14 @@ import { log, diag } from '../../util/log.ts';
 
 let buffer: string[] = [];
 let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+// Sendword grace window (commitDelaySec): armed when the commit phrase
+// is heard, dispatches when it elapses. Finals landing inside the
+// window append to the buffer and ride the same dispatch. Distinct
+// from silenceTimer so pause/resume can treat them differently: a
+// paused pending COMMIT re-fires immediately on resume (the user
+// already said the sendword; the grace was served during the gap).
+let commitTimer: ReturnType<typeof setTimeout> | null = null;
+let commitPendingThroughPause = false;
 let onUserBubble: ((text: string) => void) | null = null;
 let onReset: (() => void) | null = null;
 let userMessageIdProvider: (() => string) | null = null;
@@ -72,6 +80,11 @@ export function reset(): void {
     clearTimeout(silenceTimer);
     silenceTimer = null;
   }
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+  }
+  commitPendingThroughPause = false;
   // Drop any pause flag too — a 'reconnecting'-paused buffer that's
   // being torn down (call ended, fresh open) should not start the next
   // call already-paused. Pause is strictly a within-call hold.
@@ -93,6 +106,14 @@ export function pauseSilenceTimer(): void {
     clearTimeout(silenceTimer);
     silenceTimer = null;
   }
+  // A pending sendword commit must not dispatch into a dead channel
+  // (conn.dispatch would fail and the emptied buffer would lose the
+  // utterance). Hold it; resumeSilenceTimer re-fires it immediately.
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+    commitPendingThroughPause = true;
+  }
 }
 
 /** Resume the silence countdown. Called by controls.ts when the peer
@@ -100,6 +121,13 @@ export function pauseSilenceTimer(): void {
  *  content — an empty buffer doesn't need a silence window. Idempotent. */
 export function resumeSilenceTimer(): void {
   silencePaused = false;
+  if (commitPendingThroughPause) {
+    // The sendword landed before the gap; its grace window is long
+    // since served. Dispatch now that the channel is back.
+    commitPendingThroughPause = false;
+    dispatchNow();
+    return;
+  }
   if (buffer.length > 0) armSilenceTimer();
 }
 
@@ -108,6 +136,11 @@ function dispatchNow(): void {
     clearTimeout(silenceTimer);
     silenceTimer = null;
   }
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+  }
+  commitPendingThroughPause = false;
   const utterance = buffer.join(' ').trim();
   buffer = [];
   if (!utterance) return;
@@ -181,6 +214,12 @@ export function __hasSilenceTimerForTests(): boolean {
   return silenceTimer !== null;
 }
 
+/** Test-only introspection — true iff a sendword commit-grace timer
+ *  (commitDelaySec) is currently pending. */
+export function __hasCommitTimerForTests(): boolean {
+  return commitTimer !== null;
+}
+
 export function handleUserFinal(text: string): void {
   const trimmed = (text || '').trim();
   if (!trimmed) return;
@@ -189,11 +228,23 @@ export function handleUserFinal(text: string): void {
   const m = matchSendword(joined, sendwordPhrase);
   if (m.matched) {
     // Match: replace whatever's buffered with the cleaned prefix and
-    // dispatch immediately. The 'commit' chime fires the moment the
-    // send-word lands so the user gets feedback BEFORE the dispatch
-    // round-trips — pairs with the 'send' chime in dispatchNow().
+    // dispatch. The 'commit' chime fires the moment the send-word
+    // lands so the user gets feedback BEFORE the dispatch round-trips
+    // — pairs with the 'send' chime in dispatchNow(). With a non-zero
+    // commitDelaySec the dispatch waits out the grace window (finals
+    // arriving inside it append and ride along; a repeated sendword
+    // re-arms the window).
     try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
     buffer = m.cleaned ? [m.cleaned] : [];
+    const { commitDelaySec } = getHandsfreeConfig();
+    if (commitDelaySec > 0) {
+      if (commitTimer !== null) clearTimeout(commitTimer);
+      commitTimer = setTimeout(() => {
+        commitTimer = null;
+        dispatchNow();
+      }, commitDelaySec * 1000);
+      return;
+    }
     dispatchNow();
     return;
   }

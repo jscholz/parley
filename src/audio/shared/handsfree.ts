@@ -103,10 +103,17 @@ export class SilenceWindow {
 export function getHandsfreeConfig(): {
   silenceSec: number;
   sendwordPhrase: string;
+  commitDelaySec: number;
 } {
   const s = settings.get();
   return {
     silenceSec: Number((s as any).silenceSec) || 0,
     sendwordPhrase: String(s.commitPhrase || '').trim(),
+    // Grace window between hearing the sendword and committing, so a
+    // "…over — wait, also" correction still lands in the same turn.
+    // 0 = commit instantly. (Decorative-settings audit 2026-08-04: the
+    // slider shipped in the initial release, its consumer died with the
+    // classic pipeline; both handsfree modes now honor it again.)
+    commitDelaySec: Math.max(0, Number((s as any).commitDelaySec) || 0),
   };
 }
