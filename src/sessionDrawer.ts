@@ -2083,15 +2083,19 @@ async function resume(id: string, targetMessageId?: string) {
   // awaiting an async IDB read — the gap that made every CAP/WKWebView
   // switch flash a spinner even though the bytes were already in memory.
   // The one-frame yield (feedback-before-payload, field 2026-08-02
-  // "pitch deck") exists because the replay is a SYNCHRONOUS full
-  // project()+reconcile() of every durable row — on a huge chat that
-  // blocks the main thread for seconds, and when it ran inside the
-  // click task the row highlight flipped in the click handler never
-  // reached the screen until the replay finished: highlight + transcript
-  // painted in the same late frame, i.e. zero tap feedback for the whole
-  // load (and the habitual CAP double-tap). No blank, no spinner: the
-  // leaving chat's content simply stays up for the one yielded frame,
-  // preserving the #242 no-blank/no-spinner switch-back contract.
+  // "pitch deck") exists because the replay runs synchronously in
+  // whatever task invokes it — when it ran inside the click task the
+  // row highlight flipped in the click handler never reached the screen
+  // until the replay finished: highlight + transcript painted in the
+  // same late frame, i.e. zero tap feedback (and the habitual CAP
+  // double-tap). Phase 2 (transcript/index.ts windowed replay) has
+  // since time-sliced the heavy part — the replay's first render is a
+  // viewport window and the rest backfills in batches — but the yield
+  // still matters: even the window render + old-row teardown is ~100ms
+  // on a huge chat, and the highlight must paint before it. No blank,
+  // no spinner: the leaving chat's content simply stays up for the one
+  // yielded frame, preserving the #242 no-blank/no-spinner switch-back
+  // contract.
   // Gate on !hasMoreNewer: a floating drill
   // window must NOT go through replaySessionMessages (it flattens the
   // newer-cursor pagination → risks persisting a windowed snapshot, the

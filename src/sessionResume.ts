@@ -41,7 +41,7 @@ import * as sessionCache from './sessionCache.ts';
 import * as windowCache from './drillWindowCache.ts';
 import { listAllPins } from './pins/store.ts';
 import { listActivity } from './notifications/activityStore.ts';
-import { rerenderActive } from './transcript/index.ts';
+import { rerenderActive, requestWindowedReplay, cancelWindowedReplay } from './transcript/index.ts';
 import { getScrollPosition } from './chatScrollPositions.ts';
 
 /** Persist the chat's now-grown in-memory transcript back to IDB so a
@@ -179,6 +179,42 @@ export function replaySessionMessages(
   sessionDrawer.scheduleRefresh();
   chat.trackViewedSession(id);
   viewedSessionForLoadEarlier = id;
+
+  // Windowed replay (feedback-before-payload phase 2): arm the tail/
+  // anchor window BEFORE the store mutation below — setDurable fires the
+  // reconciler subscriber synchronously, and that first render is the
+  // one that must be windowed (on a huge chat the full render is a
+  // 1.4s+ main-thread block). Policy:
+  //   - drill (targetMessageId): NEVER window — the target bubble must
+  //     be queryable immediately after the render (drillScrollTo /
+  //     drillToOlderMessage decide off that lookup).
+  //   - different-session switch: window, seeded with the saved scroll
+  //     anchor when the user left mid-history (the initial window must
+  //     contain the anchor so restoreDomAnchor below can seat it).
+  //   - legacy mid-history save (scrollTop but no anchorKey): render
+  //     full — a raw scrollTop restore against a partial window would
+  //     land nowhere near the saved position.
+  //   - same-session re-render: leave any active window alone (its
+  //     backfill continues; the slice is a superset of what's on
+  //     screen).
+  if (targetMessageId) {
+    cancelWindowedReplay();
+  } else if (!sameSession) {
+    const anchorKey = saved && !saved.atBottom
+      && saved.anchorKey && typeof saved.anchorOffsetPx === 'number'
+      ? saved.anchorKey : null;
+    const legacyMidChat = !!(saved && !saved.atBottom && !anchorKey);
+    if (legacyMidChat) cancelWindowedReplay();
+    else {
+      requestWindowedReplay(id, {
+        anchorKey,
+        // The saved offset rides along so backfill prepends keep
+        // re-seating the SAVED anchor (not the drifting first-visible
+        // bubble) until the user takes over with a gesture.
+        anchorOffsetPx: anchorKey ? saved!.anchorOffsetPx ?? null : null,
+      });
+    }
+  }
 
   // Drive the store: durable rows + inflight envelopes. Projection +
   // reconciler bring the DOM into agreement. NO clear/iterate loop —
@@ -916,6 +952,10 @@ async function renderAroundWindow(
 ): Promise<HTMLElement | null> {
   const transcriptEl = document.getElementById('transcript');
   if (!transcriptEl) return null;
+  // Drill renders must be full-DOM: the target lookup below decides
+  // whether more paging is needed, and a still-active switch backfill
+  // window would hide rows the store already holds.
+  cancelWindowedReplay();
   // Arm the lazy-load suppress window BEFORE any render/scroll. The
   // bounded window lands the target mid-transcript, so the render +
   // scroll below can fire a scroll that would otherwise trip

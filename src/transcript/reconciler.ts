@@ -443,9 +443,23 @@ function ensureRetryRow(el: HTMLElement, spec: UserBubbleSpec): void {
 }
 
 function updateAssistant(el: HTMLElement, spec: AssistantBubbleSpec): void {
-  // Text — re-render markdown only when content changes.
+  // Text — re-render markdown only when the SOURCE changed. The
+  // `data-text` mirror (stamped by chat.addLine on create and re-stamped
+  // below) records the markdown this bubble last rendered; when it
+  // matches the spec, skip miniMarkdown entirely. Two reasons:
+  //   1. Cost: the old innerHTML comparison still PARSED the markdown on
+  //      every reconcile of every assistant row — under the time-sliced
+  //      backfill (one reconcile per batch over the whole window) that
+  //      made update passes O(window × batches) in markdown parses.
+  //   2. Correctness of the compare: the target/rel stamping below
+  //      mutates the DOM AFTER innerHTML is set, so for any bubble with
+  //      links `span.innerHTML !== rendered` was ALWAYS true and the
+  //      bubble re-rendered (wiping selection/hydrated card state) on
+  //      every reconcile.
+  // Streaming rows still re-render per delta: each delta changes
+  // spec.text, so the mirror mismatches until the next stamp.
   const span = el.querySelector('.text') as HTMLElement | null;
-  if (span) {
+  if (span && (el.dataset.text ?? '') !== (spec.text || '')) {
     const rendered = miniMarkdown(spec.text || '');
     if (span.innerHTML !== rendered) {
       span.innerHTML = rendered;

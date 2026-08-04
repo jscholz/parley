@@ -1642,7 +1642,7 @@ export function onJumpToLatest(cb: () => void) {
  *  position. renderFn should call addLine(..., {prepend: true, batch: true})
  *  per message, iterating oldest→newest so chronological order is
  *  preserved at the top of the transcript. */
-export function prependHistory(renderFn: () => void) {
+export function prependHistory(renderFn: () => void, opts: { deferPersist?: boolean } = {}) {
   if (!transcriptEl) { renderFn(); return; }
   // Anchor-based preservation (#202, field 2026-06-12): the old
   // scrollHeight-diff math is open-loop — prepended rows measure as 100px
@@ -1663,7 +1663,12 @@ export function prependHistory(renderFn: () => void) {
     noteAbsoluteScrollSeat();
     transcriptEl.scrollTop = oldScrollTop + (transcriptEl.scrollHeight - oldScrollHeight);
   }
-  persist();
+  // deferPersist: the time-sliced backfill pump prepends a batch per
+  // frame — a synchronous full-DOM clone+serialize per batch would eat
+  // the frame budget it exists to protect. The debounced scheduler
+  // coalesces to one snapshot after the batches go quiet.
+  if (opts.deferPersist) scheduleSnapshotPersist();
+  else persist();
 }
 
 /** Drill-scroll guard: while a pin-drawer / cmdk drill is scrolling
