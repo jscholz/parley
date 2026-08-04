@@ -2039,6 +2039,25 @@ let pendingTrace: { traceId: string; traceT0: number; trace: (event: string, ext
  *  switchController — see its header for the A→B→A hazard this closes. */
 let resumeInFlight: { id: string; tok: SwitchToken; promise: Promise<void> } | null = null;
 
+/** Resolves on the task AFTER the next painted frame: rAF fires just
+ *  before the paint, and the 0ms timer scheduled inside it runs on a
+ *  fresh task after the compositor commits. Used by resume() to let the
+ *  click handler's synchronous feedback (row highlight flip) reach the
+ *  screen before the heavy synchronous transcript replay blocks the
+ *  main thread. Backstop timer because rAF never fires on a hidden
+ *  document — a background resume() (notification drill racing
+ *  visibility, arrow-nav from tests) must not stall the pipeline. */
+function afterNextPaint(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    const backstop = setTimeout(finish, 100);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => { clearTimeout(backstop); setTimeout(finish, 0); });
+    }
+  });
+}
+
 async function resume(id: string, targetMessageId?: string) {
   // Adopt the trace from the click handler if present.
   const t = pendingTrace;
@@ -2059,17 +2078,31 @@ async function resume(id: string, targetMessageId?: string) {
   // Switch-back fast paint: the in-memory transcriptStore retains this
   // session's durable rows from an earlier visit this app-session (SSE
   // keeps background chats current in place). When present AND tail-
-  // anchored, we paint from it SYNCHRONOUSLY below instead of blanking +
-  // arming the 200ms spinner and awaiting an async IDB read — the gap
-  // that made every CAP/WKWebView switch flash a spinner even though the
-  // bytes were already in memory. Gate on !hasMoreNewer: a floating drill
+  // anchored, we paint from it ONE FRAME LATER (see the yield in the
+  // promise below) instead of blanking + arming the 200ms spinner and
+  // awaiting an async IDB read — the gap that made every CAP/WKWebView
+  // switch flash a spinner even though the bytes were already in memory.
+  // The one-frame yield (feedback-before-payload, field 2026-08-02
+  // "pitch deck") exists because the replay is a SYNCHRONOUS full
+  // project()+reconcile() of every durable row — on a huge chat that
+  // blocks the main thread for seconds, and when it ran inside the
+  // click task the row highlight flipped in the click handler never
+  // reached the screen until the replay finished: highlight + transcript
+  // painted in the same late frame, i.e. zero tap feedback for the whole
+  // load (and the habitual CAP double-tap). No blank, no spinner: the
+  // leaving chat's content simply stays up for the one yielded frame,
+  // preserving the #242 no-blank/no-spinner switch-back contract.
+  // Gate on !hasMoreNewer: a floating drill
   // window must NOT go through replaySessionMessages (it flattens the
   // newer-cursor pagination → risks persisting a windowed snapshot, the
   // TFC-A invariant / #223-class hole); those fall back to the blank+
   // spinner + IDB-tail path. memRendered suppresses the now-redundant IDB
   // cache re-render in the reconcile IIFE (server pass still runs).
   let memRendered = false;
-  // True when the synchronous mem paint below rendered a TFC-B-flagged
+  // Set in the leaving-branch below when the mem fast path is eligible;
+  // the actual paint runs inside the promise, after one yielded frame.
+  let memPaintPending = false;
+  // True when the mem paint below rendered a TFC-B-flagged
   // (stale) buffer — the IDB rung then re-renders the fresher cached
   // tail behind it instead of skipping (phase-3 stale-paint).
   let memWasStale = false;
@@ -2133,13 +2166,13 @@ async function resume(id: string, targetMessageId?: string) {
     if (memState.durable.length > 0 && !memState.pagination.hasMoreNewer
         && !memHasGap
         && switchCtl.isCurrent(tok)) {
-      // Synchronous repaint from the in-memory model — no blank frame, no
-      // spinner. Pass inflight=undefined to PRESERVE live inflight (same
-      // contract as the cache-render path). setViewed/render run inside
-      // replaySessionMessages, which also clears any stale .transcript-loading.
-      onResumeCb?.(tok, memState.durable, memState.pagination, undefined, targetMessageId);
-      memRendered = true;
-      t?.trace('mem-render', `n=${memState.durable.length}${memWasStale ? ' stale' : ''}`);
+      // Eligible for the mem fast paint — but do NOT run it here in the
+      // click task. The paint happens inside the promise below, after
+      // one yielded frame, so the row highlight the click handler just
+      // flipped actually reaches the screen first (feedback-before-
+      // payload). No blank/spinner: the leaving chat's pixels stay up
+      // for the yielded frame.
+      memPaintPending = true;
     } else {
       // One loading signal at a time (2026-07-10 walking-test report:
       // duplicate spinners on switch): a stale edge-pagination loader
@@ -2152,6 +2185,44 @@ async function resume(id: string, targetMessageId?: string) {
   }
   t?.trace('optimistic-set');
   const promise = (async () => {
+    if (memPaintPending) {
+      // Feedback-before-payload: yield ONE painted frame so the click
+      // handler's synchronous .active flip (and any other tap ack) is
+      // on screen before the potentially multi-second synchronous
+      // replay of a huge transcript blocks the main thread. Measured
+      // pre-fix (200 fat-markdown rows, headless chromium): the click
+      // task blocked ~1.6s and the highlight painted in the SAME frame
+      // as the transcript swap.
+      await afterNextPaint();
+      // Superseded during the yielded frame → skip the paint; the
+      // cache/server rungs below carry their own isCurrent guards (we
+      // still fall through so the IDB cache-warm behavior matches a
+      // superseded pre-fix resume).
+      if (switchCtl.isCurrent(tok)) {
+        // Re-read the store: an SSE mutation during the yielded frame
+        // could have spliced a gap or grown a newer-cursor, so the
+        // eligibility check must be re-run against current state.
+        const mem = transcriptStore.getState(id);
+        const memGapNow = mem.durable.some(it => it.role === 'gap');
+        if (mem.durable.length > 0 && !mem.pagination.hasMoreNewer && !memGapNow) {
+          // Repaint from the in-memory model — no blank frame, no
+          // spinner. Pass inflight=undefined to PRESERVE live inflight
+          // (same contract as the cache-render path). setViewed/render
+          // run inside replaySessionMessages, which also clears any
+          // stale .transcript-loading.
+          onResumeCb?.(tok, mem.durable, mem.pagination, undefined, targetMessageId);
+          memRendered = true;
+          t?.trace('mem-render', `n=${mem.durable.length}${memWasStale ? ' stale' : ''}`);
+        } else {
+          // Eligibility evaporated during the yielded frame — fall back
+          // to the blank+spinner path. This is still resume()'s mem-gate
+          // fall-through (the sole legal showTranscriptLoading caller).
+          clearEdgeLoader();
+          showTranscriptLoading();
+          t?.trace('transcript-cleared');
+        }
+      }
+    }
     // 1. Paint from cached transcript if we have one — instant feel.
     t?.trace('cache-fetch-start');
     const cached = await sessionCache.getMessagesCache(id);
