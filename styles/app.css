@@ -4209,6 +4209,16 @@
     margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.45;
   }
 
+  /* Video card (agent-pushed media lane) — same frame as images */
+  .card-video video {
+    width: 100%; max-height: 70vh;
+    background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border);
+    display: block;
+  }
+  .card-video .caption {
+    margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.45;
+  }
+
   /* Link list card */
   .card-links { display: flex; flex-direction: column; gap: 12px; }
   .card-links a.link-preview {

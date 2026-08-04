@@ -113,6 +113,7 @@ import { createVoiceController } from './voiceController.ts';
 
 // Card kind modules
 import imageCard from './cards/kinds/image.ts';
+import videoCard from './cards/kinds/video.ts';
 import youtubeCard from './cards/kinds/youtube.ts';
 import spotifyCard from './cards/kinds/spotify.ts';
 import linksCard from './cards/kinds/links.ts';
@@ -1402,7 +1403,7 @@ async function boot() {
   const player = document.getElementById('player') as HTMLAudioElement;
 
   // Register card kinds — inline attachments on agent bubbles.
-  [imageCard, youtubeCard, spotifyCard, linksCard, markdownCard, loadingCard]
+  [imageCard, videoCard, youtubeCard, spotifyCard, linksCard, markdownCard, loadingCard]
     .forEach(registerCard);
 
   // Ambient clock + weather — mounted in the right-drawer rail.

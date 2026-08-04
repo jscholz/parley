@@ -5,6 +5,7 @@
  */
 
 import { escapeAttr, escapeHtml } from '../../util/dom.ts';
+import { apiUrl } from '../../apiBase.ts';
 
 /** @type {import('../../types.js').CardKindModule} */
 export default {
@@ -25,7 +26,10 @@ export default {
     const div = document.createElement('div');
     div.className = 'card-image';
     const img = document.createElement('img');
-    img.src = p.url;
+    // Site-relative urls (the /api/sidekick/media/<id> lane) resolve
+    // against the API origin — under CAP the page origin is
+    // capacitor://localhost and a relative src 404s into the bundle.
+    img.src = p.url.startsWith('/') ? apiUrl(p.url) : p.url;
     img.alt = p.alt || p.caption || '';
     img.loading = 'lazy';
     div.appendChild(img);

@@ -43,6 +43,7 @@ export {
   handleCaptureRetroDiarize,
 } from './captureTranscribe.ts';
 export { handleCaptureAudio } from './captureAudio.ts';
+export { handleMediaGet, handleMediaRegister } from './media.ts';
 export {
   handleSidekickModelCapabilities,
   handleSidekickAuxiliaryModels,

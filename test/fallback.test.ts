@@ -11,6 +11,19 @@ describe('parseCardsFromText', () => {
     assert.equal(cards[0].payload.caption, 'A cat');
   });
 
+  it('classifies markdown-image links to video files as video cards', () => {
+    // The agent-pushed media lane: proxy/sidekick/media.ts serves the
+    // file; the reply references it via markdown image syntax.
+    const cards = parseCardsFromText('Cut it: ![The X edit](/api/sidekick/media/00c0ffee00c0ffee.mp4) done');
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].kind, 'video');
+    const byExt = parseCardsFromText('Cut: ![The X edit](/tmp/render/v1b.mp4)');
+    assert.equal(byExt[0].kind, 'video');
+    assert.equal(byExt[0].payload.caption, 'The X edit');
+    const absolute = parseCardsFromText('See ![clip](https://host/media/clip.webm?t=1)');
+    assert.equal(absolute[0].kind, 'video');
+  });
+
   it('extracts YouTube URLs', () => {
     const cards = parseCardsFromText('Watch this: https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=30s');
     assert.equal(cards.length, 1);

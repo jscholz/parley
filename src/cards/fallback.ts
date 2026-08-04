@@ -26,14 +26,17 @@ export function parseCardsFromText(text) {
   const cards = [];
   const seen = new Set();
 
-  // 1. Markdown images
+  // 1. Markdown images — classified by extension: a video file behind
+  // image syntax becomes a video card (`![clip](/api/sidekick/media/…)`
+  // is the agent-pushed media lane; see proxy/sidekick/media.ts).
   for (const m of text.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {
     seen.add(m[2]);
+    const isVideo = /\.(mp4|m4v|mov|webm)(\?[^)]*)?$/i.test(m[2]);
     cards.push({
       v: 1,
-      kind: 'image',
+      kind: isVideo ? 'video' : 'image',
       payload: { url: m[2], caption: m[1] || undefined },
-      meta: { title: m[1]?.slice(0, 40) || 'Image', source: 'fallback' },
+      meta: { title: m[1]?.slice(0, 40) || (isVideo ? 'Video' : 'Image'), source: 'fallback' },
     });
   }
 

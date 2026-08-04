@@ -1227,6 +1227,19 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capAudio) {
       return sidekick.handleCaptureAudio(req, res, capAudio[1]);
     }
+    // Agent-pushed media (proxy/sidekick/media.ts): any local agent
+    // registers a produced file, embeds the returned url in its reply
+    // as markdown, and the client renders a video/image card. Backend-
+    // agnostic by design — hermes, claude-code and openclaw agents all
+    // hit the same two routes.
+    if (req.method === 'POST' && req.url === '/api/sidekick/media/register') {
+      return sidekick.handleMediaRegister(req, res);
+    }
+    const mediaGet = req.method === 'GET'
+      && req.url.match(/^\/api\/sidekick\/media\/([a-f0-9]+)(?:\.[A-Za-z0-9]+)?(?:\?.*)?$/);
+    if (mediaGet) {
+      return sidekick.handleMediaGet(req, res, mediaGet[1]);
+    }
     const capPurge = req.method === 'POST'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/purge-audio$/);
     if (capPurge) {

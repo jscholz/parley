@@ -97,6 +97,14 @@ end-to-end." Boot it (`npm start` with no env overrides) and verify:
 
 If your adapter / plugin matches that behavior, you're done.
 
+## Pushing media into the chat
+
+A runtime agent on the Sidekick host can push produced files (video /
+audio / images) into the chat UI with a two-step lane that works for
+every backend: register the file, then reference the returned URL in
+reply text as a markdown image. See
+[`docs/AGENT_MEDIA.md`](docs/AGENT_MEDIA.md).
+
 ## What NOT to do
 
 - Don't modify the proxy (`server.ts` / `proxy/sidekick/*`) or the PWA
