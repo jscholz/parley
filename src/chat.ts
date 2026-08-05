@@ -22,7 +22,7 @@ import { markUnread as markChatUnread } from './notifications/badge.ts';
 import { markUnreadForMessage } from './notifications/activityStore.ts';
 import { toast } from './toast.ts';
 import * as backend from './backend.ts';
-import { rerenderActive } from './transcript/index.ts';
+import { rerenderActive, isBackfillActive } from './transcript/index.ts';
 import * as transcriptStore from './transcript/store.ts';
 import * as switchCtl from './switchController.ts';
 
@@ -486,6 +486,15 @@ let edgeLoaderEl: HTMLDivElement | null = null;
  *  stacks with the incoming chat's .transcript-loading — the exact
  *  duplicate-spinner case from the 2026-07-10 walking-test report. */
 export function clearEdgeLoader(): void { setEdgeLoading(null); }
+
+/** Clear the edge spinner ONLY when no pagination fetch is in flight —
+ *  an in-flight load owns its spinner (its finally clears it). Called by
+ *  the backfill pump's terminal paths so a spinner armed before/during a
+ *  backfill can't outlive it; a legit post-backfill pagination keeps
+ *  spinning untouched. */
+export function clearEdgeLoaderIfIdle(): void {
+  if (!paginationLoading && !paginationLoadingNewer) setEdgeLoading(null);
+}
 
 function setEdgeLoading(dir: 'earlier' | 'later' | null): void {
   const parent = transcriptEl?.parentElement;
@@ -1690,6 +1699,19 @@ export function suppressLazyLoadFor(ms: number): void {
 
 async function maybeLoadEarlier() {
   if (Date.now() < suppressLazyLoadUntil) return;
+  // Structural gate (field 2026-08-04, CAP/WKWebView): while a switch
+  // backfill is growing the rendered window, edge pagination must NOT
+  // fire. The store already holds the rows the pump is about to render;
+  // a ?before= fetch here targets rows ABOVE the full buffer, whose
+  // prepend lands outside the window slice and never renders — scrollTop
+  // stays at the (partial) top, so the loop refires page after page: an
+  // invisible pagination cascade with the edge spinner cycling for its
+  // whole duration (field report: 30-60s). The pump's rolling
+  // suppressLazyLoadFor(400) was the only guard, and on real WKWebView
+  // hardware rAF/timer stalls (touch-scroll throttling, foreground
+  // transitions) open >400ms gaps between pump ticks that this timer
+  // can't cover. Gate on the STATE, not a timer.
+  if (isBackfillActive()) return;
   if (!paginationHasMore || paginationLoading || !paginationCb || paginationOldestId == null) return;
   if (!transcriptEl) return;
   if (transcriptEl.scrollTop > LOAD_EARLIER_THRESHOLD_PX) return;
@@ -1720,6 +1742,8 @@ export function appendHistory(renderFn: () => void) {
 
 async function maybeLoadLater() {
   if (Date.now() < suppressLazyLoadUntil) return;
+  // Same structural backfill gate as maybeLoadEarlier above.
+  if (isBackfillActive()) return;
   if (!paginationHasMoreNewer || paginationLoadingNewer || !paginationLaterCb || paginationNewestId == null) return;
   if (!transcriptEl) return;
   const distance = transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight;

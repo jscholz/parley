@@ -18,6 +18,7 @@ import {
   scheduleSnapshotPersist, runWithScrollSaveSuppressed, autoScroll,
   prependHistory, suppressLazyLoadFor,
   restoreDomAnchor, lastUserScrollGestureAt, noteAbsoluteScrollSeat,
+  clearEdgeLoaderIfIdle,
 } from '../chat.ts';
 
 let getTranscriptEl: () => HTMLElement | null = () => document.getElementById('transcript');
@@ -114,7 +115,7 @@ function rerenderInto(chatId: string): void {
     if (replayWindow.chatId === chatId) {
       const slice = windowSlice(el, specs);
       if (slice) renderSpecs = slice;
-      else replayWindow = null;   // complete / ineligible → full render
+      else { replayWindow = null; clearEdgeLoaderIfIdle(); }   // complete / ineligible → full render
     } else {
       // A render for a different chat means focus moved without a new
       // replay request (e.g. new-chat placeholder) — the old window is
@@ -344,12 +345,12 @@ function pump(w: ReplayWindowState): void {
   // moved off this chat → this backfill is dead. No DOM was touched.
   if (replayWindow !== w || !w.resolved) return;
   const focused = getFocusedChatId();
-  if (focused && focused !== w.chatId) { replayWindow = null; return; }
+  if (focused && focused !== w.chatId) { replayWindow = null; clearEdgeLoaderIfIdle(); return; }
   const el = getTranscriptEl();
   if (!el) { replayWindow = null; return; }
   const specs = project(getState(w.chatId));
   const n = specs.length;
-  const bailFull = () => { replayWindow = null; rerenderInto(w.chatId); };
+  const bailFull = () => { replayWindow = null; clearEdgeLoaderIfIdle(); rerenderInto(w.chatId); };
   for (const s of specs) if (s.kind === 'gap') { bailFull(); return; }
   const startIdx = specs.findIndex((s) => s.key === w.startKey);
   if (startIdx < 0 || n === 0) { bailFull(); return; }
@@ -410,8 +411,11 @@ function pump(w: ReplayWindowState): void {
       );
     }
     if (newStart === 0) {
-      // Complete — steady-state full renders from here on.
+      // Complete — steady-state full renders from here on. Clear any
+      // stale edge spinner that got armed around the backfill (a legit
+      // in-flight pagination keeps its own — the IfIdle guard).
       replayWindow = null;
+      clearEdgeLoaderIfIdle();
       scheduleSnapshotPersist();
       return;
     }

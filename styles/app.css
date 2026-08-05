@@ -723,6 +723,18 @@
   .sess-pin-btn svg { width: 15px; height: 15px; }
   .sessions-list li:hover .sess-pin-btn { opacity: 0.55; }
   .sess-pin-btn:hover { opacity: 0.95 !important; color: var(--primary); }
+  /* Touch devices (field 2026-08-04, CAP/iOS): WebKit's tap-to-hover
+   * heuristic withholds the CLICK when the first tap's simulated hover
+   * makes hidden content appear — the opacity:0 → 0.55 reveal above made
+   * every UNPINNED row a deterministic two-tap switch (first tap = hover,
+   * row highlights, pin icon fades in; second tap = click), while PINNED
+   * rows (icon already visible, hover delta only 1 → 0.55, i.e. nonzero →
+   * nonzero) switched in one tap. Keep the icon faintly visible on
+   * hoverless devices so no content APPEARS on tap-hover and the first
+   * tap is a click everywhere — same treatment as .msg-caret below. */
+  @media (hover: none) {
+    .sess-pin-btn { opacity: 0.35; }
+  }
   .sess-pin-btn.pinned { opacity: 1; color: var(--primary); }
   .sess-pin-btn .pin-filled { display: none; }
   .sess-pin-btn.pinned .pin-outline { display: none; }

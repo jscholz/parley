@@ -2176,6 +2176,12 @@ async function resume(id: string, targetMessageId?: string) {
       // flipped actually reaches the screen first (feedback-before-
       // payload). No blank/spinner: the leaving chat's pixels stay up
       // for the yielded frame.
+      //
+      // Same one-loading-signal rule as the spinner branch below: a
+      // stale edge-pagination spinner from the LEAVING chat must not
+      // ride into the switched view (field 2026-08-04: it visually
+      // attached itself to the incoming chat's top edge).
+      clearEdgeLoader();
       memPaintPending = true;
     } else {
       // One loading signal at a time (2026-07-10 walking-test report:
