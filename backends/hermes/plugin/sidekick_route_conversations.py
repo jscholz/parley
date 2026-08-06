@@ -739,6 +739,35 @@ def delete_conversation_sync(
                 "[sidekick] turn-linker purge failed for chat_id=%s: %s",
                 chat_id, exc,
             )
+        # Body store + per-chat UX rows (2026-08-06 disk audit): msg_links
+        # is the v3 transcript body store — without this leg a deleted
+        # chat's bodies (tool results are the bulk) lived in sidekick.db
+        # forever AND rode every daily snapshot. Pins / unread / activity
+        # / title rows die with the chat too so no per-chat row outlives
+        # it. Best-effort per table, same posture as purge_chat_sync.
+        try:
+            purged = 0
+            for table in (
+                "msg_links", "pins", "unread_state",
+                "activity_items", "conversation_titles", "replay_dups",
+            ):
+                try:
+                    cur = sk_db.exec(
+                        f"DELETE FROM {table} WHERE chat_id = ?", (chat_id,),
+                    )
+                    purged += max(cur.rowcount or 0, 0)
+                except Exception:
+                    continue
+            if purged:
+                logger.info(
+                    "[sidekick] chat-delete purged %d sidekick.db rows for %s",
+                    purged, chat_id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "[sidekick] sidekick.db row purge failed for chat_id=%s: %s",
+                chat_id, exc,
+            )
     # sessions.json: scrub the sidekick key. SESSION_KEY_PREFIX is
     # the sidekick-namespaced prefix; for non-sidekick deletes the
     # sessions.json entry (if any) belongs to a different platform
