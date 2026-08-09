@@ -533,7 +533,11 @@ function handleUtteranceEnd(): void {
   if (committedLen > 0) {
     const endIdx = anchor + committedLen + interimLen;
     const tail = composerInput.value.charAt(endIdx - 1);
-    if (!/\s/.test(tail)) {
+    const nextCh = composerInput.value.charAt(endIdx);
+    if (nextCh && /\s/.test(nextCh)) {
+      // Already bordered by whitespace on the right (dictated into the
+      // middle of existing text) — adding another space doubles it.
+    } else if (!/\s/.test(tail)) {
       // Append a single space at the end of the utterance span. We
       // splice it in AFTER the interim (if any), so an in-flight
       // interim isn't disturbed.
@@ -797,6 +801,41 @@ function setCursor(pos: number): void {
 
 // ── User events — typing, paste, cursor moves ─────────────────────────
 
+/** Close out the current utterance IN PLACE because the user took the
+ *  caret (moved it, typed, or focused the composer) while nothing was
+ *  in flight (interimLen===0 — all speech baked). Distinct from the
+ *  mid-utterance detach (field bug 2026-07-21: while words are still
+ *  streaming, a caret move must NOT re-anchor them): at rest, a
+ *  deliberate caret move means "the next thing I say goes HERE", so
+ *  the old anchor must die now — not whenever Deepgram's UtteranceEnd
+ *  straggles in (utterance_end_ms is 1.5s and the marker was dropped
+ *  by the bridge entirely until 2026-08-09; field bug: second
+ *  utterance kept landing at the first utterance's position).
+ *  Bakes the trailing space (same bookkeeping as handleUtteranceEnd),
+ *  never touches the cursor — the user owns it — and arms the
+ *  late-event suppressor against re-emits of the closed utterance. */
+function closeUtteranceAtRest(reason: string): void {
+  if (anchor === null || !composerInput) return;
+  if (committedLen > 0) {
+    const endIdx = anchor + committedLen;
+    const tail = composerInput.value.charAt(endIdx - 1);
+    const next = composerInput.value.charAt(endIdx);
+    // Skip when either side is already whitespace — the span may sit
+    // mid-text (dictated into "alpha | omega"), where adding a space
+    // against the existing one doubles it.
+    if (!/\s/.test(tail) && !(next && /\s/.test(next))) {
+      writeRange(endIdx, endIdx, ' ');
+      committedLen += 1;
+    }
+  }
+  if (lastFinalText) {
+    abandonedAt = Date.now();
+    abandonedText = lastFinalText;
+  }
+  diag(`[dictate] utterance closed at rest (${reason}) — next speech re-anchors at the user's caret`);
+  resetUtterance(reason);
+}
+
 function onUserInput(_ev: Event): void {
   if (updating) return;          // our own write — ignore
   if (!active) return;           // not dictating — irrelevant
@@ -825,6 +864,14 @@ function onUserInput(_ev: Event): void {
     dlog('anchor shift (user edit)', { from: anchor, to: shifted, edit: JSON.stringify(edit) });
     anchor = shifted;
   }
+  // Typing with nothing in flight = the user has moved on. Close the
+  // utterance here (post-slide, so the trailing space lands right)
+  // instead of leaving a live anchor that a straggling UtteranceEnd may
+  // never kill.
+  if (interimLen === 0) {
+    closeUtteranceAtRest('user-input-at-rest');
+    return;
+  }
   caretDetached = true;
 }
 
@@ -832,6 +879,12 @@ function onComposerFocus(_ev: Event): void {
   if (updating) return;          // our own write — ignore (defensive; setSelectionRange shouldn't fire focus)
   if (!active) return;           // not dictating — let iOS handle focus normally
   if (anchor === null) return;   // no in-flight utterance — programmatic focus at dictation start fires before the first interim
+  if (interimLen === 0) {
+    // Tap with nothing in flight — user repositioning between
+    // utterances. Close out so the next speech anchors at their tap.
+    closeUtteranceAtRest('focus-at-rest');
+    return;
+  }
   // User tapped the composer while we had a voice utterance in flight.
   // Detach the caret: the utterance keeps its anchor (transcripts still
   // land there), but we stop calling setCursor on the now-focused
@@ -854,6 +907,12 @@ function onUserSelectionChange(_ev: Event): void {
   // user-driven move (or the 'preserve'-mode shift of a caret the user
   // already owns, in which case caretDetached is already true).
   if (pos === lastSetCursor) return;
+  if (interimLen === 0) {
+    // Caret move with nothing in flight — deliberate repositioning
+    // between utterances. Close out so the next speech anchors here.
+    closeUtteranceAtRest('caret-moved-at-rest');
+    return;
+  }
   // The user took the caret. Keep the utterance anchored where speech
   // started — pending finals land there — but stop moving the caret.
   if (!caretDetached) {

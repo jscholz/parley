@@ -282,40 +282,41 @@ describe('dictate — late final after user-driven reset', () => {
     assert.equal(textarea.selectionStart, newCursor);
   });
 
-  it('caret move WITHIN the in-flight utterance detaches the caret; the NEXT utterance anchors there', () => {
-    // Mid-utterance caret moves no longer re-anchor the in-flight
-    // utterance (its speech keeps landing at its own end) — but they DO
-    // detach the caret, and the next utterance (post UtteranceEnd)
-    // anchors wherever the user parked it. This preserves the
-    // 2026-05-07 strict-cursor-match intent (a click inside existing
-    // content is honored for what comes NEXT) without yanking text that
-    // belongs to the current utterance.
+  it('caret move AT REST (all speech baked) closes the utterance; the NEXT speech anchors there', () => {
+    // Contract revised 2026-08-09 (Jonathan field bug: dictate → flush →
+    // move caret → keep talking landed at the OLD spot). A caret move
+    // while nothing is in flight (interimLen==0 — the last final has
+    // baked) is a deliberate repositioning: it CLOSES the utterance in
+    // place, and whatever the user says next anchors at the moved
+    // caret. No UtteranceEnd required — production Deepgram lags it
+    // ~1.5s and the bridge dropped it entirely pre-fix. (Caret moves
+    // while an interim IS in flight keep the 2026-07-21 anchoring —
+    // covered by the test below.)
     userInterim(provider, 'Hello world.');
     userFinal(provider, 'Hello world.');
     assert.equal(textarea.value, 'Hello world.');
-    // Simulate user arrowing to position 5 — INSIDE the utterance.
+    // User arrows to position 5 — at rest, INSIDE the dictated text.
     activeElementRef = textarea;
     textarea.selectionStart = 5;
     textarea.selectionEnd = 5;
     const list = docListeners['selectionchange'];
     if (list) for (const fn of list) fn({});
-    // Continuation of the SAME utterance stays at the utterance's end
-    // (anchored) — and must not steal the caret back.
-    userInterim(provider, 'same utterance tail');
-    userFinal(provider, 'same utterance tail');
-    assert.ok(
-      textarea.value.startsWith('Hello world. same utterance tail'),
-      `same-utterance speech continues at the utterance end; got ${JSON.stringify(textarea.value)}`,
-    );
-    assert.equal(textarea.selectionStart, 5, 'caret stays where the user put it');
-    // Utterance ends → the NEXT utterance captures fresh at the user's
-    // caret (position 5).
-    userFinal(provider, '');           // UtteranceEnd
-    userInterim(provider, 'Inserted mid-text');
-    const insertIdx = textarea.value.indexOf('Inserted');
+    // Speech after the at-rest move is a NEW utterance at the caret.
+    userInterim(provider, 'inserted mid-text');
+    userFinal(provider, 'inserted mid-text');
+    const insertIdx = textarea.value.indexOf('inserted');
     const worldIdx = textarea.value.indexOf('world');
     assert.ok(insertIdx >= 0, 'inserted text should appear in textarea');
-    assert.ok(insertIdx < worldIdx, 'next utterance lands at the user caret, before "world"');
+    assert.ok(
+      insertIdx < worldIdx,
+      `speech after an at-rest caret move lands at the moved caret, before "world"; got ${JSON.stringify(textarea.value)}`,
+    );
+    // A straggler UtteranceEnd for the closed utterance is a no-op.
+    userFinal(provider, '');
+    assert.ok(
+      textarea.value.indexOf('inserted') < textarea.value.indexOf('world'),
+      'straggler UtteranceEnd must not disturb the buffer',
+    );
   });
 
   it('continued speech after a caret move keeps flowing (revises the anchored interim)', async () => {

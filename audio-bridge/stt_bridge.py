@@ -405,13 +405,21 @@ def _send_data_channel(peer, payload: dict) -> bool:
 async def _handle_transcript(peer, tx: Transcript) -> None:
     """Forward an interim or final transcript to the data channel.
 
-    Pass-through behavior: every non-empty transcript (interim + final)
-    goes out as a {type:'transcript', role:'user'} envelope. The bridge
-    does NOT buffer, gate on commit-phrase, or run a silence timer —
-    those decisions belong to the PWA, which owns the dispatch trigger.
+    Pass-through behavior: every transcript event (interim + final +
+    empty-final) goes out as a {type:'transcript', role:'user'}
+    envelope. The bridge does NOT buffer, gate on commit-phrase, or run
+    a silence timer — those decisions belong to the PWA, which owns the
+    dispatch trigger.
 
-    Empty finals (Deepgram's UtteranceEnd marker) are skipped — they're
-    internal sync points, not user-visible text.
+    Empty FINALS (Deepgram's UtteranceEnd marker) are forwarded: the
+    PWA's dictate.ts state machine closes out the current utterance on
+    them — bakes the trailing space and re-anchors the NEXT utterance at
+    the user's current caret. Dropping them here (pre-2026-08-09
+    behavior, on the theory they were "internal sync points") left the
+    client's utterance-end branch permanently dead: the anchor never
+    reset, so after a caret move every later utterance still landed at
+    the FIRST utterance's position (Jonathan field bug 2026-08-09).
+    Empty interims stay skipped — pure noise.
     """
     if peer.on_transcript is not None:
         try:
@@ -419,7 +427,7 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
         except Exception as e:  # pragma: no cover
             logger.warning("[stt-bridge] peer %s on_transcript hook raised: %s", peer.peer_id, e)
 
-    if not tx.text:
+    if not tx.text and not tx.is_final:
         return
 
     _send_data_channel(peer, {

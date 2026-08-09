@@ -110,12 +110,18 @@ export default async function run({ page, log }) {
   );
   assert(s.selStart === 0 && s.selEnd === 0,
     `A: user caret must stay at 0 (not yanked to the inserted text); was ${s.selStart}`);
-  // Utterance end (trailing space) must not steal the caret either.
+  // Utterance end must not steal the caret. Contract revised 2026-08-09:
+  //   1. the caret move at rest (all speech baked) already CLOSED the
+  //      utterance (close-at-rest — next speech re-anchors at the
+  //      user's caret), so this straggler UtteranceEnd is a no-op;
+  //   2. no trailing space is added when the span is already bordered
+  //      by whitespace (this smoke's old expectation pinned the
+  //      double-space bug: 'friends  omega').
   await fire(page, { type: 'transcript', role: 'user', is_final: true, text: '' });
   s = await snapshot(page);
   assert(
-    s.value === 'alpha well hello there friends  omega',
-    `A: utterance-end should add the trailing space at the anchor span; got ${JSON.stringify(s.value)}`,
+    s.value === 'alpha well hello there friends omega',
+    `A: straggler utterance-end must not add a doubled space; got ${JSON.stringify(s.value)}`,
   );
   assert(s.selStart === 0, `A: caret must survive utterance-end at 0; was ${s.selStart}`);
   log('A ✓ revised final landed at old anchor; caret stayed put');
