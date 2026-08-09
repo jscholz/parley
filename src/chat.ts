@@ -102,6 +102,26 @@ export function getRestoredViewedSessionId(): string | null {
 const PINNED_THRESHOLD_PX = 300;
 
 let pinnedToBottom = true;
+// Gesture-beats-geometry (field 2026-08-09, "network glitchiness" that
+// wasn't): the scroll listener re-derives pinnedToBottom from GEOMETRY,
+// and PINNED_THRESHOLD_PX is a generous 300px — so scrolling up to the
+// start of a still-short STREAMING reply left the user inside the
+// threshold, geometry re-latched pinned=true, and the next delta's
+// autoScroll yanked them back to the bottom (repeatedly, until the
+// message outgrew 300px). A deliberate upward gesture now unpins
+// immediately and holds the geometric re-latch long enough for the
+// gesture (incl. trackpad inertia ticks) to finish; scrolling back to
+// the bottom after the hold re-pins as before.
+let pinRelatchHoldUntil = 0;
+let lastScrollTopSeen = 0;
+// Distance-from-bottom measured at the last SCROLL EVENT — the
+// pre-growth truth. autoScroll's lazy re-latch can't measure live:
+// by the time it runs, the delta that triggered it has already grown
+// scrollHeight, inflating the apparent distance (28px parked read as
+// 160px after one delta).
+let lastScrollEventDist = 0;
+const PIN_RELATCH_HOLD_MS = 400;
+const UPWARD_GESTURE_FRESH_MS = 400;
 /** While `Date.now() < unpinnedHoldUntil`, the scroll listener must NOT
  *  re-derive pinnedToBottom from geometry — it stays false. Set by
  *  drillScrollTo (via holdUnpinnedFor): a drill's programmatic scroll can
@@ -631,6 +651,31 @@ export function autoScroll(): void {
     const tail = shAfter - stAfter - ch;
     diag(`[autoscroll] pinned scrollTop ${stBefore}→${stAfter} scrollHeight ${shBefore}→${shAfter} ch=${ch} tail=${tail} burst=${inBurst}`);
   } else {
+    // Lazy re-latch at the LITERAL live edge: a fast wheel-down over
+    // content-visibility rows produces browser scroll-anchoring
+    // adjustments that read as tiny upward moves — each one re-arms the
+    // gesture-beats-geometry re-latch hold, and once scroll events stop
+    // there's nothing left to re-derive pinned. If the user is parked
+    // at the strict bottom (≤48px — wheel-down rests ~28px off the edge on padded layouts; NOT the generous 300px threshold,
+    // which is exactly the yank zone this machinery exists to protect)
+    // with every hold expired, they've demonstrably returned to the
+    // live edge: re-pin and follow this delta.
+    if (Date.now() >= unpinnedHoldUntil && Date.now() >= pinRelatchHoldUntil
+        && !transcriptNotTailAnchored()) {
+      // Judge by the LAST SCROLL EVENT's distance, not a live read —
+      // the delta that invoked us already grew scrollHeight, so a live
+      // measurement inflates a parked-at-the-edge user into the yank
+      // zone (28px read as 160px after one delta).
+      const dist = lastScrollEventDist;
+      if (dist <= 48) {
+        pinnedToBottom = true;
+        missedWhileScrolled = 0;
+        transcriptEl.scrollTo({ top: transcriptEl.scrollHeight, behavior: 'instant' as ScrollBehavior });
+        updateButton();
+        diag(`[autoscroll] lazy re-latch at live edge (dist=${dist})`);
+        return;
+      }
+    }
     // No badge bump here: autoScroll fires for every appended/updated row
     // (render passes, dictation interim, batch flushes, replays), which
     // made the unread badge count garbage. Live ingestion sites call
@@ -845,7 +890,22 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
       //     pinned=false → subsequent bubble adds don't drag the user
       //     away from the restored position.
       const wasPinned = pinnedToBottom;
-      pinnedToBottom = Date.now() < unpinnedHoldUntil ? false : isPinned();
+      // Upward movement backed by a fresh user gesture unpins REGARDLESS
+      // of the 300px geometry threshold and holds the re-latch — covers
+      // touch drags + momentum where the wheel handler below can't see
+      // direction. JS writes (autoScroll, restores) move DOWN or lack a
+      // fresh gesture, so they fall through to the geometric path.
+      const st = transcriptEl.scrollTop;
+      const movedUp = st < lastScrollTopSeen - 1;
+      lastScrollTopSeen = st;
+      lastScrollEventDist = transcriptEl.scrollHeight - st - transcriptEl.clientHeight;
+      if (movedUp && Date.now() - lastUserGestureAt < UPWARD_GESTURE_FRESH_MS) {
+        pinnedToBottom = false;
+        pinRelatchHoldUntil = Date.now() + PIN_RELATCH_HOLD_MS;
+      } else {
+        pinnedToBottom = (Date.now() < unpinnedHoldUntil || Date.now() < pinRelatchHoldUntil)
+          ? false : isPinned();
+      }
       if (pinnedToBottom && !wasPinned) missedWhileScrolled = 0;
       // Off the live edge → the settle compensator guards the reading
       // position (no-op where native scroll anchoring is active; see its
@@ -877,6 +937,15 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
     // gates inside maybeLoadLater (hasMoreNewer, in-flight, ≤150px from
     // bottom, drill suppression) make this a cheap no-op everywhere else.
     transcriptEl.addEventListener('wheel', (e) => {
+      // Direction is explicit on wheel — unpin on the first upward tick
+      // (the scroll-event path above also catches this, but the wheel
+      // event can fire a beat earlier than its scroll event; being
+      // early here means the very next delta can't slip a yank in).
+      if (e.deltaY < 0 && pinnedToBottom) {
+        pinnedToBottom = false;
+        pinRelatchHoldUntil = Date.now() + PIN_RELATCH_HOLD_MS;
+        updateButton();
+      }
       if (e.deltaY > 0) maybeLoadLater();
     }, { passive: true });
     let lastTouchMoveY: number | null = null;

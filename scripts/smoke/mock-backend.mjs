@@ -1100,6 +1100,31 @@ export async function installMockBackend(page) {
      *  `messageId` lets the test pin a stable id — useful for
      *  cross-path dedup tests where history's `id` must match the
      *  envelope's `message_id`. Defaults to a fresh synthetic id. */
+    /** Stream a reply as N cumulative reply_delta envelopes at
+     *  `intervalMs` cadence, then reply_final — mirrors real hermes
+     *  streaming (deltas carry cumulativeText, edit:true upstream).
+     *  Returns a promise that resolves after reply_final. */
+    async streamReply(chatId, fullText, { chunks = 8, intervalMs = 150, messageId } = {}) {
+      const id = messageId || `mock-msg-${envelopeId + 1}`;
+      const step = Math.ceil(fullText.length / chunks);
+      for (let i = 1; i <= chunks; i++) {
+        broadcast({
+          type: 'reply_delta', chat_id: chatId,
+          text: fullText.slice(0, Math.min(i * step, fullText.length)),
+          message_id: id,
+        });
+        await new Promise((r) => setTimeout(r, intervalMs));
+      }
+      broadcast({ type: 'reply_final', chat_id: chatId, message_id: id });
+      const chat = chats.get(chatId);
+      if (chat) {
+        chat.messages.push({
+          role: 'assistant', content: fullText, message_id: id,
+          sidekick_id: id, timestamp: Date.now() / 1000,
+        });
+      }
+      return id;
+    },
     pushReply(chatId, text, messageId) {
       const id = messageId || `mock-msg-${envelopeId + 1}`;
       broadcast({ type: 'reply_delta', chat_id: chatId, text, message_id: id });
