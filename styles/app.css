@@ -4958,18 +4958,33 @@
    2026-07-09 #7). Same ring+dot record glyph as everywhere. */
 .sess-meeting-badge { display: inline-flex; align-items: center; gap: 2px; color: var(--muted, #9a9a9a); }
 .sess-meeting-badge svg { width: 11px; height: 11px; }
-.sess-meetings-toggle {
+/* Canonical session-filter button (meeting-polish #25; supersedes the
+   ◉ meetings-lens toggle) + its options strip. Same quiet-icon-button
+   family as the old lens; active = filled funnel, same color logic
+   (field 2026-07-09: red would imply recording; state reads via fill
+   like iOS toggles). */
+.sess-filter-btn {
   background: transparent; border: none; color: var(--muted, #8a8a8a);
   padding: 4px; border-radius: 6px; cursor: pointer; flex: none;
   display: inline-flex; align-items: center;
 }
-.sess-meetings-toggle svg { width: 15px; height: 15px; }
-.sess-meetings-toggle:hover { color: var(--fg, #eee); }
-/* Active = FILLED glyph, same color family (field 2026-07-09: red
-   would imply recording; state reads via fill like iOS toggles). */
-.sess-meetings-toggle.active { background: rgba(255, 255, 255, 0.08); color: var(--fg, #eee); }
-.sess-meetings-toggle.active svg circle:first-child { fill: currentColor; }
-.sess-meetings-toggle.active svg circle:last-child { fill: var(--surface, #111); }
+.sess-filter-btn svg { width: 15px; height: 15px; }
+.sess-filter-btn:hover { color: var(--fg, #eee); }
+.sess-filter-btn.active { background: rgba(255, 255, 255, 0.08); color: var(--fg, #eee); }
+.sess-filter-btn.active svg path { fill: currentColor; }
+.sess-filter-options {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 12px 6px; font-size: 12.5px; color: var(--muted, #9a9a9a);
+}
+.sess-filter-options[hidden] { display: none; }
+.sess-filter-option {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+}
+.sess-filter-option input { margin: 0; accent-color: var(--primary, #7aa2ff); }
+.sess-filter-option svg { width: 12px; height: 12px; }
+.sess-filter-option:hover { color: var(--fg, #eee); }
+#sidebar.collapsed .sess-filter-btn,
+#sidebar.collapsed .sess-filter-options { display: none; }
 .doc-player-purge {
   display: flex; color: var(--muted, #aaa); flex: none; padding: 4px;
   background: transparent; border: none; cursor: pointer;

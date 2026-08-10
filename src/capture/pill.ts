@@ -136,6 +136,22 @@ async function startFromUi(linkedChat?: string): Promise<void> {
   }
 }
 
+/** Global hotkey entry point (meeting-polish #25, Cmd+Shift+M):
+ *  TOGGLE semantics, mirroring the header button's start↔stop flip —
+ *  one binding both starts and stops, so a user mid-meeting never
+ *  needs a second affordance. Start is PLACEMENT-SCOPED to the
+ *  CURRENT session (the hotkey fires where the user is standing —
+ *  same reasoning as the composer mic-menu item); with no session in
+ *  view it degrades to the app-level path (mints a dedicated meeting
+ *  session and jumps to it via openChatCb). */
+export function hotkeyToggleMeetingCapture(): void {
+  if (getCaptureState().active) {
+    void stopMeetingCapture();
+  } else {
+    void startFromUi(switchCtl.viewedId() || undefined);
+  }
+}
+
 export function initCapturePill(opts: { openChat?: (chatId: string) => void } = {}): void {
   openChatCb = opts.openChat ?? null;
   window.addEventListener('sidekick:capture-state', (ev) => {

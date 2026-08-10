@@ -438,6 +438,17 @@ export async function installMockBackend(page) {
   const captures = new Map();
   let captureOutage = false;
   await page.route('**/api/sidekick/captures', async (route) => {
+    // GET = the capture list meetingsIndex fetches at boot (and on
+    // capture_changed envelopes). Served from the mock's map so
+    // has-recording drawer state is test-controlled — falling back to
+    // the real dev proxy here would leak whatever real captures exist
+    // on the host into the smoke.
+    if (route.request().method() === 'GET') {
+      return route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ captures: Array.from(captures.values()) }),
+      });
+    }
     if (route.request().method() !== 'POST') return route.fallback();
     let body;
     try { body = JSON.parse(route.request().postData() || '{}'); } catch { body = {}; }
@@ -1207,6 +1218,26 @@ export async function installMockBackend(page) {
      *  assertions (segment acks, marks, stop state). */
     setCaptureOutage(on) { captureOutage = !!on; },
     getCaptures() { return Array.from(captures.values()); },
+    /** Pre-seed a (finished) capture linked to a chat — feeds the
+     *  drawer's has-recording filter + row badges via the GET list
+     *  above. Call from MOCK_SETUP so the boot-time meetingsIndex
+     *  fetch sees it. */
+    addCapture(chatId, opts = {}) {
+      const id = opts.id || `cap_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+      captures.set(id, {
+        id,
+        title: opts.title || `Meeting ${new Date().toISOString().slice(0, 10)}`,
+        linked_chat: chatId || null,
+        diarize: false,
+        status: opts.status || 'complete',
+        started_at: opts.startedAt || Date.now() - 60_000,
+        ended_at: opts.endedAt ?? Date.now() - 30_000,
+        marks: [],
+        speakers: {},
+        segments: opts.segments || [{ seq: 0, bytes: 1024 }],
+      });
+      return id;
+    },
     /** Test escape hatch: set raw unread state. Use this when a test
      *  needs to simulate the plugin having pre-existing unread (e.g.
      *  cross-device scenarios where another device left mark-unread). */

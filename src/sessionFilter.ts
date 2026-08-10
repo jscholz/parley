@@ -86,6 +86,38 @@ function haystack(s: SessionRow): string {
     .toLowerCase();
 }
 
+/** Drawer option-filter state (meeting-polish #25). `engaged` is the
+ *  canonical filter button; `hasRecording` is the one option it hosts
+ *  today, DEFAULT TRUE — i.e. engaging the filter narrows to sessions
+ *  with meeting captures unless the user unticks the option. Both are
+ *  per-device + session-ephemeral (module state in the drawer; never
+ *  persisted or synced). */
+export type RecordingFilterState = {
+  engaged: boolean;
+  hasRecording: boolean;
+};
+
+/** Fresh default state: filter disengaged (the drawer must NOT boot
+ *  filtered — that would hide most sessions), has-recording option
+ *  pre-ticked so engaging the button immediately shows recorded
+ *  sessions only. */
+export function defaultRecordingFilter(): RecordingFilterState {
+  return { engaged: false, hasRecording: true };
+}
+
+/** Apply the option filter on top of the text filter. Pure: the
+ *  captures-per-chat lookup is injected (`hasRec`, backed by
+ *  capture/meetingsIndex in the drawer). Disengaged — or engaged with
+ *  the has-recording option unticked — passes everything through. */
+export function applyRecordingFilter<T extends SessionRow>(
+  sessions: T[],
+  state: RecordingFilterState,
+  hasRec: (chatId: string) => boolean,
+): T[] {
+  if (!state.engaged || !state.hasRecording) return sessions;
+  return sessions.filter((s) => !!s.id && hasRec(s.id));
+}
+
 /** Filter a session list against a parsed query. AND across all
  *  terms+globs. Empty query is pass-through. */
 export function applyFilter<T extends SessionRow>(sessions: T[], q: FilterQuery): T[] {

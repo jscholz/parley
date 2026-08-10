@@ -23,7 +23,7 @@ import * as conversations from './conversations.ts';
 import * as sessionCache from './sessionCache.ts';
 import { log, diag } from './util/log.ts';
 import * as status from './status.ts';
-import { parseQuery, applyFilter } from './sessionFilter.ts';
+import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter } from './sessionFilter.ts';
 import { meetingCountFor, hasMeetings } from './capture/meetingsIndex.ts';
 import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter as clearStoredFilter } from './util/filterStore.ts';
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
@@ -475,10 +475,14 @@ function mergePending(base: any[]): any[] {
  *  page reload restores the same filter. */
 let currentFilter: string = '';
 
-/** Meetings-only view (field 2026-07-09 #7): the ◉ toggle beside the
- *  filter input narrows the list to sessions with recordings attached.
- *  Session-local (not persisted) — it's a lens, not a mode. */
-let meetingsOnly = false;
+/** Canonical option-filter state (meeting-polish #25; grew out of the
+ *  2026-07-09 ◉ meetings lens). The funnel button beside the filter
+ *  input ENGAGES it; the "Has recording" option defaults to on, so
+ *  engaging narrows the list to sessions with recordings attached.
+ *  Deliberately session-local + per-device (module state, never
+ *  persisted/synced) — it's a lens, not a mode, and the drawer must
+ *  never BOOT filtered. */
+const recordingFilter = defaultRecordingFilter();
 
 /** Debounce handles for the filter input. Render: 100ms (instant client-side
  *  re-render over the cached list). Persist: 500ms (IDB). Server: 250ms
@@ -1243,14 +1247,12 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   const textFiltered = currentFilter
     ? applyFilter(merged, parseQuery(currentFilter))
     : merged;
-  // Meetings lens stacks on top of the text filter.
-  const filtered = meetingsOnly
-    ? textFiltered.filter((row: any) => hasMeetings(row.id))
-    : textFiltered;
+  // Option filter (has-recording) stacks on top of the text filter.
+  const filtered = applyRecordingFilter(textFiltered, recordingFilter, hasMeetings);
   // Empty list under a non-empty filter shows "No matches." instead of
   // the generic "No past sessions yet." so the user knows it's the filter
   // (not an empty server) hiding everything.
-  if (filtered.length === 0 && meetingsOnly && merged.length > 0) {
+  if (filtered.length === 0 && recordingFilter.engaged && recordingFilter.hasRecording && merged.length > 0) {
     if (deferRebuildDuringTapGesture()) return;
     listEl.innerHTML = '<li class="sess-empty">No sessions with recordings yet.</li>';
     return;
@@ -2422,27 +2424,57 @@ function ensureFilterInput(): HTMLInputElement | null {
   clearBtn.hidden = !input.value;
   header.appendChild(clearBtn);
 
-  // Meetings lens toggle (field 2026-07-09 #7): the record glyph next
-  // to the filter — press to show only sessions with recordings.
-  const meetBtn = document.createElement('button');
-  meetBtn.type = 'button';
-  meetBtn.id = 'sess-meetings-toggle';
-  meetBtn.className = 'sess-meetings-toggle';
-  meetBtn.setAttribute('aria-label', 'Show only sessions with recordings');
-  meetBtn.setAttribute('aria-pressed', 'false');
-  meetBtn.title = 'Meetings — show only sessions with recordings';
-  meetBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>';
+  // Canonical filter button (meeting-polish #25 — supersedes the
+  // 2026-07-09 ◉ meetings lens, one affordance instead of two): the
+  // funnel toggles the option filter ENGAGED/off, and an options strip
+  // under the header lists the available option(s) while engaged.
+  // Today's single option is "Has recording", DEFAULT ON — per the
+  // approved spec's "default true", read as: the option is pre-ticked
+  // when the filter UI is engaged, NOT that the drawer boots filtered
+  // (boot-filtering would hide most sessions). State is per-device and
+  // session-ephemeral by design (module vars — never IDB/synced).
   const rerenderRows = () => {
     const listEl = document.getElementById('sessions-list');
     if (listEl) renderListFiltered(listEl, activeRowId());
   };
-  meetBtn.onclick = () => {
-    meetingsOnly = !meetingsOnly;
-    meetBtn.classList.toggle('active', meetingsOnly);
-    meetBtn.setAttribute('aria-pressed', String(meetingsOnly));
+  const filterBtn = document.createElement('button');
+  filterBtn.type = 'button';
+  filterBtn.id = 'sess-filter-btn';
+  filterBtn.className = 'sess-filter-btn';
+  filterBtn.setAttribute('aria-label', 'Filter sessions');
+  filterBtn.setAttribute('aria-pressed', 'false');
+  filterBtn.title = 'Filter sessions — "has recording" is on by default';
+  filterBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5.5l-4 2.5v-8L3 5z"/></svg>';
+  header.appendChild(filterBtn);
+
+  const optionsRow = document.createElement('div');
+  optionsRow.id = 'sess-filter-options';
+  optionsRow.className = 'sess-filter-options';
+  optionsRow.hidden = true;
+  optionsRow.innerHTML =
+    '<label class="sess-filter-option" for="sess-filter-has-recording">'
+    + '<input type="checkbox" id="sess-filter-has-recording">'
+    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>'
+    + '<span>Has recording</span></label>';
+  header.insertAdjacentElement('afterend', optionsRow);
+  const hasRecCb = optionsRow.querySelector<HTMLInputElement>('#sess-filter-has-recording')!;
+  hasRecCb.checked = recordingFilter.hasRecording;
+
+  const syncFilterUi = () => {
+    filterBtn.classList.toggle('active', recordingFilter.engaged);
+    filterBtn.setAttribute('aria-pressed', String(recordingFilter.engaged));
+    optionsRow.hidden = !recordingFilter.engaged;
+  };
+  filterBtn.onclick = () => {
+    recordingFilter.engaged = !recordingFilter.engaged;
+    syncFilterUi();
     rerenderRows();
   };
-  header.appendChild(meetBtn);
+  hasRecCb.addEventListener('change', () => {
+    recordingFilter.hasRecording = hasRecCb.checked;
+    rerenderRows();
+  });
+  syncFilterUi();
 
   // Re-render rows when the meetings index refreshes (boot fetch or a
   // capture_changed envelope) so badges + the lens stay live.

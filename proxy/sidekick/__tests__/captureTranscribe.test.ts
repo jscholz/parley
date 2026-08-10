@@ -307,3 +307,133 @@ test('stitch failure (no ffmpeg / bad audio) also falls back cleanly', async () 
   const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
   assert.match(t, /plain 0\./);
 });
+
+// ── Meeting titling (meeting-polish #25) ───────────────────────────────
+//
+// Start: a MINTED session gets the capture's placeholder title (retry-
+// tolerant — the rename can race the upstream's lazy session create);
+// an existing session's title is left alone at start. End: finalize
+// re-titles topically from the FULL transcript, before the ingest turn,
+// and NEVER over a user-set title (isUserTitledFn seam → userTitles
+// marker in production). All via the injectable renameFn seam.
+
+function titledWire(
+  bridgeFn: typeof fetch,
+  extra: Record<string, unknown> = {},
+) {
+  const renames: { chatId: string; title: string }[] = [];
+  const sent = wire(bridgeFn, {
+    renameFn: async (chatId: string, title: string) => { renames.push({ chatId, title }); return true; },
+    renameRetryDelayMs: 1,
+    ...extra,
+  });
+  return { renames, sent };
+}
+
+// Enough content-word volume (>= 25 words) with a repeated phrase so
+// the topical heuristic has a clear winner.
+const TOPICAL_LINE = 'the transcript migration plan needs deterministic links and the '
+  + 'transcript migration rollout lands friday once deterministic links pass review with the team';
+
+test('titling: minted session gets the placeholder start-title', async () => {
+  const { fn } = fakeBridge(() => 'hi.');
+  const { renames } = titledWire(fn);
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:minted-1',
+    mintedSession: true, diarize: false,
+  });
+  await waitFor(async () => renames.length >= 1);
+  assert.deepEqual(renames[0], { chatId: 'sidekick:minted-1', title: 'Meeting 2026-08-10' });
+  await stopCapture(m.id);
+});
+
+test('titling: existing session is NOT touched at start', async () => {
+  const { fn } = fakeBridge(() => 'hi.');
+  const { renames } = titledWire(fn);
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:existing-1', diarize: false,
+  });
+  // Give a would-be start rename ample time to fire, then assert none did.
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(renames.length, 0, 'start must not rename an existing session');
+  await stopCapture(m.id);
+});
+
+test('titling: finalize re-titles topically from the transcript, before the ingest turn', async () => {
+  const { fn } = fakeBridge(() => TOPICAL_LINE + '.');
+  const order: string[] = [];
+  const renames: { chatId: string; title: string }[] = [];
+  wire(fn, {
+    renameFn: async (chatId: string, title: string) => {
+      order.push('rename');
+      renames.push({ chatId, title });
+      return true;
+    },
+    renameRetryDelayMs: 1,
+    dispatchFn: (_chatId: string, text: string) => {
+      order.push(text.includes('finished') ? 'ingest' : 'start');
+      return true;
+    },
+  });
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:topical-1', diarize: false,
+  });
+  await seg(m.id, 0, 0);
+  await seg(m.id, 1, 45_000);
+  await stopCapture(m.id);
+  await waitFor(async () => order.includes('ingest'));
+  assert.equal(renames.length, 1, 'exactly one end-of-meeting rename');
+  assert.equal(renames[0].chatId, 'sidekick:topical-1');
+  assert.match(renames[0].title, /^Meeting: /);
+  assert.match(renames[0].title, /transcript migration/i);
+  // Rename must land BEFORE the ingest dispatch so the agent sees the
+  // titled session.
+  assert.deepEqual(order, ['start', 'rename', 'ingest']);
+});
+
+test('titling: never clobbers a user-set title (marker seam)', async () => {
+  const { fn } = fakeBridge(() => TOPICAL_LINE + '.');
+  const { renames, sent } = titledWire(fn, {
+    isUserTitledFn: async () => true,
+  });
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:usernamed-1', diarize: false,
+  });
+  await seg(m.id, 0, 0);
+  await stopCapture(m.id);
+  await waitFor(async () => sent.some((s) => /finished/.test(s.text)));
+  assert.equal(renames.length, 0, 'user-titled chat must never be re-titled');
+});
+
+test('titling: near-empty transcript keeps the placeholder (no re-title)', async () => {
+  const { fn } = fakeBridge(() => 'okay thanks.');
+  const { renames, sent } = titledWire(fn);
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:tiny-1', diarize: false,
+  });
+  await seg(m.id, 0, 0);
+  await stopCapture(m.id);
+  await waitFor(async () => sent.some((s) => /finished/.test(s.text)));
+  assert.equal(renames.length, 0, 'no topical title from a near-empty transcript');
+});
+
+test('titling: transient rename failure retries and lands', async () => {
+  const { fn } = fakeBridge(() => 'hi.');
+  const attempts: string[] = [];
+  wire(fn, {
+    renameFn: async (_chatId: string, title: string) => {
+      attempts.push(title);
+      if (attempts.length < 3) throw new Error('session not materialized yet');
+      return true;
+    },
+    renameRetryDelayMs: 1,
+    renameMaxAttempts: 4,
+  });
+  const m = await createCapture({
+    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:retry-1',
+    mintedSession: true, diarize: false,
+  });
+  await waitFor(async () => attempts.length >= 3);
+  assert.equal(attempts.length, 3, 'succeeded on the third attempt — no further retries');
+  await stopCapture(m.id);
+});

@@ -5,7 +5,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuery, applyFilter } from '../src/sessionFilter.ts';
+import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter } from '../src/sessionFilter.ts';
 
 const sessions = [
   { id: 'sidekick-main', title: 'Project Hermes', snippet: 'migration plan', source: 'api_server' },
@@ -122,5 +122,55 @@ describe('sessionFilter.applyFilter', () => {
     const none = applyFilter([{ id: 'x', title: 't', snippet: null, source: 's' }],
       parseQuery('98bd2b'));
     assert.deepEqual(none, []);
+  });
+});
+
+describe('sessionFilter.applyRecordingFilter (meeting-polish #25)', () => {
+  const rows = [
+    { id: 'chat-rec', title: 'Standup', snippet: null, source: 'api_server' },
+    { id: 'chat-plain', title: 'Notes', snippet: null, source: 'api_server' },
+    { id: 'chat-rec-2', title: 'Retro', snippet: null, source: 'api_server' },
+  ];
+  const recorded = new Set(['chat-rec', 'chat-rec-2']);
+  const hasRec = (id: string) => recorded.has(id);
+
+  it('defaults: disengaged, has-recording option pre-ticked', () => {
+    const st = defaultRecordingFilter();
+    assert.equal(st.engaged, false, 'the drawer must not boot filtered');
+    assert.equal(st.hasRecording, true, 'option defaults to on per spec');
+  });
+
+  it('disengaged → pass-through regardless of option', () => {
+    assert.deepEqual(
+      applyRecordingFilter(rows, { engaged: false, hasRecording: true }, hasRec),
+      rows,
+    );
+  });
+
+  it('engaged + option on → only sessions with recordings', () => {
+    const out = applyRecordingFilter(rows, { engaged: true, hasRecording: true }, hasRec);
+    assert.deepEqual(out.map((r) => r.id), ['chat-rec', 'chat-rec-2']);
+  });
+
+  it('engaged + option unticked → pass-through (no option constrains)', () => {
+    assert.deepEqual(
+      applyRecordingFilter(rows, { engaged: true, hasRecording: false }, hasRec),
+      rows,
+    );
+  });
+
+  it('rows without an id never pass an engaged has-recording filter', () => {
+    const out = applyRecordingFilter(
+      [...rows, { title: 'ghost', snippet: null, source: 'api_server' }],
+      { engaged: true, hasRecording: true },
+      () => true,
+    );
+    assert.deepEqual(out.map((r: any) => r.id), ['chat-rec', 'chat-plain', 'chat-rec-2']);
+  });
+
+  it('stacks with the text filter (drawer order: text first, then option)', () => {
+    const texted = applyFilter(rows, parseQuery('re'));   // Retro + chat-rec ids…
+    const out = applyRecordingFilter(texted, { engaged: true, hasRecording: true }, hasRec);
+    assert.ok(out.every((r) => recorded.has(r.id)));
   });
 });

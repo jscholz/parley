@@ -47,6 +47,11 @@ export interface CaptureManifest {
    *  (bare API captures). See §3.6 — the PWA sends "new" at create
    *  time and gets a freshly minted session id back. */
   linked_chat: string | null;
+  /** True when linked_chat was MINTED for this capture (create body
+   *  said "new") rather than pointing at an existing chat. The titling
+   *  pipeline start-titles only minted sessions — an existing chat's
+   *  title is someone else's to keep (meeting-polish #25). */
+  minted_session?: boolean;
   diarize: boolean;
   /** Per-capture override of the pipeline's auto-ingest (Settings →
    *  Meetings). Absent = pipeline default. */
@@ -284,6 +289,7 @@ export function createCapture(opts: {
   linkedChat?: string | null;
   diarize?: boolean;
   autoIngest?: boolean;
+  mintedSession?: boolean;
 }): Promise<CaptureManifest> {
   // Global-key lock: the one-active rule is check-then-act, so two
   // concurrent creates must serialize (audit 2026-07-09).
@@ -295,6 +301,7 @@ async function createCaptureLocked(opts: {
   linkedChat?: string | null;
   diarize?: boolean;
   autoIngest?: boolean;
+  mintedSession?: boolean;
 }): Promise<CaptureManifest> {
   await fs.mkdir(capturesDir(), { recursive: true });
   // One active capture at a time (plan §3.1, v1) — with the stale
@@ -319,6 +326,7 @@ async function createCaptureLocked(opts: {
     id,
     title: opts.title?.trim() || `Meeting ${new Date().toISOString().slice(0, 10)}`,
     linked_chat: opts.linkedChat ?? null,
+    ...(opts.mintedSession ? { minted_session: true } : {}),
     diarize: opts.diarize !== false,   // default ON for meetings (plan §1.5)
     ...(typeof opts.autoIngest === 'boolean' ? { auto_ingest: opts.autoIngest } : {}),
     status: 'recording',
@@ -617,11 +625,15 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
   try {
     const body = await readJson(req);
     let linkedChat: string | null = null;
-    if (body.linked_chat === 'new') linkedChat = `sidekick:${crypto.randomUUID()}`;
-    else if (typeof body.linked_chat === 'string' && body.linked_chat) linkedChat = body.linked_chat;
+    let mintedSession = false;
+    if (body.linked_chat === 'new') {
+      linkedChat = `sidekick:${crypto.randomUUID()}`;
+      mintedSession = true;
+    } else if (typeof body.linked_chat === 'string' && body.linked_chat) linkedChat = body.linked_chat;
     const manifest = await createCapture({
       title: typeof body.title === 'string' ? body.title : undefined,
       linkedChat,
+      mintedSession,
       diarize: typeof body.diarize === 'boolean' ? body.diarize : undefined,
       autoIngest: typeof body.auto_ingest === 'boolean' ? body.auto_ingest : undefined,
     });

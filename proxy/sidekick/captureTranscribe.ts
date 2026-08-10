@@ -34,6 +34,9 @@ import {
 import { pushEnvelope } from './stream.ts';
 import { ffmpegStitch } from './captureStitch.ts';
 import { dispatchInternalMessage } from './messages.ts';
+import { topicalTitleFromTranscript } from './meetingTitles.ts';
+import { isUserTitled } from './userTitles.ts';
+import { getUpstream } from './index.ts';
 
 export interface TranscribeConfig {
   /** audio-bridge base URL (server.ts's AUDIO_BRIDGE_UPSTREAM). */
@@ -62,6 +65,19 @@ export interface TranscribeConfig {
    *  memo/dictate paths get. server.ts wires its config seed list;
    *  live so yaml reloads apply. */
   keytermsFn?: () => string[];
+  /** Session-rename seam (meeting-polish #25 titling). Production
+   *  default forwards to the upstream's renameConversation; tests
+   *  inject a recorder. Return true on success. */
+  renameFn?: (chatId: string, title: string) => Promise<boolean>;
+  /** Never-clobber guard seam — default is userTitles.isUserTitled
+   *  (chats the user manually renamed via PATCH /sessions). */
+  isUserTitledFn?: (chatId: string) => Promise<boolean>;
+  /** Rename retry knobs. The start-title rename races the upstream's
+   *  lazy session creation (the start message is dispatched
+   *  fire-and-forget), so a couple of spaced retries are part of the
+   *  design, not paranoia. */
+  renameMaxAttempts?: number;
+  renameRetryDelayMs?: number;
 }
 
 function keytermsQuery(): string {
@@ -112,6 +128,73 @@ function fmtOffset(ms: number): string {
   return h > 0
     ? `${h}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
     : `${mm}:${String(ss).padStart(2, '0')}`;
+}
+
+// ── Meeting titling (meeting-polish #25) ───────────────────────────────
+//
+// Two rename moments:
+//   * capture created with a MINTED session → title the session with
+//     the capture's placeholder title ("Meeting YYYY-MM-DD") so the
+//     drawer never shows a bare "New chat" row for a live meeting.
+//     Existing sessions are left alone at start — their title is
+//     whatever the chat was already about.
+//   * finalize → topical re-title from the FULL transcript content
+//     (deterministic salience heuristic — meetingTitles.ts), for both
+//     minted and existing sessions.
+// Both defer to the never-clobber rule: a chat the user manually
+// renamed (userTitles marker, fed by PATCH /api/sidekick/sessions) is
+// never touched.
+
+async function defaultRename(chatId: string, title: string): Promise<boolean> {
+  const upstream = getUpstream();
+  if (!upstream) return false;
+  await upstream.renameConversation(chatId, title);
+  return true;
+}
+
+/** Retry-wrapped rename. The start-title rename can land BEFORE the
+ *  upstream lazily materialized the session (start message is
+ *  dispatched fire-and-forget), so spaced retries are load-bearing.
+ *  Failures end in a warn, never a throw — titling is decoration on
+ *  top of a durable capture. */
+async function renameWithRetry(captureId: string, chatId: string, title: string): Promise<boolean> {
+  const maxAttempts = cfg?.renameMaxAttempts ?? 4;
+  const delay = cfg?.renameRetryDelayMs ?? 2000;
+  const rename = cfg?.renameFn ?? defaultRename;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      // `false` = rename unsupported here (no upstream configured) —
+      // PERMANENT; retrying would only stall finalize on
+      // transcription-only installs. Throws are transient (the
+      // start-title rename legitimately races the upstream's lazy
+      // session creation) and get the spaced retries.
+      if (await rename(chatId, title)) {
+        console.log(`[capture-transcribe] ${captureId}: session ${chatId} titled "${title}"`);
+        return true;
+      }
+      return false;
+    } catch { /* transient — fall through to retry */ }
+    if (attempt < maxAttempts) await new Promise((r) => setTimeout(r, delay * attempt));
+  }
+  console.warn(`[capture-transcribe] ${captureId}: session title "${title}" not applied after ${maxAttempts} attempts`);
+  return false;
+}
+
+/** End-of-meeting topical re-title from the final transcript. */
+async function retitleFromTranscript(m: CaptureManifest): Promise<void> {
+  if (!m.linked_chat || !m.segments.length) return;
+  try {
+    if (await (cfg?.isUserTitledFn ?? isUserTitled)(m.linked_chat)) {
+      console.log(`[capture-transcribe] ${m.id}: skip re-title — user named ${m.linked_chat}`);
+      return;
+    }
+    const transcript = await fs.readFile(transcriptPath(m), 'utf8');
+    const title = topicalTitleFromTranscript(transcript);
+    if (!title) return;   // not enough content — keep the placeholder
+    await renameWithRetry(m.id, m.linked_chat, title);
+  } catch (e) {
+    console.warn(`[capture-transcribe] ${m.id}: end-of-meeting re-title failed: ${String(e)}`);
+  }
 }
 
 // ── Transcript assembly (pure w.r.t. the .txt files + manifest) ────────
@@ -390,6 +473,10 @@ async function finalizeInner(id: string): Promise<void> {
   if (!diarized) await rebuildTranscript(id);
   await pushDoc(id, { immediate: true });
   const done = await getCapture(id);
+  // End-of-meeting topical re-title BEFORE the ingest turn so the
+  // agent (and every drawer) sees the titled session. Never clobbers
+  // a user-set title; no-op on empty/near-empty transcripts.
+  await retitleFromTranscript(done);
   const wantIngest = done.auto_ingest ?? cfg?.autoIngest ?? true;   // per-capture setting wins
   if (wantIngest && done.linked_chat && done.segments.length > 0) {
     const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
@@ -416,6 +503,12 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
         `📼 Recording "${m.title}" started. Live transcript (updates ~every minute): `
         + `${transcriptPath(m)}\n\nYou can read it mid-meeting if I ask about something.`,
       );
+      // Start-of-meeting title (meeting-polish #25): a MINTED session
+      // gets the capture's placeholder title immediately ("Meeting
+      // YYYY-MM-DD" — re-titled topically at finalize). Existing
+      // sessions keep their current title; only the end-of-meeting
+      // re-title touches those.
+      if (m.minted_session) void renameWithRetry(m.id, m.linked_chat, m.title);
     },
     onSegmentStored(m, seg) {
       job(m.id).queue.push(seg);

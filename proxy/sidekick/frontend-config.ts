@@ -49,6 +49,11 @@ export const FRONTEND_SETTINGS = {
   // setting to flip; PTT memo always sends, tap dictation never does).
   hotkeyToggleCall:       { category: 'hotkeys',         default: 'Cmd+Shift+C' },
   hotkeyToggleMic:        { category: 'hotkeys',         default: 'Cmd+Shift+D' },
+  // Meeting-polish #25. NOTE (2026-08-10 regression lesson): every
+  // synced key added to src/settings.ts DEFAULTS MUST land here too —
+  // a client-only key flips revalidate()'s missing-key backfill branch
+  // on every boot (404 writebacks + a spurious settings-changed event).
+  hotkeyToggleMeeting:    { category: 'hotkeys',         default: 'Cmd+Shift+M' },
   // Agent-activity surfacing (tool-call + tool-result row rendering)
   agentActivity:          { category: 'agent_activity',  default: 'summary' },
   // Display

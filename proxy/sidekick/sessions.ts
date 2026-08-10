@@ -22,6 +22,7 @@ import {
   type GatewayConversationSummary,
   type UpstreamAgent,
 } from './upstream.ts';
+import { markUserTitled } from './userTitles.ts';
 
 interface SidekickSessionRow {
   chat_id: string;
@@ -179,6 +180,12 @@ export async function handleSidekickSessionRename(
   }
   try {
     const result = await upstream.renameConversation(chatId, title);
+    // Remember that the USER named this chat (meeting-polish #25):
+    // every manual rename from any sidekick client passes through
+    // here, and the capture titling pipeline consults this marker so
+    // it never clobbers a deliberate name. Best-effort — a marker
+    // write failure must not fail the rename.
+    try { await markUserTitled(chatId, result.title); } catch { /* marker is advisory */ }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, title: result.title }));
   } catch (e: any) {

@@ -87,6 +87,7 @@ function buildCatalog(): Category[] {
   const s = settings.get();
   const hkMic = s.hotkeyToggleMic || 'Cmd+Shift+D';
   const hkCall = s.hotkeyToggleCall || 'Cmd+Shift+C';
+  const hkMeeting = (s as any).hotkeyToggleMeeting || 'Cmd+Shift+M';
   return [
     {
       title: 'Composer',
@@ -132,6 +133,7 @@ function buildCatalog(): Category[] {
       bindings: [
         { keys: [hkMic], label: 'Toggle dictation / voice memo', configurable: true },
         { keys: [hkCall], label: 'Toggle duplex call mode', configurable: true },
+        { keys: [hkMeeting], label: 'Start / stop meeting capture in the current session', configurable: true },
       ],
     },
     {

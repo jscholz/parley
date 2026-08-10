@@ -280,6 +280,10 @@ const DEFAULTS = {
   // dictate). hotkeyAutoSend retired with the autoSend menu toggle.
   hotkeyToggleCall: 'Cmd+Shift+C',
   hotkeyToggleMic: 'Cmd+Shift+D',
+  // Meeting-polish #25: toggle meeting capture in the CURRENT session
+  // (start when idle; stop when one is recording — same start↔stop
+  // flip as the header capture button).
+  hotkeyToggleMeeting: 'Cmd+Shift+M',
   agentActivity: 'summary' as 'off' | 'summary' | 'full',
   // Voice-call transport selector. The `realtime` flag is the mic-menu
   // toggle: when ON, a mic-button tap opens a WebRTC realtime call
@@ -711,6 +715,7 @@ export function hydrate(handlers: {
   const keytermsChips = document.getElementById('keyterms-chips');
   const setHotkeyCall = $inp('set-hotkey-call');
   const setHotkeyMic = $inp('set-hotkey-mic');
+  const setHotkeyMeeting = $inp('set-hotkey-meeting');
   const setTtsEngine = $sel('set-tts-engine');
   const setVoice = $sel('set-voice');
   const setWake = $inp('set-wake');
@@ -822,6 +827,7 @@ export function hydrate(handlers: {
     if (setAgentActivity) setAgentActivity.value = current.agentActivity;
     if (setHotkeyCall) setHotkeyCall.value = (current as any).hotkeyToggleCall;
     if (setHotkeyMic) setHotkeyMic.value = current.hotkeyToggleMic;
+    if (setHotkeyMeeting) setHotkeyMeeting.value = (current as any).hotkeyToggleMeeting;
   }
   applyToDOM();
 
@@ -1289,7 +1295,7 @@ export function hydrate(handlers: {
   // combination, and we format it as a string and save. Cmd is used as
   // the conventional Mac modifier name; the matcher accepts either Cmd
   // (metaKey) or Ctrl (ctrlKey) at runtime.
-  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic') {
+  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic' | 'hotkeyToggleMeeting') {
     if (!el) return;
     el.addEventListener('keydown', (e: KeyboardEvent) => {
       // Don't capture lone modifier keypresses; wait until a "real" key
@@ -1338,6 +1344,7 @@ export function hydrate(handlers: {
   }
   attachHotkeyCapture(setHotkeyCall, 'hotkeyToggleCall');
   attachHotkeyCapture(setHotkeyMic, 'hotkeyToggleMic');
+  attachHotkeyCapture(setHotkeyMeeting, 'hotkeyToggleMeeting');
 
   if (setTheme) setTheme.onchange = () => {
     set('theme', setTheme.value);

@@ -56,7 +56,7 @@ import * as switchCtl from './switchController.ts';
 import * as cmdkPalette from './cmdkPalette.ts';
 import * as hotkeysHelp from './hotkeysHelp.ts';
 import { initPinDrawer } from './pins/drawer.ts';
-import { initCapturePill } from './capture/pill.ts';
+import { initCapturePill, hotkeyToggleMeetingCapture } from './capture/pill.ts';
 import { initMeetingsIndex } from './capture/meetingsIndex.ts';
 import { getCaptureState } from './capture/recorder.ts';
 import { initTranscriptHighlight } from './transcriptHighlight.ts';
@@ -4425,6 +4425,18 @@ async function boot() {
       const btn = (document.getElementById('sb-toggle')
         || document.getElementById('sb-toggle-mobile')) as HTMLButtonElement | null;
       btn?.click();
+      return;
+    }
+    if (matches((s as any).hotkeyToggleMeeting)) {
+      claim();
+      // Toggle MEETING CAPTURE in the current session (meeting-polish
+      // #25). Start/stop flip mirrors the header capture button; the
+      // capture itself is app-global (survives session switches), so
+      // "stop" needs no session context. Composes with Cmd+Shift+O:
+      // new chat first, then this hotkey records INTO that fresh
+      // session (start reads switchCtl.viewedId() at press time).
+      log('[hotkey] toggleMeeting');
+      hotkeyToggleMeetingCapture();
       return;
     }
     if (matches(s.hotkeyToggleMic)) {
