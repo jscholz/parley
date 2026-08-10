@@ -42,6 +42,12 @@
  */
 
 /**
+ * @typedef {Object} AudioPayload
+ * @property {string} url - Audio URL (the /api/sidekick/media/<id> lane or absolute).
+ * @property {string} [caption] - Text below the player.
+ */
+
+/**
  * @typedef {Object} YouTubePayload
  * @property {string} video_id - YouTube video ID (11 chars).
  * @property {string} url - Full YouTube URL (for "open in YouTube" link).

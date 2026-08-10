@@ -4231,6 +4231,14 @@
     margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.45;
   }
 
+  /* Audio card (agent-pushed media lane) — native transport, full width */
+  .card-audio audio {
+    width: 100%; display: block;
+  }
+  .card-audio .caption {
+    margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.45;
+  }
+
   /* Link list card */
   .card-links { display: flex; flex-direction: column; gap: 12px; }
   .card-links a.link-preview {

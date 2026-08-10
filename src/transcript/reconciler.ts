@@ -29,7 +29,7 @@ import { escapeHtml } from '../util/dom.ts';
 import * as settings from '../settings.ts';
 import { getAgentLabel } from '../config.ts';
 import { applyBubbleState as applyReplyPlayerState } from '../audio/turn-based/replyPlayer.ts';
-import { rehydrateCards } from '../cards/attach.ts';
+import { rehydrateCards, ensureHistoricalCards } from '../cards/attach.ts';
 import * as memoCardMod from '../memoCard.ts';
 import type { ActivityRowSpec, ActivityTool, AssistantBubbleSpec, BubbleSpec, GapBubbleSpec, MemoCardSpec, NotificationBubbleSpec, SystemLineSpec, UserBubbleSpec } from './types.ts';
 
@@ -249,6 +249,14 @@ function createAssistant(spec: AssistantBubbleSpec, batch: boolean): HTMLElement
   // bars + empty card slot.
   applyReplyPlayerState(el, spec.key);
   rehydrateCards(el, spec.key);
+  // Reload / session-switch persistence: re-derive media cards from the
+  // finalized body when the in-memory card store has nothing for this
+  // reply (fresh page load, or a historical bubble backfilled during
+  // resume). Streaming bubbles are skipped — their text is still growing
+  // and the live handleReplyFinal lane owns their cards; a partial parse
+  // could classify an incomplete markdown link. Parses once per replyId
+  // (see ensureHistoricalCards) so this stays cheap under virt remounts.
+  if (!spec.streaming) ensureHistoricalCards(el, spec.key, spec.text);
   return el;
 }
 

@@ -19,6 +19,7 @@
 
 import { validateAndLog } from './validate.ts';
 import { getCard } from './registry.ts';
+import { parseCardsFromText } from './fallback.ts';
 import { log } from '../util/log.ts';
 
 /** Per-replyId card store. Keys are replyId strings; values are the
@@ -27,10 +28,27 @@ import { log } from '../util/log.ts';
 const cardsByReplyId = new Map();
 /** Per-replyId dedup set so the same payload doesn't render twice. */
 const hashesByReplyId = new Map();
+/** Per-replyId marker: the bubble's text body has already been scanned
+ *  for fallback cards, so a virt remount doesn't re-run the regex on
+ *  every mount (perf). Set the first time ensureHistoricalCards parses
+ *  a bubble; subsequent mounts replay the stored list via
+ *  rehydrateCards instead of re-parsing. */
+const parsedReplyIds = new Set();
 
-function cardHash(card) {
+/** @param {import('../types.js').CanvasCard} card */
+export function cardHash(card) {
   return `${card.kind}:${JSON.stringify(card.payload)}`;
 }
+
+/** Fallback-card kinds worth re-deriving from a historical assistant
+ *  body on reload / session switch. Rich, self-contained media that the
+ *  agent-pushed lane produces (agent registers a file → markdown link →
+ *  extension-classified card) plus embeddable link kinds. The generic
+ *  `links` kind is deliberately EXCLUDED: it fires async OG enrichment
+ *  per URL, so re-deriving it across every historical bubble would spray
+ *  network fetches over the whole transcript on load — and a bare-URL
+ *  preview is low value next to the link text already in the bubble. */
+const HISTORICAL_CARD_KINDS = new Set(['image', 'video', 'audio', 'youtube', 'spotify']);
 
 function ensureContainer(bubble) {
   let container = /** @type {HTMLElement|null} */ (bubble.querySelector(':scope > .line-cards'));
@@ -103,4 +121,63 @@ export function rehydrateCards(bubble, replyId) {
   const list = cardsByReplyId.get(replyId);
   if (!list || list.length === 0) return;
   for (const card of list) renderCardInto(bubble, card);
+}
+
+/**
+ * Re-derive fallback media cards from a FINALIZED assistant body and
+ * attach them — the reload / session-switch persistence path.
+ *
+ * The live lane (backendEventHandlers.handleReplyFinal) only parses +
+ * attaches cards for the in-flight reply; the resulting cards live in
+ * the in-memory cardsByReplyId store, which is empty on a fresh page
+ * load. So a reload re-renders the transcript from stored message
+ * bodies with the markdown link still in the text but no card. This
+ * re-runs the same parse over historical bodies during reconcile
+ * (createAssistant) so agent-pushed media (and image/youtube/spotify
+ * links) reappear.
+ *
+ * Contract:
+ *   - Parse ONCE per replyId (parsedReplyIds marker) — createAssistant
+ *     runs on every virt mount, so without the marker a media bubble
+ *     would re-parse each time it scrolls back into the window. A remount
+ *     replays via rehydrateCards from the stored list instead.
+ *   - Dedup against live-attached cards is automatic: attachCard's
+ *     per-replyId hash set drops a card the live path already added, so
+ *     a bubble that streamed + finalized in this session (cards already
+ *     stored) doesn't double-render when its historical parse later runs.
+ *   - Skip generic `links` (see HISTORICAL_CARD_KINDS) to avoid OG-fetch
+ *     spray across the whole transcript on load.
+ *
+ * Call AFTER rehydrateCards so stored cards win the render order and the
+ * hash set is primed before the parse tries to re-add them.
+ *
+ * @param {HTMLElement} bubble
+ * @param {string} replyId
+ * @param {string} text - The finalized assistant body (spec.text).
+ */
+export function ensureHistoricalCards(bubble, replyId, text) {
+  if (!bubble || !replyId || !text) return;
+  if (parsedReplyIds.has(replyId)) return;
+  // Hot-path guard: createAssistant runs this for EVERY assistant bubble
+  // on mount. A plain reply ("Turn 3 reply.") can never yield a fallback
+  // card, so skip the regex entirely unless the body has a markdown-image
+  // open (`](`) or a bare URL. Without this, the per-bubble parse cost
+  // shifted the initial-render timing enough to destabilize an unrelated
+  // activity-row-ordering smoke (2026-08-10). Cheap substring test, no
+  // allocation. Only MARK as parsed once we actually parse — a body that
+  // grows a link later (shouldn't happen post-finalize, but defensive)
+  // still gets a chance.
+  if (text.indexOf('](') === -1 && text.indexOf('http') === -1) return;
+  parsedReplyIds.add(replyId);
+  let cards;
+  try {
+    cards = parseCardsFromText(text);
+  } catch (e) {
+    log('ensureHistoricalCards parse err:', e.message);
+    return;
+  }
+  for (const card of cards) {
+    if (!HISTORICAL_CARD_KINDS.has(card.kind)) continue;
+    attachCard(bubble, card);
+  }
 }
