@@ -302,12 +302,6 @@ function createNotification(spec: NotificationBubbleSpec, batch: boolean): HTMLE
 const activityExpandByKey = new Map<string, boolean>();
 export function resetActivityExpandState(): void { activityExpandByKey.clear(); }
 
-/** A tool list is "actively streaming" while the turn isn't complete and a
- *  tool result is still pending. That's the only state that auto-expands. */
-function isActivityStreaming(spec: ActivityRowSpec): boolean {
-  return !spec.complete && spec.tools.some(t => t.result === undefined);
-}
-
 function createActivityRow(spec: ActivityRowSpec): HTMLElement {
   const row = document.createElement('div');
   row.className = 'activity-row';
@@ -330,7 +324,7 @@ function createActivityRow(spec: ActivityRowSpec): HTMLElement {
   summary.addEventListener('click', () => {
     const current = activityExpandByKey.has(spec.key)
       ? activityExpandByKey.get(spec.key)!
-      : isActivityStreaming(spec);   // matches the default in applyActivityRowView
+      : false;   // matches the collapsed-by-default in applyActivityRowView
     activityExpandByKey.set(spec.key, !current);
     applyActivityRowView(row, spec);
   });
@@ -646,14 +640,19 @@ function applyActivityRowView(row: HTMLElement, spec: ActivityRowSpec): void {
   const mode = settings.get().agentActivity;
   if (mode === 'off') { row.style.display = 'none'; return; }
   row.style.display = '';
-  // Default COLLAPSED; auto-expand ONLY while the turn is actively streaming
-  // (field 2026-05-27 nit 2 — old tool lists are long and rarely interesting,
-  // so they should be tucked away on load/switch). A user's explicit toggle
-  // (persisted per-key, reset on session switch) overrides. Note: this no
-  // longer keys off agentActivity='full' for the default — 'full' vs
-  // 'summary' no longer force-expands historical rows; 'off' still hides.
+  // Default COLLAPSED, ALWAYS — including while the turn is actively
+  // streaming. Only an explicit user toggle (activityExpandByKey,
+  // per-key, reset on session switch) expands. Field 2026-08-11
+  // (Jonathan, reaffirming a long-standing preference): during a long
+  // tool-heavy turn the row used to auto-expand on stream-start and
+  // collapse on completion — a distracting self-expanding/collapsing
+  // flicker while waiting. The collapsed summary already shows the
+  // live tool name + running count, so "agent is working" feedback
+  // survives without the churn. (Previously the default was
+  // isActivityStreaming(spec); 'full' vs 'summary' still never
+  // force-expand historical rows, 'off' still hides.)
   const userChoice = activityExpandByKey.get(spec.key);
-  const showFull = userChoice !== undefined ? userChoice : isActivityStreaming(spec);
+  const showFull = userChoice !== undefined ? userChoice : false;
   full.style.display = showFull ? '' : 'none';
   summary.setAttribute('aria-expanded', showFull ? 'true' : 'false');
   row.classList.toggle('is-expanded', showFull);
