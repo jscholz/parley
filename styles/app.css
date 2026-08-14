@@ -21,6 +21,19 @@
     --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
     --content-size: 15px;          /* main readable text; slider-adjustable */
     --transcript-gutter: 12%;      /* per-side empty margin of the chat column; slider-adjustable */
+    /* ── Design scale (2026-08-11 UX-polish experiment, branch
+       jscholz/ux-polish) ──────────────────────────────────────────
+       Consistent rhythm tokens so message layout stops relying on
+       ad-hoc per-rule values. Reversible: revert this block + the
+       rules that reference these tokens. */
+    --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 22px; --space-6: 32px;
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-pill: 999px;
+    --msg-line: 1.66;              /* message body line-height (was 1.5 — too tight for prose; 1.72 read crowded w/ serif on mobile, eased to 1.66 for sans) */
+    /* Alpha-layered surfaces for depth (flat solid hex read as no
+       depth). Dark theme values here; light overrides below. */
+    --surface-subtle: rgba(255,255,255,0.03);
+    --surface-subtle-2: rgba(255,255,255,0.05);
+    --border-subtle: rgba(255,255,255,0.09);
     color-scheme: dark;
   }
   :root[data-theme="light"] {
@@ -38,6 +51,10 @@
     --danger: #9a3d35;
     --header-grad-top: #fbfaf5;
     --header-grad-bot: #f7f5f0;
+    /* UX-polish alpha surfaces — dark-on-light (2026-08-11). */
+    --surface-subtle: rgba(0,0,0,0.028);
+    --surface-subtle-2: rgba(0,0,0,0.05);
+    --border-subtle: rgba(0,0,0,0.09);
     --debug-bg: rgba(255,255,255,0.96);
     --debug-fg: hsl(108 40% 28%);
     color-scheme: light;
@@ -1805,7 +1822,7 @@
     background: color-mix(in srgb, var(--bg, #000) 50%, transparent);
   }
   .line {
-    margin-bottom: 10px; max-width: 900px;
+    margin-bottom: var(--space-4); max-width: 900px;
     /* Long-transcript scroll-jank mitigation. Scroll becomes
        janky on chats with very large scrollHeight (~540k px / ~900
        viewport-heights of accumulated DOM). content-visibility: auto
@@ -1902,7 +1919,10 @@
     font-weight: 600; font-size: 11.5px; letter-spacing: 0.06em;
     text-transform: uppercase; font-family: var(--font-mono);
   }
-  .line .text { color: var(--fg); display: block; margin-top: 2px; font-size: var(--content-size); line-height: 1.5; }
+  .line .text { color: var(--fg); display: block; margin-top: 2px; font-size: var(--content-size); line-height: var(--msg-line); }
+  /* (Serif conversation font tried + rejected 2026-08-11 — read too
+     crowded on mobile; keep the UI sans everywhere, retain the more
+     open --msg-line leading which is the readability win.) */
 
   /* Long-bubble fold. Bubbles with body length past the threshold get
    * `.foldable`; tap "Show more" to add `.expanded`. Threshold + preview
@@ -2009,8 +2029,11 @@
     max-width: 72%;
     margin-left: auto;
     background: var(--primary-soft);
-    padding: 10px 44px 10px 14px;
-    border-radius: var(--radius);
+    /* Hairline border so the bubble reads as a raised surface, not a
+       flat tint fading into the background (UX-polish 2026-08-11). */
+    border: 1px solid var(--border-subtle);
+    padding: var(--space-3) 44px var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
   }
   .line.s0 .speaker { display: none; }
   .line.s0 .line-ts { top: 28px; right: 10px; }
@@ -2039,11 +2062,11 @@
     font-family: var(--font-mono); background: var(--bg); padding: 1px 5px;
     border-radius: 4px; font-size: 0.9em; color: var(--primary);
   }
-  .line .text pre, .pin-item-body pre , .doc-drawer-content pre { margin: 8px 0; padding: 10px; background: var(--bg); border-radius: 8px; overflow-x: auto; }
+  .line .text pre, .pin-item-body pre , .doc-drawer-content pre { margin: var(--space-3) 0; padding: var(--space-3); background: var(--surface-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow-x: auto; }
   .line .text pre code, .pin-item-body pre code , .doc-drawer-content pre code { padding: 0; background: none; }
   /* Fenced code blocks: wrap long lines instead of clipping/scrolling, and
      give them a head row with a language label + copy button. */
-  .line .text .code-block, .pin-item-body .code-block , .doc-drawer-content .code-block { margin: 8px 0; background: var(--bg); border-radius: 8px; overflow: hidden; }
+  .line .text .code-block, .pin-item-body .code-block , .doc-drawer-content .code-block { margin: var(--space-3) 0; background: var(--surface-subtle); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; }
   .line .text .code-block-head, .pin-item-body .code-block-head , .doc-drawer-content .code-block-head {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px; padding: 4px 8px 4px 12px; min-height: 26px;
