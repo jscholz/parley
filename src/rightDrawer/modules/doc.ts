@@ -386,7 +386,7 @@ export function parseTsToken(text: string): number | null {
  *  The rendered markdown puts timestamps in <strong> ("**[+0:45]**");
  *  clicks anywhere in a block resolve to the nearest timestamp at or
  *  before it by walking previous siblings. */
-function wireTapToSeek(md: HTMLElement): void {
+export function wireTapToSeek(md: HTMLElement): void {
   md.classList.add('doc-capture-seekable');
   md.addEventListener('click', (ev) => {
     const audio = md.closest('#doc-drawer-body, .pin-drawer-content')
@@ -397,7 +397,15 @@ function wireTapToSeek(md: HTMLElement): void {
       const t = parseTsToken(node.textContent || '');
       if (t !== null) {
         audio.currentTime = t;
-        void audio.play().catch(() => { /* autoplay policy — user can hit play */ });
+        // Only FOLLOW along if the user is already listening — never
+        // START playback from a text click. Field 2026-08-14: clicking
+        // transcript text to read/select unexpectedly began playing the
+        // recording, and "mainly after playing once" because the first
+        // manual play unlocks the autoplay policy, so every later text
+        // click's play() then succeeds. Seeking the playhead while
+        // paused is harmless (scrubber updates via timeupdate); starting
+        // audio from a read-gesture is the surprise.
+        if (!audio.paused) void audio.play().catch(() => { /* mid-play seek */ });
         return;
       }
       node = (node.previousElementSibling as HTMLElement | null) ?? null;
