@@ -43,6 +43,11 @@ export function MOCK_SETUP(mock) {
     ],
     lastActiveAt: Date.now() - 1000,
   });
+  // Persist the turn's tool rows to durable like real hermes does, so
+  // the post-final durable refresh carries them and the activity row
+  // survives inflight drain (2026-08-14 — fixes the ~3/8 "activity
+  // rows: 0" flake; the vanish was a mock-fidelity gap, not a prod bug).
+  mock.setPersistToolRows(true);
 }
 
 export default async function run({ page, log, mock }) {

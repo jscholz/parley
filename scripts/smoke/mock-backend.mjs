@@ -67,6 +67,21 @@ export async function installMockBackend(page) {
    *  on (persistence is instant at POST time, which is wrong vs prod
    *  but convenient for non-timing tests). */
   let postTurnPersistence = false;
+  /** Opt-in tool-row durability (2026-08-14). Real hermes persists a
+   *  turn's tool_call / tool_result rows into state.db, so the
+   *  post-final durable refresh carries them and the projection
+   *  rebuilds the activity row from DURABLE after the inflight
+   *  envelopes drain. The mock's pushEnvelope only broadcast tool
+   *  envelopes (never persisted them), so post-final refresh returned
+   *  a durable with the reply but NO tools → the activity row lost its
+   *  only source and vanished (tool-progress-not-bubbles flake, ~3/8;
+   *  NOT a production bug — prod durable carries the tools). Off by
+   *  default so the 7 other tool_call-pushing smokes are unaffected;
+   *  tool-progress-not-bubbles flips it on. Shape matches what
+   *  tool-list-collapse-default seeds (proven to project → activityRow):
+   *  an assistant row carrying tool_calls + a role:'tool' result row. */
+  let persistToolRows = false;
+  let toolPersistSeq = 0;
   /** Optional cap on the `limit` param the /messages endpoint honors,
    *  applied to the FIRST page only (requests without `?before=`).
    *  Used by load-earlier-history.mjs to force pagination in a small
@@ -1185,6 +1200,33 @@ export async function installMockBackend(page) {
       if (env && (env.type === 'notification' || env.type === 'reply_final')) {
         bumpUnread(env.chat_id);
       }
+      // Tool-row durability (opt-in): mirror hermes persisting the
+      // turn's tool activity so the post-final durable refresh carries
+      // it (see persistToolRows comment). Append BEFORE broadcasting so
+      // a subsequent /messages fetch is coherent.
+      if (persistToolRows && env && (env.type === 'tool_call' || env.type === 'tool_result') && env.chat_id) {
+        const chat = chats.get(env.chat_id);
+        if (chat) {
+          const baseTs = Date.now() / 1000 + (toolPersistSeq++) * 0.001;
+          if (env.type === 'tool_call') {
+            chat.messages.push({
+              role: 'assistant', content: '',
+              tool_calls: JSON.stringify([{
+                id: env.call_id, call_id: env.call_id, type: 'function',
+                function: { name: env.tool_name, arguments: JSON.stringify(env.args || {}) },
+              }]),
+              timestamp: baseTs,
+            });
+          } else {
+            chat.messages.push({
+              role: 'tool',
+              content: typeof env.result === 'string' ? env.result : JSON.stringify(env.result ?? { ok: true }),
+              tool_call_id: env.call_id,
+              timestamp: baseTs,
+            });
+          }
+        }
+      }
       broadcast(env);
       // Mirror what the real plugin does on a DELETE: remove from
       // server-side state so subsequent /sessions list fetches don't
@@ -1334,6 +1376,10 @@ export async function installMockBackend(page) {
      *  where first_user_message is absent until reply_final lands. */
     setPostTurnPersistence(enabled) {
       postTurnPersistence = !!enabled;
+    },
+    /** Opt into durable tool-row persistence (see persistToolRows). */
+    setPersistToolRows(enabled) {
+      persistToolRows = !!enabled;
     },
     /** Cap the FIRST /messages page to at most N messages (default
      *  unlimited). Used by load-earlier-history.mjs to force pagination
