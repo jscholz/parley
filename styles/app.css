@@ -1844,7 +1844,7 @@
     margin: 6px 0;
     padding: 2px 0 2px 10px;
     border-left: 3px solid var(--primary);
-    color: var(--fg-muted, #aaa);
+    color: var(--muted);
   }
   .line .text blockquote:first-child, .pin-item-body blockquote:first-child , .doc-drawer-content blockquote:first-child { margin-top: 0; }
   .line .text blockquote:last-child, .pin-item-body blockquote:last-child , .doc-drawer-content blockquote:last-child { margin-bottom: 0; }
@@ -1882,7 +1882,7 @@
      "uote" mass sits at the x-height — optically below the box center —
      so the icon reads slightly high. Nudge it down to the text's optical
      center. */
-  .quote-fab svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--fg-muted, #aaa); position: relative; top: -0.5px; }
+  .quote-fab svg { width: 15px; height: 15px; flex: 0 0 auto; color: var(--muted); position: relative; top: -0.5px; }
   .quote-fab:hover { border-color: var(--primary); }
   .quote-fab:hover svg { color: var(--primary); }
   .quote-fab:active { background: var(--surface); }
@@ -2074,12 +2074,12 @@
   }
   .line .text .code-lang, .pin-item-body .code-lang , .doc-drawer-content .code-lang {
     font-family: var(--font-mono); font-size: 0.78em; letter-spacing: 0.03em;
-    color: var(--fg-muted, #888); text-transform: lowercase;
+    color: var(--muted); text-transform: lowercase;
   }
   .line .text .code-copy-btn, .pin-item-body .code-copy-btn , .doc-drawer-content .code-copy-btn {
     display: inline-flex; align-items: center; justify-content: center;
     background: none; border: none; padding: 4px; margin: 0; cursor: pointer;
-    color: var(--fg-muted, #888); border-radius: 5px; line-height: 0;
+    color: var(--muted); border-radius: 5px; line-height: 0;
   }
   /* Only real pointer devices get the hover fill. On touch the :hover
      state sticks after a tap, leaving an ugly grey box parked on the
