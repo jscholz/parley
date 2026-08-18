@@ -665,9 +665,9 @@ class ParleyAdapter(BasePlatformAdapter):
         # this advertisement the button would stay disabled even though
         # the upload would actually work end-to-end.
         # Route note (Parley rename 2026-08): /v1/parley/* is primary;
-        # /v1/parley/* stays registered as a deprecated alias so a
+        # /v1/sidekick/* stays registered as a deprecated alias so a
         # mid-deploy proxy/plugin restart-order mismatch can't 404.
-        for _aux_path in ("/v1/parley/auxiliary-models", "/v1/parley/auxiliary-models"):
+        for _aux_path in ("/v1/parley/auxiliary-models", "/v1/sidekick/auxiliary-models"):
             self._app.router.add_get(
                 _aux_path,
                 lambda r: _route_settings.handle_auxiliary_models(self, r),
@@ -676,7 +676,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # registry. Replaces the previous OpenRouter-catalog fetch +
         # regex-fallback in parley. Same data hermes consults at request
         # time for native-vs-text image routing.
-        for _caps_path in ("/v1/parley/model-capabilities", "/v1/parley/model-capabilities"):
+        for _caps_path in ("/v1/parley/model-capabilities", "/v1/sidekick/model-capabilities"):
             self._app.router.add_get(
                 _caps_path,
                 lambda r: _route_settings.handle_model_capabilities(self, r),
@@ -687,7 +687,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # parley_route_upload + the upload_id branch in
         # _materialize_attachments.
         from . import parley_route_upload as _route_upload
-        for _upload_path in ("/v1/parley/upload", "/v1/parley/upload"):
+        for _upload_path in ("/v1/parley/upload", "/v1/sidekick/upload"):
             self._app.router.add_post(
                 _upload_path,
                 lambda r: _route_upload.handle_upload(self, r),

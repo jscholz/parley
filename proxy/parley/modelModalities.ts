@@ -21,6 +21,7 @@
 
 import http from 'node:http';
 import { readEnv } from '../env.mjs';
+import { upstreamV1Prefix } from './upstreamRoutePrefix.ts';
 
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
 const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
@@ -38,7 +39,9 @@ let visionInFlight: Promise<string | null> | null = null;
 async function fetchVisionFallbackModelLive(): Promise<string | null> {
   if (!UPSTREAM_TOKEN) return null;
   try {
-    const r = await fetch(`${UPSTREAM_URL}/v1/parley/auxiliary-models`, {
+    // Prefix resolves to /v1/sidekick when the upstream is a pre-rename
+    // plugin (see upstreamRoutePrefix.ts).
+    const r = await fetch(`${UPSTREAM_URL}${await upstreamV1Prefix()}/auxiliary-models`, {
       headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` },
     });
     if (!r.ok) return null;
@@ -105,7 +108,7 @@ async function fetchCapabilitiesLive(
   qs.set('model', model);
   try {
     const r = await fetch(
-      `${UPSTREAM_URL}/v1/parley/model-capabilities?${qs.toString()}`,
+      `${UPSTREAM_URL}${await upstreamV1Prefix()}/model-capabilities?${qs.toString()}`,
       { headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` } },
     );
     if (!r.ok) return null;
