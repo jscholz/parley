@@ -8,9 +8,9 @@
 // bare uuid (and vice versa). A prefixed env.chat_id never string-equals
 // the bare viewed id, so a notification for the on-screen chat took the
 // OFF-SCREEN branch: badge bump + banner. inAppBanner.ts even strips
-// `^parley:` for display, confirming notifications arrive prefixed.
+// `^sidekick:` for display, confirming notifications arrive prefixed.
 //
-// FIX: normalize the `^parley:` prefix on both sides of the
+// FIX: normalize the `^sidekick:` prefix on both sides of the
 // `chatId !== focusedId()` compare. (We deliberately keep comparing
 // against focusedId() — during an in-flight switch the chat you LEFT
 // should still accrue a badge/banner; that off-screen behavior is pinned

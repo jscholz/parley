@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const URL = process.env.PARLEY_URL || process.env.PARLEY_URL || 'https://fontbrain.taile0c895.ts.net:3001';
-const CHAT_FILTER = (process.env.CHAT || 'ae6435b5-53aa-4819-b594-d21652c89397').replace(/^parley:/, '');
+const CHAT_FILTER = (process.env.CHAT || 'ae6435b5-53aa-4819-b594-d21652c89397').replace(/^sidekick:/, '');
 const DRILL_TIMEOUT = Number(process.env.DRILL_TIMEOUT || 30000);
 const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.parley-harness-profile');
 
@@ -119,7 +119,7 @@ async function main() {
 
     const allPins = await page.$$eval('.pin-drawer-item', (els) =>
       els.map((el) => ({ chatId: el.getAttribute('data-chat-id'), msgId: el.getAttribute('data-msg-id') })));
-    const pins = allPins.filter((p) => String(p.chatId || '').replace(/^parley:/, '') === CHAT_FILTER);
+    const pins = allPins.filter((p) => String(p.chatId || '').replace(/^sidekick:/, '') === CHAT_FILTER);
     report.pinsInChat = pins.length;
     if (pins.length < 2) throw new Error(`need >=2 pins in chat ${CHAT_FILTER}, found ${pins.length}`);
 

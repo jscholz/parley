@@ -141,7 +141,7 @@ async function main() {
     if (!pins.length) throw new Error('no pins to drill');
     const target = pins[PIN_INDEX] || pins[0];
     // Sidebar rows are keyed `sidekick:<uuid>`; pins may store either form.
-    const bareId = String(target.chatId || '').replace(/^parley:/, '');
+    const bareId = String(target.chatId || '').replace(/^sidekick:/, '');
     const tgtIds = [bareId, `sidekick:${bareId}`];
     report.target = target;
 

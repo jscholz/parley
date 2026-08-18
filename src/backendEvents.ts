@@ -45,7 +45,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // the viewed chat with a mismatched prefix took the off-screen path
   // (spurious banner, #234) AND failed to render its in-chat row.
   const focusedAtEntry = switchCtl.focusedId();
-  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^parley:/, ''));
+  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^sidekick:/, ''));
   if (chatId && focusedAtEntry && bareId(chatId) === bareId(focusedAtEntry)) {
     chatId = focusedAtEntry;
   }

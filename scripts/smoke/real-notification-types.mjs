@@ -145,7 +145,7 @@ export default async function run({ page, log }) {
   assert(agentActivity.includes('Reply'), `expected agent reply Activity row, got: ${agentActivity}`);
   log(`agent_reply Activity row visible ✓`);
   const logsAfterAgent = await recentHermesLogs(since);
-  const agentBare = agentChat.replace(/^parley:/, "");
+  const agentBare = agentChat.replace(/^sidekick:/, "");
   const agentDispatch = logsAfterAgent.includes(`dispatch type=reply_final chat=${agentBare}`);
   const agentEngagedSkip = logsAfterAgent.includes(`skip type=reply_final chat=${agentBare} reason=user_engaged`);
   log(`agent_reply journal: dispatch=${agentDispatch} user_engaged_skip=${agentEngagedSkip}`);
@@ -195,7 +195,7 @@ export default async function run({ page, log }) {
 
   const logs = await recentHermesLogs(since);
   const hasReplyDispatch = logs.includes('dispatch type=reply_final') || logs.includes('skip type=reply_final');
-  const hasCronNotification = logs.includes('type=notification') && logs.includes(cronChat.replace(/^parley:/, ''));
+  const hasCronNotification = logs.includes('type=notification') && logs.includes(cronChat.replace(/^sidekick:/, ''));
   log(`journal hints: reply_final=${hasReplyDispatch} cronNotificationForChat=${hasCronNotification}`);
 
   // Cleanup the smoke chats. The one-shot job should already have fired; if

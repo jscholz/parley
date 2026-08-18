@@ -73,9 +73,11 @@ export default async function run({ page, log }) {
     localStorage.removeItem('parley.sidebarWidth');
     localStorage.setItem('sidekick.sidebarWidth', '347');
 
-    // Legacy outbox with one queued record (keyPath 'id' mirrors queue.ts).
-    const outbox = await openWith('sidekick-outbox', 'outbox', 'id');
-    await putRec(outbox, 'outbox', { id: 'q-1', text: 'queued while offline', ts: 1723600000000 });
+    // Legacy outbox with one queued record — store name/keyPath mirror
+    // queue.ts exactly (store 'messages', keyPath 'id'), like a real
+    // pre-rename install would have.
+    const outbox = await openWith('sidekick-outbox', 'messages', 'id');
+    await putRec(outbox, 'messages', { id: 'q-1', text: 'queued while offline', ts: 1723600000000 });
     outbox.close();
 
     // Poisoned pair: stale legacy drafts + already-live new drafts.
@@ -95,7 +97,7 @@ export default async function run({ page, log }) {
   const result = await page.evaluate(`(async () => {
     ${idbHelpers()}
     return {
-      outbox: await readAll('parley-outbox', 'outbox'),
+      outbox: await readAll('parley-outbox', 'messages'),
       drafts: await readAll('parley-drafts', 'drafts'),
       sidebarWidth: localStorage.getItem('parley.sidebarWidth'),
       outboxFlag: localStorage.getItem('parley.idb-migrated.parley-outbox'),

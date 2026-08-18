@@ -953,7 +953,7 @@ async function boot() {
       // round-trip to distinguish "deleted" from "not-yet-listed". This
       // removes the ~1MB blocking fetchSessionMessages that used to gate
       // EVERY activity jump with no feedback (field 2026-05-29).
-      const bare = (x: string) => String(x || '').replace(/^parley:/, '');
+      const bare = (x: string) => String(x || '').replace(/^sidekick:/, '');
       const known = sessionDrawer.getCachedSessions()
         .some((s: any) => bare(s.id) === bare(chatId));
       if (!known) {
@@ -986,7 +986,7 @@ async function boot() {
     // dropped (bubble never appeared) and deep jumps fired redundant
     // concurrent ~1MB fetches. Route straight to a single bounded around
     // fetch (or an in-DOM scroll when the bubble is already rendered).
-    const bare = (x: string) => String(x || '').replace(/^parley:/, '');
+    const bare = (x: string) => String(x || '').replace(/^sidekick:/, '');
     if (msgId && bare(switchCtl.viewedId() || '') === bare(chatId)) {
       try {
         await drillToMessageInViewedSession(chatId, msgId);

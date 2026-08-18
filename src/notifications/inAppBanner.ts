@@ -51,7 +51,7 @@ export function show(args: ShowArgs): void {
   const preview = body.length > 150 ? body.slice(0, 147) + '…' : body;
   const label = isApproval
     ? `Approval required${chatLabel ? ` · ${chatLabel}` : ''}`
-    : (chatLabel || args.chatId.replace(/^parley:/, '').slice(0, 12));
+    : (chatLabel || args.chatId.replace(/^sidekick:/, '').slice(0, 12));
 
   bannerEl.classList.toggle('iab-approval', isApproval);
   bannerEl.innerHTML = `
