@@ -37,7 +37,7 @@ Edit `.env`:
 
 ```
 PARLEY_PLATFORM_URL=https://your-agent.example.com
-SIDEKICK_PLATFORM_TOKEN=<bearer token if your agent requires auth>
+PARLEY_PLATFORM_TOKEN=<bearer token if your agent requires auth>
 ```
 
 `npm start`, open `http://localhost:3001`. Done.
