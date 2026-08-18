@@ -132,12 +132,32 @@ export async function clearAll(): Promise<void> {
   await resolveBackend().clear();
 }
 
-/** Drop every buffered segment for one capture — the cancel path
- *  (discard-without-ingest): un-uploaded audio must not drain to a
- *  server capture that no longer exists. */
+/** Drop every buffered segment for one capture. NOT called by cancel
+ *  anymore (2026-08-18 postmortem P0 #2): a canceled capture's
+ *  un-uploaded segments are the ONLY copy of that audio, so they stay
+ *  buffered (the uploader parks them when the server answers
+ *  "frozen") until clearExpired's retention window or a deliberate
+ *  purge. Kept for purge-side tooling. */
 export async function clearCapture(captureId: string): Promise<void> {
   const backend = resolveBackend();
   for (const seg of await backend.getAll()) {
     if (seg.captureId === captureId) await backend.remove(seg.key);
   }
+}
+
+/** Retention janitor: drop buffered segments older than maxAgeMs.
+ *  Mirrors the server's Recently-Deleted window — parked segments from
+ *  discarded/finalized captures stay recoverable exactly that long,
+ *  then stop eating the phone's storage. Returns the number removed. */
+export async function clearExpired(maxAgeMs: number): Promise<number> {
+  const backend = resolveBackend();
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const seg of await backend.getAll()) {
+    if (seg.createdAt < cutoff) {
+      await backend.remove(seg.key);
+      removed += 1;
+    }
+  }
+  return removed;
 }

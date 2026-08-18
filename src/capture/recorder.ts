@@ -19,7 +19,7 @@
 // capture-pill-survives-session-switch smoke).
 
 import * as mic from '../audio/shared/capture.ts';
-import { putSegment, clearCapture } from './segmentStore.ts';
+import { putSegment, clearExpired } from './segmentStore.ts';
 import { createUploader, type Uploader } from './uploader.ts';
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
@@ -32,12 +32,15 @@ export interface CaptureUiState {
   chatId: string | null;
   /** epoch ms of capture start (timer renders from this). */
   startedAt: number;
-  /** Pill copy + button states. 'paused' is USER-deliberate (pause
+  /** Pill copy + button states. 'starting' is the HONEST startup phase
+   *  (postmortem 2026-08-18): mic acquisition + recorder start are in
+   *  flight — "Starting microphone…", active stays false, nothing has
+   *  announced success anywhere. 'paused' is USER-deliberate (pause
    *  button — mic fully released, OS indicator goes dark);
    *  'interrupted' is INVOLUNTARY (call/Siri stole the mic — amber,
    *  auto-resume polling). Distinct on purpose: auto-resume after a
    *  deliberate pause would be a privacy bug. */
-  phase: 'idle' | 'recording' | 'paused' | 'interrupted' | 'finishing';
+  phase: 'idle' | 'starting' | 'recording' | 'paused' | 'interrupted' | 'finishing';
   uploaderPending: number;
   sealedSegments: number;
   marks: number;
@@ -51,6 +54,27 @@ export interface CaptureUiState {
 }
 
 const SEGMENT_MS = 45_000;
+
+/** Bounded startup (postmortem P1): the incident's getUserMedia hung
+ *  for 21 minutes with no visible state. Past this, startup fails
+ *  loudly (toast) and the pending server capture is aborted in place. */
+const START_TIMEOUT_MS = 20_000;
+
+/** Local IDB retention for parked/orphaned segments — mirrors the
+ *  server's Recently Deleted window, so a discarded capture's
+ *  un-uploaded tail stays recoverable exactly as long as the server
+ *  copy does. */
+const LOCAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Lifecycle calls self-identify for the server's capture audit log
+ *  (postmortem P0 #3 — "who called this?" must never be unknowable
+ *  again). */
+function lifecycleHeaders(json = false): Record<string, string> {
+  return {
+    'x-sidekick-client': 'pwa-recorder',
+    ...(json ? { 'content-type': 'application/json' } : {}),
+  };
+}
 
 // Far-field room capture tuning: AGC ON lifts distant speakers; AEC OFF
 // (nothing plays through the speaker during capture — call-mode's AEC
@@ -102,10 +126,15 @@ function syncPending(): void {
   emit();
 }
 
-/** Boot-time: drain any segments a previous session left in IDB.
- *  Cheap no-op when the buffer is empty. */
+/** Boot-time: expire retention-window-old segments, then drain any a
+ *  previous session left in IDB. Cheap no-op when the buffer is empty. */
 export function resumePendingUploads(): void {
-  ensureUploader().kick();
+  void clearExpired(LOCAL_RETENTION_MS)
+    .catch(() => 0)
+    .then((n) => {
+      if (n) log(`[capture] dropped ${n} buffered segment(s) past the ${Math.round(LOCAL_RETENTION_MS / 86400000)}d retention window`);
+      ensureUploader().kick();
+    });
 }
 
 function pickMime(): string {
@@ -119,9 +148,13 @@ function pickMime(): string {
 function nowMs(): number { return Date.now() - state.startedAt; }
 
 /** One segment = one MediaRecorder lifetime. onstop seals + persists
- *  the blob and (while still active) starts the next segment. */
-function startSegment(): void {
-  if (!stream || !state.active) return;
+ *  the blob and (while still active) starts the next segment.
+ *  Returns whether MediaRecorder.start() actually succeeded — the
+ *  STARTUP call must verify this before activating server-side
+ *  (postmortem P0 #1); mid-meeting callers route false into the
+ *  interruption/recovery path instead. */
+function startSegment(): boolean {
+  if (!stream || !state.active) return false;
   const chunks: Blob[] = [];
   segStartMs = nowMs();
   const rec = new MediaRecorder(
@@ -154,8 +187,11 @@ function startSegment(): void {
       });
     }
     // Chain the next segment while the meeting is live (a stop()
-    // requested by stopMeetingCapture flips state.active first).
-    if (state.active && state.phase === 'recording') startSegment();
+    // requested by stopMeetingCapture flips state.active first). A
+    // failed chain start is a dead stream — recover via interruption.
+    if (state.active && state.phase === 'recording') {
+      if (!startSegment()) handleInterruption();
+    }
   };
   // 1s timeslice (memo.ts prior art): steady dataavailable cadence and
   // size-agnostic chunk handling (Safari can flush oversized chunks
@@ -166,17 +202,18 @@ function startSegment(): void {
     // start() throws when the stream died without an 'ended' event
     // (route change, device unplug). The old code let the chain die
     // silently — a live pill over a stopped recording (field wedge
-    // 2026-07-09 #5). Interruption path re-acquires + resumes.
-    log(`[capture] recorder start failed (${String(e)}) — treating as interruption`);
+    // 2026-07-09 #5). Callers decide the recovery: interruption
+    // mid-meeting, abort-start during startup.
+    log(`[capture] recorder start failed (${String(e)})`);
     if (recorder === rec) recorder = null;
-    handleInterruption();
-    return;
+    return false;
   }
   lastChunkAt = Date.now();
   if (segTimer != null) window.clearTimeout(segTimer);
   segTimer = window.setTimeout(() => {
     try { if (rec.state !== 'inactive') rec.stop(); } catch { /* sealed */ }
   }, SEGMENT_MS);
+  return true;
 }
 
 /** Seal the running segment immediately (interruption, stop). */
@@ -216,7 +253,7 @@ function handleInterruption(): void {
       }
       state.phase = 'recording';
       emit();
-      startSegment();
+      if (!startSegment()) { handleInterruption(); return; }
       log('[capture] mic re-acquired after interruption');
     } catch {
       reacquireTimer = window.setTimeout(tryReacquire, 3000);
@@ -251,7 +288,7 @@ function watchTracks(): void {
       }
       state.phase = 'recording';
       emit();
-      startSegment();
+      if (!startSegment()) handleInterruption();
     }
   });
 }
@@ -277,44 +314,108 @@ function stopWatchdog(): void {
   if (watchdogTimer != null) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
 }
 
+const IDLE_STATE: CaptureUiState = {
+  active: false, captureId: null, title: '', chatId: null,
+  startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
+  stalledTotalMs: 0, stalledSince: null,
+};
+
+/** getUserMedia with a hard deadline. The incident's acquire hung 21
+ *  MINUTES; anything past START_TIMEOUT_MS is a failure. If the OS
+ *  grants the mic after we already gave up, it is released on the spot
+ *  — never a live mic with no pill. */
+async function acquireMicBounded(): Promise<MediaStream> {
+  let gaveUp = false;
+  const acquireP = mic.acquire('meeting', MIC_CONSTRAINTS);
+  acquireP.then(
+    () => { if (gaveUp) { try { mic.release('meeting'); } catch { /* fine */ } } },
+    () => { /* rejection surfaces through the race below (or after it — swallowed) */ },
+  );
+  try {
+    return await Promise.race([
+      acquireP,
+      new Promise<never>((_, reject) => window.setTimeout(
+        () => reject(new Error(`microphone did not start within ${START_TIMEOUT_MS / 1000}s`)),
+        START_TIMEOUT_MS,
+      )),
+    ]);
+  } finally {
+    gaveUp = true;
+  }
+}
+
 export async function startMeetingCapture(
   opts: { title?: string; linkedChat?: string } = {},
 ): Promise<CaptureUiState> {
-  if (state.active) return getCaptureState();
+  if (state.active || state.phase === 'starting') return getCaptureState();
+  // HONEST startup phase (postmortem 2026-08-18 P1): the pill shows
+  // "Starting microphone…" — active stays false, nothing red, and NO
+  // success signal exists anywhere (server included) until the
+  // recorder is proven live.
+  state = { ...IDLE_STATE, phase: 'starting' };
+  emit();
+  const failToIdle = () => { state = { ...IDLE_STATE }; emit(); };
+
   // Create server-side FIRST (instant-start: no prompts — title
-  // defaults, annotate later via PATCH; §3.4). linkedChat carries the
+  // defaults, annotate later via PATCH; §3.4). Cheap now: the entity
+  // is a PENDING placeholder — no chat message, no session title, no
+  // recording claim until /activate. linkedChat carries the
   // PLACEMENT-SCOPED semantics (field UX 2026-07-09): app-level entry
   // points omit it → 'new' mints a dedicated meeting session (§3.6);
   // the composer mic-menu passes the viewed chat → the meeting lands
   // in the session the user is standing in.
-  const res = await fetch(apiUrl('/api/sidekick/captures'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      title: opts.title || undefined,
-      linked_chat: opts.linkedChat || 'new',
-      // Settings → Meetings defaults (field 2026-07-09 #9); the pill
-      // sheet's PATCH can still flip diarize mid-recording.
-      diarize: settings.get().captureDiarize,
-      auto_ingest: settings.get().captureAutoIngest,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error || `capture create failed (${res.status})`);
+  let capture: { id: string; title: string; linked_chat: string | null };
+  try {
+    const res = await fetch(apiUrl('/api/sidekick/captures'), {
+      method: 'POST',
+      headers: lifecycleHeaders(true),
+      body: JSON.stringify({
+        title: opts.title || undefined,
+        linked_chat: opts.linkedChat || 'new',
+        // Settings → Meetings defaults (field 2026-07-09 #9); the pill
+        // sheet's PATCH can still flip diarize mid-recording.
+        diarize: settings.get().captureDiarize,
+        auto_ingest: settings.get().captureAutoIngest,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error || `capture create failed (${res.status})`);
+    }
+    ({ capture } = await res.json());
+  } catch (e) {
+    failToIdle();
+    throw e;
   }
-  const { capture } = await res.json();
+  state.captureId = capture.id;
+  state.title = capture.title;
+  state.chatId = capture.linked_chat;
+  emit();
+
+  // Startup failure → abort-start: fails the pending capture IN PLACE
+  // with the reason. NEVER the delete endpoint (postmortem root cause:
+  // the old rollback here shared the irreversible DELETE with explicit
+  // discard, and erased a real meeting). If this call can't get
+  // through, the server's pending TTL reaches the same 'failed' state.
+  const abortStart = (reason: string) => fetch(
+    apiUrl(`/api/sidekick/captures/${capture.id}/abort-start`),
+    { method: 'POST', headers: lifecycleHeaders(true), body: JSON.stringify({ reason }) },
+  ).catch(() => { /* unreachable — pending TTL fails it in place */ });
 
   try {
-    stream = await mic.acquire('meeting', MIC_CONSTRAINTS);
+    stream = await acquireMicBounded();
   } catch (e) {
-    // Roll back with DELETE, not stop (audit 2026-07-09): stopping a
-    // zero-segment capture ran the whole pipeline — a minted session,
-    // a start message, then an ingest turn asking the agent to
-    // summarize an empty transcript — on the COMMON first-use
-    // mic-permission-denied path. Cancel semantics erase it entirely.
-    void fetch(apiUrl(`/api/sidekick/captures/${capture.id}`), { method: 'DELETE' });
+    void abortStart(`mic acquisition failed: ${String((e as Error)?.message || e)}`);
+    failToIdle();
     throw e;
+  }
+  // Re-check after the await: a reload/cancel that landed while
+  // getUserMedia was pending must not resurrect the capture.
+  if (state.phase !== 'starting' || state.captureId !== capture.id) {
+    try { mic.release('meeting'); } catch { /* fine */ }
+    stream = null;
+    void abortStart('startup superseded on the client');
+    return getCaptureState();
   }
 
   mimeType = pickMime();
@@ -325,10 +426,43 @@ export async function startMeetingCapture(
     uploaderPending: 0, sealedSegments: 0, marks: 0,
     stalledTotalMs: 0, stalledSince: null,
   };
+  // No emit yet — the pill stays on "Starting microphone…" until the
+  // recorder start is VERIFIED below.
+  if (!startSegment()) {
+    try { mic.release('meeting'); } catch { /* fine */ }
+    stream = null;
+    void abortStart('MediaRecorder.start() threw');
+    failToIdle();
+    throw new Error('recorder failed to start');
+  }
+
+  // Mic owned + recorder running → tell the server (this transition
+  // fires the "Recording started" message and session title). A
+  // network failure here is non-fatal: the first uploaded segment
+  // implies activation server-side. A 409 means the pending capture
+  // was superseded/expired while we started — stand down cleanly, no
+  // destructive calls (the server already resolved its fate).
+  let refused = false;
+  try {
+    const res = await fetch(apiUrl(`/api/sidekick/captures/${capture.id}/activate`), {
+      method: 'POST', headers: lifecycleHeaders(),
+    });
+    refused = res.status === 409;
+  } catch {
+    log(`[capture] ${capture.id}: activate unreachable — first segment will imply activation`);
+  }
+  if (refused) {
+    state.captureId = null;   // seal below skips persistence
+    sealCurrent();
+    try { mic.release('meeting'); } catch { /* fine */ }
+    stream = null;
+    failToIdle();
+    throw new Error('recording was superseded before it could start — try again');
+  }
+
   watchTracks();
-  startSegment();
   startWatchdog();
-  emit();
+  emit();   // NOW the pill flips to the real red recording state
   log(`[capture] started ${capture.id} ("${capture.title}") chat=${capture.linked_chat}`);
   return getCaptureState();
 }
@@ -379,31 +513,34 @@ export async function stopMeetingCapture(): Promise<void> {
   log(`[capture] stopped ${captureId}`);
 }
 
-/** Cancel = discard WITHOUT ingesting (field ask 2026-07-09). The
- *  inverse promise of stop: nothing is saved, no agent turn fires.
- *  Clearing state.captureId BEFORE stopping the recorder makes the
- *  onstop seal a no-op (its persist path checks captureId), then the
- *  IDB buffer for this capture is dropped and the server capture is
- *  hard-deleted (segments already uploaded included). */
+/** Cancel = discard WITHOUT ingesting (field ask 2026-07-09), now with
+ *  Recently-Deleted semantics (postmortem P0 #2): the server capture
+ *  is soft-discarded (tombstone, restorable ~7 days) — never
+ *  hard-DELETEd — and the local IDB buffer is NOT cleared: un-uploaded
+ *  tail segments are the only copy of that audio, so they stay
+ *  buffered (the uploader parks them on the server's "frozen" answer)
+ *  until the retention janitor or a deliberate purge. */
 export async function cancelMeetingCapture(): Promise<void> {
   if (!state.active || !state.captureId) return;
   const captureId = state.captureId;
-  state = {
-    active: false, captureId: null, title: '', chatId: null,
-    startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-    stalledTotalMs: 0, stalledSince: null,
-  };
+  state = { ...IDLE_STATE };
   emit();
   stopWatchdog();
   if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
   sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
   try { mic.release('meeting'); } catch { /* fine */ }
   stream = null;
-  await clearCapture(captureId);       // un-uploaded audio must not drain later
   try {
-    await fetch(apiUrl(`/api/sidekick/captures/${captureId}`), { method: 'DELETE' });
-  } catch { /* server unreachable — stale-recording auto-heal covers the manifest */ }
-  log(`[capture] canceled + discarded ${captureId}`);
+    const res = await fetch(apiUrl(`/api/sidekick/captures/${captureId}/discard`), {
+      method: 'POST',
+      headers: lifecycleHeaders(true),
+      body: JSON.stringify({ reason: 'user cancel (pill discard)' }),
+    });
+    if (!res.ok) {
+      log(`[capture] discard of ${captureId} answered ${res.status} — server reconciles via sweep`);
+    }
+  } catch { /* server unreachable — stale-recording auto-heal resolves it in place */ }
+  log(`[capture] canceled ${captureId} → Recently Deleted (recoverable)`);
 }
 
 /** Pause = seal the running segment and RELEASE the mic (the OS mic
@@ -439,7 +576,7 @@ export async function resumeMeetingCapture(): Promise<void> {
   }
   state.phase = 'recording';
   emit();
-  startSegment();
+  if (!startSegment()) handleInterruption();
   log('[capture] resumed');
 }
 

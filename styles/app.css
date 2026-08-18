@@ -4903,6 +4903,15 @@
 .capture-pill.interrupted .capture-pill-dot {
   background: #f1c40f; animation: none;
 }
+/* Starting (mic acquisition/recorder start in flight — honest-UI,
+   postmortem 2026-08-18): neutral gray, NO red, NO pulse. Nothing may
+   look like "recording" until the recorder is proven live. */
+.capture-pill.starting {
+  border-color: var(--border, #333);
+  background: var(--surface-1, #1c1c1e);
+  box-shadow: none;
+}
+.capture-pill.starting .capture-pill-dot { background: #8a8a8a; animation: none; }
 /* Finishing (uploader draining after stop): neutral, no red urgency. */
 .capture-pill.finishing {
   border-color: var(--border, #333);
