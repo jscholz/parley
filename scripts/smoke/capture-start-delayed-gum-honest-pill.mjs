@@ -15,6 +15,9 @@ export const NAME = 'capture-start-delayed-gum-honest-pill';
 export const DESCRIPTION = 'hanging gUM: pill shows Starting…, capture stays pending, zero transitions; grant → single activate';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
+// The incident was an iPhone — run the delayed-gUM scenario in the
+// mobile shape too (postmortem acceptance #10).
+export const MOBILE = 'both';
 
 export default async function run({ page, log, mock }) {
   await page.addInitScript(() => {

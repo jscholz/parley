@@ -11,6 +11,9 @@ export const NAME = 'capture-start-mic-denied-fails-in-place';
 export const DESCRIPTION = 'gUM rejection: pending → failed via abort-start; DELETE never called; no recording claim';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
+// The incident was an iPhone — run the rejection scenario in the
+// mobile shape too (postmortem acceptance #10).
+export const MOBILE = 'both';
 
 export default async function run({ page, log, mock }) {
   await page.addInitScript(() => {
