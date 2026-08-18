@@ -1,6 +1,6 @@
 # Sidekick proxy (`proxy/sidekick/`)
 
-Node-side handlers for the `/api/sidekick/*` PWA-facing surface plus
+Node-side handlers for the `/api/parley/*` PWA-facing surface plus
 the `UpstreamAgent` adapter the proxy uses to talk `/v1/*` to whichever
 agent is wired in (hermes plugin, stub agent, raw OAI third-party).
 
@@ -9,14 +9,14 @@ agent is wired in (hermes plugin, stub agent, raw OAI third-party).
 | File | Owns |
 |---|---|
 | `index.ts` | Module root. Wires `init({token, url})` and re-exports the per-route handlers consumed by `server.ts`. |
-| `messages.ts` | `POST /api/sidekick/messages` — turn dispatch (fire-and-forget). Forwards to `upstream.sendMessage`, fans every yielded envelope onto the SSE multiplexer via `pushEnvelope`. |
-| `stream.ts` | `GET /api/sidekick/stream` — persistent SSE multiplexer. Replay ring, per-chat filtering, cursor-aware reconnect (`Last-Event-ID` / `?last_event_id=`). Subscribes to upstream `/v1/events` once at boot via `init()`. |
+| `messages.ts` | `POST /api/parley/messages` — turn dispatch (fire-and-forget). Forwards to `upstream.sendMessage`, fans every yielded envelope onto the SSE multiplexer via `pushEnvelope`. |
+| `stream.ts` | `GET /api/parley/stream` — persistent SSE multiplexer. Replay ring, per-chat filtering, cursor-aware reconnect (`Last-Event-ID` / `?last_event_id=`). Subscribes to upstream `/v1/events` once at boot via `init()`. |
 | `sessions.ts` | Drawer list + delete + rename. Wraps upstream `/v1/conversations` (channel) or `/v1/gateway/conversations` (cross-platform). |
-| `history.ts` | `GET /api/sidekick/sessions/{id}/messages` — transcript replay. |
-| `settings.ts` | `/api/sidekick/settings/*` — wraps upstream `/v1/settings/*`. |
-| `commands.ts` | `GET /api/sidekick/commands` — slash-command catalog. |
+| `history.ts` | `GET /api/parley/sessions/{id}/messages` — transcript replay. |
+| `settings.ts` | `/api/parley/settings/*` — wraps upstream `/v1/settings/*`. |
+| `commands.ts` | `GET /api/parley/commands` — slash-command catalog. |
 | `modelModalities.ts` | Model capabilities + auxiliary-vision passthrough — thin proxy to hermes plugin's models.dev lookup; powers attach-button gating. (Filename pre-dates the refactor; content is now ground-truth caps, not modalities.) |
-| `frontend-config.ts` | yaml-backed PWA settings (`/api/sidekick/config`). Distinct from `/v1/settings` — those are agent-owned. |
+| `frontend-config.ts` | yaml-backed PWA settings (`/api/parley/config`). Distinct from `/v1/settings` — those are agent-owned. |
 | `upstream.ts` | The `UpstreamAgent` interface + `HTTPAgentUpstream` implementation. The `SidekickEnvelope` union here is the canonical wire-shape reference. |
 | `__tests__/proxy.test.ts` | Integration tests against a `FakeAgent`. Run via `npm test`. |
 
@@ -24,7 +24,7 @@ agent is wired in (hermes plugin, stub agent, raw OAI third-party).
 
 The `SidekickEnvelope` union near the top of `upstream.ts` is the
 canonical list of envelope types fanned out on
-`/api/sidekick/stream` — see also the top-level
+`/api/parley/stream` — see also the top-level
 [`README.md`](../../README.md) endpoint inventory.
 
 ## Why a single persistent SSE stream

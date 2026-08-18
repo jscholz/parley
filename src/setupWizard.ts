@@ -47,7 +47,7 @@ export function gateIfNeeded(): boolean {
  *  no gate (a broken status probe must never lock a working install). */
 export async function init(): Promise<void> {
   try {
-    const r = await fetch('/api/sidekick/setup/status');
+    const r = await fetch('/api/parley/setup/status');
     if (!r.ok) return;
     status = await r.json();
   } catch { return; }
@@ -186,7 +186,7 @@ function applyButton(label: string, run: (btn: HTMLButtonElement, out: HTMLEleme
 }
 
 async function apply(bodyJson: Record<string, unknown>): Promise<{ llm: string | null; restartRequired: boolean }> {
-  const r = await fetch('/api/sidekick/setup', {
+  const r = await fetch('/api/parley/setup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(bodyJson),

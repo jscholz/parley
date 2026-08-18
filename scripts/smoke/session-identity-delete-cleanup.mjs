@@ -40,7 +40,7 @@ async function rowMenuAction(page, chatId, label) {
 
 const persistedIdentities = (page) =>
   page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/prefs/sessionIdentities', { cache: 'no-store' });
+    const r = await fetch('/api/parley/prefs/sessionIdentities', { cache: 'no-store' });
     if (!r.ok) return null;
     const b = await r.json();
     const raw = b?.value;
@@ -78,7 +78,7 @@ export default async function run({ page, log }) {
   await rowMenuAction(page, ID('beta'), 'Delete');
 
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/sessionIdentities')
+    () => fetch('/api/parley/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => !String(b?.value || '').includes('Nick beta')),
     null, { timeout: 5_000, polling: 100, label: 'beta identity never pruned from sessionIdentities' },

@@ -1,4 +1,4 @@
-"""HTTP route handler for ``POST /v1/sidekick/upload`` — large-file staging.
+"""HTTP route handler for ``POST /v1/parley/upload`` — large-file staging.
 
 Task #158. Big PDFs (Jonathan hit a 57 MB file) can't ride the
 base64-in-JSON ``attachments`` field on ``/v1/responses``: base64
@@ -82,7 +82,7 @@ def _sweep_stale() -> None:
 
 
 async def handle_upload(adapter, request: "web.Request") -> "web.Response":
-    """POST /v1/sidekick/upload — stream raw bytes to a staged file.
+    """POST /v1/parley/upload — stream raw bytes to a staged file.
 
     Body is the raw file (no multipart, no base64). Returns
     ``{upload_id, size}``. The PWA references the id in its next turn's

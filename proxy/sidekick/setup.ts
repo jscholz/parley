@@ -1,8 +1,8 @@
 /**
  * First-run setup surface — powers the PWA's onboarding wizard.
  *
- *   GET  /api/sidekick/setup/status  → what's configured, what's detected
- *   POST /api/sidekick/setup         → persist choice + hot-apply
+ *   GET  /api/parley/setup/status  → what's configured, what's detected
+ *   POST /api/parley/setup         → persist choice + hot-apply
  *
  * Design (FTUE research 2026-07-07, "Agent Zero model gate" pattern):
  * the wizard only ever ENGAGES when the upstream is the in-tree stub

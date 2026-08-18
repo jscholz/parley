@@ -27,7 +27,7 @@
 // prior hydrate) and locks in BOTH halves of the post-fix invariant:
 //   A. Merge dedup: same prefixed key on both sides → ONE drawer row.
 //   B. Cleanup contract: navigate-away from any populated chat fires
-//      ZERO `DELETE /api/sidekick/sessions/*` requests.
+//      ZERO `DELETE /api/parley/sessions/*` requests.
 //
 // Companion to `empty-chat-navigate-away-cleanup.mjs` — that one tests
 // the LEGITIMATE orphan-cleanup feature (which is preserved). This one
@@ -118,7 +118,7 @@ export default async function run({ page, ctx, log }) {
   // Intercept ALL backend DELETE requests so we can assert the negative.
   // We don't care about other methods — fall through.
   const deleteCalls = [];
-  await ctx.route('**/api/sidekick/sessions/*', async (route) => {
+  await ctx.route('**/api/parley/sessions/*', async (route) => {
     if (route.request().method() === 'DELETE') {
       const url = new URL(route.request().url());
       deleteCalls.push(decodeURIComponent(url.pathname));

@@ -3,8 +3,8 @@
 // PWA settings (theme, hotkeys, voice phrases, send-word, etc.) used
 // to live in browser localStorage, hardcoded defaults in
 // src/settings.ts. Now they live in `sidekick.config.yaml` under a
-// `frontend:` section, written via POST /api/sidekick/config/{key}
-// and read via GET /api/sidekick/config.
+// `frontend:` section, written via POST /api/parley/config/{key}
+// and read via GET /api/parley/config.
 //
 // Categories below match the Settings pane's groups so the yaml
 // stays human-readable. The wire shape, on the other hand, is FLAT

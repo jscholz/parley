@@ -71,7 +71,7 @@ async function startGateRig(opts: { subscriptionSuffix?: string } = {}) {
   // to. Subscribe through the route so we exercise the same path the
   // PWA would.
   const sub = makeSubscription(opts.subscriptionSuffix ?? 'default');
-  const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+  const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(sub),
@@ -183,11 +183,11 @@ test('gate: active SSE subscriber + visibility=visible → no dispatch (SSE hand
     // matches real-PWA behavior: initVisibilityReporting fires on
     // boot before the first envelope arrives.)
     const ac = new AbortController();
-    const ssePromise = fetch(`${g.rig.proxyUrl}/api/sidekick/stream?chat_id=chat-A`, {
+    const ssePromise = fetch(`${g.rig.proxyUrl}/api/parley/stream?chat_id=chat-A`, {
       signal: ac.signal,
     });
     await new Promise<void>((r) => setTimeout(r, 50));
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/visibility`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/visibility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ state: 'visible', chat_id: 'chat-A' }),
@@ -213,7 +213,7 @@ test('gate: SSE subscriber for DIFFERENT chat → still dispatches for envelope 
   const g = await startGateRig();
   try {
     const ac = new AbortController();
-    const ssePromise = fetch(`${g.rig.proxyUrl}/api/sidekick/stream?chat_id=chat-B`, {
+    const ssePromise = fetch(`${g.rig.proxyUrl}/api/parley/stream?chat_id=chat-B`, {
       signal: ac.signal,
     });
     await new Promise<void>((r) => setTimeout(r, 50));
@@ -512,7 +512,7 @@ test('fan-out: dispatches to every subscription, marks each used', async () => {
   try {
     // Add a second subscription so a single envelope must fan to both.
     const sub2 = makeSubscription('fanout-b');
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub2),
@@ -540,7 +540,7 @@ test('no subscriptions: dispatch is a no-op (no errors thrown)', async () => {
   // startGateRig pre-registers a subscription; remove it before pushing.
   const g = await startGateRig({ subscriptionSuffix: 'empty' });
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: g.sub.endpoint }),
@@ -577,7 +577,7 @@ test('error: sender 410 Gone → subscription pruned automatically', async () =>
     });
 
     // Verify the subscription was removed from the store.
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: g.sub.endpoint }),
@@ -596,7 +596,7 @@ test('mute: muted chat skips dispatch even for push-eligible envelope', async ()
   const g = await startGateRig({ subscriptionSuffix: 'mute-1' });
   try {
     const mutedChat = 'chat-quiet-please';
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: mutedChat, muted: true }),
@@ -631,7 +631,7 @@ test('mute: unmute restores dispatch for the same chat', async () => {
   try {
     const chat = 'chat-toggle';
     // Mute, push, expect 0 dispatched.
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chat, muted: true }),
@@ -640,7 +640,7 @@ test('mute: unmute restores dispatch for the same chat', async () => {
     assert.equal(g.sent.length, 0);
 
     // Unmute, push again, expect 1 dispatched.
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chat, muted: false }),
@@ -656,25 +656,25 @@ test('mute: GET /mutes returns the current list', async () => {
   const g = await startGateRig({ subscriptionSuffix: 'mute-list' });
   try {
     // Initially empty.
-    const r1 = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mutes`);
+    const r1 = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mutes`);
     assert.equal(r1.status, 200);
     assert.deepEqual((await r1.json()).muted_chats, []);
 
     // Mute two chats, verify list reflects them (sorted).
     for (const c of ['chat-b', 'chat-a']) {
-      await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+      await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ chat_id: c, muted: true }),
       });
     }
-    const r2 = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mutes`);
+    const r2 = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mutes`);
     const body: any = await r2.json();
     assert.deepEqual(body.muted_chats, ['chat-a', 'chat-b'],
       'list should be sorted for stable client-side rendering');
 
     // Idempotent re-mute returns the same total.
-    const r3 = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+    const r3 = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: 'chat-a', muted: true }),
@@ -698,7 +698,7 @@ test('mute: invalid bodies return 400', async () => {
       { chat_id: 42, muted: true },      // non-string chat_id
     ];
     for (const b of bad) {
-      const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+      const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(b),
@@ -728,7 +728,7 @@ test('error: sender transient 5xx → counted as failed, subscription kept', asy
     });
 
     // Subscription should NOT have been pruned — 5xx is transient.
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: g.sub.endpoint }),

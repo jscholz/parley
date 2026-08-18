@@ -1,6 +1,6 @@
 // Mock backend for sidekick PWA smoke scenarios.
 //
-// Intercepts /api/sidekick/* via Playwright page.route() and serves
+// Intercepts /api/parley/* via Playwright page.route() and serves
 // scripted responses. No real hermes/LLM/Deepgram calls.
 //
 // Use:
@@ -12,10 +12,10 @@
 //   // ...
 //   await mock.close();   // tears down the in-process SSE server
 //
-// /api/sidekick/stream is served by a real in-process http.Server on
+// /api/parley/stream is served by a real in-process http.Server on
 // an ephemeral 127.0.0.1 port (mirrors the proxy-test harness pattern
 // at proxy/sidekick/__tests__/proxy-harness.ts).
-// Playwright forwards the PWA's /api/sidekick/stream request to that
+// Playwright forwards the PWA's /api/parley/stream request to that
 // local server via `route.continue({ url })`, so the EventSource sees
 // a single long-lived connection — `pushReply` / `pushSessionChanged`
 // land within milliseconds instead of having to wait for the
@@ -46,7 +46,7 @@ export async function installMockBackend(page) {
    *  not yet persisted in state.db (e.g. an in-flight turn). The
    *  history-fetch handler appends these as the `inflight` field. */
   const inflightByChat = new Map();
-  /** When true (default), POST /api/sidekick/messages auto-emits a
+  /** When true (default), POST /api/parley/messages auto-emits a
    *  reply via SSE 50ms later. Tests that want to drive envelopes
    *  manually (e.g. assert the thinking-dots label transitions
    *  across typing → tool_call → canvas.show) call
@@ -90,7 +90,7 @@ export async function installMockBackend(page) {
   let historyFirstPageLimit = null;
   const messageDelays = new Map();  // chat_id -> artificial /messages delay in ms
   /** SSE-disconnect simulation (offline-first smokes). While true:
-   *   - /api/sidekick/stream is answered with a 503 → the PWA's
+   *   - /api/parley/stream is answered with a 503 → the PWA's
    *     EventSource HARD-fails (readyState CLOSED, no native retry) →
    *     proxyClient flips connected=false, exactly the spotty-mobile
    *     shape the field bug reproduced (isConnected() gate class).
@@ -125,7 +125,7 @@ export async function installMockBackend(page) {
     }
   };
 
-  // Real in-process http.Server hosting /api/sidekick/stream as a
+  // Real in-process http.Server hosting /api/parley/stream as a
   // proper persistent SSE endpoint. Playwright redirects the PWA's
   // request here via route.continue({ url }) below.
   const sseServer = http.createServer((req, res) => {
@@ -179,8 +179,8 @@ export async function installMockBackend(page) {
   const ssePort = typeof sseAddr === 'object' && sseAddr ? sseAddr.port : 0;
   const sseUrl = `http://127.0.0.1:${ssePort}/stream`;
 
-  // GET /api/sidekick/sessions — canned list from the in-memory map.
-  await page.route('**/api/sidekick/sessions*', async (route) => {
+  // GET /api/parley/sessions — canned list from the in-memory map.
+  await page.route('**/api/parley/sessions*', async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith('/messages')) {
       // Per-chat history endpoint — handled by the next route.
@@ -244,13 +244,13 @@ export async function installMockBackend(page) {
     });
   });
 
-  // GET /api/sidekick/sessions/<chat_id>/messages — canned transcript.
+  // GET /api/parley/sessions/<chat_id>/messages — canned transcript.
   // Each message's `id` matches the SSE envelope `message_id` the
   // proxy emitted for that same content — mirrors the real proxy
   // (proxy/sidekick/history.ts maps `id: it.id` and upstream.ts
   // emits the same `it.id` as `message_id` on reply_delta /
   // reply_final). Tests rely on this alignment for cross-path dedup.
-  await page.route(/.*\/api\/sidekick\/sessions\/[^/]+\/messages/, async (route) => {
+  await page.route(/.*\/api\/parley\/sessions\/[^/]+\/messages/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     if (streamOutage) return route.abort('connectionfailed');
     const url = new URL(route.request().url());
@@ -436,8 +436,8 @@ export async function installMockBackend(page) {
     });
   });
 
-  // DELETE /api/sidekick/sessions/<chat_id> — drop from the in-memory map.
-  await page.route(/.*\/api\/sidekick\/sessions\/[^/]+$/, async (route) => {
+  // DELETE /api/parley/sessions/<chat_id> — drop from the in-memory map.
+  await page.route(/.*\/api\/parley\/sessions\/[^/]+$/, async (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/sessions\/([^/]+)$/);
@@ -452,7 +452,7 @@ export async function installMockBackend(page) {
   // wizard overlay, which intercepts pointer events over the whole
   // page and breaks every click-based smoke. Mocked smokes must not
   // depend on the host's .env; no smoke exercises the wizard itself.
-  await page.route('**/api/sidekick/setup/status', async (route) => {
+  await page.route('**/api/parley/setup/status', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -475,7 +475,7 @@ export async function installMockBackend(page) {
   const captures = new Map();
   const captureLifecycle = [];   // { action, id, body? } in arrival order
   let captureOutage = false;
-  await page.route('**/api/sidekick/captures', async (route) => {
+  await page.route('**/api/parley/captures', async (route) => {
     // GET = the capture list meetingsIndex fetches at boot (and on
     // capture_changed envelopes). Served from the mock's map so
     // has-recording drawer state is test-controlled — falling back to
@@ -598,7 +598,7 @@ export async function installMockBackend(page) {
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, seq, duplicate }) });
   });
-  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/stop$/, async (route) => {
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/stop$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/stop$/);
     const cap = captures.get(m ? m[1] : '');
@@ -608,7 +608,7 @@ export async function installMockBackend(page) {
     if (cap && cap.status === 'recording') { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
-  await page.route(/.*\/api\/sidekick\/captures\/[^/]+$/, async (route) => {
+  await page.route(/.*\/api\/parley\/captures\/[^/]+$/, async (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
     const cap = captures.get(m ? m[1] : '');
@@ -642,7 +642,7 @@ export async function installMockBackend(page) {
     captures.delete(cap.id);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: cap.id }) });
   });
-  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/marks$/, async (route) => {
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/marks$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/marks$/);
     const cap = captures.get(m ? m[1] : '');
@@ -652,10 +652,10 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, marks: cap?.marks || [] }) });
   });
 
-  // POST /api/sidekick/messages — fire-and-forget, returns 202.
+  // POST /api/parley/messages — fire-and-forget, returns 202.
   // Body has {chat_id, text}. Auto-creates the chat in our map and
   // schedules a reply envelope on the persistent stream.
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.route('**/api/parley/messages', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     if (streamOutage) return route.abort('connectionfailed');
     let body;
@@ -750,14 +750,14 @@ export async function installMockBackend(page) {
     });
   });
 
-  // GET /api/sidekick/stream — persistent SSE forwarded to the
+  // GET /api/parley/stream — persistent SSE forwarded to the
   // in-process http.Server above. Playwright's `route.continue({ url })`
   // re-issues the request to the new URL and pipes the response body
   // back to the page, including streamed chunks. That gives us a real
   // long-lived SSE channel: `pushReply` / `pushSessionChanged` write
   // straight to `streamSubs` and the PWA sees them immediately, no
   // EventSource-reconnect hop required.
-  await page.route('**/api/sidekick/stream', async (route) => {
+  await page.route('**/api/parley/stream', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     if (streamOutage) {
       // Non-200 makes the EventSource fail HARD (readyState CLOSED, no
@@ -777,7 +777,7 @@ export async function installMockBackend(page) {
 
   // GET /config — minimal config so the PWA doesn't 404. Anchor to
   // origin-root with a regex; a glob like `**/config` also matches
-  // `/api/sidekick/config`, which silently turned settings.load() into
+  // `/api/parley/config`, which silently turned settings.load() into
   // a no-op (the runtime-config payload has no `settings` field) — every
   // mocked-backend test was reading DEFAULTS for every yaml-backed key.
   await page.route(/^https?:\/\/[^/]+\/config(\?.*)?$/, async (route) => {
@@ -796,16 +796,16 @@ export async function installMockBackend(page) {
     });
   });
 
-  // /api/sidekick/settings/* — agent-declared settings extension.
+  // /api/parley/settings/* — agent-declared settings extension.
   // Tests configure schema via mock.setSettingsSchema([...]). null
   // schema = agent doesn't implement extension (route returns 404),
   // matching the contract for opt-out agents.
   let settingsSchema = null;            // null | SettingDef[]
-  /** Records the most recent /api/sidekick/settings/{id} POST so
+  /** Records the most recent /api/parley/settings/{id} POST so
    *  tests can assert the body shape forwarded matches what they
    *  expected. */
   let lastSettingsPost = null;
-  await page.route(/.*\/api\/sidekick\/settings(?:\/.*)?/, async (route) => {
+  await page.route(/.*\/api\/parley\/settings(?:\/.*)?/, async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (method === 'GET' && url.pathname.endsWith('/settings/schema')) {
@@ -859,13 +859,13 @@ export async function installMockBackend(page) {
     return route.fallback();
   });
 
-  // /api/sidekick/commands — slash-command catalog. Tests configure
+  // /api/parley/commands — slash-command catalog. Tests configure
   // via mock.setCommandsCatalog([...]). null = upstream agent doesn't
   // implement the extension (route returns 404), matching the
   // contract for opt-out agents. Default is null so existing smokes
   // see a no-op slashCommands module.
   let commandsCatalog = null;        // null | CommandDef[]
-  await page.route(/.*\/api\/sidekick\/commands(\?.*)?$/, async (route) => {
+  await page.route(/.*\/api\/parley\/commands(\?.*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     if (commandsCatalog === null) {
       await route.fulfill({
@@ -895,7 +895,7 @@ export async function installMockBackend(page) {
   // ── Server-driven unread state (SSOT after the 2026-05 refactor) ──
   //
   // Real plugin owns unread_state in sidekick.db; the proxy forwards
-  // /api/sidekick/notifications/{unread,seen,mark} to /v1/unread/*.
+  // /api/parley/notifications/{unread,seen,mark} to /v1/unread/*.
   // Mock mirrors that surface here so tests can drive the badge flow
   // through the same code paths the PWA uses in production.
   //
@@ -922,7 +922,7 @@ export async function installMockBackend(page) {
     unreadByChat.delete(chatId);
     markedUnread.delete(chatId);
   }
-  await page.route(/.*\/api\/sidekick\/notifications\/unread$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/unread$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     const out = [];
     const seen = new Set();
@@ -942,14 +942,14 @@ export async function installMockBackend(page) {
       body: JSON.stringify({ chats: out, total: out.reduce((a, c) => a + Math.max(c.unread_count, c.marked_unread ? 1 : 0), 0) }),
     });
   });
-  await page.route(/.*\/api\/sidekick\/notifications\/seen$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/seen$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     let body; try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
     if (body.chat_id) clearUnreadFor(body.chat_id);
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  await page.route(/.*\/api\/sidekick\/notifications\/mark$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/mark$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     let body; try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
@@ -974,7 +974,7 @@ export async function installMockBackend(page) {
     quiet_hours: { enabled: false, start: '22:00', end: '07:00' },
     kinds: { agent_reply: true, cron: true, approval: true },
   };
-  await page.route(/.*\/api\/sidekick\/notifications\/preferences$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/preferences$/, async (route) => {
     const method = route.request().method();
     if (method === 'POST') {
       let body; try { body = JSON.parse(route.request().postData() || '{}'); }
@@ -994,14 +994,14 @@ export async function installMockBackend(page) {
     });
   });
   const mutedChats = new Set();
-  await page.route(/.*\/api\/sidekick\/notifications\/mutes$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/mutes$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ muted_chats: Array.from(mutedChats) }),
     });
   });
-  await page.route(/.*\/api\/sidekick\/notifications\/mute$/, async (route) => {
+  await page.route(/.*\/api\/parley\/notifications\/mute$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     let body; try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
@@ -1015,12 +1015,12 @@ export async function installMockBackend(page) {
   // ── Server-driven pin state (SSOT after the 2026-05 refactor) ──
   //
   // Real plugin owns the `pins` table in sidekick.db; the proxy
-  // forwards /api/sidekick/pins/* to /v1/pins/*. Mock mirrors that
+  // forwards /api/parley/pins/* to /v1/pins/*. Mock mirrors that
   // surface here so tests that use pinMessage() / unpinMessage() drive
   // the real server-roundtrip code paths.
   const pinsByKey = new Map();  // `${chatId}|${msgId}` → pin record
   const pkey = (cid, mid) => `${cid}|${mid}`;
-  await page.route(/.*\/api\/sidekick\/pins(\?.*)?$/, async (route) => {
+  await page.route(/.*\/api\/parley\/pins(\?.*)?$/, async (route) => {
     const method = route.request().method();
     if (method === 'GET') {
       const out = Array.from(pinsByKey.values()).sort((a, b) => b.pinnedAt - a.pinnedAt);
@@ -1048,7 +1048,7 @@ export async function installMockBackend(page) {
     }
     return route.fallback();
   });
-  await page.route(/.*\/api\/sidekick\/pins\/[^/]+\/[^/]+$/, async (route) => {
+  await page.route(/.*\/api\/parley\/pins\/[^/]+\/[^/]+$/, async (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/pins\/([^/]+)\/([^/]+)$/);
@@ -1063,7 +1063,7 @@ export async function installMockBackend(page) {
   // ── Synced user settings (sidekick.db user_settings) ──
   //
   // Real plugin owns the `user_settings` table; the proxy forwards
-  // GET/PUT /api/sidekick/prefs/<key> to /v1/user-settings. Mock keys
+  // GET/PUT /api/parley/prefs/<key> to /v1/user-settings. Mock keys
   // a Map by setting name so cross-device sync tests (e.g. STT
   // key-terms) drive the same server-roundtrip path the PWA uses.
   //
@@ -1087,7 +1087,7 @@ export async function installMockBackend(page) {
     userSettingsMeta.set(key, prefsClock);
     return prefsClock;
   };
-  await page.route(/.*\/api\/sidekick\/prefs\/[^/]+$/, async (route) => {
+  await page.route(/.*\/api\/parley\/prefs\/[^/]+$/, async (route) => {
     const method = route.request().method();
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/prefs\/([^/]+)$/);
@@ -1140,13 +1140,13 @@ export async function installMockBackend(page) {
     return route.fallback();
   });
 
-  // Bare list: GET /api/sidekick/prefs → {settings:{key:value,…}} for every
+  // Bare list: GET /api/parley/prefs → {settings:{key:value,…}} for every
   // key the PWA has written this session. settings.ts load() reads this first
   // (DB-as-source-of-truth) and only seeds-forward from /config for keys it
   // doesn't find here. Disjoint from the per-key regex above (no trailing
   // /<key> segment). The Map is fresh-empty per scenario, so absent a seed
   // the PWA naturally backfills synced values from the real-server YAML.
-  await page.route(/.*\/api\/sidekick\/prefs(?:\?.*)?$/, async (route) => {
+  await page.route(/.*\/api\/parley\/prefs(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({
       status: 200, contentType: 'application/json',
@@ -1171,7 +1171,7 @@ export async function installMockBackend(page) {
     messageId: item.messageId ?? item.message_id ?? null,
     resolved: item.resolved ?? null,
   });
-  await page.route(/.*\/api\/sidekick\/activity(\?.*)?$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity(\?.*)?$/, async (route) => {
     const method = route.request().method();
     if (method === 'GET') {
       const out = Array.from(activityById.values()).sort((a, b) => {
@@ -1192,7 +1192,7 @@ export async function installMockBackend(page) {
     }
     return route.fallback();
   });
-  await page.route(/.*\/api\/sidekick\/activity\/resolve$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity\/resolve$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     let body; try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
@@ -1200,7 +1200,7 @@ export async function installMockBackend(page) {
     if (item) activityById.set(body.id, { ...item, read: true, resolved: body.resolution || 'dismissed' });
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  await page.route(/.*\/api\/sidekick\/activity\/seen$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity\/seen$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     let body; try { body = JSON.parse(route.request().postData() || '{}'); }
     catch { body = {}; }
@@ -1212,7 +1212,7 @@ export async function installMockBackend(page) {
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  await page.route(/.*\/api\/sidekick\/activity\/clear$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity\/clear$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     for (const [id, item] of Array.from(activityById.entries())) {
       if (item.kind === 'approval' && !item.resolved) continue;
@@ -1220,7 +1220,7 @@ export async function installMockBackend(page) {
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  await page.route(/.*\/api\/sidekick\/activity\/[^/]+$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity\/[^/]+$/, async (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     const url = new URL(route.request().url());
     const id = decodeURIComponent(url.pathname.split('/').pop() || '');
@@ -1320,7 +1320,7 @@ export async function installMockBackend(page) {
      *  bump the per-chat unread counter (mirrors the plugin's
      *  responses-handler write into `unread_state` when an assistant
      *  row lands). The PWA reads this state via the
-     *  /api/sidekick/notifications/unread route mocked above. */
+     *  /api/parley/notifications/unread route mocked above. */
     pushEnvelope(env) {
       if (env && (env.type === 'notification' || env.type === 'reply_final')) {
         bumpUnread(env.chat_id);
@@ -1455,7 +1455,7 @@ export async function installMockBackend(page) {
     getUserSetting(key) {
       return userSettingsByKey.has(key) ? userSettingsByKey.get(key) : null;
     },
-    /** Fail per-key GET /api/sidekick/prefs/<key> with 503 while on;
+    /** Fail per-key GET /api/parley/prefs/<key> with 503 while on;
      *  PUTs keep working. This is the 2026-07-31 incident's network
      *  shape (flaky cellular: the read times out, the write that a
      *  buggy client fires right after still lands). The bare-list GET
@@ -1469,7 +1469,7 @@ export async function installMockBackend(page) {
       return Array.from(activityById.values());
     },
     /** Set the inflight envelope list for a chat. The next
-     *  /api/sidekick/sessions/<chatId>/messages GET will include
+     *  /api/parley/sessions/<chatId>/messages GET will include
      *  these as the `inflight` field, mirroring the real proxy's
      *  in-memory inflight cache. Pass `null` or an empty array to
      *  clear. Tests use this to simulate the "switch-back during
@@ -1548,7 +1548,7 @@ export async function installMockBackend(page) {
       lastSettingsPost = null;
     },
     getLastSettingsPost() { return lastSettingsPost; },
-    /** Configure /api/sidekick/commands. Pass null to declare the
+    /** Configure /api/parley/commands. Pass null to declare the
      *  agent doesn't implement the extension (route returns 404).
      *  Each entry is a CommandDef from
      *  proxy/sidekick/upstream.ts — { name, description, category,

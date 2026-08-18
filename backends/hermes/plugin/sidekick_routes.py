@@ -138,7 +138,7 @@ async def handle_push_health(ctx, request: web.Request) -> web.Response:
     """Aggregate push-delivery health: effective per-kind enablement,
     the all-kinds-disabled tripwire, quiet-hours pref, subscription
     count, and the dispatcher's rolling skip-counter snapshot. The
-    proxy folds this into /api/sidekick/notifications/diagnostics so
+    proxy folds this into /api/parley/notifications/diagnostics so
     the PWA settings panel can surface 'pushes are disabled' without
     journal access. (Push-outage audit, 2026-07-25.)
 

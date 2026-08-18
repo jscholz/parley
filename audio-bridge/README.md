@@ -13,7 +13,7 @@ isolates audio failure modes from the proxy.
 | `peer.py` | RTCPeerConnection lifecycle — terminates a single browser peer. |
 | `stt_bridge.py` | Live STT during the WebRTC call. Emits transcripts on the data channel. |
 | `tts_bridge.py` | TTS playback over the WebRTC audio track. |
-| `dispatch_listener.py` | Per-turn `/api/sidekick/stream` subscription (`?live_only=1`) so the bridge knows when the agent's reply text is ready to TTS. |
+| `dispatch_listener.py` | Per-turn `/api/parley/stream` subscription (`?live_only=1`) so the bridge knows when the agent's reply text is ready to TTS. |
 | `providers/` | STT + TTS provider abstractions (Deepgram is the default for both). |
 | `tests/` | Pytest suite — runs against the in-process app. |
 | `sidekick-audio.service` | systemd unit installed under `~/.config/systemd/user/`. |
@@ -29,8 +29,8 @@ envelopes.
 ```
 PWA (browser) <—WebRTC—> audio-bridge (Python)
                                 |
-                                | /api/sidekick/messages (POST text)
-                                | /api/sidekick/stream (?live_only=1)
+                                | /api/parley/messages (POST text)
+                                | /api/parley/stream (?live_only=1)
                                 v
                         Node proxy (port 3001)
                                 |

@@ -142,7 +142,7 @@ function fmtOffset(ms: number): string {
 //     (deterministic salience heuristic — meetingTitles.ts), for both
 //     minted and existing sessions.
 // Both defer to the never-clobber rule: a chat the user manually
-// renamed (userTitles marker, fed by PATCH /api/sidekick/sessions) is
+// renamed (userTitles marker, fed by PATCH /api/parley/sessions) is
 // never touched.
 
 async function defaultRename(chatId: string, title: string): Promise<boolean> {
@@ -564,7 +564,7 @@ export async function retroDiarize(id: string): Promise<boolean> {
   return ok;
 }
 
-/** POST /api/sidekick/captures/{id}/diarize — HTTP face of
+/** POST /api/parley/captures/{id}/diarize — HTTP face of
  *  retroDiarize. Lives HERE, not in capture.ts (audit 2.2): the
  *  storage module must not reach into the pipeline. */
 export async function handleCaptureRetroDiarize(

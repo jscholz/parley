@@ -2,9 +2,9 @@
  * Integration tests for the Web Push notification routes — Phase 3a
  * subscribe-roundtrip pin.
  *
- *   GET    /api/sidekick/notifications/vapid-public-key
- *   POST   /api/sidekick/notifications/subscribe
- *   POST   /api/sidekick/notifications/unsubscribe
+ *   GET    /api/parley/notifications/vapid-public-key
+ *   POST   /api/parley/notifications/subscribe
+ *   POST   /api/parley/notifications/unsubscribe
  *
  * Storage is JSON-file backed at <dataDir>/push-subscriptions.json
  * (see notifications/storage.ts). Each test gets a fresh tmp dataDir
@@ -101,7 +101,7 @@ function fakeSubscription(suffix: string) {
 test('vapid-public-key — returns 503 with hint when VAPID unconfigured', async () => {
   const { rig, stop } = await startUnconfiguredRig();
   try {
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/vapid-public-key`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/vapid-public-key`);
     assert.equal(r.status, 503);
     const body: any = await r.json();
     assert.equal(body.error, 'vapid_unconfigured');
@@ -115,7 +115,7 @@ test('vapid-public-key — returns 503 with hint when VAPID unconfigured', async
 test('vapid-public-key — returns 200 with publicKey when configured', async () => {
   const { rig, stop } = await startNotifiedRig();
   try {
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/vapid-public-key`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/vapid-public-key`);
     assert.equal(r.status, 200);
     const body: any = await r.json();
     assert.equal(body.publicKey, TEST_VAPID_PUBLIC);
@@ -129,7 +129,7 @@ test('vapid-public-key — returns 200 with publicKey when configured', async ()
 test('subscribe — 503 when VAPID unconfigured', async () => {
   const { rig, stop } = await startUnconfiguredRig();
   try {
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(fakeSubscription('a')),
@@ -153,7 +153,7 @@ test('subscribe — 400 on malformed body', async () => {
       { endpoint: 42, keys: { p256dh: 'a', auth: 'b' } },             // wrong type
     ];
     for (const body of bad) {
-      const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+      const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -172,7 +172,7 @@ test('subscribe — creates a fresh row + returns total count', async () => {
   const { rig, stop, dataDir } = await startNotifiedRig();
   try {
     const sub = fakeSubscription('fresh');
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub),
@@ -205,7 +205,7 @@ test('subscribe — re-subscribe with same endpoint upserts (created=false)', as
   const { rig, stop } = await startNotifiedRig();
   try {
     const sub = fakeSubscription('reup');
-    const r1 = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    const r1 = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub),
@@ -216,7 +216,7 @@ test('subscribe — re-subscribe with same endpoint upserts (created=false)', as
     // p256dh/auth on an internal subscription refresh while preserving
     // the endpoint URL — happens in practice on some Android browsers).
     const rotated = { ...sub, keys: { p256dh: 'rotated_p256', auth: 'rotated_auth' } };
-    const r2 = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    const r2 = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(rotated),
@@ -234,14 +234,14 @@ test('unsubscribe — removes existing row, returns removed=true; idempotent on 
   const { rig, stop } = await startNotifiedRig();
   try {
     const sub = fakeSubscription('byebye');
-    await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(sub),
     });
 
     // First unsubscribe — removes the row.
-    const r1 = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r1 = await fetch(`${rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: sub.endpoint }),
@@ -253,7 +253,7 @@ test('unsubscribe — removes existing row, returns removed=true; idempotent on 
 
     // Second unsubscribe — no row to remove. Must NOT 4xx (PWA may retry
     // on a flaky network and a 4xx would surface as an error to the user).
-    const r2 = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r2 = await fetch(`${rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: sub.endpoint }),
@@ -272,7 +272,7 @@ test('unsubscribe — 400 on missing endpoint, 503 when VAPID unconfigured', asy
   // Empty-body path.
   const ok = await startNotifiedRig();
   try {
-    const r = await fetch(`${ok.rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r = await fetch(`${ok.rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({}),
@@ -287,7 +287,7 @@ test('unsubscribe — 400 on missing endpoint, 503 when VAPID unconfigured', asy
   // Unconfigured path — 503 even with a valid body shape.
   const off = await startUnconfiguredRig();
   try {
-    const r = await fetch(`${off.rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const r = await fetch(`${off.rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: 'https://x' }),
@@ -307,7 +307,7 @@ test('multiple subscribers — each tracked independently, total increments', as
       fakeSubscription('multi-c'),
     ];
     for (let i = 0; i < subs.length; i++) {
-      const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+      const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(subs[i]),
@@ -319,7 +319,7 @@ test('multiple subscribers — each tracked independently, total increments', as
 
     // Remove the middle one — total drops by 1, ordering of remainders
     // doesn't matter for correctness but the row count must be right.
-    const rm = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/unsubscribe`, {
+    const rm = await fetch(`${rig.proxyUrl}/api/parley/notifications/unsubscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint: subs[1].endpoint }),
@@ -327,7 +327,7 @@ test('multiple subscribers — each tracked independently, total increments', as
     assert.equal((await rm.json()).removed, true);
 
     // Re-subscribing the OTHER endpoints is still an upsert (total unchanged).
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(subs[0]),

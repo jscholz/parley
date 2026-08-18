@@ -80,7 +80,7 @@ export default async function run({ page, log }) {
 
   // Mock the search endpoint to return a single hit pointing at the
   // deep target.
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

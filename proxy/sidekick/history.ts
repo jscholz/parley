@@ -1,4 +1,4 @@
-// GET /api/sidekick/sessions/<chat_id>/messages — per-chat transcript
+// GET /api/parley/sessions/<chat_id>/messages — per-chat transcript
 // replay through the agent contract. The upstream's
 // `/v1/conversations/{id}/items` walks the parent_session_id chain
 // server-side so the proxy doesn't need to maintain its own CTE; we

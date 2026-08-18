@@ -891,7 +891,7 @@ export async function open(
   //               dispatching to /api/<backend>/responses.
   //   chat_id   — hermes-gateway path, opaque PWA-minted UUID per
   //               conversation. When present, bridge dispatches to
-  //               /api/sidekick/messages with {chat_id, text}. Set
+  //               /api/parley/messages with {chat_id, text}. Set
   //               only when the active backend is hermes-gateway.
   //
   // keyterms: per-user STT vocabulary biasing, sourced from the PWA's

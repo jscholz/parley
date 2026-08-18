@@ -1,16 +1,16 @@
-// /api/sidekick/notifications/* handlers — Web Push subscription
+// /api/parley/notifications/* handlers — Web Push subscription
 // roundtrip. Phase 3a: subscribe/unsubscribe + the public-key probe
 // the client needs before it can call PushManager.subscribe().
 //
-//   GET    /api/sidekick/notifications/vapid-public-key
+//   GET    /api/parley/notifications/vapid-public-key
 //          → { publicKey: string } | 503
-//   POST   /api/sidekick/notifications/subscribe
+//   POST   /api/parley/notifications/subscribe
 //          body: { endpoint, keys: {p256dh, auth}, userAgent? }
 //          → { ok: true, created: boolean, total: number } | 503/400
-//   POST   /api/sidekick/notifications/unsubscribe
+//   POST   /api/parley/notifications/unsubscribe
 //          body: { endpoint }
 //          → { ok: true, removed: boolean } | 503/400
-//   POST   /api/sidekick/notifications/test
+//   POST   /api/parley/notifications/test
 //          body: { endpoint?, title?, body? }
 //          → { ok: true, dispatched: number, failed: number } | 503
 //          Phase 3a stub: returns { ok: true, dispatched: 0, failed: 0,
@@ -67,7 +67,7 @@ function sendJson(res: any, status: number, payload: any): void {
   res.end(JSON.stringify(payload));
 }
 
-/** GET /api/sidekick/notifications/vapid-public-key
+/** GET /api/parley/notifications/vapid-public-key
  *  Client fetches this before calling pushManager.subscribe(). The
  *  public key isn't a secret — it's the application-server identity
  *  that gets signed into every push request. Returns 503 (not 404) when
@@ -85,7 +85,7 @@ export function handleSidekickVapidPublicKey(req: any, res: any): void {
   sendJson(res, 200, { publicKey: vapid.publicKey });
 }
 
-/** POST /api/sidekick/notifications/subscribe
+/** POST /api/parley/notifications/subscribe
  *  Store a PushSubscription from the client. Body shape mirrors
  *  PushSubscription.toJSON() plus an optional userAgent for debugging:
  *    { endpoint: "https://...", keys: { p256dh, auth }, userAgent? }
@@ -115,7 +115,7 @@ export async function handleSidekickSubscribe(req: any, res: any): Promise<void>
   sendJson(res, 200, { ok: true, ...result });
 }
 
-/** POST /api/sidekick/notifications/unsubscribe
+/** POST /api/parley/notifications/unsubscribe
  *  Remove a subscription by endpoint URL. Idempotent. */
 export async function handleSidekickUnsubscribe(req: any, res: any): Promise<void> {
   if (isPushOwnedByPlugin()) return delegateUnsubscribe(req, res);
@@ -132,7 +132,7 @@ export async function handleSidekickUnsubscribe(req: any, res: any): Promise<voi
   sendJson(res, 200, { ok: true, removed });
 }
 
-/** GET /api/sidekick/notifications/mutes
+/** GET /api/parley/notifications/mutes
  *  Return the list of currently-muted chat_ids. PWA reads this at boot
  *  + after toggling so the 3-dots menu can show the right label
  *  ("Mute" vs "Unmute") per chat. */
@@ -144,7 +144,7 @@ export function handleSidekickListMutes(req: any, res: any): void {
   sendJson(res, 200, { muted_chats: listMutedChats() });
 }
 
-/** POST /api/sidekick/notifications/mute
+/** POST /api/parley/notifications/mute
  *  Toggle a chat's mute state. Body:
  *    { chat_id: string, muted: boolean }
  *  Idempotent: setting an already-muted chat to muted=true returns the
@@ -172,7 +172,7 @@ export async function handleSidekickSetMute(req: any, res: any): Promise<void> {
   }
 }
 
-/** GET /api/sidekick/notifications/preferences
+/** GET /api/parley/notifications/preferences
  *  Return current user prefs (quiet_hours today; more knobs as wave 2
  *  fills in digest + per-kind toggles). Always 200 — defaults are
  *  returned even when no prefs file exists. */
@@ -181,7 +181,7 @@ export function handleSidekickGetPreferences(req: any, res: any): void {
   sendJson(res, 200, getPrefs());
 }
 
-/** POST /api/sidekick/notifications/preferences
+/** POST /api/parley/notifications/preferences
  *  Update one or more preference fields. Partial — fields not in the
  *  body keep their current values. Returns the updated prefs blob.
  *  400 on malformed body (non-HH:MM times etc). */
@@ -201,7 +201,7 @@ export async function handleSidekickSetPreferences(req: any, res: any): Promise<
   }
 }
 
-/** POST /api/sidekick/notifications/visibility
+/** POST /api/parley/notifications/visibility
  *  PWA reports a visibility transition (document.visibilitychange or
  *  a chat switch). Body:
  *    { state: 'visible' | 'hidden', chat_id?: string }
@@ -239,7 +239,7 @@ export async function handleSidekickVisibility(req: any, res: any): Promise<void
   sendJson(res, 200, { ok: true });
 }
 
-/** GET /api/sidekick/notifications/diagnostics
+/** GET /api/parley/notifications/diagnostics
  *  Return the recent dispatch decisions (in-process ring, capped at
  *  50 entries) plus an aggregate `push_health` blob. Used by the
  *  Notifications settings panel for the "last decisions" readout —
@@ -271,7 +271,7 @@ export async function handleSidekickDiagnostics(req: any, res: any): Promise<voi
   sendJson(res, 200, { decisions: getRecentDecisions(limit), push_health: pushHealth });
 }
 
-/** POST /api/sidekick/notifications/test
+/** POST /api/parley/notifications/test
  *  Dispatch a synthetic push to every stored subscription. Body is
  *  optional:
  *    { title?, body? }

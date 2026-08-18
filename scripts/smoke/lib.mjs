@@ -18,7 +18,7 @@ import { chromium } from 'playwright-core';
 //   2. The Playwright-bundled chromium under ~/.cache/ms-playwright
 //      (any chromium-*/chrome-linux64/chrome). This is the right
 //      default — the mock-backend smoke harness uses an in-process
-//      HTTP server forwarding /api/sidekick/stream as SSE, and
+//      HTTP server forwarding /api/parley/stream as SSE, and
 //      consumer chromium builds (Google Chrome stable on Ubuntu)
 //      ship aggressive default "block 3rd-party SSE / private-
 //      network" heuristics that surface as net::ERR_BLOCKED_BY_CLIENT
@@ -313,7 +313,7 @@ export async function resetServerSettings(page, overrides = {}) {
         // worktree run on an alt port wrote settings to the wrong server
         // while the page read config from its own — e.g. streamingEngine
         // stayed 'server' and listen-local-engine spuriously failed.
-        const r = await fetch(`${DEFAULT_URL}/api/sidekick/config/${key}`, {
+        const r = await fetch(`${DEFAULT_URL}/api/parley/config/${key}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value }),
@@ -483,7 +483,7 @@ export async function deleteChat(page, chatId) {
   try {
     await page.evaluate(async (id) => {
       try {
-        await fetch(`/api/sidekick/sessions/${encodeURIComponent(id)}`, {
+        await fetch(`/api/parley/sessions/${encodeURIComponent(id)}`, {
           method: 'DELETE',
         });
       } catch {}
@@ -499,7 +499,7 @@ export async function clickRow(page, chatId) {
   await locator.first().click();
 }
 
-/** Wait until no `/api/sidekick/sessions/<id>/messages` request has
+/** Wait until no `/api/parley/sessions/<id>/messages` request has
  *  fired for `idleMs`. Used by drawer tests to synchronize on "all in-
  *  flight resume() callbacks have settled" before asserting final state.
  *  Without this, a test that asserts immediately after the last click
@@ -507,7 +507,7 @@ export async function clickRow(page, chatId) {
 export async function waitForDrawerQuiet(page, idleMs = 500, timeoutMs = 10_000) {
   let lastSeenAt = Date.now();
   const onReq = (req) => {
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages/.test(req.url())) lastSeenAt = Date.now();
+    if (/\/api\/parley\/sessions\/[^/]+\/messages/.test(req.url())) lastSeenAt = Date.now();
   };
   page.on('request', onReq);
   try {

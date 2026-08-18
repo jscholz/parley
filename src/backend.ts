@@ -4,7 +4,7 @@
  * and re-exports its methods as the shell's single entry point.
  *
  * Post-refactor, sidekick has a single backend: the proxy's hermes-
- * gateway (the agent contract over /api/sidekick/*). The legacy
+ * gateway (the agent contract over /api/parley/*). The legacy
  * openclaw / openai-compat / zeroclaw direct-PWA-to-LLM adapters were
  * removed in step 7 of the sidekick backend refactor; new
  * deployments wire any agent — hermes, stub, openclaw plugin,

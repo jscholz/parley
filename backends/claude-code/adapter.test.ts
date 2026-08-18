@@ -283,7 +283,7 @@ test('approval round-trip: agent_question mid-turn, answer Allow resolves canUse
   const envs = await collect(adapter.sendMessage('chatA', 'clean the build dir'), (env) => {
     if (env.type === 'agent_question') {
       question = env as AgentQuestionEnvelope;
-      // The PWA answers via POST /api/sidekick/questions/{id}; the
+      // The PWA answers via POST /api/parley/questions/{id}; the
       // route lands here.
       const resolved = adapter.answerQuestion(question.question_id, 'Allow');
       assert.equal(resolved, true);

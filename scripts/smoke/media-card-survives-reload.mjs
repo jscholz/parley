@@ -27,7 +27,7 @@ export const BACKEND = 'mocked';
 
 const CHAT_ID = 'mock-media-reload';
 const OTHER_ID = 'mock-media-other';
-const MEDIA_PATH = '/api/sidekick/media/00c0ffee00c0ffee.mp4';
+const MEDIA_PATH = '/api/parley/media/00c0ffee00c0ffee.mp4';
 const TARGET_REPLY_ID = 'media-msg-10';
 
 export function MOCK_SETUP(mock) {
@@ -75,7 +75,7 @@ export default async function run({ page, log }) {
   await waitForReady(page);
 
   // Stub the media bytes — the <video> element probes the src.
-  await page.route(/\/api\/sidekick\/media\/[a-f0-9]+\.mp4$/, (route) =>
+  await page.route(/\/api\/parley\/media\/[a-f0-9]+\.mp4$/, (route) =>
     route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(64) }));
 
   // Open the media chat — history renders through the SAME createAssistant

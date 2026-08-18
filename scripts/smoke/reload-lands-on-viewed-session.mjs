@@ -63,7 +63,7 @@ export default async function run({ page, log }) {
   // the main chat, where the agent happens to be replying. Synced pref,
   // read back by settings.load() on the post-reload boot.
   await page.evaluate(async (id) => {
-    await fetch(`/api/sidekick/prefs/pinnedSessions`, {
+    await fetch(`/api/parley/prefs/pinnedSessions`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: JSON.stringify([id]) }),

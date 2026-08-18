@@ -3,19 +3,19 @@
 // surface).
 //
 // Wraps an UpstreamAgent (HTTPAgentUpstream by default) and exposes
-// the /api/sidekick/* HTTP routes the PWA + audio-bridge consume.
+// the /api/parley/* HTTP routes the PWA + audio-bridge consume.
 //
 // Usage from server.ts:
 //   import * as sidekick from './proxy/sidekick/index.ts';
 //   sidekick.init({ token: SIDEKICK_PLATFORM_TOKEN, url: SIDEKICK_PLATFORM_URL });
 //   // route handlers:
-//   if (req.method === 'POST' && url === '/api/sidekick/messages')
+//   if (req.method === 'POST' && url === '/api/parley/messages')
 //     return sidekick.handleSidekickMessage(req, res);
-//   if (req.method === 'GET' && url === '/api/sidekick/stream')
+//   if (req.method === 'GET' && url === '/api/parley/stream')
 //     return sidekick.handleSidekickStream(req, res);
-//   if (req.method === 'GET' && url === '/api/sidekick/sessions')
+//   if (req.method === 'GET' && url === '/api/parley/sessions')
 //     return sidekick.handleSidekickSessionsList(req, res);
-//   if (req.method === 'DELETE' && url.match(/^\/api\/sidekick\/sessions\/.+/))
+//   if (req.method === 'DELETE' && url.match(/^\/api\/parley\/sessions\/.+/))
 //     return sidekick.handleSidekickSessionDelete(req, res, chatId);
 
 import { init as initStream } from './stream.ts';

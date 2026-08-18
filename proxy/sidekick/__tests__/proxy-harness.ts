@@ -359,34 +359,34 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     const path = url.pathname;
     const method = req.method || 'GET';
 
-    if (method === 'POST' && path === '/api/sidekick/messages') {
+    if (method === 'POST' && path === '/api/parley/messages') {
       return sidekick.handleSidekickMessage(req, res);
     }
-    if (method === 'GET' && path === '/api/sidekick/stream') {
+    if (method === 'GET' && path === '/api/parley/stream') {
       return sidekick.handleSidekickStream(req, res);
     }
-    if (method === 'GET' && /^\/api\/sidekick\/sessions\/?$/.test(path)) {
+    if (method === 'GET' && /^\/api\/parley\/sessions\/?$/.test(path)) {
       return sidekick.handleSidekickSessionsList(req, res);
     }
     const histMatch = method === 'GET'
-      && path.match(/^\/api\/sidekick\/sessions\/([^/]+)\/messages$/);
+      && path.match(/^\/api\/parley\/sessions\/([^/]+)\/messages$/);
     if (histMatch) {
       return sidekick.handleSidekickSessionMessages(
         req, res, decodeURIComponent(histMatch[1]),
       );
     }
     const delMatch = method === 'DELETE'
-      && path.match(/^\/api\/sidekick\/sessions\/([^/]+)$/);
+      && path.match(/^\/api\/parley\/sessions\/([^/]+)$/);
     if (delMatch) {
       return sidekick.handleSidekickSessionDelete(
         req, res, decodeURIComponent(delMatch[1]),
       );
     }
-    if (method === 'GET' && path === '/api/sidekick/settings/schema') {
+    if (method === 'GET' && path === '/api/parley/settings/schema') {
       return sidekick.handleSidekickSettingsSchema(req, res);
     }
     const setMatch = method === 'POST'
-      && path.match(/^\/api\/sidekick\/settings\/([^/]+)$/);
+      && path.match(/^\/api\/parley\/settings\/([^/]+)$/);
     if (setMatch) {
       return sidekick.handleSidekickSettingsUpdate(
         req, res, decodeURIComponent(setMatch[1]),
@@ -395,43 +395,43 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     // Notifications routes — tests opt in by calling notifications.init()
     // explicitly; routes return 503 until then (matching production
     // VAPID-unconfigured behaviour).
-    if (method === 'GET' && path === '/api/sidekick/notifications/vapid-public-key') {
+    if (method === 'GET' && path === '/api/parley/notifications/vapid-public-key') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickVapidPublicKey(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/subscribe') {
+    if (method === 'POST' && path === '/api/parley/notifications/subscribe') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickSubscribe(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/unsubscribe') {
+    if (method === 'POST' && path === '/api/parley/notifications/unsubscribe') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickUnsubscribe(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/test') {
+    if (method === 'POST' && path === '/api/parley/notifications/test') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickTest(req, res);
     }
-    if (method === 'GET' && path === '/api/sidekick/notifications/mutes') {
+    if (method === 'GET' && path === '/api/parley/notifications/mutes') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickListMutes(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/mute') {
+    if (method === 'POST' && path === '/api/parley/notifications/mute') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickSetMute(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/visibility') {
+    if (method === 'POST' && path === '/api/parley/notifications/visibility') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickVisibility(req, res);
     }
-    if (method === 'GET' && path === '/api/sidekick/notifications/preferences') {
+    if (method === 'GET' && path === '/api/parley/notifications/preferences') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickGetPreferences(req, res);
     }
-    if (method === 'POST' && path === '/api/sidekick/notifications/preferences') {
+    if (method === 'POST' && path === '/api/parley/notifications/preferences') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickSetPreferences(req, res);
     }
-    if (method === 'GET' && path === '/api/sidekick/notifications/diagnostics') {
+    if (method === 'GET' && path === '/api/parley/notifications/diagnostics') {
       const r = await import('../notifications/routes.ts');
       return r.handleSidekickDiagnostics(req, res);
     }

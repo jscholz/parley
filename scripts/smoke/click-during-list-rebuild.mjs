@@ -99,7 +99,7 @@ export default async function run({ page, log, mock }) {
   // Deterministic: wait for the delayed list response to land, then a
   // beat for doRefresh's post-await render to run.
   await page.waitForResponse(
-    (r) => /\/api\/sidekick\/sessions(\?|$)/.test(r.url()),
+    (r) => /\/api\/parley\/sessions(\?|$)/.test(r.url()),
     { timeout: 10_000 },
   );
   await page.waitForTimeout(150);

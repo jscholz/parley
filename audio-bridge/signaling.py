@@ -128,7 +128,7 @@ async def handle_offer(request: "web.Request") -> "web.Response":
     # chat_id is the hermes-gateway path's session-routing primitive,
     # opaque UUID minted PWA-side per conversation (see
     # src/conversations.ts). When present, the bridge dispatches user
-    # transcripts to <proxy>/api/sidekick/messages with {chat_id, text}
+    # transcripts to <proxy>/api/parley/messages with {chat_id, text}
     # instead of <proxy>/api/<backend>/responses with {input,
     # conversation}. The two routing paths coexist so legacy
     # `backend.type: hermes` deployments keep working unchanged — the
@@ -157,7 +157,7 @@ async def handle_offer(request: "web.Request") -> "web.Response":
     # agent backend. The sidekick proxy is the sole gateway between
     # sidekick-land and agent-land. <be> is the active backend slug
     # configured at startup (default 'hermes'). When peer.extra["chat_id"]
-    # is set, dispatch routes through /api/sidekick/messages instead.
+    # is set, dispatch routes through /api/parley/messages instead.
     peer.extra["proxy_url"] = _PROXY_URL
     peer.extra["backend"] = _BACKEND
     # Per-peer STT vocabulary biasing. The PWA owns the canonical list
@@ -221,7 +221,7 @@ async def handle_offer(request: "web.Request") -> "web.Response":
         # stt_bridge feed_frame call falls through harmlessly). Stream
         # mode skips this entirely — there's no TTS to barge against.
         barge_policy.attach(peer, voice_config=_VOICE_CONFIG)
-        # Peer-scoped persistent subscriber to /api/sidekick/stream.
+        # Peer-scoped persistent subscriber to /api/parley/stream.
         # No-op when chat_id is missing (legacy /v1/responses route
         # owns its own per-POST SSE inside _dispatch_to_agent).
         stt_bridge.start_sidekick_stream(peer)

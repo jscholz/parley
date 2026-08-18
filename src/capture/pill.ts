@@ -10,7 +10,7 @@
 //   * /?capture=start URL param (manifest shortcut → pocket start;
 //     whether iOS grants mic without an in-page tap is the Phase-0(e)
 //     open question — failure lands on a toast, never a broken state)
-//   * capture_control envelopes (POST /api/sidekick/captures/control →
+//   * capture_control envelopes (POST /api/parley/captures/control →
 //     external triggers: Shortcuts, hardware buttons)
 
 import {
@@ -220,7 +220,7 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   });
 
   // External control plane: capture_control envelopes broadcast by
-  // POST /api/sidekick/captures/control. Only a foregrounded page
+  // POST /api/parley/captures/control. Only a foregrounded page
   // should grab the mic — a background tab starting a recorder would
   // race the visible one.
   window.addEventListener('sidekick:capture-control', (ev) => {

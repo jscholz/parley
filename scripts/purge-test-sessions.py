@@ -6,7 +6,7 @@ smoke-test prompt (marker-*, "baseline-content", weather smoke,
 greeting variants, etc.). Real user chats are preserved.
 
 Three storage layers get cleaned for each test session:
-  1. state.db sessions + messages rows (via DELETE /api/sidekick/...)
+  1. state.db sessions + messages rows (via DELETE /api/parley/...)
   2. ~/.hermes/sessions/sessions.json entry (session_key → session_id)
   3. ~/.hermes/sessions/<session_id>.jsonl transcript file
 
@@ -31,7 +31,7 @@ HERMES_HOME = Path(os.path.expanduser("~/.hermes"))
 STATE_DB = HERMES_HOME / "state.db"
 SESSIONS_INDEX = HERMES_HOME / "sessions" / "sessions.json"
 SESSIONS_DIR = HERMES_HOME / "sessions"
-PROXY_BASE = "http://127.0.0.1:3001/api/sidekick"
+PROXY_BASE = "http://127.0.0.1:3001/api/parley"
 SIDEKICK_KEY_PREFIX = "agent:main:sidekick:dm:"
 
 # First-user-message patterns that indicate a test session.
@@ -125,7 +125,7 @@ def classify_sessions() -> tuple[list[dict], list[dict]]:
 
 
 def delete_via_proxy(chat_id: str) -> tuple[bool, str]:
-    """Use the /api/sidekick/sessions/<chat_id> DELETE endpoint."""
+    """Use the /api/parley/sessions/<chat_id> DELETE endpoint."""
     url = f"{PROXY_BASE}/sessions/{chat_id}"
     req = urllib.request.Request(url, method="DELETE")
     try:

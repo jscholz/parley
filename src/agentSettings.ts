@@ -5,7 +5,7 @@
  *
  * The agent declares a SettingDef[] (model, persona, temperature, ...);
  * we render each to a settings-panel row by `type`. Updates POST back
- * to /api/sidekick/settings/{id} via the backend adapter; the response
+ * to /api/parley/settings/{id} via the backend adapter; the response
  * (the updated def) replaces the local copy. On error, we revert the
  * input to the previous value so a rejection is visible.
  *

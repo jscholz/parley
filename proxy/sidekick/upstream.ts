@@ -35,7 +35,7 @@ export type SidekickEnvelope =
   // Unified elicitation (2026-07-13): the agent is blocked on a user
   // answer. hermes emits these for clarify; the claude-code backend
   // for canUseTool approvals. The PWA renders a pop-up; answers ride
-  // POST /api/sidekick/questions/{id}. expires_at null = sticks until
+  // POST /api/parley/questions/{id}. expires_at null = sticks until
   // answered.
   | {
       type: 'agent_question'; chat_id: string; question_id: string;
@@ -193,7 +193,7 @@ export interface ConversationItem {
 
 export interface UpstreamAgent {
   /** Dispatch a turn. Returns an async iterable of sidekick envelopes
-   *  that the caller fans into the persistent /api/sidekick/stream
+   *  that the caller fans into the persistent /api/parley/stream
    *  multiplexer. The iterable terminates when the upstream emits
    *  response.completed (or response.error). `attachments` is the
    *  PWA's collected payload (data:URL-encoded images / videos /

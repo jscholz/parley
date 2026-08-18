@@ -14,7 +14,7 @@ steps and files that touches.
 ## Architecture
 
 ```
-PWA ──POST /api/sidekick/messages──▶ proxy dispatch (messages.ts)
+PWA ──POST /api/parley/messages──▶ proxy dispatch (messages.ts)
                                         │ upstream.sendMessage(chatId, text)
                                         ▼
                         ClaudeCodeUpstream (adapter.ts)  ← in-process, no /v1 HTTP hop
@@ -93,7 +93,7 @@ tool). The callback:
    `expires_at: null` (the SDK pauses indefinitely; the pop-up sticks until
    answered) — and pushes it into the live turn stream;
 2. parks a promise in `QuestionRegistry`;
-3. the PWA answers via `POST /api/sidekick/questions/{question_id}` →
+3. the PWA answers via `POST /api/parley/questions/{question_id}` →
    `ClaudeCodeUpstream.answerQuestion(id, response)` resolves it:
    allow-keywords → `{allow: true}`; "Deny"/deny-keywords →
    `{allow: false, message: 'Denied by user.'}`; any other free text →
@@ -198,7 +198,7 @@ Nothing here is wired yet. The steps, in order:
    `new ClaudeCodeUpstream({sdk: await import('@anthropic-ai/claude-agent-sdk'), config}).asUpstreamAgent()`
    instead of `HTTPAgentUpstream`.
 4. **Question-answer route** — `server.ts` routes
-   `POST /api/sidekick/questions/{id}` to
+   `POST /api/parley/questions/{id}` to
    `delegate.delegateQuestionAnswer`, which forwards to the plugin's
    `/v1/questions/{id}` over HTTP. Add a branch: if the active upstream
    exposes `answerQuestion` (this backend), call it directly and map

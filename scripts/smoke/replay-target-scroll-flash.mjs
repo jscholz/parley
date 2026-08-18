@@ -60,11 +60,11 @@ export function MOCK_SETUP(mock) {
 }
 
 export default async function run({ page, log }) {
-  // Mock /api/sidekick/search — return a single message-hit pointing
+  // Mock /api/parley/search — return a single message-hit pointing
   // at the target chat + sidekick_id. Shape matches what
   // proxyClient.search expects: { sessions: [], hits: [...] } with
   // each hit carrying session_id (the prefixed gateway id) + message_id.
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({
       status: 200,

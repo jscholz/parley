@@ -11,7 +11,7 @@
  *   POST /v1/push/visibility               ← {chat_id, visible}
  *   POST /v1/push/test                     ← {chat_id?, text?}  (test push dispatch)
  *
- *  The proxy at /api/sidekick/notifications/* forwards to these when
+ *  The proxy at /api/parley/notifications/* forwards to these when
  *  configured with SIDEKICK_PUSH_OWNED_BY_PLUGIN=true.
  */
 import {

@@ -14,7 +14,7 @@
 //
 // This test makes the drill slow (setMessageDelay on the owning chat's
 // history fetch), taps Approve, and immediately switches to another chat.
-// The recorded POST /api/sidekick/messages body must carry the OWNING
+// The recorded POST /api/parley/messages body must carry the OWNING
 // chat id.
 
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
@@ -57,7 +57,7 @@ export default async function run({ page, log, mock }) {
 
   // Record slash-command POSTs, then defer to the mock's handler.
   const sent = [];
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.route('**/api/parley/messages', async (route) => {
     if (route.request().method() === 'POST') {
       try {
         const body = JSON.parse(route.request().postData() || '{}');

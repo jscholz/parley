@@ -44,7 +44,7 @@ async function startDigestRig() {
   dispatch.__setSenderForTest(async (_target, body) => {
     sent.push({ body: JSON.parse(body) });
   });
-  await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+  await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({

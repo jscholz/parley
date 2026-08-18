@@ -4,17 +4,17 @@
 // image / pdf attachments will work.
 //
 // Behaviour (post-2026-05 refactor):
-//   - Reads /api/sidekick/model-capabilities?model=X for ground truth
+//   - Reads /api/parley/model-capabilities?model=X for ground truth
 //     from hermes's models.dev registry (no more OpenRouter cache).
-//   - Reads /api/sidekick/auxiliary-models to know whether an
+//   - Reads /api/parley/auxiliary-models to know whether an
 //     auxiliary vision model is configured (drives the "images route
 //     via X" hint when the primary is non-vision).
 //   - When models.dev doesn't know the model AND no aux is configured,
 //     the line reads "text · capability unknown to models.dev".
 //
 // Test plan (mocked):
-//   1. Mock /api/sidekick/auxiliary-models with vision=null.
-//   2. Mock /api/sidekick/model-capabilities to return per-model caps
+//   1. Mock /api/parley/auxiliary-models with vision=null.
+//   2. Mock /api/parley/model-capabilities to return per-model caps
 //      based on a small in-test table.
 //   3. Set agent settings schema with three model enum values.
 //   4. Flip the model select to a vision model; assert system line
@@ -77,14 +77,14 @@ async function waitForSystemLine(page, predicate, timeout = 4_000) {
 }
 
 export default async function run({ page, log }) {
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ vision: null }),
     });
   });
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     const u = new URL(route.request().url());
     const model = u.searchParams.get('model') || '';
     const c = CAPS[model];

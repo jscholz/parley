@@ -3,13 +3,13 @@
  * Jonathan's "push multimedia to the client" ask; trigger case was a
  * server-side video edit with no lane into the chat).
  *
- *   POST /api/sidekick/media/register {path} → {id, url, mime, size}
- *   GET  /api/sidekick/media/{id}            → bytes (Range/206)
+ *   POST /api/parley/media/register {path} → {id, url, mime, size}
+ *   GET  /api/parley/media/{id}            → bytes (Range/206)
  *
  * Any local agent (hermes plugin session, claude-code backend, openclaw
  * — anything that can curl the sidekick server) registers a file it
  * produced and embeds the returned url in its reply as a markdown image
- * (`![caption](/api/sidekick/media/<id>)`); the client's card fallback
+ * (`![caption](/api/parley/media/<id>)`); the client's card fallback
  * parser classifies by extension into an image or video card. No
  * per-backend envelope plumbing — the reference rides plain reply text.
  *
@@ -164,7 +164,7 @@ export async function registerMedia(rawPath: string): Promise<{ id: string; entr
   return { id, entry };
 }
 
-/** POST /api/sidekick/media/register — body {path}. */
+/** POST /api/parley/media/register — body {path}. */
 export async function handleMediaRegister(
   req: IncomingMessage, res: ServerResponse,
 ): Promise<void> {
@@ -182,7 +182,7 @@ export async function handleMediaRegister(
     const ext = path.extname(entry.filename).toLowerCase();
     res.end(JSON.stringify({
       id,
-      url: `/api/sidekick/media/${id}${ext}`,
+      url: `/api/parley/media/${id}${ext}`,
       mime: entry.mime,
       size: entry.size,
       filename: entry.filename,
@@ -194,7 +194,7 @@ export async function handleMediaRegister(
   }
 }
 
-/** GET /api/sidekick/media/{id} — full body or 206 partial. Range logic
+/** GET /api/parley/media/{id} — full body or 206 partial. Range logic
  *  mirrors captureAudio.ts (scrubbing = Range requests under the hood). */
 export async function handleMediaGet(
   req: IncomingMessage, res: ServerResponse, id: string,

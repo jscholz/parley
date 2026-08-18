@@ -55,7 +55,7 @@ async function startVisRig(opts: { subscriptionSuffix?: string } = {}) {
   });
 
   const sub = makeSubscription(opts.subscriptionSuffix ?? 'default');
-  await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+  await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(sub),
@@ -66,7 +66,7 @@ async function startVisRig(opts: { subscriptionSuffix?: string } = {}) {
     sent,
     sub,
     async reportVisibility(state: 'visible' | 'hidden', chatId?: string) {
-      const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/visibility`, {
+      const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/visibility`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ state, chat_id: chatId }),
@@ -165,7 +165,7 @@ test('case 4: SSE attached, channel quiet >30s (legacy gate fallback) → push',
   const g = await startVisRig({ subscriptionSuffix: 'c4' });
   try {
     const ac = new AbortController();
-    const ssePromise = fetch(`${g.rig.proxyUrl}/api/sidekick/stream?chat_id=chat-A`, {
+    const ssePromise = fetch(`${g.rig.proxyUrl}/api/parley/stream?chat_id=chat-A`, {
       signal: ac.signal,
     });
     await new Promise<void>((r) => setTimeout(r, 50));
@@ -216,7 +216,7 @@ test('case 5: two reply_finals for same chat in a short burst → one push (Appl
 test('case 6: muted chat, off-screen, eligible envelope → no push', async () => {
   const g = await startVisRig({ subscriptionSuffix: 'c6' });
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/mute`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/mute`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: 'chat-quiet', muted: true }),
@@ -318,7 +318,7 @@ test('bonus: invalid visibility body returns 400', async () => {
       null,
     ];
     for (const b of bad) {
-      const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/visibility`, {
+      const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/visibility`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(b),
@@ -340,7 +340,7 @@ test('bonus: visibility report accepted with VAPID unconfigured (no 503)', async
     notif.__resetForTest();
     const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidekick-vis-503-'));
     await notif.init({ publicKey: '', privateKey: '', subject: '', dataDir });
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/visibility`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/visibility`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ state: 'visible', chat_id: 'x' }),

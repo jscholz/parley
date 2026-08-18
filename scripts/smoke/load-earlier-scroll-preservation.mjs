@@ -86,7 +86,7 @@ export default async function run({ page, log }) {
   // be in the store after prepend but outside the current spec window.
   const beforeRequests = [];
   page.on('request', (req) => {
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
+    if (/\/api\/parley\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
       beforeRequests.push(req.url());
     }
   });

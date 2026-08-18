@@ -1,13 +1,13 @@
 // Pin the large-file upload routing (task #158). A small attachment
 // rides the existing base64 `content` field inside the JSON message
 // body; a large one (over the ~5 MB threshold) is streamed to
-// /api/sidekick/upload first and referenced by `uploadId` in the
+// /api/parley/upload first and referenced by `uploadId` in the
 // message body — keeping a 57 MB PDF out of the base64-in-JSON path
 // that blows the 50 MB proxy/aiohttp body caps.
 //
 // Mocked, keyless. We mock a pdf-native model so the attach gate is
-// open, intercept /api/sidekick/upload to mint a fake upload_id, and
-// observe the /api/sidekick/messages body to assert the attachment
+// open, intercept /api/parley/upload to mint a fake upload_id, and
+// observe the /api/parley/messages body to assert the attachment
 // shape per file size.
 
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
@@ -59,7 +59,7 @@ async function attachPdf(page, buffer) {
 
 export default async function run({ page, log }) {
   let uploadCalls = 0;
-  await page.route('**/api/sidekick/upload', async (route) => {
+  await page.route('**/api/parley/upload', async (route) => {
     uploadCalls += 1;
     // Drain the body so the request completes like the real route.
     await route.fulfill({
@@ -67,13 +67,13 @@ export default async function run({ page, log }) {
       body: JSON.stringify({ upload_id: MOCK_UPLOAD_ID, size: 1 }),
     });
   });
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ vision: null }),
     });
   });
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -95,7 +95,7 @@ export default async function run({ page, log }) {
 
   // ── Small file → inline base64 content, no upload call ──────────────
   await attachPdf(page, Buffer.from(TINY_PDF, 'utf-8'));
-  let msgReqP = page.waitForRequest('**/api/sidekick/messages', { timeout: 5_000 });
+  let msgReqP = page.waitForRequest('**/api/parley/messages', { timeout: 5_000 });
   await page.fill('#composer-input', 'small one');
   await page.evaluate(() => document.getElementById('composer-send')?.click());
   let body = JSON.parse((await msgReqP).postData() || '{}');
@@ -113,8 +113,8 @@ export default async function run({ page, log }) {
   const bigBuf = Buffer.alloc(6 * 1024 * 1024, 0x20);
   Buffer.from(TINY_PDF, 'utf-8').copy(bigBuf, 0);
   await attachPdf(page, bigBuf);
-  const uploadReqP = page.waitForRequest('**/api/sidekick/upload', { timeout: 5_000 });
-  msgReqP = page.waitForRequest('**/api/sidekick/messages', { timeout: 8_000 });
+  const uploadReqP = page.waitForRequest('**/api/parley/upload', { timeout: 5_000 });
+  msgReqP = page.waitForRequest('**/api/parley/messages', { timeout: 8_000 });
   await page.fill('#composer-input', 'big one');
   await page.evaluate(() => document.getElementById('composer-send')?.click());
   await uploadReqP;

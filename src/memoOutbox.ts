@@ -435,7 +435,7 @@ export function startBackgroundPollers(): void {
     try {
       const gwConnected = backend.isConnected();
       const summary = await queue.summary();
-      // Idle cursor — wall-clock ms since /api/sidekick/stream last
+      // Idle cursor — wall-clock ms since /api/parley/stream last
       // delivered ANY envelope. EventSource can stay "connected" while
       // the underlying TCP connection is dead (cellular handoff,
       // suspended radio). Combined with queued outbound, a long idle

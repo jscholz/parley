@@ -82,7 +82,7 @@ Tier 1/2/3 test plan and which seams are worth pinning.
 
 The agent-side wire format lives in `docs/ABSTRACT_AGENT_PROTOCOL.md`
 (the `/v1/*` surface that the proxy speaks to upstream agents). If you
-change any of the `/api/sidekick/*` HTTP+SSE surface or the upstream
+change any of the `/api/parley/*` HTTP+SSE surface or the upstream
 agent contract:
 1. Update `docs/ABSTRACT_AGENT_PROTOCOL.md` if the upstream contract
    shifted.
@@ -98,17 +98,17 @@ the proxy or downstream; if only the PWA repros, it's the PWA.
 
 ```bash
 # Watch one chat's live envelope stream
-curl -N "http://127.0.0.1:3001/api/sidekick/stream?chat_id=$CHAT"
+curl -N "http://127.0.0.1:3001/api/parley/stream?chat_id=$CHAT"
 
 # Drawer source-of-truth (should match state.db)
-curl http://127.0.0.1:3001/api/sidekick/sessions | jq
+curl http://127.0.0.1:3001/api/parley/sessions | jq
 
 # state.db ground truth
 sqlite3 ~/.hermes/state.db \
   "SELECT id, title, message_count FROM sessions WHERE source='sidekick' ORDER BY started_at DESC LIMIT 20"
 
 # Drive a turn from CLI (no PWA needed)
-curl -X POST http://127.0.0.1:3001/api/sidekick/messages \
+curl -X POST http://127.0.0.1:3001/api/parley/messages \
   -H 'content-type: application/json' \
   -d '{"chat_id":"test-cli","text":"hi"}'
 

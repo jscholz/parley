@@ -10,7 +10,7 @@
  *
  * The interface is richer than a bare lifecycle (start/stop/isActive)
  * because today both modes drive the same agent-contract endpoints
- * (`/api/sidekick/messages` + `/api/sidekick/stream`), so "user
+ * (`/api/parley/messages` + `/api/parley/stream`), so "user
  * committed an utterance" and "agent reply playing" are meaningful in
  * both. A future duplex-native backend (OpenAI Realtime, Gemini Live)
  * would break that: realtime mode would stream audio in both

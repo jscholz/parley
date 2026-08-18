@@ -8,8 +8,8 @@ recorder is just the **first client** of this HTTP API — a Shortcut, a
 desk-mic daemon, or a meeting bot can drive the same endpoints and get
 the same pipeline.
 
-All endpoints live under `/api/sidekick/captures` on the proxy (same
-trust model as the rest of `/api/sidekick/*`: designed for
+All endpoints live under `/api/parley/captures` on the proxy (same
+trust model as the rest of `/api/parley/*`: designed for
 localhost/LAN/tailnet, no per-route auth).
 
 ## Lifecycle
@@ -51,7 +51,7 @@ pre-action segment/byte counts.
 
 ## Endpoints
 
-### `POST /api/sidekick/captures` — start
+### `POST /api/parley/captures` — start
 Body (all optional):
 ```json
 { "title": "Board sync", "linked_chat": "new", "diarize": true }
@@ -71,7 +71,7 @@ idle minutes — to `complete` if it has audio, `failed` if empty). A
 zero-segment *pending* capture never blocks: a new create supersedes
 it (failed in place, reason recorded).
 
-### `POST /api/sidekick/captures/{id}/activate` — confirm a real recorder
+### `POST /api/parley/captures/{id}/activate` — confirm a real recorder
 Call this AFTER your recorder is actually running (mic acquired,
 recording loop started). `pending → recording`, atomically, once —
 this transition fires the "Recording started" chat message and session
@@ -79,13 +79,13 @@ title. Idempotent for retries; `409` if the capture already failed
 (e.g. superseded/expired — treat as "stand down, start over"). If you
 skip this (legacy clients), your first uploaded segment implies it.
 
-### `POST /api/sidekick/captures/{id}/abort-start` — startup failed
+### `POST /api/parley/captures/{id}/abort-start` — startup failed
 Body `{reason: "mic permission denied"}`. Marks a still-pending,
 zero-segment capture `failed` in place with the reason — the correct
 rollback for "my recorder never started". Never deletes anything;
 `409` once the capture activated or has segments (use `/discard`).
 
-### `POST /api/sidekick/captures/{id}/segments/{seq}` — upload audio
+### `POST /api/parley/captures/{id}/segments/{seq}` — upload audio
 Raw audio bytes as the body. Each segment must be a **self-contained
 file** (own container header — a fresh recorder per segment, not a
 byte-sliced stream). Headers:
@@ -103,32 +103,32 @@ copy only on a 2xx). Segments are accepted while `recording`/
 `complete`/`failed` capture answers `409 …frozen` — treat that as
 "keep your copy, stop retrying". Max 32MB/segment (`413`).
 
-### `POST /api/sidekick/captures/{id}/stop`
+### `POST /api/parley/captures/{id}/stop`
 Idempotent. Upload everything **before** stopping — stop hands the
 capture to the pipeline (rolling transcript finalization → optional
 diarize pass → ingest turn into `linked_chat`).
 
-### `PATCH /api/sidekick/captures/{id}`
+### `PATCH /api/parley/captures/{id}`
 `{title?, linked_chat?, diarize?}` — annotate-later. `diarize` freezes
 once the capture finishes (use retro-diarize below instead).
 
-### `POST /api/sidekick/captures/{id}/marks`
+### `POST /api/parley/captures/{id}/marks`
 `{t_ms: <capture-relative ms>}` — a user-flagged moment; rendered as
 `[MARK m:ss]` in the transcript and treated as important by ingest.
 
-### `GET /api/sidekick/captures` / `GET /api/sidekick/captures/{id}`
+### `GET /api/parley/captures` / `GET /api/parley/captures/{id}`
 List summaries / full manifest.
 
-### `GET /api/sidekick/captures/{id}/audio`
+### `GET /api/parley/captures/{id}/audio`
 The whole meeting as one mono m4a (lazily stitched, cached, HTTP Range
 supported — scrubbing works). Available once the capture is terminal.
 
-### `POST /api/sidekick/captures/{id}/diarize`
+### `POST /api/parley/captures/{id}/diarize`
 Retro-diarize a **finished** capture (raw segments persist forever, so
 speakers can be added — or re-computed — any time). Rewrites
 `transcript.md` (plain version preserved as `transcript.plain.md`).
 
-### `POST /api/sidekick/captures/{id}/discard` — Recently Deleted
+### `POST /api/parley/captures/{id}/discard` — Recently Deleted
 Body `{reason?}`. Soft delete: the capture becomes `discarded` — a
 tombstone. Directory, audio, and transcripts stay on disk; segments
 freeze (`409 …frozen`); default `GET /captures` hides it (opt in with
@@ -136,17 +136,17 @@ freeze (`409 …frozen`); default `GET /captures` hides it (opt in with
 which the retention sweep purges it (audited). This is what the pill's
 ✕ (cancel) and any UI "delete" call.
 
-### `POST /api/sidekick/captures/{id}/restore`
+### `POST /api/parley/captures/{id}/restore`
 Undo a discard. A capture that was live when discarded restores to
 `complete` (it has audio — a real meeting) or `failed` (empty), never
 to a phantom `recording`.
 
-### `POST /api/sidekick/captures/{id}/purge` — irreversible
+### `POST /api/parley/captures/{id}/purge` — irreversible
 Body `{reason?}`. Permanently removes the capture directory. Only
 valid on a `discarded` capture (two deliberate steps by construction);
 unreachable from automatic/error paths. The audit log survives.
 
-### `DELETE /api/sidekick/captures/{id}` — safety-mapped legacy verb
+### `DELETE /api/parley/captures/{id}` — safety-mapped legacy verb
 Pre-2026-08-18 this hard-deleted unconditionally — it is the verb that
 erased a healthy 20-minute recording. Old clients keep calling it, so
 the server maps it to safe semantics instead of trusting the caller:
@@ -160,7 +160,7 @@ the server maps it to safe semantics instead of trusting the caller:
 
 New clients should call `/discard` / `/purge` explicitly.
 
-### `POST /api/sidekick/captures/control`
+### `POST /api/parley/captures/control`
 `{action: "start"|"stop", title?, capture_id?}` — broadcasts a
 `capture_control` envelope over the SSE fanout; a foregrounded PWA
 starts/stops its recorder. This is how a hardware button or an iOS
@@ -189,7 +189,7 @@ mic don't need this — call the endpoints above directly.
 Point it inside your agent's workspace and any backend with file tools
 reads transcripts natively — that's the backend-neutrality trick.
 
-## Events (SSE `/api/sidekick/stream`)
+## Events (SSE `/api/parley/stream`)
 
 - `capture_changed` `{kind: created|activated|patched|stopped|completed|discarded|restored|deleted, chat_id, capture}`
 - `capture_control` `{action, title?, capture_id?}`

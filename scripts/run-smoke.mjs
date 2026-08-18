@@ -230,7 +230,7 @@ async function main() {
   ];
   const settingsSnapshot = {};
   try {
-    const r = await fetch(`${DEFAULT_URL}/api/sidekick/config`);
+    const r = await fetch(`${DEFAULT_URL}/api/parley/config`);
     if (r.ok) {
       const j = await r.json();
       const live = j?.settings || {};
@@ -252,7 +252,7 @@ async function main() {
   // run can never leave production push prefs corrupted.
   let pushPrefsSnapshot = null;
   try {
-    const r = await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`);
+    const r = await fetch(`${DEFAULT_URL}/api/parley/notifications/preferences`);
     if (r.ok) {
       const j = await r.json();
       if (j && typeof j === 'object' && !j.error) {
@@ -287,7 +287,7 @@ async function main() {
     // Best-effort — log+continue on individual failures.
     for (const [key, value] of Object.entries(settingsSnapshot)) {
       try {
-        await fetch(`${DEFAULT_URL}/api/sidekick/config/${key}`, {
+        await fetch(`${DEFAULT_URL}/api/parley/config/${key}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ value }),
@@ -299,7 +299,7 @@ async function main() {
     // outage, and silent restoration would hide the offending scenario.
     if (pushPrefsSnapshot) {
       try {
-        const r = await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`);
+        const r = await fetch(`${DEFAULT_URL}/api/parley/notifications/preferences`);
         const after = r.ok ? await r.json() : null;
         const afterSlim = after && !after.error
           ? { quiet_hours: after.quiet_hours, kinds: after.kinds }
@@ -313,7 +313,7 @@ async function main() {
           console.error('[smoke] Some scenario wrote LIVE push prefs (2026-07 outage pattern).');
           console.error('[smoke] Restoring the pre-suite snapshot; find and fix the writer.');
           console.error('!'.repeat(70));
-          await fetch(`${DEFAULT_URL}/api/sidekick/notifications/preferences`, {
+          await fetch(`${DEFAULT_URL}/api/parley/notifications/preferences`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(pushPrefsSnapshot),

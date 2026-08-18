@@ -72,7 +72,7 @@ export default async function run({ page, log }) {
   let aroundHits = 0;
   page.on('request', (req) => {
     const u = req.url();
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages\?/.test(u) && /[?&]around=/.test(u)) aroundHits++;
+    if (/\/api\/parley\/sessions\/[^/]+\/messages\?/.test(u) && /[?&]around=/.test(u)) aroundHits++;
   });
 
   await openChat(page, CHAT_ID);

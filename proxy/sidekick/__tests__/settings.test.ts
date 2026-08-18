@@ -30,7 +30,7 @@ test('settings schema — forwards upstream list', async () => {
   try {
     rig.fakeAgent.setSettingsSchema([MODEL_ENUM]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/schema`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/schema`);
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.object, 'list');
@@ -52,7 +52,7 @@ test('settings schema — agent without extension returns 404', async () => {
     // implement the optional settings extension.
     rig.fakeAgent.setSettingsSchema(null);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/schema`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/schema`);
     assert.equal(r.status, 404);
   } finally {
     await rig.stop();
@@ -64,7 +64,7 @@ test('settings update — forwards body, returns updated def', async () => {
   try {
     rig.fakeAgent.setSettingsSchema([MODEL_ENUM]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/model`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/model`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: 'google/gemini-3-flash-preview' }),
@@ -88,7 +88,7 @@ test('settings update — unknown id propagates 404', async () => {
   try {
     rig.fakeAgent.setSettingsSchema([MODEL_ENUM]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/nonexistent`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/nonexistent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: 'x' }),
@@ -107,7 +107,7 @@ test('settings update — validation error propagates 400', async () => {
     // Value not in the enum's options[]. FakeAgent returns 400
     // with the OAI-shaped error body; the proxy passes it through
     // so the PWA can surface the message.
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/model`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/model`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: 'bogus/model-ref' }),
@@ -133,7 +133,7 @@ test('settings update — string-list type round-trips a list', async () => {
     rig.fakeAgent.setSettingsSchema([def]);
 
     // Schema endpoint surfaces the new type + initial list.
-    const sR = await fetch(`${rig.proxyUrl}/api/sidekick/settings/schema`);
+    const sR = await fetch(`${rig.proxyUrl}/api/parley/settings/schema`);
     assert.equal(sR.status, 200);
     const sBody = await sR.json();
     assert.equal(sBody.data[0].type, 'string-list');
@@ -141,7 +141,7 @@ test('settings update — string-list type round-trips a list', async () => {
 
     // Update with a fresh list — chip add/remove sends the entire
     // updated list per the contract.
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/preferred_models`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/preferred_models`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: ['anthropic/*', 'google/gemini-*'] }),
@@ -164,7 +164,7 @@ test('settings update — string-list rejects non-array body', async () => {
       value: [],
     }]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/settings/preferred_models`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/settings/preferred_models`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ value: 'not-a-list' }),
@@ -186,7 +186,7 @@ test('settings update — id validated at proxy boundary', async () => {
     // even hitting the agent — the id is part of the URL, so we
     // gate on the same charset the contract calls out ([a-z0-9_]+).
     const r = await fetch(
-      `${rig.proxyUrl}/api/sidekick/settings/${encodeURIComponent('../foo')}`,
+      `${rig.proxyUrl}/api/parley/settings/${encodeURIComponent('../foo')}`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },

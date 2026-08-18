@@ -30,7 +30,7 @@
 const ENGAGED_WINDOW_MS = 10000;
 
 /** Per-chat last visibility-visible timestamp. Updated on every
- *  POST /api/sidekick/notifications/visibility with state='visible'.
+ *  POST /api/parley/notifications/visibility with state='visible'.
  *  Read by the dispatch gate via isUserEngaged. */
 const lastVisibleAt = new Map<string, number>();
 

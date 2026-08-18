@@ -17,7 +17,7 @@
  *      is the only DOM element this module attaches to.
  *
  * Architecture:
- *   - Catalog fetch: one-shot GET /api/sidekick/commands on first
+ *   - Catalog fetch: one-shot GET /api/parley/commands on first
  *     init() + on reconnect (caller calls refresh()). Failures are
  *     non-fatal — module degrades to "no popover" (`isCommand` returns
  *     false, dispatch returns false, send-as-text proceeds).
@@ -292,7 +292,7 @@ export function init(opts: {
  *  popover without a page reload. */
 export async function refresh(): Promise<void> {
   try {
-    const r = await fetch(apiUrl('/api/sidekick/commands'), {
+    const r = await fetch(apiUrl('/api/parley/commands'), {
       credentials: 'same-origin',
     });
     if (r.status === 404) {

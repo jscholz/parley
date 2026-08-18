@@ -3,14 +3,14 @@
 // docs/ABSTRACT_AGENT_PROTOCOL.md "Optional settings extension".
 //
 // Test plan (mocked):
-//   1. Mock /api/sidekick/settings/schema with one enum setting
+//   1. Mock /api/parley/settings/schema with one enum setting
 //      ("model" with two options).
 //   2. Open the settings panel.
 //   3. Assert the model dropdown rendered with both options + the
 //      expected current value selected.
 //   4. Change the dropdown to the other value.
 //   5. Assert the PWA POSTed { value: <new> } to
-//      /api/sidekick/settings/model and the dropdown reflects the
+//      /api/parley/settings/model and the dropdown reflects the
 //      agent's response.
 
 import { waitForReady, openSettingsSection } from './lib.mjs';
@@ -76,7 +76,7 @@ export default async function run({ page, log, mock }) {
   log('initial dropdown state OK');
 
   // Change to the other value. The renderer's onchange handler
-  // POSTs to /api/sidekick/settings/model.
+  // POSTs to /api/parley/settings/model.
   await sel.selectOption('google/gemini-3-flash-preview');
 
   // Poll the mock for the POST itself (not the DOM value — selectOption

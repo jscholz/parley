@@ -56,7 +56,7 @@ export default async function run({ page, log }) {
   // the hermes FTS index hands back for a client-renamed chat. Registered
   // after the mock harness's routes so this one wins for /search.
   let searchHits = 0;
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     searchHits++;
     await route.fulfill({
       status: 200,

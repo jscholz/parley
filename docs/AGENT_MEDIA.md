@@ -12,10 +12,10 @@ is needed.
 1. **Register the file** (returns a servable URL):
 
 ```bash
-curl -s -X POST http://127.0.0.1:3001/api/sidekick/media/register \
+curl -s -X POST http://127.0.0.1:3001/api/parley/media/register \
   -H 'content-type: application/json' \
   -d '{"path": "/tmp/render/my-cut-v1.mp4"}'
-# → {"id":"3fa9c2…","url":"/api/sidekick/media/3fa9c2….mp4",
+# → {"id":"3fa9c2…","url":"/api/parley/media/3fa9c2….mp4",
 #    "mime":"video/mp4","size":26337133,"filename":"my-cut-v1.mp4"}
 ```
 
@@ -23,7 +23,7 @@ curl -s -X POST http://127.0.0.1:3001/api/sidekick/media/register \
    image syntax for video too — the client classifies by extension):
 
 ```
-Rough cut is ready: ![The proposed X edit](/api/sidekick/media/3fa9c2….mp4)
+Rough cut is ready: ![The proposed X edit](/api/parley/media/3fa9c2….mp4)
 ```
 
 The client renders an inline card: `<video controls playsInline>` for
@@ -33,7 +33,7 @@ browser PWA and the Capacitor iOS shell.
 
 ## Rules and limits
 
-- **Registered ids only are served.** `GET /api/sidekick/media/<id>`
+- **Registered ids only are served.** `GET /api/parley/media/<id>`
   never takes a path; registration is the only mint.
 - **Allowed roots**: `$HOME` and `/tmp` by default
   (`SIDEKICK_MEDIA_ROOTS=path:path` to override). Symlinks are resolved

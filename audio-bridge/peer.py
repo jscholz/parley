@@ -76,7 +76,7 @@ class PeerSession:
     # circular import — peer.py doesn't import stt_bridge / tts_bridge).
     stt_task: Optional[asyncio.Task] = None
     tts_task: Optional[asyncio.Task] = None
-    # Long-lived subscriber to the proxy's /api/sidekick/stream channel
+    # Long-lived subscriber to the proxy's /api/parley/stream channel
     # — drains assistant reply envelopes into peer.extra['tts_text_queue']
     # for the lifetime of the peer (talk-mode only, chat_id route only).
     # Replaces the legacy per-utterance SSE consumer in

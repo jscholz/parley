@@ -3,7 +3,7 @@
 // chat_id. The PWA opens this once on connect and keeps it open;
 // turn lifecycle is decoupled from the connection lifecycle.
 //
-// GET /api/sidekick/stream
+// GET /api/parley/stream
 //
 // Why a single persistent channel (replacing the per-message SSE):
 //
@@ -486,7 +486,7 @@ export function handleSidekickStream(req, res): void {
   // ?chat_id=<id> scopes both live broadcast and replay to a single chat.
   // PWA tabs always pass this so cross-chat envelopes never reach the
   // wrong view. Validate against the same shape used by the rest of the
-  // /api/sidekick/* surface; reject malformed values rather than silently
+  // /api/parley/* surface; reject malformed values rather than silently
   // ignoring them.
   const url = new URL(req.url || '/', 'http://x');
   const chatIdParam = url.searchParams.get('chat_id');

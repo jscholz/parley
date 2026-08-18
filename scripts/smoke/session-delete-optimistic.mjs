@@ -64,7 +64,7 @@ export default async function run({ page, log, mock }) {
 
   // ── Failure path: DELETE 500s → row returns + error status ────────
   mock.setSessionsFailure(0);           // ensure list is healthy
-  await page.route('**/api/sidekick/sessions/' + encodeURIComponent(CHAT_B), (route) =>
+  await page.route('**/api/parley/sessions/' + encodeURIComponent(CHAT_B), (route) =>
     route.request().method() === 'DELETE'
       ? route.fulfill({ status: 500, body: 'boom' })
       : route.fallback());

@@ -58,7 +58,7 @@ export default async function run({ page, log, mock }) {
 
   // Fire the session_changed envelope through the mock stream.
   // The PWA's hermes-gateway adapter receives it on the persistent
-  // /api/sidekick/stream EventSource and updates IDB.
+  // /api/parley/stream EventSource and updates IDB.
   mock.pushSessionChanged(CHAT_ID, NEW_TITLE);
   log(`pushed session_changed envelope title=${JSON.stringify(NEW_TITLE)}`);
 

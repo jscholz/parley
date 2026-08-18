@@ -142,7 +142,7 @@ export default async function run({ page, log, url }) {
 }
 
 async function fetchDrawerEntry(url, chatId) {
-  const r = await fetch(`${url}/api/sidekick/sessions?limit=50`);
+  const r = await fetch(`${url}/api/parley/sessions?limit=50`);
   if (!r.ok) throw new Error(`drawer fetch HTTP ${r.status}`);
   const body = await r.json();
   const sessions = body?.sessions || body?.data || [];
@@ -150,14 +150,14 @@ async function fetchDrawerEntry(url, chatId) {
 }
 
 async function fetchAllDrawer(url) {
-  const r = await fetch(`${url}/api/sidekick/sessions?limit=200`);
+  const r = await fetch(`${url}/api/parley/sessions?limit=200`);
   if (!r.ok) throw new Error(`drawer fetch HTTP ${r.status}`);
   const body = await r.json();
   return body?.sessions || body?.data || [];
 }
 
 async function fetchTranscriptItems(url, chatId) {
-  const r = await fetch(`${url}/api/sidekick/sessions/${encodeURIComponent(chatId)}/messages`);
+  const r = await fetch(`${url}/api/parley/sessions/${encodeURIComponent(chatId)}/messages`);
   if (!r.ok) throw new Error(`items fetch HTTP ${r.status}`);
   const body = await r.json();
   return body?.messages || body?.data || [];

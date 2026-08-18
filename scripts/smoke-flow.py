@@ -50,12 +50,12 @@ def parse_sse_event(buf: str) -> dict | None:
 
 def stream_reader(host: str, port: int, q: queue.Queue, stop: threading.Event,
                   log_prefix: str) -> None:
-    """Persistent GET on /api/sidekick/stream — pushes parsed events
+    """Persistent GET on /api/parley/stream — pushes parsed events
     onto `q`. Reconnects on transient failure."""
     while not stop.is_set():
         try:
             conn = http.client.HTTPConnection(host, port, timeout=120)
-            conn.request("GET", "/api/sidekick/stream",
+            conn.request("GET", "/api/parley/stream",
                          headers={"Accept": "text/event-stream"})
             resp = conn.getresponse()
             if resp.status != 200:
@@ -81,10 +81,10 @@ def stream_reader(host: str, port: int, q: queue.Queue, stop: threading.Event,
 
 
 def post_message(host: str, port: int, chat_id: str, text: str) -> dict:
-    """POST /api/sidekick/messages — fire-and-forget. Returns the JSON ack."""
+    """POST /api/parley/messages — fire-and-forget. Returns the JSON ack."""
     body = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
     conn = http.client.HTTPConnection(host, port, timeout=10)
-    conn.request("POST", "/api/sidekick/messages", body=body,
+    conn.request("POST", "/api/parley/messages", body=body,
                  headers={"Content-Type": "application/json"})
     resp = conn.getresponse()
     raw = resp.read().decode("utf-8")
@@ -175,7 +175,7 @@ def main() -> int:
 
     chat_id = str(uuid.uuid4())
     print(f"=== sidekick smoke flow — chat_id={chat_id} ===")
-    print(f"persistent stream: http://{args.host}:{args.port}/api/sidekick/stream")
+    print(f"persistent stream: http://{args.host}:{args.port}/api/parley/stream")
     print()
 
     q: queue.Queue = queue.Queue()

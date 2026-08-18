@@ -5,12 +5,12 @@
 //   1. Off-screen `notification` or `reply_final` envelope lands.
 //   2. PWA's handler calls `incrementUnread(chatId)` →
 //      `requestRefresh()` (debounced 1500ms).
-//   3. Debounced fetch hits /api/sidekick/notifications/unread.
+//   3. Debounced fetch hits /api/parley/notifications/unread.
 //   4. Server (mocked here) returns per-chat counts; PWA's
 //      `syncBadge()` calls navigator.setAppBadge(total).
 //
 //   Switching INTO a chat:
-//   5. PWA fires `/api/sidekick/notifications/seen` (POST).
+//   5. PWA fires `/api/parley/notifications/seen` (POST).
 //   6. Server clears that chat's unread; subsequent refresh sees
 //      lower total → setAppBadge or clearAppBadge accordingly.
 //

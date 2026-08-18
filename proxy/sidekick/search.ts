@@ -2,7 +2,7 @@
 //
 // One route:
 //
-//   GET /api/sidekick/search?q=&limit=20  → { sessions, hits }
+//   GET /api/parley/search?q=&limit=20  → { sessions, hits }
 //
 // Forwards to the upstream's /v1/conversations/search contract. Returns
 // the SearchResult shape `src/proxyClientTypes.ts` defines so the PWA

@@ -29,7 +29,7 @@ export function MOCK_SETUP(mock) {
     lastActiveAt: Date.now() - 1000,
   });
   // Finished capture linked to CHAT_REC — the boot-time meetingsIndex
-  // fetch (GET /api/sidekick/captures) sees it.
+  // fetch (GET /api/parley/captures) sees it.
   mock.addCapture(CHAT_REC, { title: 'Standup recording' });
 }
 

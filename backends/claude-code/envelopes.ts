@@ -15,7 +15,7 @@ export type { SidekickEnvelope };
 
 /** Unified elicitation protocol (2026-07-13). Rendered by the PWA as a
  *  pop-up with choice buttons (+ free text); answered via
- *  POST /api/sidekick/questions/{question_id}. Mirrors the hermes
+ *  POST /api/parley/questions/{question_id}. Mirrors the hermes
  *  plugin's send_clarify emission (backends/hermes/plugin/__init__.py). */
 export interface AgentQuestionEnvelope {
   type: 'agent_question';

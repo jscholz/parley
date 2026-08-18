@@ -71,7 +71,7 @@ export default async function run({ page, log }) {
 
   // Models the patched plugin's id-match pre-pass: server search returns
   // the owning chat (stale empty title, as hermes search results carry).
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

@@ -32,7 +32,7 @@ const RECORD_ID = 'list';
 
 // Synced settings key on the server (sidekick.db user_settings).
 const PREFS_KEY = 'stt_keyterms';
-const PREFS_URL = `/api/sidekick/prefs/${PREFS_KEY}`;
+const PREFS_URL = `/api/parley/prefs/${PREFS_KEY}`;
 
 /** Shape of the single IDB record. Sync-state fields (added after the
  *  2026-07-31 cross-device clobber incident):

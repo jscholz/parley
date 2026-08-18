@@ -80,7 +80,7 @@ def _add_msg(state_db, sid, role, content, ts, tool_calls=None,
 def test_unread_counts_envelope_only_reply_before_state_db_flush(db, state_db):
     """Agent emits a short "Checking." quick-ack reply on an off-screen
     chat. PWA upserts the activity row + bumps badge.incrementUnread,
-    then refreshes from server via /api/sidekick/notifications/unread.
+    then refreshes from server via /api/parley/notifications/unread.
     The server-side compute_unread used to count state.db assistant rows
     ONLY — but the envelope just arrived; hermes hasn't post-turn-
     flushed yet, so state.db has nothing for this chat. compute_unread

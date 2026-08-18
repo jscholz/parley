@@ -1,5 +1,5 @@
 // Serial segment uploader — drains the durable segmentStore buffer to
-// POST /api/sidekick/captures/{id}/segments/{seq} (capture plan §3.2).
+// POST /api/parley/captures/{id}/segments/{seq} (capture plan §3.2).
 //
 // Contract with the server (proxy/sidekick/capture.ts):
 //   * exactly-once by construction: the IDB copy is deleted only on a
@@ -88,7 +88,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     let res: Response;
     try {
       res = await fetchFn(
-        apiUrl(`/api/sidekick/captures/${encodeURIComponent(seg.captureId)}/segments/${seg.seq}`),
+        apiUrl(`/api/parley/captures/${encodeURIComponent(seg.captureId)}/segments/${seg.seq}`),
         { method: 'POST', headers, body: seg.blob },
       );
     } catch {

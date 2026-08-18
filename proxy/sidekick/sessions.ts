@@ -1,11 +1,11 @@
-// /api/sidekick/sessions handlers — drawer list + per-chat delete.
+// /api/parley/sessions handlers — drawer list + per-chat delete.
 // Both go through the agent contract (HTTP+SSE), which means the
 // proxy doesn't reach into the upstream's filesystem (e.g. hermes's
 // state.db / sessions.json / jsonl) anymore — the plugin owns that read.
 //
-//   GET    /api/sidekick/sessions          → drawer list
-//   DELETE /api/sidekick/sessions/<chatId> → cascade delete
-//   PATCH  /api/sidekick/sessions/<chatId> → rename (sets title server-side)
+//   GET    /api/parley/sessions          → drawer list
+//   DELETE /api/parley/sessions/<chatId> → cascade delete
+//   PATCH  /api/parley/sessions/<chatId> → rename (sets title server-side)
 //
 // Drawer-list behavior:
 //   1. Probe `/v1/gateway/conversations` (gateway extension). A
@@ -48,7 +48,7 @@ interface SidekickSessionRow {
   session_ids?: string;
 }
 
-/** GET /api/sidekick/sessions
+/** GET /api/parley/sessions
  *
  *  Returns: { sessions: [{ chat_id, source, title, message_count,
  *                          last_active_at, created_at,
@@ -86,7 +86,7 @@ export async function handleSidekickSessionsList(req, res) {
   res.end(JSON.stringify({ sessions: rows }));
 }
 
-/** DELETE /api/sidekick/sessions/<chat_id>
+/** DELETE /api/parley/sessions/<chat_id>
  *
  *  Hard delete via the agent contract — the upstream cascades through
  *  its own state (state.db, sessions.json, jsonl, hindsight memory).
@@ -119,7 +119,7 @@ export async function handleSidekickSessionDelete(req, res, chatId: string) {
   res.end(JSON.stringify({ ok: true }));
 }
 
-/** PATCH /api/sidekick/sessions/<chat_id>
+/** PATCH /api/parley/sessions/<chat_id>
  *
  *  Body: `{ title: string }`. Forwards to the upstream's
  *  `PATCH /v1/conversations/{id}` which writes through to state.db

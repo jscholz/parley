@@ -105,7 +105,7 @@ export default async function run({ page, log, ctx }) {
   // 100ms throttle — modest. We want both cache-cb and server-cb to
   // land within a click window so both refresh() calls happen, but we
   // don't need a hard race here.
-  await ctx.route('**/api/sidekick/sessions/*/messages*', async (route) => {
+  await ctx.route('**/api/parley/sessions/*/messages*', async (route) => {
     await new Promise(r => setTimeout(r, 100));
     await route.continue();
   });

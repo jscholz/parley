@@ -4,7 +4,7 @@
 // neither, attachments.add() must REJECT the PDF up front (toast + no chip)
 // instead of letting the gateway silently drop it.
 //
-// Mocked, keyless. Three model tiers via /api/sidekick/model-capabilities:
+// Mocked, keyless. Three model tiers via /api/parley/model-capabilities:
 //   - none  (supports_vision:false, accepts_pdf:false) → PDF rejected
 //   - image (supports_vision:true,  accepts_pdf:false) → PDF accepted (rasterize)
 //   - pdf   (supports_vision:true,  accepts_pdf:true)  → PDF accepted (native)
@@ -69,7 +69,7 @@ async function selectModel(page, value) {
 }
 
 export default async function run({ page, log }) {
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ vision: null }),
@@ -80,7 +80,7 @@ export default async function run({ page, log }) {
     'vendor/vision': { supports_vision: true, accepts_pdf: false },
     'vendor/pdf-native': { supports_vision: true, accepts_pdf: true },
   };
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     const u = new URL(route.request().url());
     const model = u.searchParams.get('model') || '';
     const caps = CAPS[model];

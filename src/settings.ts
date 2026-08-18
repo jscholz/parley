@@ -196,9 +196,9 @@ function startModelPoll() {
 //     gate, realtime call mode.
 //
 // Persists in `~/.hermes/sidekick.db` (table `user_settings`, one row
-// per key). Read via GET /api/sidekick/prefs, written via PUT
-// /api/sidekick/prefs/<key>. YAML (`sidekick.config.yaml`, GET
-// /api/sidekick/config) survives ONLY as a one-time read-only seed: a
+// per key). Read via GET /api/parley/prefs, written via PUT
+// /api/parley/prefs/<key>. YAML (`sidekick.config.yaml`, GET
+// /api/parley/config) survives ONLY as a one-time read-only seed: a
 // synced key absent from the DB is backfilled from the YAML value on
 // first load, then the DB wins. **Reset triggers**: an explicit DB edit
 // (CLI or another device). Survives all device-level state clears, syncs
@@ -406,7 +406,7 @@ function audioFeedbackLabel(vol) {
  *  if a user customised the legacy keys (and didn't separately customised
  *  the canonical ones), this carries their tuning forward. After the
  *  copy, the legacy values are unread; the proxy still ships them in
- *  /api/sidekick/config until the server-side cleanup lands. */
+ *  /api/parley/config until the server-side cleanup lands. */
 function migrateLegacyHandsfreeKeys(snapshot: Record<string, any>): void {
   const lSilence = snapshot.listenSilenceSec;
   const lSendword = snapshot.listenSendword;
@@ -543,12 +543,12 @@ let revalidateInFlight: Promise<void> | null = null;
 async function revalidate(): Promise<void> {
   if (revalidateInFlight) return revalidateInFlight;
   revalidateInFlight = (async () => {
-    // Synced settings: sidekick.db `user_settings` (GET /api/sidekick/prefs)
+    // Synced settings: sidekick.db `user_settings` (GET /api/parley/prefs)
     // is the source of truth. We apply every synced key the DB carries.
     let dbOk = false;
     const dbSettings: Record<string, any> = {};
     try {
-      const r = await fetch(apiUrl('/api/sidekick/prefs'), { cache: 'no-store' });
+      const r = await fetch(apiUrl('/api/parley/prefs'), { cache: 'no-store' });
       if (r.ok) {
         dbOk = true;
         const j = await r.json() as { settings?: Record<string, any> };
@@ -566,7 +566,7 @@ async function revalidate(): Promise<void> {
       // not clobber DB-resident settings with stale YAML defaults.
     }
 
-    // YAML (sidekick.config.yaml, GET /api/sidekick/config) survives ONLY
+    // YAML (sidekick.config.yaml, GET /api/parley/config) survives ONLY
     // as a one-time read-only seed. Any synced key absent from the DB is
     // backfilled from the YAML value, then the DB wins forever after. Once
     // every synced key has a DB row, YAML is never read again.
@@ -575,7 +575,7 @@ async function revalidate(): Promise<void> {
     );
     if (missing.length) {
       try {
-        const r = await fetch(apiUrl('/api/sidekick/config'), { cache: 'no-store' });
+        const r = await fetch(apiUrl('/api/parley/config'), { cache: 'no-store' });
         if (r.ok) {
           const j = await r.json() as { settings?: Record<string, any> };
           const cfg = j?.settings || {};
@@ -637,7 +637,7 @@ if (typeof window !== 'undefined') {
 }
 
 /** Persist per-device values to localStorage. Synced values
- *  ride through set() → PUT /api/sidekick/prefs and don't touch localStorage. */
+ *  ride through set() → PUT /api/parley/prefs and don't touch localStorage. */
 export function save() {
   try {
     const slice: Record<string, any> = {};
@@ -658,21 +658,21 @@ export function get() { return current; }
  *  failure the local cache keeps the user's value and the next load()
  *  resyncs from the DB. */
 function putServerSetting(key: string, value: any): void {
-  void fetch(apiUrl(`/api/sidekick/prefs/${encodeURIComponent(key)}`), {
+  void fetch(apiUrl(`/api/parley/prefs/${encodeURIComponent(key)}`), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ value }),
   }).then((r) => {
     if (!r.ok) {
-      console.warn(`[settings] PUT /api/sidekick/prefs/${key} failed: ${r.status}`);
+      console.warn(`[settings] PUT /api/parley/prefs/${key} failed: ${r.status}`);
     }
   }).catch((e) => {
-    console.warn(`[settings] PUT /api/sidekick/prefs/${key} threw:`, e);
+    console.warn(`[settings] PUT /api/parley/prefs/${key} threw:`, e);
   });
 }
 
 /** Update one setting. Per-device keys land in localStorage; all
- *  others write to sidekick.db (PUT /api/sidekick/prefs/<key>). The
+ *  others write to sidekick.db (PUT /api/parley/prefs/<key>). The
  *  local cache updates synchronously regardless so call sites that read
  *  settings.get() right after set() see the new value. */
 export function set(key: string, value: any) {
@@ -746,7 +746,7 @@ export function hydrate(handlers: {
   const setPushHint = $any('set-push-hint');
   // Notifications panel — controls landed 2026-05-12. Quiet hours +
   // test-push button + last-decision readout wire to the proxy's
-  // /api/sidekick/notifications/* endpoints (no local persistence —
+  // /api/parley/notifications/* endpoints (no local persistence —
   // prefs and decision ring live server-side; UI just renders).
   const setQuietHoursEnabled = $inp('set-quiet-hours-enabled');
   const setQuietHoursStart = $inp('set-quiet-hours-start');
@@ -1035,7 +1035,7 @@ export function hydrate(handlers: {
   // the user re-opened the panel.
   window.addEventListener('sidekick:settings-changed', () => { void refreshPushUi(); });
 
-  // ── Quiet hours — server-side prefs at /api/sidekick/notifications/preferences.
+  // ── Quiet hours — server-side prefs at /api/parley/notifications/preferences.
   // The UI is GLOBAL (matches Option A: applies to all subscriptions).
   // Initial hydrate fetches current state; toggle/time edits POST the
   // partial update.
@@ -1045,7 +1045,7 @@ export function hydrate(handlers: {
   // make this safe).
   async function loadPrefsUi(): Promise<void> {
     try {
-      const r = await fetch(apiUrl('/api/sidekick/notifications/preferences'));
+      const r = await fetch(apiUrl('/api/parley/notifications/preferences'));
       if (!r.ok) return;
       const prefs = await r.json();
       const qh = prefs?.quiet_hours;
@@ -1068,7 +1068,7 @@ export function hydrate(handlers: {
   void loadPrefsUi();
   async function pushPrefs(update: any): Promise<void> {
     try {
-      const r = await fetch(apiUrl('/api/sidekick/notifications/preferences'), {
+      const r = await fetch(apiUrl('/api/parley/notifications/preferences'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(update),
@@ -1125,7 +1125,7 @@ export function hydrate(handlers: {
     setPushTest.setAttribute('disabled', 'true');
     if (setPushTestHint) setPushTestHint.textContent = 'sending…';
     try {
-      const r = await fetch(apiUrl('/api/sidekick/notifications/test'), {
+      const r = await fetch(apiUrl('/api/parley/notifications/test'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -1162,7 +1162,7 @@ export function hydrate(handlers: {
     if (!setPushDiagnosticsOut) return;
     setPushDiagnosticsOut.textContent = 'loading…';
     try {
-      const r = await fetch(apiUrl('/api/sidekick/notifications/diagnostics?limit=10'));
+      const r = await fetch(apiUrl('/api/parley/notifications/diagnostics?limit=10'));
       if (!r.ok) {
         setPushDiagnosticsOut.textContent = `error: HTTP ${r.status}`;
         return;

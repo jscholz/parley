@@ -1,12 +1,12 @@
-// POST /api/sidekick/upload — large-file staging pass-through (task #158).
+// POST /api/parley/upload — large-file staging pass-through (task #158).
 //
 // Streams the raw request body straight to the upstream plugin's
-// /v1/sidekick/upload route and returns its { upload_id } verbatim. NO
+// /v1/parley/upload route and returns its { upload_id } verbatim. NO
 // buffering: the Node request stream is piped into the undici fetch body
 // (duplex:'half'), so a 100 MB PDF never lands fully in proxy memory.
 //
 // The PWA uploads the raw file bytes here (no base64, no multipart), gets
-// back an upload_id, then sends its normal turn on /api/sidekick/messages
+// back an upload_id, then sends its normal turn on /api/parley/messages
 // with the attachment carrying { ..., uploadId } instead of inline
 // base64 `content`. That keeps the JSON message body small while big
 // files take the streamed path. See src/attachments.ts toSendPayload.
@@ -28,7 +28,7 @@ export async function handleSidekickUpload(req, res) {
   if (typeof cl === 'string') headers['content-length'] = cl;
 
   try {
-    const upstream = await fetch(`${UPSTREAM_URL}/v1/sidekick/upload`, {
+    const upstream = await fetch(`${UPSTREAM_URL}/v1/parley/upload`, {
       method: 'POST',
       headers,
       body: req,
@@ -42,7 +42,7 @@ export async function handleSidekickUpload(req, res) {
     });
     res.end(text);
   } catch (e: any) {
-    console.error(`[sidekick] /api/sidekick/upload failed: ${e?.message || e}`);
+    console.error(`[sidekick] /api/parley/upload failed: ${e?.message || e}`);
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'upload pass-through failed' }));

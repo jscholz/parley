@@ -1,14 +1,14 @@
 /**
  * @fileoverview Proxy-client BackendAdapter — wraps the local sidekick
- * proxy's /api/sidekick/* HTTP+SSE surface (served by
+ * proxy's /api/parley/* HTTP+SSE surface (served by
  * proxy/sidekick/) into the BackendAdapter contract. Fully
- * agent-agnostic: the proxy translates /api/sidekick/* to the agent
+ * agent-agnostic: the proxy translates /api/parley/* to the agent
  * contract (/v1/*) on its own. Filename was historically
  * `hermes-gateway.ts`; renamed during the post-refactor cleanup
  * after the proxy module rename to proxy/sidekick/.
  *
  * Wire path:
- *   PWA → POST /api/sidekick/messages {chat_id, text}    (fire-and-forget)
+ *   PWA → POST /api/parley/messages {chat_id, text}    (fire-and-forget)
  *           ↓ (proxy WS client)
  *   hermes platform adapter (in-process, ws://127.0.0.1:8645)
  *           ↓
@@ -17,7 +17,7 @@
  *   adapter → reply_delta / reply_final / image / typing /
  *             session_changed / notification envelopes back over WS
  *           ↓
- *   proxy fans every envelope onto /api/sidekick/stream (one
+ *   proxy fans every envelope onto /api/parley/stream (one
  *   persistent SSE channel for the lifetime of the PWA tab).
  *           ↓
  *   we parse here; emit normalized BackendAdapter events. Each
@@ -55,7 +55,7 @@ let connected = false;
  *  paths all funnel through this so lookups don't hit IDB on the
  *  hot path. */
 let activeChatId: string | null = null;
-/** Health-poll handle. We use GET /api/sidekick/sessions as a cheap
+/** Health-poll handle. We use GET /api/parley/sessions as a cheap
  *  liveness probe — its handler is the same one the drawer calls, so
  *  there's no separate health route to mount. */
 let healthTimer: ReturnType<typeof setTimeout> | null = null;
@@ -135,7 +135,7 @@ function replyIdFor(env: any, chatId: string): string {
 }
 
 function apiBase(): string {
-  return `${apiOrigin()}/api/sidekick`;
+  return `${apiOrigin()}/api/parley`;
 }
 
 async function fetchSessionMessages(id: string, logPrefix = 'proxy-client.fetchSessionMessages', limit?: number) {
@@ -629,7 +629,7 @@ function bindLifecycleHandlers(): void {
 
 /** Cross-device SSOT sync — the plugin emits these envelopes when
  *  another device (or a local seen/mark/pin/delete op) mutated state
- *  the PWA tracks via /api/sidekick/{notifications,pins,...}. The
+ *  the PWA tracks via /api/parley/{notifications,pins,...}. The
  *  PWA's local listeners (badge.ts, pins/store.ts, sessionDrawer.ts)
  *  re-fetch the affected surface; some types also have a local side
  *  effect (e.g. delete the IDB row).
@@ -720,7 +720,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       subs?.onActivity?.({ working: false, conversation: chatId });
       subs?.onFinal?.({ replyId, text: finalText, conversation: chatId, messageId: msgId, isReplay });
       // Bump last_message_at so the drawer sort surfaces this row even
-      // before /api/sidekick/sessions enrichment refreshes.
+      // before /api/parley/sessions enrichment refreshes.
       // NOT on replay: server replays past envelopes on stream
       // reconnect; bumping then triggers a drawer-reorder cascade
       // (multiple resumes per page-load). The IDB row's lastMessageAt
@@ -972,12 +972,12 @@ export const proxyClientAdapter = {
     streaming: true,
     sessions: true,           // chat_id provides multi-session semantics
     models: false,            // legacy hardcoded picker — superseded by `agentSettings`
-    agentSettings: true,      // /api/sidekick/settings/* schema-driven panel (model picker etc.)
+    agentSettings: true,      // /api/parley/settings/* schema-driven panel (model picker etc.)
     toolEvents: true,         // tool_call / tool_result envelopes (Phase 3); image is also tool-like
 
-    history: true,            // /api/sidekick/sessions/<chat_id>/messages
+    history: true,            // /api/parley/sessions/<chat_id>/messages
     attachments: false,       // wire shape allows it, no PWA composer support yet
-    sessionBrowsing: true,    // /api/sidekick/sessions
+    sessionBrowsing: true,    // /api/parley/sessions
     slashCommands: true,      // gateway parses /new, /compress, /resume, /undo, /background
     persona: false,           // RESERVED (inert): per-session persona prompt not wired yet
   },
@@ -1545,7 +1545,7 @@ export const proxyClientAdapter = {
     };
   },
 
-  /** GET /api/sidekick/settings/schema → agent-declared settings list,
+  /** GET /api/parley/settings/schema → agent-declared settings list,
    *  or `null` if the agent doesn't implement the optional extension
    *  (404). Caller (settings panel) hides the "Agent" group on null. */
   async getSettingsSchema(): Promise<any[] | null> {
@@ -1564,7 +1564,7 @@ export const proxyClientAdapter = {
     }
   },
 
-  /** POST /api/sidekick/settings/{id} {value} → updated SettingDef.
+  /** POST /api/parley/settings/{id} {value} → updated SettingDef.
    *  Throws on 4xx/5xx with the upstream's error.message extracted so
    *  the panel can revert + surface the message inline. */
   async updateSetting(id: string, value: unknown): Promise<any> {

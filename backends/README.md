@@ -16,7 +16,7 @@ What lives in each subdirectory:
   the model picker that round-trips through `/v1/settings/*`).
 
 The proxy itself is **agent-agnostic** — `proxy/sidekick/` doesn't
-contain any per-backend code. It just forwards `/api/sidekick/*`
+contain any per-backend code. It just forwards `/api/parley/*`
 to whatever HTTP server is at `SIDEKICK_PLATFORM_URL`. So adding
 a new backend doesn't require proxy changes; you implement the
 `/v1/*` contract on your end and point sidekick at it.

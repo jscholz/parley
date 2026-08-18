@@ -11,7 +11,7 @@
  *   - computeLocalPushHealth: defaults → healthy; all kinds false →
  *     all_kinds_disabled; disabled_kinds listed sorted; quiet_hours
  *     active-flag honors the injected clock.
- *   - GET /api/sidekick/notifications/diagnostics carries push_health
+ *   - GET /api/parley/notifications/diagnostics carries push_health
  *     alongside decisions (proxy-owned mode).
  */
 import { test } from 'node:test';
@@ -96,7 +96,7 @@ test('push-health: diagnostics endpoint carries push_health', async () => {
   const rig = await startRig();
   const { cleanup } = await initTmpPrefs();
   try {
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/notifications/diagnostics?limit=5`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/notifications/diagnostics?limit=5`);
     assert.equal(r.status, 200);
     const body: any = await r.json();
     assert.ok(Array.isArray(body.decisions));

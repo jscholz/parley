@@ -15,7 +15,7 @@ The PWA only ever talks to the proxy and the audio bridge — never to the agent
                     └────────────┬────────────────────┬────────┘
                                  │                    │
                          HTTP+SSE                  WebRTC
-                         /api/sidekick/*           (realtime mode only,
+                         /api/parley/*           (realtime mode only,
                          /transcribe, /tts          audio bytes only)
                                  │                    │
                                  ▼                    ▼
@@ -24,12 +24,12 @@ The PWA only ever talks to the proxy and the audio bridge — never to the agent
               │   (Node, server.ts)      │◀───│   (Python, aiortc)          │
               │                          │    │                             │
               │ - serves static assets   │    │ Realtime mode:              │
-              │ - serves /api/sidekick/* │    │ - terminates WebRTC peer    │
+              │ - serves /api/parley/* │    │ - terminates WebRTC peer    │
               │ - /tts → Deepgram Aura   │    │ - live STT during speech    │
               │ - /transcribe → bridge   │    │ - posts text to proxy at    │
-              │   /v1/transcribe         │    │   /api/sidekick/messages,   │
+              │   /v1/transcribe         │    │   /api/parley/messages,   │
               │ - translates             │    │   subscribes to             │
-              │   /api/sidekick/* ↔      │    │   /api/sidekick/stream,     │
+              │   /api/parley/* ↔      │    │   /api/parley/stream,     │
               │   /v1/*                  │    │   streams TTS over WebRTC   │
               │ - SSE multiplexer (mem)  │    │                             │
               │ - utility endpoints      │    │ Turn-based mode:            │
@@ -67,13 +67,13 @@ The PWA only ever talks to the proxy and the audio bridge — never to the agent
 
 **Two voice modes**, both handsfree, picked by the user via the **Realtime** toggle in the mic menu (default off):
 
-- **Realtime** — full-duplex WebRTC peer to the bridge. Optimises for **latency**: live STT as the user speaks, TTS streamed back over the same peer. The bridge POSTs recognised text to `/api/sidekick/messages` and subscribes to `/api/sidekick/stream` on the user's behalf.
+- **Realtime** — full-duplex WebRTC peer to the bridge. Optimises for **latency**: live STT as the user speaks, TTS streamed back over the same peer. The bridge POSTs recognised text to `/api/parley/messages` and subscribes to `/api/parley/stream` on the user's behalf.
 - **Turn-based** — `MediaRecorder` writes one blob locally per utterance. Optimises for **fidelity**: the full audio uploads to `/transcribe`, the agent's reply text round-trips through `/tts` for an mp3, played in `<audio>`. No WebRTC peer; everything rides plain HTTP+SSE through the proxy. The PWA also caches the mp3 (LRU) so per-bubble replay chips and BT skip-fwd/back are instant.
 
-Both modes use the same handsfree commit triggers — silence timeout and a sendword (default "over"). Both ride the same agent contract (`POST /api/sidekick/messages`, `GET /api/sidekick/stream`); only audio in/out differ. See [`../src/audio/README.md`](../src/audio/README.md) for the PWA-side architecture.
+Both modes use the same handsfree commit triggers — silence timeout and a sendword (default "over"). Both ride the same agent contract (`POST /api/parley/messages`, `GET /api/parley/stream`); only audio in/out differ. See [`../src/audio/README.md`](../src/audio/README.md) for the PWA-side architecture.
 
 **Wire contracts**:
-- `/api/sidekick/*` — the PWA-and-bridge-facing surface served by the proxy. Fully agent-agnostic. POST messages, GET drawer rows, GET a persistent SSE multiplexer, DELETE chats.
+- `/api/parley/*` — the PWA-and-bridge-facing surface served by the proxy. Fully agent-agnostic. POST messages, GET drawer rows, GET a persistent SSE multiplexer, DELETE chats.
 - `/v1/*` — the upstream-facing surface the proxy speaks to whichever agent it's wired to. OpenAI Responses-shaped, plus a sidekick-defined `/v1/gateway/conversations` extension for cross-platform drawer. See [`ABSTRACT_AGENT_PROTOCOL.md`](ABSTRACT_AGENT_PROTOCOL.md).
 
 ## Endpoint inventory
@@ -95,27 +95,27 @@ Every HTTP+SSE endpoint sidekick speaks, with a one-line purpose and a classific
 | `GET /v1/settings/schema` | sidekick-ext | Agent-declared user-facing settings catalog. 404 = unsupported, sidekick hides the Agent group. |
 | `POST /v1/settings/{id}` | sidekick-ext | Update one agent setting. 400 propagates as a UI revert + error message. |
 | `GET /v1/commands` | sidekick-ext | Slash-command catalog (composer autocomplete). 404 = unsupported. |
-| `GET /v1/sidekick/auxiliary-models` | sidekick-ext | Advertises the auxiliary vision model the agent will auto-route image attachments through. PWA uses this to enable the attach button when the primary model is text-only but a fallback is configured. |
+| `GET /v1/parley/auxiliary-models` | sidekick-ext | Advertises the auxiliary vision model the agent will auto-route image attachments through. PWA uses this to enable the attach button when the primary model is text-only but a fallback is configured. |
 | `GET /health` | sidekick-ext | Liveness probe used by the proxy's healthcheck poll. |
 
-### PWA-facing surface — `/api/sidekick/*` (browser → proxy)
+### PWA-facing surface — `/api/parley/*` (browser → proxy)
 
 | Method+Path | Class | Purpose |
 |---|---|---|
-| `POST /api/sidekick/messages` | sidekick-ext | Send a turn. Body `{chat_id, text, attachments?, voice?, user_message_id?}`. 202 fire-and-forget — replies arrive on the persistent SSE channel. |
-| `GET /api/sidekick/stream` | sidekick-ext | Persistent SSE multiplexer. Fans every upstream envelope (`reply_delta`, `reply_final`, `tool_call`, `tool_result`, `notification`, `session_changed`, `image`, `error`, `user_message`) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
-| `GET /api/sidekick/sessions` | mixed | Drawer list. Wraps `/v1/gateway/conversations` (when available) or `/v1/conversations`. |
-| `GET /api/sidekick/sessions/{id}/messages` | mixed | Transcript replay. Wraps `/v1/conversations/{id}/items`. |
-| `DELETE /api/sidekick/sessions/{id}` | mixed | Cascade delete. |
-| `PATCH /api/sidekick/sessions/{id}` | sidekick-ext | Rename. Wraps `PATCH /v1/conversations/{id}`. |
-| `GET /api/sidekick/search` | sidekick-ext | Cross-conversation FTS search. Wraps `GET /v1/conversations/search`. |
-| `GET /api/sidekick/settings/schema` | sidekick-ext | Wraps `GET /v1/settings/schema`. |
-| `POST /api/sidekick/settings/{id}` | sidekick-ext | Wraps `POST /v1/settings/{id}`. |
-| `GET /api/sidekick/commands` | sidekick-ext | Wraps `GET /v1/commands`. |
-| `GET /api/sidekick/model-capabilities?model=Y[&provider=X]` | sidekick-ext | Ground-truth ModelCapabilities from hermes's models.dev registry (powers attach-button gating). Wraps `GET /v1/sidekick/model-capabilities`. |
-| `GET /api/sidekick/auxiliary-models` | sidekick-ext | Auxiliary-vision-model advertisement (`{vision: <id> \| null}`) — drives the "images route via X" hint when the primary is non-vision. Wraps `GET /v1/sidekick/auxiliary-models`. |
-| `GET /api/sidekick/config` | sidekick-ext | PWA-frontend settings snapshot (yaml-backed). Distinct from `/v1/settings/*` — those are agent-owned. |
-| `POST /api/sidekick/config/{key}` | sidekick-ext | Write one frontend setting back to `sidekick.config.yaml`. |
+| `POST /api/parley/messages` | sidekick-ext | Send a turn. Body `{chat_id, text, attachments?, voice?, user_message_id?}`. 202 fire-and-forget — replies arrive on the persistent SSE channel. |
+| `GET /api/parley/stream` | sidekick-ext | Persistent SSE multiplexer. Fans every upstream envelope (`reply_delta`, `reply_final`, `tool_call`, `tool_result`, `notification`, `session_changed`, `image`, `error`, `user_message`) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
+| `GET /api/parley/sessions` | mixed | Drawer list. Wraps `/v1/gateway/conversations` (when available) or `/v1/conversations`. |
+| `GET /api/parley/sessions/{id}/messages` | mixed | Transcript replay. Wraps `/v1/conversations/{id}/items`. |
+| `DELETE /api/parley/sessions/{id}` | mixed | Cascade delete. |
+| `PATCH /api/parley/sessions/{id}` | sidekick-ext | Rename. Wraps `PATCH /v1/conversations/{id}`. |
+| `GET /api/parley/search` | sidekick-ext | Cross-conversation FTS search. Wraps `GET /v1/conversations/search`. |
+| `GET /api/parley/settings/schema` | sidekick-ext | Wraps `GET /v1/settings/schema`. |
+| `POST /api/parley/settings/{id}` | sidekick-ext | Wraps `POST /v1/settings/{id}`. |
+| `GET /api/parley/commands` | sidekick-ext | Wraps `GET /v1/commands`. |
+| `GET /api/parley/model-capabilities?model=Y[&provider=X]` | sidekick-ext | Ground-truth ModelCapabilities from hermes's models.dev registry (powers attach-button gating). Wraps `GET /v1/parley/model-capabilities`. |
+| `GET /api/parley/auxiliary-models` | sidekick-ext | Auxiliary-vision-model advertisement (`{vision: <id> \| null}`) — drives the "images route via X" hint when the primary is non-vision. Wraps `GET /v1/parley/auxiliary-models`. |
+| `GET /api/parley/config` | sidekick-ext | PWA-frontend settings snapshot (yaml-backed). Distinct from `/v1/settings/*` — those are agent-owned. |
+| `POST /api/parley/config/{key}` | sidekick-ext | Write one frontend setting back to `sidekick.config.yaml`. |
 
 ### Audio + utility — proxy-owned
 
@@ -137,11 +137,11 @@ Every HTTP+SSE endpoint sidekick speaks, with a one-line purpose and a classific
 
 ### Typed turn
 
-1. PWA pre-mints a `user_message_id`, renders an optimistic user bubble keyed on that id (idempotent in `renderedMessages`), then sends `POST /api/sidekick/messages` with `{chat_id, text, user_message_id}`.
+1. PWA pre-mints a `user_message_id`, renders an optimistic user bubble keyed on that id (idempotent in `renderedMessages`), then sends `POST /api/parley/messages` with `{chat_id, text, user_message_id}`.
 2. Proxy forwards `POST /v1/responses` (with `stream: true`) to upstream.
-3. Upstream emits a `user_message` envelope on `/v1/events` — fans out to ALL connected PWA tabs via `/api/sidekick/stream`. The originating tab dedups (the entry already exists); other devices render the user bubble for the first time.
+3. Upstream emits a `user_message` envelope on `/v1/events` — fans out to ALL connected PWA tabs via `/api/parley/stream`. The originating tab dedups (the entry already exists); other devices render the user bubble for the first time.
 4. Upstream streams `response.output_text.delta` events on the per-turn /v1/responses SSE.
-5. Proxy fans those into the persistent `/api/sidekick/stream` SSE channel as `reply_delta` envelopes.
+5. Proxy fans those into the persistent `/api/parley/stream` SSE channel as `reply_delta` envelopes.
 6. PWA renders the streaming reply bubble.
 7. Upstream emits `response.completed`; proxy emits `reply_final`.
 
@@ -149,19 +149,19 @@ Every HTTP+SSE endpoint sidekick speaks, with a one-line purpose and a classific
 
 1. PWA opens a WebRTC peer connection to the audio bridge.
 2. Bridge streams mic audio to STT, gets transcripts.
-3. On end-of-utterance (silence-detect or commit-phrase), bridge POSTs the recognized text to the proxy's `/api/sidekick/messages`.
-4. Bridge subscribes to `/api/sidekick/stream` (scoped to the same `chat_id`) for the agent's reply.
+3. On end-of-utterance (silence-detect or commit-phrase), bridge POSTs the recognized text to the proxy's `/api/parley/messages`.
+4. Bridge subscribes to `/api/parley/stream` (scoped to the same `chat_id`) for the agent's reply.
 5. As `reply_delta` envelopes arrive, bridge synthesizes TTS audio chunks and streams them back over the WebRTC connection.
 
 ### Turn-based voice turn (Listen mode)
 
 1. PWA captures one utterance with `MediaRecorder`. End-of-turn fires on local silence detection or sendword (e.g. "over").
 2. PWA `POST /transcribe` with the audio blob. Proxy forwards to the bridge's `POST /v1/transcribe` (one HTTP round-trip — no WebRTC), which runs the configured STT provider and returns `{transcript}`.
-3. PWA submits the transcript through the same canonical send path a typed message uses: `POST /api/sidekick/messages`, then watch the shared `/api/sidekick/stream` for `reply_final`.
+3. PWA submits the transcript through the same canonical send path a typed message uses: `POST /api/parley/messages`, then watch the shared `/api/parley/stream` for `reply_final`.
 4. On `reply_final`, PWA `POST /tts` with the reply text. Proxy forwards to Deepgram Aura and returns mp3.
 5. PWA caches the mp3 (`replyCache.ts` LRU) and plays it in the shared `<audio id="player">` element. Per-bubble replay chips and BT skip-fwd/back navigate this same cache.
 
-Turn-based mode adds **zero new wire endpoints** — `/transcribe`, `/tts`, `/api/sidekick/messages`, and `/api/sidekick/stream` already existed for typed turns and voice memos.
+Turn-based mode adds **zero new wire endpoints** — `/transcribe`, `/tts`, `/api/parley/messages`, and `/api/parley/stream` already existed for typed turns and voice memos.
 
 ### Drawer state
 
@@ -171,14 +171,14 @@ Turn-based mode adds **zero new wire endpoints** — `/transcribe`, `/tts`, `/ap
 
 ## Why the audio bridge is a separate process
 
-WebRTC audio processing (aiortc + STT/TTS pipelines) lives on a long-lived Python process so it survives PWA reloads and isolates audio failure modes from the proxy. The bridge talks to the proxy via the same `/api/sidekick/*` HTTP surface the PWA uses — no special channel.
+WebRTC audio processing (aiortc + STT/TTS pipelines) lives on a long-lived Python process so it survives PWA reloads and isolates audio failure modes from the proxy. The bridge talks to the proxy via the same `/api/parley/*` HTTP surface the PWA uses — no special channel.
 
 ## Why the proxy exists at all (vs. PWA → upstream direct)
 
 - **Reusable contract.** Any `/v1/*`-speaking server fits the same shape (hermes plugin, stub, future openclaw plugin, raw OAI third-parties). A new backend just speaks the contract from whatever language it's in.
 - **Decouples app server from agent runtime.** Hermes restarts (or GIL stalls) don't take down the chat UI; static asset serving keeps working. The proxy is single-purpose Node, fast to restart.
 - **Centralized auth.** The browser never holds the upstream bearer token; the proxy injects it on every outbound call.
-- **Multiplexing.** PWA sees one persistent `/api/sidekick/stream` even when there are N concurrent chats with reply streams in flight. The proxy translates that to per-turn `/v1/responses` streams against the upstream and fans envelopes back tagged with `chat_id`.
+- **Multiplexing.** PWA sees one persistent `/api/parley/stream` even when there are N concurrent chats with reply streams in flight. The proxy translates that to per-turn `/v1/responses` streams against the upstream and fans envelopes back tagged with `chat_id`.
 - **Utility endpoints.** `/gen-image`, `/weather`, `/link-preview`, `/transcribe` — none of these belong in an agent backend, but they belong somewhere.
 
 The proxy owns no durable state. That stays in the upstream.
@@ -189,7 +189,7 @@ The proxy owns no durable state. That stays in the upstream.
 sidekick/
 ├── server.ts                 proxy entry point
 ├── proxy/                    proxy-side TS (handlers, upstream client)
-│   └── sidekick/                /api/sidekick/* PWA-facing routes
+│   └── sidekick/                /api/parley/* PWA-facing routes
 ├── src/                      PWA (browser) code
 ├── audio-bridge/             Python WebRTC bridge (STT + TTS + barge-in)
 ├── backends/                 each subdirectory = one /v1/*-speaking agent
@@ -211,7 +211,7 @@ src/
 ├── main.ts              entry — boots modules, wires cross-module callbacks
 ├── config.ts            runtime config loaded from /config, applies skinning
 ├── backend.ts           adapter loader — single proxy-client path
-├── proxyClient.ts       calls /api/sidekick/* on the local Node proxy
+├── proxyClient.ts       calls /api/parley/* on the local Node proxy
 ├── proxyClientTypes.ts  BackendAdapter contract types
 ├── agentSettings.ts     generic SettingDef[] renderer for /v1/settings/*
 ├── chat.ts              transcript rendering + sessionStorage persistence

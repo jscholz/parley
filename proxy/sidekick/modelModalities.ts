@@ -5,12 +5,12 @@
 // live config).
 //
 // Two endpoints exposed:
-//   GET /api/sidekick/model-capabilities?model=Y[&provider=X]
+//   GET /api/parley/model-capabilities?model=Y[&provider=X]
 //     Returns the full ModelCapabilities shape from the upstream's
 //     capability lookup (e.g. hermes's agent.models_dev
 //     .get_model_capabilities) — the same data it consults at request
 //     time for native-vs-text image routing.
-//   GET /api/sidekick/auxiliary-models
+//   GET /api/parley/auxiliary-models
 //     Returns {vision: <model_id> | null} reflecting the configured
 //     auxiliary.vision.model. PWA reads this to show the "will route
 //     through X" hint when the primary doesn't support vision.
@@ -38,7 +38,7 @@ let visionInFlight: Promise<string | null> | null = null;
 async function fetchVisionFallbackModelLive(): Promise<string | null> {
   if (!UPSTREAM_TOKEN) return null;
   try {
-    const r = await fetch(`${UPSTREAM_URL}/v1/sidekick/auxiliary-models`, {
+    const r = await fetch(`${UPSTREAM_URL}/v1/parley/auxiliary-models`, {
       headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` },
     });
     if (!r.ok) return null;
@@ -105,7 +105,7 @@ async function fetchCapabilitiesLive(
   qs.set('model', model);
   try {
     const r = await fetch(
-      `${UPSTREAM_URL}/v1/sidekick/model-capabilities?${qs.toString()}`,
+      `${UPSTREAM_URL}/v1/parley/model-capabilities?${qs.toString()}`,
       { headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` } },
     );
     if (!r.ok) return null;

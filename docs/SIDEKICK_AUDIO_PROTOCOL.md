@@ -89,7 +89,7 @@ transcripts to `<proxy>/api/<be>/responses` with
 
 `chat_id` is the hermes-gateway path's session-routing primitive (an
 opaque UUID minted PWA-side per conversation). When set, the bridge
-dispatches to `<proxy>/api/sidekick/messages` with `{chat_id, text}`
+dispatches to `<proxy>/api/parley/messages` with `{chat_id, text}`
 instead. The proxy WS-forwards to the hermes sidekick platform adapter.
 
 `conv_name` and `chat_id` are mutually exclusive in practice — the PWA
@@ -223,7 +223,7 @@ offer payload carried:
 
 **`chat_id` set** (hermes-gateway path):
 
-1. POSTs `{chat_id, text}` to `<proxy_url>/api/sidekick/messages`.
+1. POSTs `{chat_id, text}` to `<proxy_url>/api/parley/messages`.
 2. Parses the SSE stream as adapter envelopes:
    `event: reply_delta\ndata: {type, chat_id, text}` carries the FULL
    cumulative reply so far (per `BasePlatformAdapter.edit_message`'s
@@ -405,16 +405,16 @@ the event.
 The proxy exposes the WS surface to the PWA over plain HTTP/SSE so
 the existing fetch+EventSource code path applies unchanged:
 
-- `POST /api/sidekick/messages` body `{chat_id, text, attachments?}`
+- `POST /api/parley/messages` body `{chat_id, text, attachments?}`
   forwards as `{type:'message', chat_id, text}` over the WS, then
   streams every per-chat_id outbound envelope back as one SSE event
   (`event:` = envelope `type`; `data:` = JSON envelope verbatim).
   Connection ends on `reply_final`.
-- `GET /api/sidekick/sessions[?limit=N]` returns drawer enrichment
+- `GET /api/parley/sessions[?limit=N]` returns drawer enrichment
   rows from state.db (`{chat_id, session_id, title, message_count,
   last_active_at, created_at}`). PWA-side IDB owns the canonical chat
   list; this endpoint adds gateway metadata.
-- `DELETE /api/sidekick/sessions/<chat_id>` drops the matching state.db
+- `DELETE /api/parley/sessions/<chat_id>` drops the matching state.db
   row + messages (best-effort; a fresh chat_id reuse mints a new
   session automatically).
 

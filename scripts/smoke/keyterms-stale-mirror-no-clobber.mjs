@@ -3,7 +3,7 @@
 // FIELD INCIDENT: keyterms were edited on the laptop (server row at 30
 // terms). Next morning the phone booted on flaky cellular with a
 // 27-term IDB mirror from days earlier; its GET of
-// /api/sidekick/prefs/stt_keyterms failed transiently, and because the
+// /api/parley/prefs/stt_keyterms failed transiently, and because the
 // old client collapsed "server has no row" and "read failed" into one
 // null, the legacy-adoption path re-uploaded the stale mirror —
 // silently overwriting the newer server row.

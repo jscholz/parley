@@ -90,7 +90,7 @@ export default async function run({ page, log, mock }) {
   log('bare OpenRouter options coexist with prefixed ones ✓');
 
   // Bonus: pick a prefixed value and verify the POST round-trip ships
-  // the prefix verbatim. agentSettings POSTs to /api/sidekick/settings/<id>
+  // the prefix verbatim. agentSettings POSTs to /api/parley/settings/<id>
   // with body { value: <selected-value> }; the mock records it via
   // getLastSettingsPost().
   await page.evaluate(() => {
@@ -108,7 +108,7 @@ export default async function run({ page, log, mock }) {
     if (lastPost && lastPost.id === 'model' && lastPost.body?.value === 'anthropic:claude-opus-4-7') break;
     await page.waitForTimeout(50);
   }
-  assert(lastPost !== null, 'expected POST /api/sidekick/settings/model to land');
+  assert(lastPost !== null, 'expected POST /api/parley/settings/model to land');
   assert(
     lastPost.id === 'model',
     `lastSettingsPost id mismatch: expected 'model', got ${JSON.stringify(lastPost.id)}`,

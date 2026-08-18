@@ -46,7 +46,7 @@ export function parseCardsFromText(text) {
 
   // 1. Markdown images — classified by extension: a video/audio file
   // behind image syntax becomes a video/audio card
-  // (`![clip](/api/sidekick/media/…)` is the agent-pushed media lane; see
+  // (`![clip](/api/parley/media/…)` is the agent-pushed media lane; see
   // proxy/sidekick/media.ts, which serves mp4/webm and m4a/mp3/wav/ogg
   // with Range). Anything else falls through to an image card.
   for (const m of text.matchAll(/!\[([^\]]*)\]\(([^)]+)\)/g)) {

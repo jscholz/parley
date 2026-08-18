@@ -489,7 +489,7 @@ async function boot() {
   // value — the toggle would flip in storage but the highlight wouldn't
   // reflect it. Generally: any boot code that calls settings.get() before
   // this line was reading uninitialised defaults.
-  // Async now: yaml-backed settings come from /api/sidekick/config; the
+  // Async now: yaml-backed settings come from /api/parley/config; the
   // remaining per-device keys are read from localStorage in the same
   // call. Built-in DEFAULTS are the offline / proxy-down fallback.
   await settings.load();

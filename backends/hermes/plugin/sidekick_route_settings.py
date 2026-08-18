@@ -6,8 +6,8 @@ refactor — ~700 LOC):
 
   - GET  /v1/settings/schema             list user-facing knobs
   - POST /v1/settings/{id}               apply one setting
-  - GET  /v1/sidekick/auxiliary-models   surface aux vision model
-  - GET  /v1/sidekick/model-capabilities models.dev caps lookup
+  - GET  /v1/parley/auxiliary-models   surface aux vision model
+  - GET  /v1/parley/model-capabilities models.dev caps lookup
 
 Plus the helpers:
 
@@ -530,7 +530,7 @@ async def handle_update(adapter, request: "web.Request") -> "web.Response":
 
 
 async def handle_auxiliary_models(adapter, request: "web.Request") -> "web.Response":
-    """GET /v1/sidekick/auxiliary-models — surface the auxiliary models
+    """GET /v1/parley/auxiliary-models — surface the auxiliary models
     hermes is configured to route to. Today: just ``vision``. The PWA's
     attachment-button gate uses this to enable the + button when the
     primary model is text-only but an auxiliary vision model is
@@ -546,7 +546,7 @@ async def handle_auxiliary_models(adapter, request: "web.Request") -> "web.Respo
 
 
 async def handle_model_capabilities(adapter, request: "web.Request") -> "web.Response":
-    """GET /v1/sidekick/model-capabilities?provider=X&model=Y — return
+    """GET /v1/parley/model-capabilities?provider=X&model=Y — return
     ground-truth capability metadata from the models.dev registry that
     hermes already uses for its native-vs-text image routing decision."""
     if not adapter._check_http_auth(request):

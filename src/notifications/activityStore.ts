@@ -60,7 +60,7 @@ function payloadForServer(item: ActivityItem): Record<string, unknown> {
 
 const store = new ServerBackedStore<ActivityItem>({
   storageKey: STORAGE_KEY,
-  endpoint: '/api/sidekick/activity?limit=200',
+  endpoint: '/api/parley/activity?limit=200',
   fetchInit: { cache: 'no-store' },
   extract: (data) => (Array.isArray(data?.items) ? data.items : []),
   parse: normalizeItem,
@@ -111,7 +111,7 @@ export function reconcileActivity(
   // Preserve freshly-arrived, still-unresolved approvals the server
   // snapshot doesn't know about yet. A pending approval is added to the
   // local store SYNCHRONOUSLY by upsertNotification, but its POST to
-  // /api/sidekick/activity is fire-and-forget. The server ALSO emits an
+  // /api/parley/activity is fire-and-forget. The server ALSO emits an
   // `activity_changed` cross-device sync the moment it records the
   // approval, which fires a refresh here. If this GET races ahead of our
   // own POST (or of the server's own write), the snapshot lacks the
@@ -134,7 +134,7 @@ export function reconcileActivity(
   // apply so we don't wipe them. The next refresh reconciles.
   if (ctx.firstServerHydrate && next.size === 0 && current.size > 0) {
     for (const item of current.values()) {
-      post('/api/sidekick/activity', payloadForServer(item));
+      post('/api/parley/activity', payloadForServer(item));
     }
     return 'skip';
   }
@@ -169,7 +169,7 @@ function pruneSupersededApprovals(items: Map<string, ActivityItem>, post: Activi
     const newer = newestByChat.get(item.chatId) ?? 0;
     if (newer > item.createdAt) {
       items.set(id, { ...item, read: true, resolved: 'dismissed' });
-      post('/api/sidekick/activity/resolve', { id, resolution: 'dismissed' });
+      post('/api/parley/activity/resolve', { id, resolution: 'dismissed' });
     }
   }
 }
@@ -218,7 +218,7 @@ export function upsertNotification(args: {
   };
   store.items.set(id, item);
   store.commit();
-  void store.postJson('/api/sidekick/activity', payloadForServer(item));
+  void store.postJson('/api/parley/activity', payloadForServer(item));
   return item;
 }
 
@@ -257,7 +257,7 @@ export function markRead(id: string): void {
   const next = { ...item, read: true };
   store.items.set(id, next);
   store.commit();
-  void store.postJson('/api/sidekick/activity', payloadForServer(next));
+  void store.postJson('/api/parley/activity', payloadForServer(next));
 }
 
 /** Flip a specific message back to unread in the activity tray. Used by the
@@ -296,7 +296,7 @@ export function markUnreadForMessage(args: {
       };
   store.items.set(id, item);
   store.commit();
-  void store.postJson('/api/sidekick/activity', payloadForServer(item));
+  void store.postJson('/api/parley/activity', payloadForServer(item));
 }
 
 export function dismissApprovalsForChat(chatId: string): void {
@@ -308,7 +308,7 @@ export function dismissApprovalsForChat(chatId: string): void {
     store.items.delete(id);
     changed = true;
     void store.trackWrite(() =>
-      fetch(apiUrl(`/api/sidekick/activity/${encodeURIComponent(id)}`), { method: 'DELETE' }),
+      fetch(apiUrl(`/api/parley/activity/${encodeURIComponent(id)}`), { method: 'DELETE' }),
     ).catch(() => {});
   }
   if (changed) store.commit();
@@ -329,7 +329,7 @@ export function resolveApprovalsForChat(chatId: string, resolution: ActivityReso
     if (item.chatId !== chatId || item.kind !== 'approval' || item.resolved) continue;
     store.items.set(id, { ...item, read: true, resolved: resolution });
     changed = true;
-    void store.postJson('/api/sidekick/activity/resolve', { id, resolution });
+    void store.postJson('/api/parley/activity/resolve', { id, resolution });
   }
   if (changed) store.commit();
 }
@@ -352,7 +352,7 @@ export function runApprovalStaleCheck(): void {
     if (now - item.createdAt < approvalStaleMs) continue;
     store.items.set(id, { ...item, read: true, resolved: 'stale' });
     changed = true;
-    void store.postJson('/api/sidekick/activity/resolve', { id, resolution: 'stale' });
+    void store.postJson('/api/parley/activity/resolve', { id, resolution: 'stale' });
   }
   if (changed) store.commit();
 }
@@ -375,7 +375,7 @@ export function markChatRead(chatId: string): void {
     changed = true;
   }
   if (changed) store.commit();
-  void store.postJson('/api/sidekick/activity/seen', { chat_id: chatId });
+  void store.postJson('/api/parley/activity/seen', { chat_id: chatId });
 }
 
 export function markAllRead(): void {
@@ -387,7 +387,7 @@ export function markAllRead(): void {
     changed = true;
   }
   if (changed) store.commit();
-  void store.postJson('/api/sidekick/activity/seen', { all: true });
+  void store.postJson('/api/parley/activity/seen', { all: true });
 }
 
 export function resolveActivity(id: string, resolution: ActivityResolution): void {
@@ -396,7 +396,7 @@ export function resolveActivity(id: string, resolution: ActivityResolution): voi
   if (!item) return;
   store.items.set(id, { ...item, read: true, resolved: resolution });
   store.commit();
-  void store.postJson('/api/sidekick/activity/resolve', { id, resolution });
+  void store.postJson('/api/parley/activity/resolve', { id, resolution });
 }
 
 export function dismissActivity(id: string): void {
@@ -404,7 +404,7 @@ export function dismissActivity(id: string): void {
   if (!store.items.delete(id)) return;
   store.commit();
   void store.trackWrite(() =>
-    fetch(apiUrl(`/api/sidekick/activity/${encodeURIComponent(id)}`), { method: 'DELETE' }),
+    fetch(apiUrl(`/api/parley/activity/${encodeURIComponent(id)}`), { method: 'DELETE' }),
   ).catch(() => {});
 }
 
@@ -431,5 +431,5 @@ export function clearDismissible(): void {
   }
   if (!changed) return;
   store.commit();
-  void store.postJson('/api/sidekick/activity/clear', {});
+  void store.postJson('/api/parley/activity/clear', {});
 }

@@ -1,6 +1,6 @@
 // Real-backend end-to-end search smoke. Posts a message with a unique
 // marker, waits for hermes to persist (post-turn append_to_transcript),
-// then asserts /api/sidekick/search finds the marker. Catches the
+// then asserts /api/parley/search finds the marker. Catches the
 // regression where the v11 schema migration bumped schema_version=11
 // but left the messages_fts_insert/delete/update triggers absent —
 // silently breaking every search of post-migration content.
@@ -20,7 +20,7 @@ import {
 } from './lib.mjs';
 
 export const NAME = 'search-end-to-end';
-export const DESCRIPTION = 'Real backend: a sent message becomes searchable via /api/sidekick/search';
+export const DESCRIPTION = 'Real backend: a sent message becomes searchable via /api/parley/search';
 // install-only: gated on a working hermes-agent + state.db FTS5 index.
 // Used to verify the search subsystem after install / hermes upgrade.
 export const STATUS = 'install-only';
@@ -71,11 +71,11 @@ export default async function run({ page, log, url }) {
     await page.waitForTimeout(750);
 
     // Search via the same surface the cmd+K palette uses.
-    const r = await fetch(`${url}/api/sidekick/search?q=${encodeURIComponent(MARKER)}`);
+    const r = await fetch(`${url}/api/parley/search?q=${encodeURIComponent(MARKER)}`);
     assert(r.ok, `search HTTP ${r.status}`);
     const body = await r.json();
     const hits = Array.isArray(body?.hits) ? body.hits : [];
-    log(`/api/sidekick/search?q=${MARKER} → ${hits.length} hits`);
+    log(`/api/parley/search?q=${MARKER} → ${hits.length} hits`);
     assert(
       hits.length >= 1,
       `expected the marker to be searchable post-send; got 0 hits. ` +

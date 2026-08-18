@@ -2,7 +2,7 @@
  * Notification preferences — quiet hours.
  *
  * Pins:
- *   - GET /api/sidekick/notifications/preferences returns defaults
+ *   - GET /api/parley/notifications/preferences returns defaults
  *     when no file exists (quiet_hours.enabled=false).
  *   - POST partial updates persist + don't clobber other fields.
  *   - Bad HH:MM strings return 400.
@@ -47,7 +47,7 @@ async function startPrefsRig() {
     keys: { p256dh: 'p256_pref', auth: 'auth_pref' },
     userAgent: 'PrefsTest',
   };
-  await fetch(`${rig.proxyUrl}/api/sidekick/notifications/subscribe`, {
+  await fetch(`${rig.proxyUrl}/api/parley/notifications/subscribe`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(sub),
@@ -73,7 +73,7 @@ async function startPrefsRig() {
 test('prefs: GET returns defaults when no file exists', async () => {
   const g = await startPrefsRig();
   try {
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`);
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`);
     assert.equal(r.status, 200);
     const body: any = await r.json();
     assert.equal(body.quiet_hours.enabled, false);
@@ -87,7 +87,7 @@ test('prefs: GET returns defaults when no file exists', async () => {
 test('prefs: POST partial update persists + leaves other fields alone', async () => {
   const g = await startPrefsRig();
   try {
-    const r1 = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    const r1 = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ quiet_hours: { enabled: true } }),
@@ -100,7 +100,7 @@ test('prefs: POST partial update persists + leaves other fields alone', async ()
     assert.equal(body1.quiet_hours.end, '07:00');
 
     // Update times only — `enabled` should stay true.
-    const r2 = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    const r2 = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ quiet_hours: { start: '23:30', end: '06:30' } }),
@@ -118,7 +118,7 @@ test('prefs: bad HH:MM string returns 400', async () => {
   const g = await startPrefsRig();
   try {
     for (const bad of ['25:00', '12:60', '7:00', '07:0', 'foo', '']) {
-      const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+      const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ quiet_hours: { start: bad } }),
@@ -136,7 +136,7 @@ test('prefs: bad HH:MM string returns 400', async () => {
 test('prefs: inQuietHours wraps midnight (22:00-07:00)', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -165,7 +165,7 @@ test('prefs: inQuietHours wraps midnight (22:00-07:00)', async () => {
 test('prefs: inQuietHours simple interval (13:00-15:00)', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -210,7 +210,7 @@ test('prefs: inQuietHours disabled = always false', async () => {
 test('prefs: inQuietHours start == end is never (ambiguous → safer no-suppress)', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -243,7 +243,7 @@ test('case 7: quiet hours active, non-urgent envelope → no push', async () => 
     const endMin = (now.getMinutes() + 59) % 60;
     const endHr = (now.getHours() + (now.getMinutes() + 59 >= 60 ? 1 : 0)) % 24;
     const end = `${pad(endHr)}:${pad(endMin)}`;
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ quiet_hours: { enabled: true, start, end } }),
@@ -269,7 +269,7 @@ test('case 8: quiet hours active, urgent:true envelope → push fires anyway', a
     const endMin = (now.getMinutes() + 59) % 60;
     const endHr = (now.getHours() + (now.getMinutes() + 59 >= 60 ? 1 : 0)) % 24;
     const end = `${pad(endHr)}:${pad(endMin)}`;
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ quiet_hours: { enabled: true, start, end } }),
@@ -293,7 +293,7 @@ test('case 8: quiet hours active, urgent:true envelope → push fires anyway', a
 test('kinds: defaults are both true on a fresh prefs file', async () => {
   const g = await startPrefsRig();
   try {
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`);
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`);
     const body: any = await r.json();
     assert.equal(body.kinds.agent_reply, true);
     assert.equal(body.kinds.cron, true);
@@ -306,7 +306,7 @@ test('kinds: defaults are both true on a fresh prefs file', async () => {
 test('kinds: toggling agent_reply=false suppresses reply_final push', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kinds: { agent_reply: false } }),
@@ -337,7 +337,7 @@ test('kinds: toggling agent_reply=false suppresses reply_final push', async () =
 test('kinds: toggling cron=false suppresses only cron notification push', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kinds: { cron: false } }),
@@ -368,7 +368,7 @@ test('kinds: toggling cron=false suppresses only cron notification push', async 
 test('kinds: both off → no envelope kind pushes (master kill switch)', async () => {
   const g = await startPrefsRig();
   try {
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kinds: { agent_reply: false, cron: false, approval: false } }),
@@ -386,12 +386,12 @@ test('kinds: partial update keeps the other kind untouched', async () => {
   const g = await startPrefsRig();
   try {
     // Disable agent_reply, leave notification at default (true).
-    await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`, {
+    await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ kinds: { agent_reply: false } }),
     });
-    const r = await fetch(`${g.rig.proxyUrl}/api/sidekick/notifications/preferences`);
+    const r = await fetch(`${g.rig.proxyUrl}/api/parley/notifications/preferences`);
     const body: any = await r.json();
     assert.equal(body.kinds.agent_reply, false);
     assert.equal(body.kinds.cron, true,

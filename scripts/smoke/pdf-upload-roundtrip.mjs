@@ -1,7 +1,7 @@
 // End-to-end PDF upload smoke. Drives the PWA, uploads a tiny fixture
 // PDF with a unique text marker, sends a question, asserts the agent
 // reply mentions the marker — proving the rasterization path works
-// end-to-end (PWA composer → /api/sidekick/messages → hermes plugin
+// end-to-end (PWA composer → /api/parley/messages → hermes plugin
 // _materialize_attachments → _rasterize_pdf shell-out to pdftoppm →
 // page PNGs → vision-capable LLM → reply that contains the marker).
 //
@@ -70,7 +70,7 @@ export default async function run({ page, log, fail }) {
   // ── Vision-capability gate ────────────────────────────────────────
   //
   // Previous behavior: this smoke USED to pick a vision-capable model
-  // from the live schema's options[] and POST it to /api/sidekick/
+  // from the live schema's options[] and POST it to /api/parley/
   // settings/model, silently switching the user's hermes config to
   // whatever vision-capable model it found (almost always an
   // openrouter-prefixed one). It never restored the original. Result:
@@ -78,25 +78,25 @@ export default async function run({ page, log, fail }) {
   // unrelated agent calls. That path has been removed.
   //
   // New behavior: the test interrogates the *current* model's
-  // capabilities via /api/sidekick/model-capabilities. Three cases:
+  // capabilities via /api/parley/model-capabilities. Three cases:
   //   1. Current model supports vision → great, use it as-is.
   //   2. Current model is text-only but an auxiliary vision model
-  //      is configured (/api/sidekick/auxiliary-models) → the
+  //      is configured (/api/parley/auxiliary-models) → the
   //      attach-button vision-gate routes PDFs through the aux
   //      model; proceed.
   //   3. Neither → fail with a clear warning. Honest signal that
   //      the user's hermes config doesn't support vision; the test
   //      should not pass under false pretenses.
   const visionStatus = await page.evaluate(async () => {
-    const schemaResp = await fetch('/api/sidekick/settings/schema');
+    const schemaResp = await fetch('/api/parley/settings/schema');
     if (!schemaResp.ok) return { error: `settings/schema returned ${schemaResp.status}` };
     const schema = await schemaResp.json();
     const modelDef = (schema?.data || []).find((s) => s.id === 'model');
     const current = modelDef?.value || null;
     if (!current) return { error: 'no current model in schema' };
-    const capsResp = await fetch(`/api/sidekick/model-capabilities?model=${encodeURIComponent(current)}`);
+    const capsResp = await fetch(`/api/parley/model-capabilities?model=${encodeURIComponent(current)}`);
     const caps = capsResp.ok ? await capsResp.json() : null;
-    const auxResp = await fetch('/api/sidekick/auxiliary-models');
+    const auxResp = await fetch('/api/parley/auxiliary-models');
     const aux = auxResp.ok ? await auxResp.json() : null;
     return {
       current,

@@ -2,7 +2,7 @@
 //
 // One route:
 //
-//   GET /api/sidekick/commands     → list of CommandDef
+//   GET /api/parley/commands     → list of CommandDef
 //
 // Forwards to the upstream's /v1/commands contract (slash-command
 // registry surfaced by hermes_cli.commands.COMMAND_REGISTRY).
@@ -17,7 +17,7 @@
 
 import { getUpstream } from './index.ts';
 
-/** GET /api/sidekick/commands */
+/** GET /api/parley/commands */
 export async function handleSidekickCommands(_req, res) {
   const upstream = getUpstream();
   if (!upstream) {

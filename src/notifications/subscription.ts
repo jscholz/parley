@@ -1,5 +1,5 @@
 // Push subscription helpers — talk to PushManager + post the result to
-// the proxy's /api/sidekick/notifications/{subscribe,unsubscribe}
+// the proxy's /api/parley/notifications/{subscribe,unsubscribe}
 // endpoints. Extracted as a dedicated file because the subscribe()
 // roundtrip has enough moving parts (VAPID fetch + base64 decoding +
 // PushManager call + POST + IDB cache for the active endpoint) that
@@ -76,7 +76,7 @@ export async function subscribe(): Promise<PushSubscription> {
   // 1. Fetch the VAPID public key. 503 from this endpoint means the
   //    server-side env isn't configured — present as a clear error
   //    rather than a generic "subscribe failed".
-  const vapidRes = await fetch(apiUrl('/api/sidekick/notifications/vapid-public-key'));
+  const vapidRes = await fetch(apiUrl('/api/parley/notifications/vapid-public-key'));
   if (vapidRes.status === 503) {
     throw new Error('Server not configured for push (VAPID keys missing)');
   }
@@ -104,7 +104,7 @@ export async function subscribe(): Promise<PushSubscription> {
     keys: json.keys,
     userAgent: navigator.userAgent,
   };
-  const res = await fetch(apiUrl('/api/sidekick/notifications/subscribe'), {
+  const res = await fetch(apiUrl('/api/parley/notifications/subscribe'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -131,7 +131,7 @@ export async function unsubscribe(): Promise<void> {
   // Tell the server first so we don't leave a stale row if the local
   // unsubscribe fails (less harmful direction than the opposite).
   try {
-    await fetch(apiUrl('/api/sidekick/notifications/unsubscribe'), {
+    await fetch(apiUrl('/api/parley/notifications/unsubscribe'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ endpoint }),

@@ -461,7 +461,7 @@ async def dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[s
 
 # ── Persistent sidekick-stream subscriber ───────────────────────────────
 #
-# Long-lived per-peer SSE subscriber to /api/sidekick/stream?chat_id=X.
+# Long-lived per-peer SSE subscriber to /api/parley/stream?chat_id=X.
 # Replaces the legacy per-utterance subscriber that broke out of the
 # stream after the first reply_final and missed every subsequent bubble
 # in the same user turn (post-tool-call results, follow-up nudges, etc.).
@@ -636,13 +636,13 @@ def start_sidekick_stream(peer) -> None:
 
 
 async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
-    """Stay subscribed to /api/sidekick/stream for the peer's lifetime,
+    """Stay subscribed to /api/parley/stream for the peer's lifetime,
     feeding every reply_delta delta into ``text_queue``. Reconnects with
     bounded backoff if the connection drops; exits cleanly on
     cancellation (peer.close).
     """
     proxy_url = (peer.extra.get("proxy_url") or "http://127.0.0.1:3001").rstrip("/")
-    stream_url = f"{proxy_url}/api/sidekick/stream?chat_id={chat_id}&live_only=1"
+    stream_url = f"{proxy_url}/api/parley/stream?chat_id={chat_id}&live_only=1"
 
     try:
         import aiohttp  # type: ignore
@@ -718,7 +718,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
     carried:
 
     - **chat_id present** (hermes-gateway backend): POST
-      <proxy_url>/api/sidekick/messages with {chat_id, text}. The proxy
+      <proxy_url>/api/parley/messages with {chat_id, text}. The proxy
       forwards via WebSocket to the hermes sidekick platform adapter;
       the SSE response carries `event: <envelope_type>` frames with the
       adapter envelope (reply_delta / reply_final / typing / etc) as the
@@ -742,7 +742,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
     proxy_url = (peer.extra.get("proxy_url") or "http://127.0.0.1:3001").rstrip("/")
     chat_id = peer.extra.get("chat_id")
     if chat_id:
-        url = f"{proxy_url}/api/sidekick/messages"
+        url = f"{proxy_url}/api/parley/messages"
         body: Dict[str, Any] = {"chat_id": chat_id, "text": utterance}
         if user_message_id:
             body["user_message_id"] = user_message_id

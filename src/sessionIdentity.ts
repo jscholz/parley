@@ -17,7 +17,7 @@
 //
 // In-memory `map` is the sync source of truth for renders (the drawer's
 // per-row nicknameFor() and the TTS voiceFor() resolver can't await).
-// Mutations write through to settings.set() (PUT /api/sidekick/prefs) and
+// Mutations write through to settings.set() (PUT /api/parley/prefs) and
 // emit a `sidekick:session-identity-changed` event so the drawer repaints.
 
 import * as settings from './settings.ts';

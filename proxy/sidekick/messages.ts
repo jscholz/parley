@@ -1,8 +1,8 @@
-// POST /api/sidekick/messages — forward a chat turn to the upstream
+// POST /api/parley/messages — forward a chat turn to the upstream
 // agent. Fire-and-forget: returns 202 immediately; reply envelopes
 // (reply_delta, reply_final, image, typing, notification,
 // session_changed) flow back through the persistent
-// /api/sidekick/stream SSE channel.
+// /api/parley/stream SSE channel.
 //
 // Request body (JSON):
 //   { chat_id: string, text: string, attachments?: any[],
@@ -19,13 +19,13 @@
 // device callers).
 //
 // Wire path:
-//   PWA → POST /api/sidekick/messages
+//   PWA → POST /api/parley/messages
 //                ↓ (this handler)
 //   upstream.sendMessage → POST /v1/responses (stream:true)
 //                ↓ (SSE)
 //   reply_delta / reply_final / tool_* envelopes → pushEnvelope
 //                ↓
-//   stream.ts SSE multiplexer fan-out on /api/sidekick/stream
+//   stream.ts SSE multiplexer fan-out on /api/parley/stream
 //
 // Why fire-and-forget vs per-POST SSE: agents emit multiple bubbles
 // per turn (bootstrap nudges, the actual reply, possibly tool-result-
@@ -79,7 +79,7 @@ export async function handleSidekickMessage(req, res) {
 
   if (aborted) {
     console.warn(
-      `[sidekick] /api/sidekick/messages aborted: body > ${MAX_BODY_BYTES} bytes ` +
+      `[sidekick] /api/parley/messages aborted: body > ${MAX_BODY_BYTES} bytes ` +
       `(saw ${raw.length}). If this is a legitimate large attachment, raise MAX_BODY_BYTES ` +
       `here AND the upstream plugin's body-size limit.`
     );

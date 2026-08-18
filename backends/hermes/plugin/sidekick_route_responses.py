@@ -399,7 +399,7 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
 
     # Register the turn queue. If a queue already exists for this
     # chat_id, replace it — the proxy is expected to serialize per-
-    # chat (multiplexed via /api/sidekick/messages on the proxy
+    # chat (multiplexed via /api/parley/messages on the proxy
     # side), so this branch is purely defensive.
     queue: "asyncio.Queue[Dict[str, Any]]" = asyncio.Queue(maxsize=_TURN_QUEUE_MAX)
     adapter._turn_queues[chat_id] = queue

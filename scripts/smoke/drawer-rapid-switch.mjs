@@ -78,7 +78,7 @@ export default async function run({ page, log, ctx }) {
   // 200ms throttle on the messages endpoint forces the race window
   // open. Without this, both cache-cb and server-cb resolve in <10ms
   // and stale callbacks land before they can be superseded.
-  await ctx.route('**/api/sidekick/sessions/*/messages*', async (route) => {
+  await ctx.route('**/api/parley/sessions/*/messages*', async (route) => {
     await new Promise(r => setTimeout(r, 200));
     await route.continue();
   });

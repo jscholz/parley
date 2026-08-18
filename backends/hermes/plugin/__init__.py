@@ -146,7 +146,7 @@ _CRON_RESPONSE_RE = re.compile(
 )
 
 # ── PDF rasterization knobs ───────────────────────────────────────────
-# When the PWA uploads a PDF via /api/sidekick/messages, we shell out to
+# When the PWA uploads a PDF via /api/parley/messages, we shell out to
 # `pdftoppm` (poppler-utils) and replace the PDF tempfile with one PNG
 # per page so vision-capable models (gemma-3, claude, gpt-4o, gemini)
 # see it as N images via the existing media_urls path. The PDF tempfile
@@ -504,7 +504,7 @@ class SidekickAdapter(BasePlatformAdapter):
         # client_max_size lifted from aiohttp's 1 MiB default. Small
         # attachments still ride the base64-in-JSON /v1/responses body
         # (phone photos exceed the 1 MiB default once encoded). Large
-        # files (task #158) come as raw bytes on /v1/sidekick/upload,
+        # files (task #158) come as raw bytes on /v1/parley/upload,
         # which needs ~100 MB headroom — so the app-wide limit is sized
         # for the upload route (the JSON path stays well under it because
         # the PWA routes anything over ~5 MB through the upload endpoint).
@@ -521,7 +521,7 @@ class SidekickAdapter(BasePlatformAdapter):
         # ── Sidekick supplemental store + plugin-owned push/unread/pins ──
         # See backends/hermes/plugin/sidekick_db.py + sidekick_routes.py.
         # When SIDEKICK_PUSH_OWNED_BY_PLUGIN=true, the proxy forwards
-        # /api/sidekick/notifications/* to /v1/push/* on us. Same flag
+        # /api/parley/notifications/* to /v1/push/* on us. Same flag
         # gates whether _safe_send_envelope fires push directly.
         from . import sidekick_db as _sdb  # noqa: WPS433 (local import keeps test rigs unaffected)
         from . import sidekick_routes as _sroutes  # noqa: WPS433
@@ -661,28 +661,34 @@ class SidekickAdapter(BasePlatformAdapter):
         # attachment button when the primary is text-only — without
         # this advertisement the button would stay disabled even though
         # the upload would actually work end-to-end.
-        self._app.router.add_get(
-            "/v1/sidekick/auxiliary-models",
-            lambda r: _route_settings.handle_auxiliary_models(self, r),
-        )
+        # Route note (Parley rename 2026-08): /v1/parley/* is primary;
+        # /v1/parley/* stays registered as a deprecated alias so a
+        # mid-deploy proxy/plugin restart-order mismatch can't 404.
+        for _aux_path in ("/v1/parley/auxiliary-models", "/v1/sidekick/auxiliary-models"):
+            self._app.router.add_get(
+                _aux_path,
+                lambda r: _route_settings.handle_auxiliary_models(self, r),
+            )
         # Model capability lookup — ground truth from hermes's models.dev
         # registry. Replaces the previous OpenRouter-catalog fetch +
         # regex-fallback in sidekick. Same data hermes consults at request
         # time for native-vs-text image routing.
-        self._app.router.add_get(
-            "/v1/sidekick/model-capabilities",
-            lambda r: _route_settings.handle_model_capabilities(self, r),
-        )
+        for _caps_path in ("/v1/parley/model-capabilities", "/v1/sidekick/model-capabilities"):
+            self._app.router.add_get(
+                _caps_path,
+                lambda r: _route_settings.handle_model_capabilities(self, r),
+            )
         # Large-file staging (task #158). Raw-bytes upload → upload_id;
         # the PWA references the id in its next turn's `attachments`
         # entry instead of inlining a base64 `content`. See
         # sidekick_route_upload + the upload_id branch in
         # _materialize_attachments.
         from . import sidekick_route_upload as _route_upload
-        self._app.router.add_post(
-            "/v1/sidekick/upload",
-            lambda r: _route_upload.handle_upload(self, r),
-        )
+        for _upload_path in ("/v1/parley/upload", "/v1/sidekick/upload"):
+            self._app.router.add_post(
+                _upload_path,
+                lambda r: _route_upload.handle_upload(self, r),
+            )
         # Cross-conversation FTS5 search. Reads against the same
         # messages_fts virtual table hermes_state.SessionDB maintains
         # — the index is hermes-owned, we just SELECT against it.
@@ -1110,7 +1116,7 @@ class SidekickAdapter(BasePlatformAdapter):
         ``{type, mimeType, fileName, content}`` where ``content`` is a
         full ``data:<mime>;base64,<payload>`` string — OR, for large
         files (task #158), as ``{type, mimeType, fileName, uploadId}``
-        referencing a file already staged via ``/v1/sidekick/upload``
+        referencing a file already staged via ``/v1/parley/upload``
         (handled by the ``uploadId`` branch below). Hermes wants
         on-disk paths in ``MessageEvent.media_urls`` (telegram adapter
         models this — it downloads photos to a cache dir, then sets

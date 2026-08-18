@@ -70,7 +70,7 @@ export default async function run({ page, log }) {
   // route this path (it's a proxy concern), so we fulfill 200 ourselves
   // and snapshot the request body for assertion.
   const reports = /** @type {{ state: string; chatId: string }[]} */ ([]);
-  await page.route('**/api/sidekick/notifications/visibility', async (route) => {
+  await page.route('**/api/parley/notifications/visibility', async (route) => {
     try {
       const body = JSON.parse(route.request().postData() || '{}');
       const state = typeof body?.state === 'string' ? body.state : '';

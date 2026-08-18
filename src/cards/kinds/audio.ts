@@ -12,7 +12,7 @@
 
 import { apiUrl } from '../../apiBase.ts';
 
-/** Site-relative urls (the /api/sidekick/media/<id> lane) must resolve
+/** Site-relative urls (the /api/parley/media/<id> lane) must resolve
  *  against the API origin, not the page origin — under CAP the page
  *  origin is capacitor://localhost and a relative src would 404 into
  *  the local bundle. Absolute urls pass through untouched. */

@@ -76,7 +76,7 @@ export default async function run({ page, log, fail, url, mock }) {
   // can hand-push turn 2's reply onto that conversation. Intercept then
   // fall back to the mock's POST handler (most-recent route wins; fallback
   // defers to the earlier-registered mock route).
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.route('**/api/parley/messages', async (route) => {
     if (route.request().method() === 'POST') {
       try {
         const b = JSON.parse(route.request().postData() || '{}');

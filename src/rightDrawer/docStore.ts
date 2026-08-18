@@ -38,7 +38,7 @@ export interface DocPayload {
    *  record glyph — ring+dot — instead of emoji in the title). */
   source?: string;
   /** For capture docs: the capture id — the reader's player strip
-   *  streams /api/sidekick/captures/{captureId}/audio. */
+   *  streams /api/parley/captures/{captureId}/audio. */
   captureId?: string;
 }
 

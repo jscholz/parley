@@ -1,5 +1,5 @@
 /**
- * Capture playback endpoint — GET /api/sidekick/captures/{id}/audio
+ * Capture playback endpoint — GET /api/parley/captures/{id}/audio
  * (capture plan §3.6: the player strip's backend, and the artifact
  * "Download audio" serves).
  *
@@ -58,7 +58,7 @@ async function ensurePlaybackFile(id: string): Promise<string> {
   return p;
 }
 
-/** GET /api/sidekick/captures/{id}/audio — full body or 206 partial. */
+/** GET /api/parley/captures/{id}/audio — full body or 206 partial. */
 export async function handleCaptureAudio(
   req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {

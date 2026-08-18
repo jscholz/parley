@@ -5,7 +5,7 @@
  * auto-titler and a manual PATCH rename write the same sessions.title
  * column — the known shadowing backlog item). But every MANUAL rename
  * from any sidekick client flows through this proxy's
- * `PATCH /api/sidekick/sessions/<id>` — so the proxy itself is the
+ * `PATCH /api/parley/sessions/<id>` — so the proxy itself is the
  * cheapest place to remember "the user named this chat". The meeting
  * titling pipeline consults this marker and never overwrites a chat
  * the user has deliberately named.

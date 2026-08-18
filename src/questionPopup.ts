@@ -8,7 +8,7 @@
  *     question, choices[], allow_free_text, expires_at|null }
  *
  * Answer paths by kind:
- *   - clarify  → POST /api/sidekick/questions/{id} {response} — resolves
+ *   - clarify  → POST /api/parley/questions/{id} {response} — resolves
  *     the blocking tools.clarify_gateway entry the agent thread waits on.
  *     Typing in the chat ALSO answers it (gateway text-intercept), so a
  *     dismissed pop-up isn't a dead end — the hint line says so.
@@ -67,7 +67,7 @@ function fmtRemaining(ms: number): string {
 
 async function answerClarify(q: AgentQuestion, response: string): Promise<void> {
   try {
-    const r = await fetch(apiUrl(`/api/sidekick/questions/${encodeURIComponent(q.question_id)}`), {
+    const r = await fetch(apiUrl(`/api/parley/questions/${encodeURIComponent(q.question_id)}`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ response }),

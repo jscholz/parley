@@ -26,6 +26,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
 import { resolveConfigPath } from './proxy/configPath.mjs';
+import { rewriteLegacyApiPath } from './proxy/legacyPaths.mjs';
 import * as sidekick from './proxy/sidekick/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/sidekick/setup.ts';
 import {
@@ -137,7 +138,7 @@ function createHttpServer(handler: http.RequestListener): http.Server | https.Se
 }
 
 // Mutable: the first-run setup wizard can supply the key live
-// (POST /api/sidekick/setup) — TTS starts working without a restart.
+// (POST /api/parley/setup) — TTS starts working without a restart.
 let DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY || '';
 if (!DEEPGRAM_KEY) {
   console.warn('DEEPGRAM_API_KEY not set — voice STT/TTS and /transcribe disabled');
@@ -805,7 +806,7 @@ async function handleKeytermsGet(_req, res) {
   res.end(body);
 }
 
-/** GET /api/sidekick/config — flat snapshot of every PWA setting
+/** GET /api/parley/config — flat snapshot of every PWA setting
  *  with its current value (yaml override or built-in default). */
 function handleSidekickConfigGet(_req, res) {
   const snapshot = readAllFrontend(DEPLOY_CFG);
@@ -813,7 +814,7 @@ function handleSidekickConfigGet(_req, res) {
   res.end(JSON.stringify({ settings: snapshot }));
 }
 
-/** POST /api/sidekick/config/<key> — write one setting. Body is
+/** POST /api/parley/config/<key> — write one setting. Body is
  *  `{value: <new>}`. Persists to sidekick.config.yaml under
  *  `frontend.<category>.<key>:`. Returns the updated value. */
 async function handleSidekickConfigSet(req, res, key: string) {
@@ -1002,7 +1003,7 @@ function handleConfig(_req, res) {
 
 // Sidekick audio bridge — standalone Python aiortc service for WebRTC
 // signaling + STT + TTS. The proxy forwards /api/rtc/* to the bridge;
-// the bridge POSTs back to /api/sidekick/messages with {chat_id, text}
+// the bridge POSTs back to /api/parley/messages with {chat_id, text}
 // for agent dispatch (single sidekick→agent gateway). See
 // ~/code/sidekick/audio-bridge/.
 const AUDIO_BRIDGE_UPSTREAM = cfgVal(
@@ -1018,7 +1019,7 @@ const HOME = os.homedir();
 // contract (HTTP+SSE — see docs/ABSTRACT_AGENT_PROTOCOL.md).
 // backends/hermes/plugin is the typical upstream; the stub agent under
 // `agent/` is a hermes-free reference. With no token configured,
-// `/api/sidekick/*` endpoints return 503.
+// `/api/parley/*` endpoints return 503.
 // Legacy config key `backend.sidekick_platform.*` still present in
 // deployed yaml files is honored as a fallback (new key wins).
 const PARLEY_UPSTREAM_URL = cfgVal('PARLEY_PLATFORM_URL',
@@ -1090,7 +1091,7 @@ initSetup({
 // ── WebRTC voice transport proxy: /api/rtc/* → audio-bridge /v1/rtc/* ────────
 // The audio bridge (~/code/sidekick/audio-bridge/) is a standalone Python
 // aiortc service on :8643. The bridge owns WebRTC signaling, STT, and
-// TTS; it POSTs back through this proxy at /api/sidekick/messages with
+// TTS; it POSTs back through this proxy at /api/parley/messages with
 // {chat_id, text} for agent dispatch (single sidekick→agent gateway).
 //
 // Body sizes are tiny (an SDP offer is <4KB, ICE candidates <1KB) so no
@@ -1167,6 +1168,10 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
 }
 
 const requestHandler: http.RequestListener = async (req, res) => {
+  // Deprecated alias (Parley rename): installed PWA/CAP clients still
+  // call /api/parley/* until rebuilt — same handlers serve both
+  // prefixes. See proxy/legacyPaths.mjs for the removal condition.
+  if (req.url) req.url = rewriteLegacyApiPath(req.url);
   applyCors(req, res);
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
@@ -1202,34 +1207,34 @@ const requestHandler: http.RequestListener = async (req, res) => {
   // on character class to match the IDB-minted UUIDs we expect.
   if (req.url) {
     // First-run setup wizard surface (see proxy/sidekick/setup.ts).
-    if (req.method === 'GET' && req.url === '/api/sidekick/setup/status') {
+    if (req.method === 'GET' && req.url === '/api/parley/setup/status') {
       return handleSetupStatus(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/setup') {
+    if (req.method === 'POST' && req.url === '/api/parley/setup') {
       return handleSetupApply(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/messages') {
+    if (req.method === 'POST' && req.url === '/api/parley/messages') {
       return sidekick.handleSidekickMessage(req, res);
     }
     // Large-file staging (task #158) — raw-bytes upload streamed to the
     // upstream plugin; returns { upload_id } the PWA references on its
     // next message. Match before the static fallback.
-    if (req.method === 'POST' && req.url === '/api/sidekick/upload') {
+    if (req.method === 'POST' && req.url === '/api/parley/upload') {
       return sidekick.handleSidekickUpload(req, res);
     }
     // Meeting capture — proxy-owned public API (capture.ts; design doc
     // §3.3). Order matters: /control and the id-scoped subroutes match
     // before the bare /captures collection routes.
-    if (req.method === 'POST' && req.url === '/api/sidekick/captures/control') {
+    if (req.method === 'POST' && req.url === '/api/parley/captures/control') {
       return sidekick.handleCaptureControl(req, res);
     }
     const capSegment = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/segments\/(\d+)$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/segments\/(\d+)$/);
     if (capSegment) {
       return sidekick.handleCaptureSegment(req, res, capSegment[1], capSegment[2]);
     }
     const capStop = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/stop$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/stop$/);
     if (capStop) {
       return sidekick.handleCaptureStop(req, res, capStop[1]);
     }
@@ -1264,12 +1269,12 @@ const requestHandler: http.RequestListener = async (req, res) => {
       return sidekick.handleCapturePurge(req, res, capPurgeAll[1]);
     }
     const capMark = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/marks$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/marks$/);
     if (capMark) {
       return sidekick.handleCaptureMark(req, res, capMark[1]);
     }
     const capAudio = req.method === 'GET'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/audio(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/audio(?:\?.*)?$/);
     if (capAudio) {
       return sidekick.handleCaptureAudio(req, res, capAudio[1]);
     }
@@ -1278,115 +1283,115 @@ const requestHandler: http.RequestListener = async (req, res) => {
     // as markdown, and the client renders a video/image card. Backend-
     // agnostic by design — hermes, claude-code and openclaw agents all
     // hit the same two routes.
-    if (req.method === 'POST' && req.url === '/api/sidekick/media/register') {
+    if (req.method === 'POST' && req.url === '/api/parley/media/register') {
       return sidekick.handleMediaRegister(req, res);
     }
     const mediaGet = req.method === 'GET'
-      && req.url.match(/^\/api\/sidekick\/media\/([a-f0-9]+)(?:\.[A-Za-z0-9]+)?(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/media\/([a-f0-9]+)(?:\.[A-Za-z0-9]+)?(?:\?.*)?$/);
     if (mediaGet) {
       return sidekick.handleMediaGet(req, res, mediaGet[1]);
     }
     const capPurge = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/purge-audio$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/purge-audio$/);
     if (capPurge) {
       return sidekick.handleCapturePurgeAudio(req, res, capPurge[1]);
     }
     const capRediarize = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/diarize$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/diarize$/);
     if (capRediarize) {
       return sidekick.handleCaptureRetroDiarize(req, res, capRediarize[1]);
     }
     const capPatch = req.method === 'PATCH'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capPatch) {
       return sidekick.handleCapturePatch(req, res, capPatch[1]);
     }
     const capDelete = req.method === 'DELETE'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capDelete) {
       return sidekick.handleCaptureDelete(req, res, capDelete[1]);
     }
     const capGet = req.method === 'GET'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/?]+)$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capGet) {
       return sidekick.handleCaptureGet(req, res, capGet[1]);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/captures(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/captures(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleCaptureList(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/captures') {
+    if (req.method === 'POST' && req.url === '/api/parley/captures') {
       return sidekick.handleCaptureCreate(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/stream(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/stream(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickStream(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/sessions(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/sessions(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickSessionsList(req, res);
     }
     // Per-chat_id transcript history. Match BEFORE the generic
     // /sessions/<id> DELETE pattern so the more-specific subroute wins.
     const sidekickHistory = req.method === 'GET'
-      && req.url.match(/^\/api\/sidekick\/sessions\/([^/?]+)\/messages(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)\/messages(?:\?.*)?$/);
     if (sidekickHistory) {
       return sidekick.handleSidekickSessionMessages(req, res, decodeURIComponent(sidekickHistory[1]));
     }
     const sidekickDelete = req.method === 'DELETE'
-      && req.url.match(/^\/api\/sidekick\/sessions\/([^/?]+)(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)(?:\?.*)?$/);
     if (sidekickDelete) {
       return sidekick.handleSidekickSessionDelete(req, res, decodeURIComponent(sidekickDelete[1]));
     }
     const sidekickRename = req.method === 'PATCH'
-      && req.url.match(/^\/api\/sidekick\/sessions\/([^/?]+)(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)(?:\?.*)?$/);
     if (sidekickRename) {
       return sidekick.handleSidekickSessionRename(req, res, decodeURIComponent(sidekickRename[1]));
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/settings\/schema(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/settings\/schema(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickSettingsSchema(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/commands(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/commands(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickCommands(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/model-capabilities(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/model-capabilities(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickModelCapabilities(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/auxiliary-models(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/auxiliary-models(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickAuxiliaryModels(req, res);
     }
-    if (req.method === 'GET' && /^\/api\/sidekick\/search(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/search(?:\?.*)?$/.test(req.url)) {
       return sidekick.handleSidekickSearch(req, res);
     }
     // Web Push (Phase 3) — VAPID public-key probe + subscribe /
     // unsubscribe / test. Routes implemented in
     // proxy/sidekick/notifications/routes.ts; the 503-on-unconfigured
     // gate lives inside each handler so this dispatch stays uniform.
-    if (req.method === 'GET' && req.url === '/api/sidekick/notifications/vapid-public-key') {
+    if (req.method === 'GET' && req.url === '/api/parley/notifications/vapid-public-key') {
       return sidekick.handleSidekickVapidPublicKey(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/subscribe') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/subscribe') {
       return sidekick.handleSidekickSubscribe(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/unsubscribe') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/unsubscribe') {
       return sidekick.handleSidekickUnsubscribe(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/test') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/test') {
       return sidekick.handleSidekickTest(req, res);
     }
-    if (req.method === 'GET' && req.url === '/api/sidekick/notifications/mutes') {
+    if (req.method === 'GET' && req.url === '/api/parley/notifications/mutes') {
       return sidekick.handleSidekickListMutes(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/mute') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/mute') {
       return sidekick.handleSidekickSetMute(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/visibility') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/visibility') {
       return sidekick.handleSidekickVisibility(req, res);
     }
-    if (req.method === 'GET' && req.url === '/api/sidekick/notifications/preferences') {
+    if (req.method === 'GET' && req.url === '/api/parley/notifications/preferences') {
       return sidekick.handleSidekickGetPreferences(req, res);
     }
-    if (req.method === 'POST' && req.url === '/api/sidekick/notifications/preferences') {
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/preferences') {
       return sidekick.handleSidekickSetPreferences(req, res);
     }
-    if (req.method === 'GET' && req.url && req.url.startsWith('/api/sidekick/notifications/diagnostics')) {
+    if (req.method === 'GET' && req.url && req.url.startsWith('/api/parley/notifications/diagnostics')) {
       return sidekick.handleSidekickDiagnostics(req, res);
     }
     // ── Unread + pins (plugin-owned SSOT; proxy forwards). ───────────
@@ -1394,73 +1399,73 @@ const requestHandler: http.RequestListener = async (req, res) => {
     // delegates to the upstream plugin's /v1/unread + /v1/pins.
     {
       const delegate = await import('./proxy/sidekick/notifications/delegate.ts');
-      if (req.method === 'GET' && req.url === '/api/sidekick/notifications/unread') {
+      if (req.method === 'GET' && req.url === '/api/parley/notifications/unread') {
         return delegate.delegateUnread(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/notifications/seen') {
+      if (req.method === 'POST' && req.url === '/api/parley/notifications/seen') {
         return delegate.delegateUnreadSeen(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/notifications/mark') {
+      if (req.method === 'POST' && req.url === '/api/parley/notifications/mark') {
         return delegate.delegateUnreadMark(req, res);
       }
       // Unified elicitation: answer a blocking agent question (clarify).
       const questionAnswer = req.method === 'POST'
-        && req.url.match(/^\/api\/sidekick\/questions\/([^/?]+)(?:\?.*)?$/);
+        && req.url.match(/^\/api\/parley\/questions\/([^/?]+)(?:\?.*)?$/);
       if (questionAnswer) {
         return delegate.delegateQuestionAnswer(req, res, decodeURIComponent(questionAnswer[1]));
       }
-      if (req.method === 'GET' && req.url && /^\/api\/sidekick\/pins(?:\?.*)?$/.test(req.url)) {
+      if (req.method === 'GET' && req.url && /^\/api\/parley\/pins(?:\?.*)?$/.test(req.url)) {
         return delegate.delegatePinsList(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/pins') {
+      if (req.method === 'POST' && req.url === '/api/parley/pins') {
         return delegate.delegatePinUpsert(req, res);
       }
       const pinDelete = req.method === 'DELETE'
-        && req.url.match(/^\/api\/sidekick\/pins\/([^/]+)\/([^/?]+)(?:\?.*)?$/);
+        && req.url.match(/^\/api\/parley\/pins\/([^/]+)\/([^/?]+)(?:\?.*)?$/);
       if (pinDelete) {
         return delegate.delegatePinDelete(
           req, res, decodeURIComponent(pinDelete[1]), decodeURIComponent(pinDelete[2]),
         );
       }
-      if (req.method === 'GET' && req.url && /^\/api\/sidekick\/activity(?:\?.*)?$/.test(req.url)) {
+      if (req.method === 'GET' && req.url && /^\/api\/parley\/activity(?:\?.*)?$/.test(req.url)) {
         return delegate.delegateActivityList(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/activity') {
+      if (req.method === 'POST' && req.url === '/api/parley/activity') {
         return delegate.delegateActivityUpsert(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/activity/resolve') {
+      if (req.method === 'POST' && req.url === '/api/parley/activity/resolve') {
         return delegate.delegateActivityResolve(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/activity/seen') {
+      if (req.method === 'POST' && req.url === '/api/parley/activity/seen') {
         return delegate.delegateActivitySeen(req, res);
       }
-      if (req.method === 'POST' && req.url === '/api/sidekick/activity/clear') {
+      if (req.method === 'POST' && req.url === '/api/parley/activity/clear') {
         return delegate.delegateActivityClear(req, res);
       }
       const activityDelete = req.method === 'DELETE'
-        && req.url.match(/^\/api\/sidekick\/activity\/([^/?]+)(?:\?.*)?$/);
+        && req.url.match(/^\/api\/parley\/activity\/([^/?]+)(?:\?.*)?$/);
       if (activityDelete) {
         return delegate.delegateActivityDelete(req, res, decodeURIComponent(activityDelete[1]));
       }
       // Synced user settings (sidekick.db user_settings): STT key-terms
       // today, more as the YAML→DB migration proceeds. Distinct from
-      // /api/sidekick/config (YAML) and /api/sidekick/settings (agent).
-      if (req.method === 'GET' && /^\/api\/sidekick\/prefs(?:\?.*)?$/.test(req.url)) {
+      // /api/parley/config (YAML) and /api/parley/settings (agent).
+      if (req.method === 'GET' && /^\/api\/parley\/prefs(?:\?.*)?$/.test(req.url)) {
         return delegate.delegateUserSettingsList(req, res);
       }
       const prefGet = req.method === 'GET'
-        && req.url.match(/^\/api\/sidekick\/prefs\/([A-Za-z0-9_]+)(?:\?.*)?$/);
+        && req.url.match(/^\/api\/parley\/prefs\/([A-Za-z0-9_]+)(?:\?.*)?$/);
       if (prefGet) {
         return delegate.delegateUserSettingGet(req, res, prefGet[1]);
       }
       const prefSet = req.method === 'PUT'
-        && req.url.match(/^\/api\/sidekick\/prefs\/([A-Za-z0-9_]+)(?:\?.*)?$/);
+        && req.url.match(/^\/api\/parley\/prefs\/([A-Za-z0-9_]+)(?:\?.*)?$/);
       if (prefSet) {
         return delegate.delegateUserSettingSet(req, res, prefSet[1]);
       }
     }
     const sidekickSettingsUpdate = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/settings\/([^/?]+)(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/settings\/([^/?]+)(?:\?.*)?$/);
     if (sidekickSettingsUpdate) {
       return sidekick.handleSidekickSettingsUpdate(
         req, res, decodeURIComponent(sidekickSettingsUpdate[1]),
@@ -1468,11 +1473,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     }
     // Frontend settings store (yaml-backed PWA settings: theme,
     // hotkeys, voice phrases, etc.).
-    if (req.method === 'GET' && /^\/api\/sidekick\/config(?:\?.*)?$/.test(req.url)) {
+    if (req.method === 'GET' && /^\/api\/parley\/config(?:\?.*)?$/.test(req.url)) {
       return handleSidekickConfigGet(req, res);
     }
     const sidekickConfigSet = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/config\/([A-Za-z0-9_]+)(?:\?.*)?$/);
+      && req.url.match(/^\/api\/parley\/config\/([A-Za-z0-9_]+)(?:\?.*)?$/);
     if (sidekickConfigSet) {
       return handleSidekickConfigSet(req, res, sidekickConfigSet[1]);
     }

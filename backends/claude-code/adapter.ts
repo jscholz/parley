@@ -17,7 +17,7 @@
 //     getSessionMessages / deleteSession, not by parsing
 //     ~/.claude/projects JSONL.
 //   * approvals: canUseTool → agent_question envelope (kind:'approval',
-//     expires_at:null) → POST /api/sidekick/questions/{id} →
+//     expires_at:null) → POST /api/parley/questions/{id} →
 //     answerQuestion() resolves the parked promise → allow/deny.
 //   * display_doc: per-turn in-process MCP server (docShim.ts) pushes
 //     doc_show into the live turn stream.
@@ -261,7 +261,7 @@ export class ClaudeCodeUpstream {
   }
 
   /** Resolve one pending approval/clarify question. The wiring step
-   *  routes POST /api/sidekick/questions/{id} here for this backend.
+   *  routes POST /api/parley/questions/{id} here for this backend.
    *  Returns false when the id is unknown/lapsed (→ 404, PWA renders
    *  the question as lapsed). */
   answerQuestion(questionId: string, response: string): boolean {

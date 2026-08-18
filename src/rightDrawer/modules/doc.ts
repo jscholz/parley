@@ -237,7 +237,7 @@ export function isLiveCaptureDoc(doc: Pick<DocState, 'title'>): boolean {
 function audioUrlFor(doc: DocState): string {
   // apiUrl, not a bare path — the CAP shell serves the app from its
   // local bundle and reaches the proxy through the configured base.
-  return apiUrl(`/api/sidekick/captures/${encodeURIComponent(doc.captureId!)}/audio`);
+  return apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}/audio`);
 }
 
 function fmtClock(sec: number): string {
@@ -354,7 +354,7 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
   purge.onclick = async () => {
     if (!window.confirm('Delete the audio for this recording? The transcript stays; playback and re-diarization will no longer be possible.')) return;
     try {
-      const res = await fetch(apiUrl(`/api/sidekick/captures/${encodeURIComponent(doc.captureId!)}/purge-audio`), { method: 'POST' });
+      const res = await fetch(apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}/purge-audio`), { method: 'POST' });
       if (res.ok) strip.remove();
     } catch { /* strip stays; user can retry */ }
   };

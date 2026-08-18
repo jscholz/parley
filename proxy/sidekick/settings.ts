@@ -2,8 +2,8 @@
 //
 // Two routes:
 //
-//   GET  /api/sidekick/settings/schema      → list of SettingDef
-//   POST /api/sidekick/settings/{id}        → update one setting
+//   GET  /api/parley/settings/schema      → list of SettingDef
+//   POST /api/parley/settings/{id}        → update one setting
 //
 // Both forward to the upstream's /v1/settings/* contract documented
 // in docs/ABSTRACT_AGENT_PROTOCOL.md "Optional settings extension".
@@ -23,7 +23,7 @@ import { UpstreamHTTPError } from './upstream.ts';
  *  charset for agents to follow. */
 const SETTING_ID_RE = /^[a-z0-9_]{1,64}$/;
 
-/** GET /api/sidekick/settings/schema */
+/** GET /api/parley/settings/schema */
 export async function handleSidekickSettingsSchema(_req, res) {
   const upstream = getUpstream();
   if (!upstream) {
@@ -55,7 +55,7 @@ export async function handleSidekickSettingsSchema(_req, res) {
   res.end(JSON.stringify({ object: 'list', data: schema }));
 }
 
-/** POST /api/sidekick/settings/{id} */
+/** POST /api/parley/settings/{id} */
 export async function handleSidekickSettingsUpdate(req, res, id: string) {
   const upstream = getUpstream();
   if (!upstream) {

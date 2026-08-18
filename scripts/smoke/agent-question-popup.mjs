@@ -1,7 +1,7 @@
 // Unified elicitation protocol (2026-07-13, task: hermes 0.18 clarify
 // gap): an `agent_question` envelope renders a pop-up with choice
 // buttons + a countdown tied to expires_at; tapping a choice POSTs the
-// answer to /api/sidekick/questions/{id}; an already-expired question
+// answer to /api/parley/questions/{id}; an already-expired question
 // never pops (ring replays of dead prompts); expiry flips the pop-up
 // to a visible EXPIRED state instead of silently vanishing.
 //
@@ -38,7 +38,7 @@ export default async function run({ page, log, mock }) {
 
   // Capture answers the PWA POSTs.
   const answers = [];
-  await page.route('**/api/sidekick/questions/**', async (route) => {
+  await page.route('**/api/parley/questions/**', async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     const url = route.request().url();
     let body = {};

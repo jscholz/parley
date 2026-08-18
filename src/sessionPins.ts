@@ -16,7 +16,7 @@
 //
 // In-memory `order` array is the sync source of truth for renders
 // (sessionDrawer's per-row isPinned() check can't await). Mutations
-// write through to settings.set() (PUT /api/sidekick/prefs) and emit a
+// write through to settings.set() (PUT /api/parley/prefs) and emit a
 // `sidekick:session-pins-changed` event so the drawer repaints.
 
 import * as settings from './settings.ts';

@@ -50,8 +50,8 @@ export default async function run({ page, log }) {
   // 503's. Page-level routes take precedence over context-level, so
   // unroute the existing handler first (mock-backend installs its
   // own page.route for the same pattern).
-  await page.unroute('**/api/sidekick/messages');
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.unroute('**/api/parley/messages');
+  await page.route('**/api/parley/messages', async (route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',

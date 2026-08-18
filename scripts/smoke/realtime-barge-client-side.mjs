@@ -122,7 +122,7 @@ export default async function run({ page, log, mock }) {
   await page.route('**/api/rtc/close', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
-  await page.route('**/api/sidekick/config/*', async (route) => {
+  await page.route('**/api/parley/config/*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 

@@ -94,7 +94,7 @@ test('sessions list — gateway endpoint surfaces multi-source rows', async () =
       },
     ]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions?limit=10`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions?limit=10`);
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.sessions.length, 2);
@@ -134,7 +134,7 @@ test('sessions list — forwards turn_count + tool_count split through to PWA', 
         },
       },
     ]);
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions?limit=10`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions?limit=10`);
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.sessions.length, 1);
@@ -164,7 +164,7 @@ test('sessions list — omits turn_count/tool_count when plugin does not emit th
         },
       },
     ]);
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions?limit=10`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions?limit=10`);
     assert.equal(r.status, 200);
     const body = await r.json();
     const s = body.sessions[0];
@@ -192,7 +192,7 @@ test('sessions list — falls back to channel endpoint on gateway 404', async ()
       },
     ]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions`);
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.sessions.length, 1);
@@ -214,7 +214,7 @@ test('history — proxy forwards items with tool_name preserved', async () => {
       { id: 3, role: 'assistant', content: 'no results', created_at: 1700000010 },
     ]);
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions/chat-with-tools/messages`);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions/chat-with-tools/messages`);
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.messages.length, 3);
@@ -232,7 +232,7 @@ test('history — proxy forwards items with tool_name preserved', async () => {
 test('delete — proxy cascades through to upstream', async () => {
   const rig = await startRig({ mode: 'gateway' });
   try {
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/sessions/doomed-chat`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/sessions/doomed-chat`, {
       method: 'DELETE',
     });
     assert.equal(r.status, 200);
@@ -261,7 +261,7 @@ test('messages — attachments forwarded on /v1/responses request body', async (
         content: 'data:image/png;base64,iVBORw0KGgo=',
       },
     ];
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/messages`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -297,12 +297,12 @@ test('SSE multiplexer — POST /messages dispatches via /v1/responses and fans e
     // the in-turn envelopes. The replay ring would catch a small
     // delay, but tests should be deterministic.
     const ac = new AbortController();
-    const sse = fetch(`${rig.proxyUrl}/api/sidekick/stream`, { signal: ac.signal });
+    const sse = fetch(`${rig.proxyUrl}/api/parley/stream`, { signal: ac.signal });
     // Give the subscription a tick to attach.
     await new Promise<void>((r) => setTimeout(r, 50));
 
     // POST a message turn.
-    const post = await fetch(`${rig.proxyUrl}/api/sidekick/messages`, {
+    const post = await fetch(`${rig.proxyUrl}/api/parley/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: 'test-chat', text: 'hi' }),
@@ -369,8 +369,8 @@ test('SSE — chat_id filter blocks cross-chat envelopes', async () => {
   const acA = new AbortController();
   const acB = new AbortController();
   try {
-    const rA = await fetch(`${rig.proxyUrl}/api/sidekick/stream?chat_id=chat-A`, { signal: acA.signal });
-    const rB = await fetch(`${rig.proxyUrl}/api/sidekick/stream?chat_id=chat-B`, { signal: acB.signal });
+    const rA = await fetch(`${rig.proxyUrl}/api/parley/stream?chat_id=chat-A`, { signal: acA.signal });
+    const rB = await fetch(`${rig.proxyUrl}/api/parley/stream?chat_id=chat-B`, { signal: acB.signal });
     assert.equal(rA.status, 200);
     assert.equal(rB.status, 200);
     const readerA = rA.body!.getReader();
@@ -460,7 +460,7 @@ test('SSE — live_only=1 skips ring replay, only forwards live envelopes', asyn
       const ac = new AbortController();
       const out: any[] = [];
       const r = await fetch(
-        `${rig.proxyUrl}/api/sidekick/stream?chat_id=c&live_only=1`,
+        `${rig.proxyUrl}/api/parley/stream?chat_id=c&live_only=1`,
         { signal: ac.signal },
       );
       assert.equal(r.status, 200);
@@ -521,7 +521,7 @@ test('SSE — last_event_id query param resumes from the ring (manual reconnect)
     const phase1 = await (async () => {
       const ac = new AbortController();
       const out: string[] = [];
-      const r = await fetch(`${rig.proxyUrl}/api/sidekick/stream`, { signal: ac.signal });
+      const r = await fetch(`${rig.proxyUrl}/api/parley/stream`, { signal: ac.signal });
       const reader = r.body!.getReader();
       const dec = new TextDecoder();
       let buf = '';
@@ -561,7 +561,7 @@ test('SSE — last_event_id query param resumes from the ring (manual reconnect)
     rig.fakeAgent.pushOutOfTurnEvent({ type: 'notification', chat_id: 'c', content: 'three' });
     await new Promise<void>((rs) => setTimeout(rs, 100));
     const replayed = await collectEnvelopesFor(
-      `${rig.proxyUrl}/api/sidekick/stream?last_event_id=${cursor}`, 400,
+      `${rig.proxyUrl}/api/parley/stream?last_event_id=${cursor}`, 400,
     );
     const contents = replayed.map((e) => e.envelope.content);
     assert.ok(!contents.includes('one'),
@@ -587,7 +587,7 @@ test('turn failure — upstream EOF before terminal emits an addressed error env
 
     const ac = new AbortController();
     const stream = await fetch(
-      `${rig.proxyUrl}/api/sidekick/stream?chat_id=restart-failure`,
+      `${rig.proxyUrl}/api/parley/stream?chat_id=restart-failure`,
       { signal: ac.signal },
     );
     assert.equal(stream.status, 200);
@@ -623,7 +623,7 @@ test('turn failure — upstream EOF before terminal emits an addressed error env
       }
     })();
 
-    const response = await fetch(`${rig.proxyUrl}/api/sidekick/messages`, {
+    const response = await fetch(`${rig.proxyUrl}/api/parley/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -646,7 +646,7 @@ test('turn failure — upstream EOF before terminal emits an addressed error env
   }
 });
 
-test('user_message — broadcast envelope reaches /api/sidekick/stream subscribers', async () => {
+test('user_message — broadcast envelope reaches /api/parley/stream subscribers', async () => {
   // Cross-device user-message asymmetry fix: when the upstream
   // emits a user_message envelope (out-of-turn, before agent
   // dispatch), the proxy must fan it out on the persistent SSE
@@ -656,7 +656,7 @@ test('user_message — broadcast envelope reaches /api/sidekick/stream subscribe
   try {
     const ac = new AbortController();
     const r = await fetch(
-      `${rig.proxyUrl}/api/sidekick/stream?chat_id=cross-dev`,
+      `${rig.proxyUrl}/api/parley/stream?chat_id=cross-dev`,
       { signal: ac.signal },
     );
     assert.equal(r.status, 200);
@@ -711,7 +711,7 @@ test('user_message — broadcast envelope reaches /api/sidekick/stream subscribe
   }
 });
 
-test('user_message — POST /api/sidekick/messages forwards user_message_id to upstream', async () => {
+test('user_message — POST /api/parley/messages forwards user_message_id to upstream', async () => {
   // The PWA pre-mints the user-message id to use as the dedup key
   // for its optimistic bubble vs. the upstream's broadcast. The
   // proxy must propagate it verbatim into the /v1/responses request
@@ -745,7 +745,7 @@ test('user_message — POST /api/sidekick/messages forwards user_message_id to u
       };
     }
 
-    const r = await fetch(`${rig.proxyUrl}/api/sidekick/messages`, {
+    const r = await fetch(`${rig.proxyUrl}/api/parley/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({

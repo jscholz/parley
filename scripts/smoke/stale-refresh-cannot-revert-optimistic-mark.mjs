@@ -67,7 +67,7 @@ export default async function run({ page, log, mock }) {
   // Kick a refresh the way a foreground/server envelope would and wait
   // for its GET to actually leave (1500ms debounce).
   const staleGet = page.waitForRequest(
-    (req) => /\/api\/sidekick\/notifications\/unread/.test(req.url()) && req.method() === 'GET',
+    (req) => /\/api\/parley\/notifications\/unread/.test(req.url()) && req.method() === 'GET',
     { timeout: 8_000 },
   );
   await page.evaluate(() => {

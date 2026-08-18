@@ -749,7 +749,7 @@ async function purgeCaptureAudioLocked(id: string): Promise<CaptureManifest> {
   return m;
 }
 
-/** POST /api/sidekick/captures/{id}/purge-audio */
+/** POST /api/parley/captures/{id}/purge-audio */
 export async function handleCapturePurgeAudio(
   _req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
@@ -994,7 +994,7 @@ function actorFromReq(req: IncomingMessage, reason?: string): CaptureActor {
 // generous ceiling that still stops a runaway client.
 const MAX_SEGMENT_BYTES = 32 * 1024 * 1024;
 
-/** POST /api/sidekick/captures — start. Body {title?, linked_chat?, diarize?}.
+/** POST /api/parley/captures — start. Body {title?, linked_chat?, diarize?}.
  *  linked_chat: "new" mints a fresh session id (the PWA's chats are
  *  lazily created server-side on first message, so minting = issuing
  *  an id in the same `sidekick:<uuid>` shape the composer's new-chat
@@ -1020,7 +1020,7 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/activate — the client proved a
+/** POST /api/parley/captures/{id}/activate — the client proved a
  *  running recorder (mic acquired, MediaRecorder.start() succeeded).
  *  pending→recording, once; fires the "Recording started" hook. */
 export async function handleCaptureActivate(
@@ -1031,7 +1031,7 @@ export async function handleCaptureActivate(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/abort-start — body {reason}.
+/** POST /api/parley/captures/{id}/abort-start — body {reason}.
  *  Startup failed before a recorder ran: fail the pending capture IN
  *  PLACE. Never deletes; never touches an activated capture. */
 export async function handleCaptureAbortStart(
@@ -1044,7 +1044,7 @@ export async function handleCaptureAbortStart(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/discard — body {reason?}. Soft
+/** POST /api/parley/captures/{id}/discard — body {reason?}. Soft
  *  delete to Recently Deleted; recoverable via /restore. */
 export async function handleCaptureDiscard(
   req: IncomingMessage, res: ServerResponse, id: string,
@@ -1056,7 +1056,7 @@ export async function handleCaptureDiscard(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/restore — undo a discard. */
+/** POST /api/parley/captures/{id}/restore — undo a discard. */
 export async function handleCaptureRestore(
   req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
@@ -1065,7 +1065,7 @@ export async function handleCaptureRestore(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/purge — deliberate irreversible
+/** POST /api/parley/captures/{id}/purge — deliberate irreversible
  *  deletion of a capture already in Recently Deleted. Management-UI
  *  verb; 409 for anything not discarded. */
 export async function handleCapturePurge(
@@ -1079,7 +1079,7 @@ export async function handleCapturePurge(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/segments/{seq} — raw bytes.
+/** POST /api/parley/captures/{id}/segments/{seq} — raw bytes.
  *  Headers: content-type (segment mime), x-sidekick-t0-ms,
  *  x-sidekick-sha256 (optional integrity check). */
 export async function handleCaptureSegment(
@@ -1098,7 +1098,7 @@ export async function handleCaptureSegment(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/stop */
+/** POST /api/parley/captures/{id}/stop */
 export async function handleCaptureStop(
   req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
@@ -1106,7 +1106,7 @@ export async function handleCaptureStop(
   catch (err) { sendError(res, err); }
 }
 
-/** PATCH /api/sidekick/captures/{id} — rename / re-link / diarize
+/** PATCH /api/parley/captures/{id} — rename / re-link / diarize
  *  toggle (the annotate-later sheet, §3.4). */
 export async function handleCapturePatch(
   req: IncomingMessage, res: ServerResponse, id: string,
@@ -1123,7 +1123,7 @@ export async function handleCapturePatch(
   } catch (err) { sendError(res, err); }
 }
 
-/** DELETE /api/sidekick/captures/{id} — legacy hard delete, now guarded
+/** DELETE /api/parley/captures/{id} — legacy hard delete, now guarded
  *  (postmortem P0 #2): 409 for live/discarded/segment-bearing captures;
  *  only a terminal zero-segment husk is removable here. Real deletion
  *  is the two-step /discard → /purge lane. */
@@ -1136,7 +1136,7 @@ export async function handleCaptureDelete(
   } catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/{id}/marks — {t_ms} */
+/** POST /api/parley/captures/{id}/marks — {t_ms} */
 export async function handleCaptureMark(
   req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
@@ -1147,7 +1147,7 @@ export async function handleCaptureMark(
   } catch (err) { sendError(res, err); }
 }
 
-/** GET /api/sidekick/captures[?include=discarded] — default view hides
+/** GET /api/parley/captures[?include=discarded] — default view hides
  *  Recently Deleted; the management surface opts in. */
 export async function handleCaptureList(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
@@ -1156,7 +1156,7 @@ export async function handleCaptureList(req: IncomingMessage, res: ServerRespons
   } catch (err) { sendError(res, err); }
 }
 
-/** GET /api/sidekick/captures/{id} */
+/** GET /api/parley/captures/{id} */
 export async function handleCaptureGet(
   _req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
@@ -1164,7 +1164,7 @@ export async function handleCaptureGet(
   catch (err) { sendError(res, err); }
 }
 
-/** POST /api/sidekick/captures/control — {action: 'start'|'stop', ...}.
+/** POST /api/parley/captures/control — {action: 'start'|'stop', ...}.
  *  External-trigger control plane (§3.3): broadcasts over the fanout;
  *  whichever device's PWA is foregrounded picks it up and drives its
  *  recorder. API clients that own their own mic don't need this —

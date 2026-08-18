@@ -2,7 +2,7 @@
 // in the backend plugin's supplemental DB (see
 // backends/openclaw/src/push-*.js). The proxy stops
 // owning the JSON files + web-push send; it just forwards the PWA's
-// /api/sidekick/notifications/* calls to upstream /v1/push/* and skips
+// /api/parley/notifications/* calls to upstream /v1/push/* and skips
 // local dispatch in stream.ts.
 //
 // Hermes still uses the legacy in-proxy storage until its plugin grows
@@ -127,7 +127,7 @@ async function readBody(req: http.IncomingMessage, cap = DEFAULT_BODY_CAP_BYTES)
   });
 }
 
-/** /api/sidekick/notifications/vapid-public-key → /v1/push/vapid-public-key */
+/** /api/parley/notifications/vapid-public-key → /v1/push/vapid-public-key */
 export async function delegateVapid(req: http.IncomingMessage, res: http.ServerResponse) {
   const r = await forwardRaw('/v1/push/vapid-public-key', 'GET', null);
   sendJson(res, r.status, r.body ?? {});
@@ -260,7 +260,7 @@ export async function delegateUnreadMark(req: http.IncomingMessage, res: http.Se
 
 // ── Agent questions (unified elicitation protocol, 2026-07-13) ────────
 
-/** POST /api/sidekick/questions/{id} → plugin /v1/questions/{id}.
+/** POST /api/parley/questions/{id} → plugin /v1/questions/{id}.
  *  Resolves a blocking agent question (hermes clarify). 404 from
  *  upstream = the question lapsed (answered elsewhere / expired) —
  *  the PWA renders that state rather than treating it as an error. */
@@ -294,7 +294,7 @@ export async function delegateQuestionAnswer(
 
 export async function delegatePinsList(req: http.IncomingMessage, res: http.ServerResponse) {
   try {
-    const url = req.url || '/api/sidekick/pins';
+    const url = req.url || '/api/parley/pins';
     const query = url.includes('?') ? '?' + url.split('?')[1] : '';
     const r = await forwardRaw(`/v1/pins${query}`, 'GET', null);
     sendJson(res, r.status, r.body ?? {});
@@ -327,7 +327,7 @@ export async function delegatePinDelete(
 
 export async function delegateActivityList(req: http.IncomingMessage, res: http.ServerResponse) {
   try {
-    const url = req.url || '/api/sidekick/activity';
+    const url = req.url || '/api/parley/activity';
     const query = url.includes('?') ? '?' + url.split('?')[1] : '';
     const r = await forwardRaw(`/v1/activity${query}`, 'GET', null);
     sendJson(res, r.status, r.body ?? {});
