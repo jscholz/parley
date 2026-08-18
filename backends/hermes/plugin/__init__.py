@@ -107,6 +107,7 @@ import contextlib
 import json
 import logging
 import os
+from .parley_env import env_get
 import re
 import secrets
 import socket as _socket
@@ -157,13 +158,13 @@ _CRON_RESPONSE_RE = re.compile(
 #  * 30s timeout is the hard ceiling per upload.
 #  * 100 MB file-size cap (task #158) rejects abusive uploads before we
 #    shell out; matches the client cap + the upload route ceiling.
-SIDEKICK_PDF_DPI = int(os.environ.get("SIDEKICK_PDF_DPI", "150"))
-SIDEKICK_PDF_MAX_PAGES = int(os.environ.get("SIDEKICK_PDF_MAX_PAGES", "50"))
+SIDEKICK_PDF_DPI = int(env_get("PARLEY_PDF_DPI", "150"))
+SIDEKICK_PDF_MAX_PAGES = int(env_get("PARLEY_PDF_MAX_PAGES", "50"))
 SIDEKICK_PDF_RASTERIZE_TIMEOUT_S = int(
-    os.environ.get("SIDEKICK_PDF_RASTERIZE_TIMEOUT_S", "30")
+    env_get("PARLEY_PDF_RASTERIZE_TIMEOUT_S", "30")
 )
 SIDEKICK_PDF_MAX_BYTES = int(
-    os.environ.get("SIDEKICK_PDF_MAX_BYTES", str(100 * 1024 * 1024))
+    env_get("PARLEY_PDF_MAX_BYTES", str(100 * 1024 * 1024))
 )
 
 # ── tool-event hook plumbing ──────────────────────────────────────────
@@ -364,13 +365,13 @@ class SidekickAdapter(BasePlatformAdapter):
 
         extra = config.extra or {}
         self._host: str = extra.get(
-            "host", os.getenv("SIDEKICK_PLATFORM_HOST", DEFAULT_HOST)
+            "host", env_get("PARLEY_PLATFORM_HOST", DEFAULT_HOST)
         )
         self._port: int = int(
-            extra.get("port", os.getenv("SIDEKICK_PLATFORM_PORT", str(DEFAULT_PORT)))
+            extra.get("port", env_get("PARLEY_PLATFORM_PORT", str(DEFAULT_PORT)))
         )
         self._token: str = extra.get(
-            "token", os.getenv("SIDEKICK_PLATFORM_TOKEN", "")
+            "token", env_get("PARLEY_PLATFORM_TOKEN", "")
         ).strip()
 
         # aiohttp server primitives
@@ -1701,7 +1702,7 @@ class SidekickAdapter(BasePlatformAdapter):
     def _push_owned_by_plugin() -> bool:
         """Mirrors the proxy's ``isPushOwnedByPlugin`` env check.
         When set, dispatch lives here; the proxy is just a passthrough."""
-        v = os.environ.get("SIDEKICK_PUSH_OWNED_BY_PLUGIN", "")
+        v = env_get("PARLEY_PUSH_OWNED_BY_PLUGIN", "")
         return v == "true" or v == "1"
 
     def _maybe_migrate_legacy_push_subs(self) -> None:
@@ -2852,7 +2853,7 @@ def _sidekick_env_enablement() -> Optional[Dict[str, Any]]:
     pre-migration patch installed in ``_apply_env_overrides``: token
     present → enabled, missing → adapter never instantiates.
     """
-    token = os.getenv("SIDEKICK_PLATFORM_TOKEN")
+    token = env_get("PARLEY_PLATFORM_TOKEN")
     if not token:
         return None
     return {"enabled": True, "token": token}

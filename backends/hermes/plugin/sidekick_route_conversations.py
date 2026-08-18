@@ -27,6 +27,7 @@ import contextlib
 import json
 import logging
 import os
+from .parley_env import env_get
 import sqlite3
 import time
 from typing import Tuple
@@ -80,7 +81,7 @@ SESSION_KEY_PREFIX = "agent:main:sidekick:dm:"
 # in the drawer 2s later is invisible compared to a 13s spinner.
 import threading as _threading  # noqa: WPS433
 _SUMMARIES_CACHE_TTL_S = float(
-    os.environ.get("SIDEKICK_SUMMARIES_CACHE_TTL_MS", "5000") or 5000
+    env_get("PARLEY_SUMMARIES_CACHE_TTL_MS", "5000") or 5000
 ) / 1000.0
 _summaries_cache: dict = {}  # (sources_tuple, limit) → (cached_at, result)
 _summaries_cache_lock = _threading.Lock()
@@ -979,11 +980,11 @@ def _purge_hindsight_for_session_uuids(session_uuids: list) -> None:
     isn't configured (local-only deployments without a memory store).
 
     Best-effort: hindsight unreachable is logged but not fatal."""
-    url = os.getenv("HINDSIGHT_URL", "").strip() or os.getenv("SIDEKICK_HINDSIGHT_URL", "").strip()
+    url = os.getenv("HINDSIGHT_URL", "").strip() or env_get("PARLEY_HINDSIGHT_URL", "").strip()
     if not url:
         return
-    bank = os.getenv("HINDSIGHT_BANK", "").strip() or os.getenv("SIDEKICK_HINDSIGHT_BANK", "default").strip()
-    api_key = os.getenv("HINDSIGHT_API_KEY", "").strip() or os.getenv("SIDEKICK_HINDSIGHT_API_KEY", "").strip()
+    bank = os.getenv("HINDSIGHT_BANK", "").strip() or env_get("PARLEY_HINDSIGHT_BANK", "default").strip()
+    api_key = os.getenv("HINDSIGHT_API_KEY", "").strip() or env_get("PARLEY_HINDSIGHT_API_KEY", "").strip()
     try:
         import urllib.error
         import urllib.parse

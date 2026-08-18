@@ -11,8 +11,10 @@
 // base64 `content`. That keeps the JSON message body small while big
 // files take the streamed path. See src/attachments.ts toSendPayload.
 
+import { readEnv } from '../env.mjs';
+
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || process.env.SIDEKICK_PLATFORM_TOKEN || '').trim();
+const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 export async function handleSidekickUpload(req, res) {
   const headers: Record<string, string> = {};

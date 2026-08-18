@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from .parley_env import env_get
 import secrets
 import sqlite3
 import sys as _sys
@@ -45,7 +46,7 @@ from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
 # tolerate a few seconds of staleness. We skip reconcile when it ran for
 # this chat within the window. Kept in the route (not the function) so the
 # unit tests that call reconcile_from_state_db directly are unaffected.
-_RECONCILE_THROTTLE_S = float(os.environ.get("SIDEKICK_RECONCILE_THROTTLE_S", "20") or 20)
+_RECONCILE_THROTTLE_S = float(env_get("PARLEY_RECONCILE_THROTTLE_S", "20") or 20)
 _last_reconcile_at: Dict[str, float] = {}
 # Background reconcile is fire-and-forget: the /items read is correct from
 # state.db alone (reconcile only maintains sidekick.db msg_links linkage +
@@ -62,7 +63,7 @@ _reconcile_tasks: set = set()
 
 def _items_v3_flag() -> bool:
     """SIDEKICK_ITEMS_V3 read-flip flag (Phase 3, B2 playbook)."""
-    return os.environ.get("SIDEKICK_ITEMS_V3", "").strip().lower() in (
+    return env_get("PARLEY_ITEMS_V3", "").strip().lower() in (
         "1", "true", "yes",
     )
 
@@ -76,7 +77,7 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
     # alone (msg_links provides annotations only); skipping reconcile
     # only delays msg_links linkage updates, which the periodic sweep
     # picks up.
-    if os.environ.get("SIDEKICK_RECONCILE_BG_DISABLED", "").lower() in ("1", "true", "yes"):
+    if env_get("PARLEY_RECONCILE_BG_DISABLED", "").lower() in ("1", "true", "yes"):
         return
     if chat_id in _reconcile_inflight:
         return
@@ -408,7 +409,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # toggle without a code change; default OFF to keep the loop clear.
     # When investigating, set SIDEKICK_ITEMS_TRACE=1 in the systemd
     # drop-in to re-enable the legacy verbose breadcrumbs.
-    _items_trace_on = os.environ.get("SIDEKICK_ITEMS_TRACE", "").lower() in ("1", "true", "yes")
+    _items_trace_on = env_get("PARLEY_ITEMS_TRACE", "").lower() in ("1", "true", "yes")
     if _items_trace_on:
         def _trace(event: str, extra: str = "") -> None:
             ms = int((_time.monotonic() - _t0) * 1000)
@@ -500,7 +501,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # link shim in reconcile_from_state_db Pass 1.b). Set
     # SIDEKICK_ITEMS_READ_FROM_STATE_DB=0 to fall back to the legacy v1
     # path (mirrors bodies in sidekick.db; dupes on link miss).
-    _b2_enabled = os.environ.get("SIDEKICK_ITEMS_READ_FROM_STATE_DB", "1").lower() in ("1", "true", "yes")
+    _b2_enabled = env_get("PARLEY_ITEMS_READ_FROM_STATE_DB", "1").lower() in ("1", "true", "yes")
     # Transcript v3 read flip (Phase 3, 2026-07-30): for chats holding a
     # current-SCHEMA_VERSION chat_migrations marker, serve sidekick.db
     # bodies + identity (msg_links), consulting state.db only through

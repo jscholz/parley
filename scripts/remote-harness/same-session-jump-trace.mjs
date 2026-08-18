@@ -19,7 +19,7 @@ import { chromium } from 'playwright-core';
 import os from 'node:os';
 import path from 'node:path';
 
-const URL = process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
+const URL = process.env.PARLEY_URL || process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
 const CHAT_FILTER = (process.env.CHAT || 'ae6435b5-53aa-4819-b594-d21652c89397').replace(/^sidekick:/, '');
 const DRILL_TIMEOUT = Number(process.env.DRILL_TIMEOUT || 30000);
 const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.sidekick-harness-profile');

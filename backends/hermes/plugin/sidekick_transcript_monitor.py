@@ -67,6 +67,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+from .parley_env import env_get
 import sqlite3
 import sys
 import time
@@ -88,7 +89,7 @@ logger = logging.getLogger(__name__)
 # by one grace window, while a false alarm mid-turn would cry wolf on
 # every long background job.
 MONITOR_RECENT_GRACE_S = float(
-    os.environ.get("SIDEKICK_MONITOR_GRACE_S", "300") or 300,
+    env_get("PARLEY_MONITOR_GRACE_S", "300") or 300,
 )
 
 # In-memory registry: chat_id → last sweep snapshot. Feeds

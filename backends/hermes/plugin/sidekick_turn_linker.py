@@ -67,6 +67,7 @@ import contextlib
 import json
 import logging
 import os
+from .parley_env import env_get
 import re
 import sqlite3
 import sys
@@ -132,7 +133,7 @@ def _store_compare_hwm(db, chat_id: str, value: float) -> None:
 def enabled() -> bool:
     """Env kill switch. SIDEKICK_TURN_LINKER, default '1'; '0' disables
     watermark capture, close/link, and the soak comparison entirely."""
-    return os.environ.get("SIDEKICK_TURN_LINKER", "1").strip().lower() not in (
+    return env_get("PARLEY_TURN_LINKER", "1").strip().lower() not in (
         "0", "false", "no",
     )
 
@@ -151,8 +152,7 @@ def reconcile_retired() -> bool:
     (reconcile maintains links, linker back to shadow tables only)
     WITHOUT touching ``SIDEKICK_ITEMS_V3`` serving — the v3 read never
     cares who wrote agent_row_id."""
-    return os.environ.get(
-        "SIDEKICK_RECONCILE_RETIRED", "1",
+    return env_get("PARLEY_RECONCILE_RETIRED", "1",
     ).strip().lower() not in ("0", "false", "no")
 
 

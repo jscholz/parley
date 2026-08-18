@@ -94,6 +94,7 @@ phase shipped is recorded in the ``meta`` table under
 """
 
 import os
+from .parley_env import env_get
 import sqlite3
 import threading
 from pathlib import Path
@@ -319,17 +320,18 @@ CREATE TABLE IF NOT EXISTS user_settings (
 # Field incident 2026-07: live push_prefs rows were corrupted during a
 # dev/test session running against the production instance — days of
 # silently-dropped pushes. Belt-and-braces: any process that sets
-# SIDEKICK_TEST_GUARD (the pytest conftest does, unconditionally)
+# PARLEY_TEST_GUARD (legacy SIDEKICK_TEST_GUARD honored; the pytest
+# conftest sets it unconditionally)
 # refuses to open a sidekick DB inside the real state directories.
 # Tests operate on tmp paths exclusively; a fixture or helper that
 # accidentally resolves to ~/.hermes fails LOUDLY at open, before any
 # write can land.
 
-_GUARDED_STATE_DIRS = (".hermes", ".sidekick", ".openclaw-sk-integ")
+_GUARDED_STATE_DIRS = (".hermes", ".parley", ".sidekick", ".openclaw-sk-integ")
 
 
 def _assert_not_live_db_under_test_guard(path: Path) -> None:
-    if not os.environ.get("SIDEKICK_TEST_GUARD"):
+    if not env_get("PARLEY_TEST_GUARD"):
         return
     try:
         resolved = Path(path).expanduser().resolve()
@@ -340,7 +342,7 @@ def _assert_not_live_db_under_test_guard(path: Path) -> None:
         guarded = home / name
         if resolved == guarded or guarded in resolved.parents:
             raise RuntimeError(
-                f"SIDEKICK_TEST_GUARD is set but SidekickDB path {resolved} "
+                f"PARLEY_TEST_GUARD/SIDEKICK_TEST_GUARD is set but DB path {resolved} "
                 f"resolves inside the live state dir {guarded}. Tests must "
                 "use tmp paths — refusing to open the production DB."
             )

@@ -21,6 +21,7 @@
 import { init as initStream } from './stream.ts';
 import { init as initNotifications } from './notifications/index.ts';
 import { HTTPAgentUpstream, type UpstreamAgent } from './upstream.ts';
+import { readEnv } from '../env.mjs';
 
 export { handleSidekickMessage } from './messages.ts';
 export { handleSidekickUpload } from './upload.ts';
@@ -93,7 +94,7 @@ export function init(opts: { token: string; url: string; backend?: string; claud
   // 'http' (hermes/stub over /v1). The claude-code upstream is
   // in-process (no HTTP hop) — constructed lazily via dynamic import so
   // installs that never select it don't pay the SDK load.
-  const backend = (process.env.SIDEKICK_BACKEND || opts.backend || 'http').trim().toLowerCase();
+  const backend = (readEnv('PARLEY_BACKEND') || opts.backend || 'http').trim().toLowerCase();
   if (backend === 'claude-code' || backend === 'claude_code') {
     void (async () => {
       try {

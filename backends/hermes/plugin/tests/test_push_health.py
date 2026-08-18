@@ -298,15 +298,26 @@ def test_expand_kinds_drops_unknown_kind_names():
 
 def test_guard_blocks_live_state_dirs(tmp_path, monkeypatch):
     """With the guard env set (conftest sets it for the whole suite),
-    opening a DB under ~/.hermes (or ~/.sidekick, ~/.openclaw-sk-integ)
+    opening a DB under ~/.hermes (or ~/.parley, ~/.sidekick,
+    ~/.openclaw-sk-integ)
     raises before anything touches disk. HOME is faked so the test is
     safe even if the guard were broken."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    for dirname in (".hermes", ".sidekick", ".openclaw-sk-integ"):
-        live_path = tmp_path / dirname / "sidekick.db"
-        with pytest.raises(RuntimeError, match="SIDEKICK_TEST_GUARD"):
+    for dirname in (".hermes", ".parley", ".sidekick", ".openclaw-sk-integ"):
+        live_path = tmp_path / dirname / "parley.db"
+        with pytest.raises(RuntimeError, match="TEST_GUARD"):
             SidekickDB(live_path)
         assert not live_path.parent.exists()  # raised before mkdir
+
+
+def test_guard_blocks_live_state_dirs_under_legacy_env_spelling(tmp_path, monkeypatch):
+    """The pytest command line historically sets SIDEKICK_TEST_GUARD=1;
+    the tripwire must keep honoring that spelling post-rename."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
+    monkeypatch.setenv("SIDEKICK_TEST_GUARD", "1")
+    with pytest.raises(RuntimeError, match="TEST_GUARD"):
+        SidekickDB(tmp_path / ".hermes" / "parley.db")
 
 
 def test_guard_allows_tmp_paths(tmp_path, monkeypatch):
@@ -319,6 +330,7 @@ def test_guard_disabled_without_env(tmp_path, monkeypatch):
     """Production path: no guard env → live dirs open normally (the
     gateway itself must not be blocked)."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
     monkeypatch.delenv("SIDEKICK_TEST_GUARD", raising=False)
-    db = SidekickDB(tmp_path / ".hermes" / "sidekick.db")
+    db = SidekickDB(tmp_path / ".hermes" / "parley.db")
     db.close()

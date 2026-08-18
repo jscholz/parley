@@ -60,6 +60,7 @@ import contextlib
 import json
 import logging
 import os
+from .parley_env import env_get
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -84,7 +85,7 @@ SCHEMA_VERSION = 2
 def enabled() -> bool:
     """Env kill switch. SIDEKICK_CHAT_MIGRATION, default '1'; '0'
     disables backfill, heal, and marker minting entirely."""
-    return os.environ.get("SIDEKICK_CHAT_MIGRATION", "1").strip().lower() not in (
+    return env_get("PARLEY_CHAT_MIGRATION", "1").strip().lower() not in (
         "0", "false", "no",
     )
 

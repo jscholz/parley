@@ -300,8 +300,13 @@ export class UpstreamHTTPError extends Error {
 const DEFAULT_URL = process.env.UPSTREAM_URL || 'http://127.0.0.1:8645';
 // Fall back to the same shared secret the WS path uses; this lets
 // backends/hermes/plugin auth both transports with one env var.
+// PARLEY_/SIDEKICK_ fallback matches proxy/env.mjs (this module stays
+// import-free by design, so the shim is inlined here).
 const DEFAULT_AUTH = (
-  process.env.UPSTREAM_TOKEN || process.env.SIDEKICK_PLATFORM_TOKEN || ''
+  process.env.UPSTREAM_TOKEN
+  || process.env.PARLEY_PLATFORM_TOKEN
+  || process.env.SIDEKICK_PLATFORM_TOKEN
+  || ''
 ).trim();
 
 export interface HTTPAgentUpstreamOpts {

@@ -24,6 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
+import { readEnv } from './proxy/env.mjs';
 import * as sidekick from './proxy/sidekick/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/sidekick/setup.ts';
 import {
@@ -43,12 +44,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Docker/CI where mounting a file is awkward but env injection is easy.
 // Missing file is fine; defaults + env vars cover the ground.
 //
-// SIDEKICK_CONFIG env var can point at a config path outside the repo
+// PARLEY_CONFIG env var can point at a config path outside the repo
 // (e.g. a private fork with keys and personal keyterms). Useful so the
 // public repo stays generic while deployment config lives privately.
 function resolveConfigPath(): string | null {
-  if (process.env.SIDEKICK_CONFIG && fsSync.existsSync(process.env.SIDEKICK_CONFIG)) {
-    return process.env.SIDEKICK_CONFIG;
+  const envPath = readEnv('PARLEY_CONFIG');
+  if (envPath && fsSync.existsSync(envPath)) {
+    return envPath;
   }
   for (const name of ['sidekick.config.yaml', 'config.yaml']) {
     const p = path.join(__dirname, name);
@@ -100,35 +102,41 @@ function reloadConfigIfChanged(): boolean {
     return false;
   }
 }
-/** Resolve a value by precedence: env var → config file → fallback. */
-function cfgVal<T>(envName: string, cfgPath: string, fallback: T): T {
-  const env = process.env[envName];
+/** Resolve a value by precedence: env var → config file → fallback.
+ *  `cfgPath` may be an array of dotted paths tried in order — used to
+ *  honor legacy `backend.sidekick_platform.*` keys still present in
+ *  deployed config files after the Parley rename (new key wins). */
+function cfgVal<T>(envName: string, cfgPath: string | string[], fallback: T): T {
+  const env = readEnv(envName);
   if (env != null && env !== '') return env as unknown as T;
-  const parts = cfgPath.split('.');
-  let cur: any = DEPLOY_CFG;
-  for (const p of parts) {
-    if (cur == null) break;
-    cur = cur[p];
+  const paths = Array.isArray(cfgPath) ? cfgPath : [cfgPath];
+  for (const onePath of paths) {
+    const parts = onePath.split('.');
+    let cur: any = DEPLOY_CFG;
+    for (const p of parts) {
+      if (cur == null) break;
+      cur = cur[p];
+    }
+    if (cur != null && cur !== '') return cur as T;
   }
-  if (cur != null && cur !== '') return cur as T;
   return fallback;
 }
 
 const PORT = Number(cfgVal('PORT', 'server.port', 3001));
 const HOST = cfgVal('HOST', 'server.host', '127.0.0.1') as string;
-const HTTPS_CERT_FILE = cfgVal('SIDEKICK_HTTPS_CERT_FILE', 'server.https.cert_file', '') as string;
-const HTTPS_KEY_FILE = cfgVal('SIDEKICK_HTTPS_KEY_FILE', 'server.https.key_file', '') as string;
+const HTTPS_CERT_FILE = cfgVal('PARLEY_HTTPS_CERT_FILE', 'server.https.cert_file', '') as string;
+const HTTPS_KEY_FILE = cfgVal('PARLEY_HTTPS_KEY_FILE', 'server.https.key_file', '') as string;
 const HTTPS_ENABLED = HTTPS_CERT_FILE !== '' || HTTPS_KEY_FILE !== '';
-// Dual mode: cert pair + SIDEKICK_HTTPS_PORT → main server stays HTTP,
+// Dual mode: cert pair + PARLEY_HTTPS_PORT → main server stays HTTP,
 // an auxiliary HTTPS listener binds that port on 0.0.0.0 (see bottom of
 // file). Cert pair alone = legacy single-HTTPS-server behavior.
-const HTTPS_PORT = Number(cfgVal('SIDEKICK_HTTPS_PORT', 'server.https.port', 0));
+const HTTPS_PORT = Number(cfgVal('PARLEY_HTTPS_PORT', 'server.https.port', 0));
 const DUAL_HTTPS = HTTPS_ENABLED && HTTPS_PORT > 0;
 
 function createHttpServer(handler: http.RequestListener): http.Server | https.Server {
   if (!HTTPS_ENABLED || DUAL_HTTPS) return http.createServer(handler);
   if (!HTTPS_CERT_FILE || !HTTPS_KEY_FILE) {
-    throw new Error('HTTPS requires both SIDEKICK_HTTPS_CERT_FILE and SIDEKICK_HTTPS_KEY_FILE');
+    throw new Error('HTTPS requires both PARLEY_HTTPS_CERT_FILE and PARLEY_HTTPS_KEY_FILE');
   }
   return https.createServer({
     cert: fsSync.readFileSync(HTTPS_CERT_FILE),
@@ -426,8 +434,8 @@ async function handleLinkPreview(req, res) {
 // see a real city's weather rather than a broken card on Null Island.
 // Resolution order (handleWeather): explicit ?lat/?lon → explicit config
 // coords → ?tz-derived coords (browser timezone) → London.
-const CONFIG_WEATHER_LAT = cfgVal('SIDEKICK_WEATHER_LAT', 'weather.lat', '') as string;
-const CONFIG_WEATHER_LON = cfgVal('SIDEKICK_WEATHER_LON', 'weather.lon', '') as string;
+const CONFIG_WEATHER_LAT = cfgVal('PARLEY_WEATHER_LAT', 'weather.lat', '') as string;
+const CONFIG_WEATHER_LON = cfgVal('PARLEY_WEATHER_LON', 'weather.lon', '') as string;
 const FALLBACK_WEATHER_LAT = 51.5074;
 const FALLBACK_WEATHER_LON = -0.1278;
 
@@ -514,11 +522,11 @@ async function handleSpotifyCheck(req, res) {
 // ── Chromium screenshot service ────────────────────────────────────────────
 // Persistent browser instance — launched once, reused for all screenshots.
 // Each request: new tab → navigate → screenshot → close tab.
-// Disabled when SIDEKICK_DISABLE_SCREENSHOT=1 (Pi 3 and other low-RAM
+// Disabled when PARLEY_DISABLE_SCREENSHOT=1 (Pi 3 and other low-RAM
 // targets that can't afford a Chromium process).
 import { chromium } from 'playwright-core';
 
-const SCREENSHOT_DISABLED = !!cfgVal('SIDEKICK_DISABLE_SCREENSHOT', 'server.disable_screenshot', false);
+const SCREENSHOT_DISABLED = !!cfgVal('PARLEY_DISABLE_SCREENSHOT', 'server.disable_screenshot', false);
 
 let browser = null;
 const screenshotCache = new Map(); // url → { at, buffer }
@@ -541,7 +549,7 @@ async function getBrowser() {
 async function handleScreenshot(req, res) {
   if (SCREENSHOT_DISABLED) {
     res.writeHead(501, { 'Content-Type': 'text/plain' });
-    res.end('screenshot disabled (SIDEKICK_DISABLE_SCREENSHOT=1)');
+    res.end('screenshot disabled (PARLEY_DISABLE_SCREENSHOT=1)');
     return;
   }
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -612,7 +620,7 @@ const RENDER_CACHE_TTL_MS = 60 * 60 * 1000;
 async function handleRender(req, res) {
   if (SCREENSHOT_DISABLED) {
     res.writeHead(501, { 'Content-Type': 'text/plain' });
-    res.end('render disabled (SIDEKICK_DISABLE_SCREENSHOT=1)');
+    res.end('render disabled (PARLEY_DISABLE_SCREENSHOT=1)');
     return;
   }
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -847,7 +855,7 @@ async function handleSidekickConfigSet(req, res, key: string) {
   }
   if (!CONFIG_PATH) {
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'no sidekick.config.yaml configured (set SIDEKICK_CONFIG)' } }));
+    res.end(JSON.stringify({ error: { message: 'no sidekick.config.yaml configured (set PARLEY_CONFIG)' } }));
     return;
   }
   if (!deployDoc) deployDoc = YAML.parseDocument('frontend: {}\n');
@@ -987,16 +995,16 @@ function handleConfig(_req, res) {
     // Skinning — per-install overrides for app name / agent label / primary
     // theme color. Resolved via sidekick.config.yaml (app.*) then env var
     // then default. See config.example.yaml.
-    appName: cfgVal('SIDEKICK_APP_NAME', 'app.name', 'SideKick'),
-    appSubtitle: cfgVal('SIDEKICK_APP_SUBTITLE', 'app.subtitle', 'Agent Portal'),
-    agentLabel: cfgVal('SIDEKICK_AGENT_LABEL', 'app.agent_label', 'Clawdian'),
+    appName: cfgVal('PARLEY_APP_NAME', 'app.name', 'SideKick'),
+    appSubtitle: cfgVal('PARLEY_APP_SUBTITLE', 'app.subtitle', 'Agent Portal'),
+    agentLabel: cfgVal('PARLEY_AGENT_LABEL', 'app.agent_label', 'Clawdian'),
     // Any valid CSS color (hex, rgb(), hsl()). Empty = keep stylesheet default.
-    themePrimary: cfgVal('SIDEKICK_THEME_PRIMARY', 'app.theme_primary', ''),
+    themePrimary: cfgVal('PARLEY_THEME_PRIMARY', 'app.theme_primary', ''),
     // Which BackendAdapter the client loads. Always 'hermes-gateway'
     // post-refactor — the legacy openclaw / openai-compat / zeroclaw
     // direct-PWA-to-LLM adapters were removed in step 7. Setting any
     // other value loads hermes-gateway anyway.
-    backend: cfgVal('SIDEKICK_BACKEND', 'backend.type', 'hermes-gateway'),
+    backend: cfgVal('PARLEY_BACKEND', 'backend.type', 'hermes-gateway'),
   }));
 }
 
@@ -1006,7 +1014,7 @@ function handleConfig(_req, res) {
 // for agent dispatch (single sidekick→agent gateway). See
 // ~/code/sidekick/audio-bridge/.
 const AUDIO_BRIDGE_UPSTREAM = cfgVal(
-  'SIDEKICK_AUDIO_BRIDGE_URL',
+  'PARLEY_AUDIO_BRIDGE_URL',
   'backend.audio_bridge.url',
   'http://127.0.0.1:8643',
 ) as string;
@@ -1019,17 +1027,21 @@ const HOME = os.homedir();
 // backends/hermes/plugin is the typical upstream; the stub agent under
 // `agent/` is a hermes-free reference. With no token configured,
 // `/api/sidekick/*` endpoints return 503.
-const SIDEKICK_UPSTREAM_URL = cfgVal('SIDEKICK_PLATFORM_URL', 'backend.sidekick_platform.url',
+// Legacy config key `backend.sidekick_platform.*` still present in
+// deployed yaml files is honored as a fallback (new key wins).
+const PARLEY_UPSTREAM_URL = cfgVal('PARLEY_PLATFORM_URL',
+  ['backend.parley_platform.url', 'backend.sidekick_platform.url'],
   'http://127.0.0.1:8645') as string;
 sidekick.init({
-  token: process.env.SIDEKICK_PLATFORM_TOKEN
-    || (cfgVal('SIDEKICK_PLATFORM_TOKEN', 'backend.sidekick_platform.token', '') as string),
-  url: SIDEKICK_UPSTREAM_URL,
+  token: readEnv('PARLEY_PLATFORM_TOKEN')
+    || (cfgVal('PARLEY_PLATFORM_TOKEN',
+      ['backend.parley_platform.token', 'backend.sidekick_platform.token'], '') as string),
+  url: PARLEY_UPSTREAM_URL,
   // Backend switch (claude-code wiring 2026-07-14): `backend: claude-code`
-  // in sidekick.config.yaml (or SIDEKICK_BACKEND env, which wins inside
+  // in sidekick.config.yaml (or PARLEY_BACKEND env, which wins inside
   // init) selects the in-process Agent SDK upstream; the claude_code
   // block carries its config (cwd, allowlist, model, approvals, …).
-  backend: cfgVal('SIDEKICK_BACKEND', 'backend.name', 'http') as string,
+  backend: cfgVal('PARLEY_BACKEND', 'backend.name', 'http') as string,
   claudeCode: (cfgVal('', 'claude_code', null) as Record<string, unknown> | null) ?? undefined,
 });
 
@@ -1074,11 +1086,11 @@ setInterval(() => {
 }, 60_000).unref();
 
 // First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
-// same .env start-all loads (SIDEKICK_ENV_FILE from the npx launcher,
+// same .env start-all loads (PARLEY_ENV_FILE from the npx launcher,
 // else the repo-root .env) and live-swaps the TTS key above.
 initSetup({
-  envFile: process.env.SIDEKICK_ENV_FILE || path.join(__dirname, '.env'),
-  upstreamUrl: () => SIDEKICK_UPSTREAM_URL,
+  envFile: readEnv('PARLEY_ENV_FILE') || path.join(__dirname, '.env'),
+  upstreamUrl: () => PARLEY_UPSTREAM_URL,
   setDeepgramKey: (key: string) => { DEEPGRAM_KEY = key; },
   hasDeepgramKey: () => !!DEEPGRAM_KEY,
 });
@@ -1510,9 +1522,9 @@ const zcWss = new WebSocketServer({ noServer: true });
 // The zeroclaw gateway is bound to loopback on the Pi. This server proxies
 // browser WS connections on /ws/zeroclaw to the upstream gateway, so the
 // gateway stays unexposed and the browser only speaks to the same origin.
-const ZC_UPSTREAM = cfgVal('SIDEKICK_ZEROCLAW_WS', 'backend.zeroclaw.ws_url',
+const ZC_UPSTREAM = cfgVal('PARLEY_ZEROCLAW_WS', 'backend.zeroclaw.ws_url',
   'ws://127.0.0.1:42617/ws/chat') as string;
-const ZC_TOKEN = process.env.SIDEKICK_ZEROCLAW_TOKEN || '';  // secret — env only
+const ZC_TOKEN = readEnv('PARLEY_ZEROCLAW_TOKEN') || '';  // secret — env only
 
 // Canvas card delivery: agents emit `tool_event` envelopes with
 // `kind: 'canvas.show'` through the normal SSE channel — see
@@ -1598,7 +1610,7 @@ server.listen(PORT, HOST, () => {
 });
 
 // ── Auxiliary HTTPS listener (auto-HTTPS trial path) ─────────────────
-// When SIDEKICK_HTTPS_PORT is set alongside the cert pair (start-all's
+// When PARLEY_HTTPS_PORT is set alongside the cert pair (start-all's
 // auto-generated self-signed cert), the main server stays plain HTTP on
 // localhost and this second listener serves the SAME app over HTTPS on
 // all interfaces — the secure context phones need for mic/PWA/push.

@@ -37,7 +37,7 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 const FIXTURE_DIR = join(REPO_ROOT, 'test/fixtures/audio');
-const PROXY_URL = process.env.SIDEKICK_PROXY_URL || 'http://localhost:3001';
+const PROXY_URL = process.env.PARLEY_PROXY_URL || process.env.SIDEKICK_PROXY_URL || 'http://localhost:3001';
 
 const FIXTURES = [
   {

@@ -23,14 +23,14 @@ beforeEach(async () => {
   // realpaths incoming files, so the allowed root must be the resolved
   // form too or every containment check fails spuriously.
   dir = await fs.realpath(dir);
-  process.env.SIDEKICK_MEDIA_REGISTRY = path.join(dir, 'registry.json');
-  process.env.SIDEKICK_MEDIA_ROOTS = dir;
+  process.env.PARLEY_MEDIA_REGISTRY = path.join(dir, 'registry.json');
+  process.env.PARLEY_MEDIA_ROOTS = dir;
   __resetForTests();
 });
 
 afterEach(async () => {
-  delete process.env.SIDEKICK_MEDIA_REGISTRY;
-  delete process.env.SIDEKICK_MEDIA_ROOTS;
+  delete process.env.PARLEY_MEDIA_REGISTRY;
+  delete process.env.PARLEY_MEDIA_ROOTS;
   __resetForTests();
   await fs.rm(dir, { recursive: true, force: true });
 });

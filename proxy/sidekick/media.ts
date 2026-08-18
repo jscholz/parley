@@ -37,12 +37,14 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readEnv } from '../env.mjs';
+import { dataHome } from '../dataHome.mjs';
 
 // Env override is the test seam (tests must not touch the real
-// ~/.sidekick) and doubles as a deploy knob.
+// data home) and doubles as a deploy knob.
 function registryFile(): string {
-  return process.env.SIDEKICK_MEDIA_REGISTRY
-    || path.join(os.homedir(), '.sidekick', 'media-registry.json');
+  return readEnv('PARLEY_MEDIA_REGISTRY')
+    || path.join(dataHome(), 'media-registry.json');
 }
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -72,7 +74,7 @@ type MediaEntry = {
 let registry: Map<string, MediaEntry> | null = null;
 
 function allowedRoots(): string[] {
-  const env = process.env.SIDEKICK_MEDIA_ROOTS;
+  const env = readEnv('PARLEY_MEDIA_ROOTS');
   if (env) return env.split(':').map((r) => path.resolve(r)).filter(Boolean);
   return [os.homedir(), '/tmp'];
 }

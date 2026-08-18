@@ -87,13 +87,13 @@ export async function bootRig({ wavPath }) {
   // 2. Audio-bridge — fixture TTS, noop STT.
   const bridgePython = resolve(REPO_ROOT, 'audio-bridge/.venv/bin/python');
   spawnLogged('bridge', bridgePython, ['bridge.py'], {
-    SIDEKICK_AUDIO_HOST: '127.0.0.1',
-    SIDEKICK_AUDIO_PORT: String(PORTS.bridge),
-    SIDEKICK_AUDIO_TTS_PROVIDER: 'fixture',
-    SIDEKICK_AUDIO_TTS_WAV_PATH: absWav,
-    SIDEKICK_AUDIO_STT_PROVIDER: 'noop',
-    SIDEKICK_PROXY_URL: PROXY_URL,
-    SIDEKICK_AUDIO_LOG_FILE: '',
+    PARLEY_AUDIO_HOST: '127.0.0.1',
+    PARLEY_AUDIO_PORT: String(PORTS.bridge),
+    PARLEY_AUDIO_TTS_PROVIDER: 'fixture',
+    PARLEY_AUDIO_TTS_WAV_PATH: absWav,
+    PARLEY_AUDIO_STT_PROVIDER: 'noop',
+    PARLEY_PROXY_URL: PROXY_URL,
+    PARLEY_AUDIO_LOG_FILE: '',
   }, resolve(REPO_ROOT, 'audio-bridge'));
   await waitForPort(PORTS.bridge);
 
@@ -123,10 +123,10 @@ export async function bootRig({ wavPath }) {
     ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'server.ts'],
     {
       PORT: String(PORTS.proxy),
-      SIDEKICK_PLATFORM_URL: `http://127.0.0.1:${PORTS.stub}`,
-      SIDEKICK_PLATFORM_TOKEN: '',
-      SIDEKICK_AUDIO_BRIDGE_URL: `http://127.0.0.1:${PORTS.bridge}`,
-      SIDEKICK_CONFIG: smokeConfigPath,
+      PARLEY_PLATFORM_URL: `http://127.0.0.1:${PORTS.stub}`,
+      PARLEY_PLATFORM_TOKEN: '',
+      PARLEY_AUDIO_BRIDGE_URL: `http://127.0.0.1:${PORTS.bridge}`,
+      PARLEY_CONFIG: smokeConfigPath,
     });
   await waitForPort(PORTS.proxy);
 

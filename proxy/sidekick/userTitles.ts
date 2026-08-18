@@ -23,6 +23,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { dataHome } from '../dataHome.mjs';
 
 interface UserTitleMark {
   title: string;
@@ -45,8 +46,7 @@ export function initUserTitles(opts?: { file?: string }): void {
 
 function storeFile(): string {
   if (fileOverride) return fileOverride;
-  const home = process.env.SIDEKICK_HOME || path.join(os.homedir(), '.sidekick');
-  return path.join(home, 'user-titles.json');
+  return path.join(dataHome(), 'user-titles.json');
 }
 
 async function load(): Promise<Map<string, UserTitleMark>> {

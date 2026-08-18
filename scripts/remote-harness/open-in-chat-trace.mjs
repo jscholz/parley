@@ -29,7 +29,7 @@ import { chromium } from 'playwright-core';
 import os from 'node:os';
 import path from 'node:path';
 
-const URL = process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
+const URL = process.env.PARLEY_URL || process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
 const PIN_INDEX = Number(process.env.PIN_INDEX || 0);
 const REPEATS = Number(process.env.REPEATS || 2);
 const DRILL_TIMEOUT = Number(process.env.DRILL_TIMEOUT || 30000);

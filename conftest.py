@@ -18,11 +18,13 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
     os.environ.setdefault("VAPID_PUBLIC_KEY", "test-public-key")
     os.environ.setdefault("VAPID_PRIVATE_KEY", "test-private-key")
     # Live-DB tripwire (push-prefs corruption incident, 2026-07-25):
-    # with this set, SidekickDB refuses to open any DB under the real
-    # state dirs (~/.hermes, ~/.sidekick, ~/.openclaw-sk-integ). Every
-    # test must use tmp paths; a fixture that accidentally resolves to
-    # the live store fails at open instead of writing production state.
-    os.environ["SIDEKICK_TEST_GUARD"] = "1"
+    # with this set, the plugin DB layer refuses to open any DB under the
+    # real state dirs (~/.hermes, ~/.parley, ~/.sidekick,
+    # ~/.openclaw-sk-integ). Every test must use tmp paths; a fixture that
+    # accidentally resolves to the live store fails at open instead of
+    # writing production state. Legacy SIDEKICK_TEST_GUARD spelling is
+    # honored too (parley_env shim).
+    os.environ["PARLEY_TEST_GUARD"] = "1"
     if "gateway" not in sys.modules:
         sys.modules["gateway"] = types.ModuleType("gateway")
 

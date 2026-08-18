@@ -17,7 +17,10 @@ import webpush from 'web-push';
 
 const { generateVAPIDKeys } = webpush;
 
-const DEFAULT_VAPID_SUBJECT = process.env.SIDEKICK_VAPID_SUBJECT
+// PARLEY_/SIDEKICK_ fallback matches proxy/env.mjs in the parley repo
+// (this plugin installs standalone, so the shim is inlined here).
+const DEFAULT_VAPID_SUBJECT = process.env.PARLEY_VAPID_SUBJECT
+  || process.env.SIDEKICK_VAPID_SUBJECT
   || 'mailto:jscholz@reimaginerobotics.ai';
 
 /** Get the active VAPID identity, generating one on first call. */

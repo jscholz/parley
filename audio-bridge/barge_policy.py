@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 import os
+from parley_env import env_get
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -53,14 +54,14 @@ INT16_TO_FLOAT = 1.0 / 32768.0
 # Defaults — overridable via env. Numbers picked to match the spirit of
 # the client-side BargeDetector (positiveSpeechThreshold=0.5,
 # minSpeechMs=400) translated into bridge cadence (32ms per inference).
-DEFAULT_SPEECH_THRESHOLD = float(os.environ.get("SIDEKICK_BARGE_THRESHOLD", "0.5"))
+DEFAULT_SPEECH_THRESHOLD = float(env_get("PARLEY_BARGE_THRESHOLD", "0.5"))
 # 7 frames * 32ms ≈ 224ms — a touch faster than the client's 400ms.
 # Bridge has cleaner buffering, so we can be slightly tighter without
 # false-firing on transients.
-DEFAULT_MIN_SPEECH_FRAMES = int(os.environ.get("SIDEKICK_BARGE_MIN_SPEECH_FRAMES", "7"))
+DEFAULT_MIN_SPEECH_FRAMES = int(env_get("PARLEY_BARGE_MIN_SPEECH_FRAMES", "7"))
 # 25 frames * 32ms ≈ 800ms — long enough that the user has clearly
 # stopped before we re-arm.
-DEFAULT_MIN_SILENCE_FRAMES = int(os.environ.get("SIDEKICK_BARGE_MIN_SILENCE_FRAMES", "25"))
+DEFAULT_MIN_SILENCE_FRAMES = int(env_get("PARLEY_BARGE_MIN_SILENCE_FRAMES", "25"))
 
 
 SileroInfer = Callable[[np.ndarray], float]

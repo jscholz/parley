@@ -25,6 +25,8 @@
 
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { readEnv } from '../../env.mjs';
+import { dataHome } from '../../dataHome.mjs';
 import { initStorage } from './storage.ts';
 import { initMutes, __resetMutesForTest } from './mutes.ts';
 import { initPrefs, __resetPrefsForTest } from './prefs.ts';
@@ -53,8 +55,8 @@ export async function init(opts?: {
   const subject = opts?.subject || process.env.VAPID_SUBJECT || '';
 
   const dataDir = opts?.dataDir
-    || process.env.SIDEKICK_NOTIFICATIONS_DIR
-    || path.join(os.homedir(), '.sidekick', 'notifications');
+    || readEnv('PARLEY_NOTIFICATIONS_DIR')
+    || path.join(dataHome(), 'notifications');
   await initStorage({ dataDir });
   await initMutes({ dataDir });
   await initPrefs({ dataDir });

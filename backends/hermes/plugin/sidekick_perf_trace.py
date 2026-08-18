@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import os
+from .parley_env import env_get
 import sys
 import time
 from contextlib import contextmanager
@@ -72,7 +73,7 @@ def _is_enabled() -> bool:
     """Module-level toggle. Read each call rather than cache so toggling
     via systemctl set-environment + reload works without a code change.
     Cost of the env read is negligible compared to anything we'd log."""
-    return os.environ.get("SIDEKICK_PERF_TRACE", "").lower() in ("1", "true", "yes")
+    return env_get("PARLEY_PERF_TRACE", "").lower() in ("1", "true", "yes")
 
 
 # ── 1. Event-loop lag watcher ────────────────────────────────────────
@@ -306,7 +307,7 @@ async def db_stats_periodic_loop(
 # without giving back enough GIL share to actually move the needle.
 
 _SIDEKICK_WORKER_CONCURRENCY = int(
-    os.environ.get("SIDEKICK_WORKER_CONCURRENCY", "3") or 3
+    env_get("PARLEY_WORKER_CONCURRENCY", "3") or 3
 )
 _sidekick_sem: Optional[asyncio.Semaphore] = None
 

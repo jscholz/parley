@@ -1,4 +1,4 @@
-// When SIDEKICK_PUSH_OWNED_BY_PLUGIN=true, push storage + dispatch live
+// When PARLEY_PUSH_OWNED_BY_PLUGIN=true, push storage + dispatch live
 // in the backend plugin's supplemental DB (see
 // backends/openclaw/src/push-*.js). The proxy stops
 // owning the JSON files + web-push send; it just forwards the PWA's
@@ -9,13 +9,14 @@
 // an equivalent surface. This env flag is the per-backend switch.
 
 import * as http from 'node:http';
+import { readEnv } from '../../env.mjs';
 
-const UPSTREAM_BASE = (process.env.SIDEKICK_PLATFORM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (process.env.SIDEKICK_PLATFORM_TOKEN || '').trim();
+const UPSTREAM_BASE = (readEnv('PARLEY_PLATFORM_URL') || 'http://127.0.0.1:8645').replace(/\/+$/, '');
+const UPSTREAM_TOKEN = (readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 export function isPushOwnedByPlugin(): boolean {
-  return process.env.SIDEKICK_PUSH_OWNED_BY_PLUGIN === 'true'
-      || process.env.SIDEKICK_PUSH_OWNED_BY_PLUGIN === '1';
+  const v = readEnv('PARLEY_PUSH_OWNED_BY_PLUGIN');
+  return v === 'true' || v === '1';
 }
 
 interface ForwardResult {

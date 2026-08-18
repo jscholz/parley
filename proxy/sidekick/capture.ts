@@ -29,6 +29,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readEnv } from '../env.mjs';
+import { dataHome } from '../dataHome.mjs';
 
 import { pushEnvelope } from './stream.ts';
 import { setAuditFileResolver, recordCaptureEvent } from './captureAudit.ts';
@@ -192,7 +194,7 @@ export function setCaptureHooks(h: CaptureHooks | null): void {
 let capturesDirOverride: string | null = null;
 
 /** Test seam + explicit boot configuration. Production resolution
- *  order: SIDEKICK_CAPTURES_DIR (Jonathan points this at his agent
+ *  order: PARLEY_CAPTURES_DIR (Jonathan points this at his agent
  *  workspace so hermes reads transcripts as plain files) → the
  *  sidekick data home (`SIDEKICK_HOME`, else ~/.sidekick) /captures. */
 export function initCapture(opts?: { dir?: string }): void {
@@ -201,9 +203,9 @@ export function initCapture(opts?: { dir?: string }): void {
 
 function capturesDir(): string {
   if (capturesDirOverride) return capturesDirOverride;
-  if (process.env.SIDEKICK_CAPTURES_DIR) return process.env.SIDEKICK_CAPTURES_DIR;
-  const home = process.env.SIDEKICK_HOME || path.join(os.homedir(), '.sidekick');
-  return path.join(home, 'captures');
+  const dirOverride = readEnv('PARLEY_CAPTURES_DIR');
+  if (dirOverride) return dirOverride;
+  return path.join(dataHome(), 'captures');
 }
 
 // capture ids are path components — validate hard so a crafted id can

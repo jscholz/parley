@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+from .parley_env import env_get
 import sqlite3
 import threading
 import time
@@ -42,7 +43,7 @@ from .sidekick_state import list_unread_state
 # meaningfully larger than the compute time so repeat polls within a
 # burst can actually hit the cache. Tunable via
 # SIDEKICK_UNREAD_CACHE_TTL_MS for emergencies.
-_CACHE_TTL_S = float(os.environ.get("SIDEKICK_UNREAD_CACHE_TTL_MS", "5000") or 5000) / 1000.0
+_CACHE_TTL_S = float(env_get("PARLEY_UNREAD_CACHE_TTL_MS", "5000") or 5000) / 1000.0
 _cache: Dict[str, Tuple[float, Dict]] = {}  # key → (cached_at_monotonic, result)
 _cache_lock = threading.Lock()
 

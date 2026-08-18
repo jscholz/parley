@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import os
+from parley_env import env_get
 import sys
 
 from aiohttp import web
@@ -50,14 +51,14 @@ from signaling import register_routes
 
 
 def main() -> None:
-    level = os.environ.get("SIDEKICK_AUDIO_LOG_LEVEL", "INFO").upper()
+    level = env_get("PARLEY_AUDIO_LOG_LEVEL", "INFO").upper()
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
 
     # File handler — defaults to /tmp/sidekick-audio.log so logs are
     # tailable even when user-level journald isn't capturing this unit.
     # `tail -f` works regardless of journald state.
-    log_file = os.environ.get("SIDEKICK_AUDIO_LOG_FILE", "/tmp/sidekick-audio.log")
+    log_file = env_get("PARLEY_AUDIO_LOG_FILE", "/tmp/sidekick-audio.log")
     if log_file:
         try:
             handlers.append(logging.FileHandler(log_file))
@@ -66,21 +67,21 @@ def main() -> None:
 
     logging.basicConfig(level=level, format=fmt, handlers=handlers, force=True)
 
-    host = os.environ.get("SIDEKICK_AUDIO_HOST", "127.0.0.1")
-    port = int(os.environ.get("SIDEKICK_AUDIO_PORT", "8643"))
-    proxy_url = os.environ.get("SIDEKICK_PROXY_URL", "http://127.0.0.1:3001")
-    backend = os.environ.get("SIDEKICK_BACKEND", "hermes")
+    host = env_get("PARLEY_AUDIO_HOST", "127.0.0.1")
+    port = int(env_get("PARLEY_AUDIO_PORT", "8643"))
+    proxy_url = env_get("PARLEY_PROXY_URL", "http://127.0.0.1:3001")
+    backend = env_get("PARLEY_BACKEND", "hermes")
 
     voice_config = VoiceConfig.defaults()
     # Smoke-test overrides — let the rig swap providers via env without
     # writing a config.yaml. Production deployments leave these unset
     # and use the deepgram defaults. Both override blocks are
     # self-contained: an unset env var → no change to defaults.
-    tts_provider_env = os.environ.get("SIDEKICK_AUDIO_TTS_PROVIDER")
+    tts_provider_env = env_get("PARLEY_AUDIO_TTS_PROVIDER")
     if tts_provider_env:
         from config import ProviderSpec
         opts = {}
-        wav_path = os.environ.get("SIDEKICK_AUDIO_TTS_WAV_PATH")
+        wav_path = env_get("PARLEY_AUDIO_TTS_WAV_PATH")
         if wav_path:
             opts["wav_path"] = wav_path
         voice_config = type(voice_config)(
@@ -89,7 +90,7 @@ def main() -> None:
             bind_host=voice_config.bind_host,
             enabled=voice_config.enabled,
         )
-    stt_provider_env = os.environ.get("SIDEKICK_AUDIO_STT_PROVIDER")
+    stt_provider_env = env_get("PARLEY_AUDIO_STT_PROVIDER")
     if stt_provider_env:
         from config import ProviderSpec
         voice_config = type(voice_config)(

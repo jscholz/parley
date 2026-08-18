@@ -50,7 +50,8 @@ const TARGET_CHAT_ID = process.env.SMOKE_SCROLL_CHAT
 // pure gateway-side work — same SQL the proxy /messages route would
 // invoke, but with zero proxy/network-to-proxy overhead.
 const GATEWAY_PORT = Number(process.env.SMOKE_GATEWAY_PORT || 8645);
-const HERMES_TOKEN = process.env.SIDEKICK_PLATFORM_TOKEN
+const HERMES_TOKEN = process.env.PARLEY_PLATFORM_TOKEN
+  || process.env.SIDEKICK_PLATFORM_TOKEN
   || readTokenFromEnv()
   || '';
 

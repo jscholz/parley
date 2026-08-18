@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 import base64
 import os
+from .parley_env import env_get
 
 from py_vapid import Vapid
 from cryptography.hazmat.primitives.serialization import (
@@ -37,7 +38,7 @@ ITEMS_FETCH_ELISION_MARGIN = 64
 
 def activity_retention_limit() -> int:
     try:
-        value = int(os.environ.get("SIDEKICK_ACTIVITY_MAX_ITEMS", str(DEFAULT_ACTIVITY_MAX_ITEMS)))
+        value = int(env_get("PARLEY_ACTIVITY_MAX_ITEMS", str(DEFAULT_ACTIVITY_MAX_ITEMS)))
     except (TypeError, ValueError):
         value = DEFAULT_ACTIVITY_MAX_ITEMS
     return max(1, value)

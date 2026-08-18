@@ -33,6 +33,7 @@ import asyncio
 import json
 import logging
 import os
+from .parley_env import env_get
 from typing import Any, Dict, List, Set
 
 # Guarded aiohttp import — see sidekick_route_conversations for why.
@@ -84,7 +85,7 @@ def read_preferred_models(cfg: Dict[str, Any]) -> List[str]:
         out = [str(g).strip() for g in raw if isinstance(g, str) and str(g).strip()]
         if out:
             return out
-    env_raw = (os.environ.get("SIDEKICK_PREFERRED_MODELS") or "").strip()
+    env_raw = (env_get("PARLEY_PREFERRED_MODELS") or "").strip()
     if env_raw:
         return [g.strip() for g in env_raw.split(",") if g.strip()]
     return []

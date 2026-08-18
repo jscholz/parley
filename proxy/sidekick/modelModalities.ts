@@ -20,9 +20,10 @@
 // were dropped (May 2026) in favor of asking the upstream directly.
 
 import http from 'node:http';
+import { readEnv } from '../env.mjs';
 
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || process.env.SIDEKICK_PLATFORM_TOKEN || '').trim();
+const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 // ── Auxiliary vision advertisement ────────────────────────────────────
 // Short server-side memo so rapid PWA polls (visibility-change retries,

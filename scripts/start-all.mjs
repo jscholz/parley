@@ -15,19 +15,20 @@
  * Reads PROXY_PORT (or PORT) and AGENT_PORT from the env. Defaults:
  * 3001 / 4001. If either port is busy, the pair shifts forward
  * together (3002/4002, 3003/4003, ...) up to PORT_RETRY_MAX so the
- * proxy always knows where the agent is. Pass `SIDEKICK_PLATFORM_URL`
+ * proxy always knows where the agent is. Pass `PARLEY_PLATFORM_URL`
  * explicitly to point the proxy at an already-running agent (and set
- * `SIDEKICK_AGENT_CMD=` to skip booting the in-tree stub).
+ * `PARLEY_AGENT_CMD=` to skip booting the in-tree stub).
  *
  * No new dep — pure `child_process`. Used by `npm start`.
  *
- * Override the agent command with `SIDEKICK_AGENT_CMD` to swap the
+ * Override the agent command with `PARLEY_AGENT_CMD` to swap the
  * stub for a different upstream (a different binary, a docker exec,
  * etc.). Set it to an empty string to skip starting the agent
  * entirely (useful when running against an already-running
  * backends/hermes/plugin).
  */
 import { spawn } from 'node:child_process';
+import { readEnv } from '../proxy/env.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -42,9 +43,9 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 // running without their .env (the README's "add a Deepgram key to
 // .env" promise was broken outside systemd). Real env vars win:
 // loadEnvFile never overrides variables that are already set.
-// SIDEKICK_ENV_FILE lets the npx launcher (bin/cli.mjs) point at a
+// PARLEY_ENV_FILE lets the npx launcher (bin/cli.mjs) point at a
 // data-home .env outside the (ephemeral) package directory.
-const envFile = process.env.SIDEKICK_ENV_FILE ?? path.join(REPO_ROOT, '.env');
+const envFile = readEnv('PARLEY_ENV_FILE') ?? path.join(REPO_ROOT, '.env');
 try {
   process.loadEnvFile(envFile);
   process.stdout.write(`[start-all] loaded env from ${envFile}\n`);
@@ -82,8 +83,8 @@ async function pickPortPair(baseProxy, baseAgent) {
   return null;
 }
 
-const skipAgent = process.env.SIDEKICK_AGENT_CMD === '';
-const agentCmd = process.env.SIDEKICK_AGENT_CMD;
+const agentCmd = readEnv('PARLEY_AGENT_CMD');
+const skipAgent = agentCmd === '';
 
 const requestedProxy = Number(process.env.PROXY_PORT ?? process.env.PORT ?? 3001);
 const requestedAgent = Number(process.env.AGENT_PORT ?? 4001);
@@ -94,7 +95,7 @@ let agentPort = requestedAgent;
 // Skip auto-shift when the user pinned an explicit upstream URL —
 // they're driving the agent themselves and the proxy port is the only
 // thing we need free.
-const explicitUpstream = !!process.env.SIDEKICK_PLATFORM_URL;
+const explicitUpstream = !!readEnv('PARLEY_PLATFORM_URL');
 
 if (skipAgent || explicitUpstream) {
   if (!(await portFree(proxyPort))) {
@@ -120,9 +121,9 @@ if (skipAgent || explicitUpstream) {
   }
 }
 
-// Proxy reads PORT for itself and SIDEKICK_PLATFORM_URL for upstream.
+// Proxy reads PORT for itself and PARLEY_PLATFORM_URL for upstream.
 // We always set both so the children's own defaults can't drift.
-const upstreamUrl = process.env.SIDEKICK_PLATFORM_URL ?? `http://127.0.0.1:${agentPort}`;
+const upstreamUrl = readEnv('PARLEY_PLATFORM_URL') ?? `http://127.0.0.1:${agentPort}`;
 
 /** Spawn with prefixed stdout so `[proxy]` and `[agent]` lines are
  *  distinguishable in one terminal. Inherits stderr to surface
@@ -160,21 +161,22 @@ function spawnPrefixed(label, cmd, args, opts = {}) {
 // so existing deployments (systemd, reverse-proxied) see no new
 // listener unless asked.
 let httpsInfo = null;
-const autoHttpsWanted = process.env.SIDEKICK_AUTO_HTTPS === '1'
-  && !process.env.SIDEKICK_HTTPS_CERT_FILE;
+const autoHttpsWanted = readEnv('PARLEY_AUTO_HTTPS') === '1'
+  && !readEnv('PARLEY_HTTPS_CERT_FILE');
 if (autoHttpsWanted) {
   const { ensureSelfSignedCert, lanAddresses } = await import('./https-cert.mjs');
-  const certDir = process.env.SIDEKICK_CERT_DIR
-    || (process.env.SIDEKICK_HOME ? path.join(process.env.SIDEKICK_HOME, 'certs')
+  const envHome = readEnv('PARLEY_HOME');
+  const certDir = readEnv('PARLEY_CERT_DIR')
+    || (envHome ? path.join(envHome, 'certs')
         : path.join(REPO_ROOT, '.certs'));
   const cert = ensureSelfSignedCert(certDir);
   if (cert) {
-    const httpsPort = Number(process.env.SIDEKICK_HTTPS_PORT || proxyPort + 442);
+    const httpsPort = Number(readEnv('PARLEY_HTTPS_PORT') || proxyPort + 442);
     httpsInfo = { ...cert, port: httpsPort, lan: lanAddresses()[0] || null };
   } else {
     process.stdout.write(
       '[start-all] openssl not found — skipping auto-HTTPS (phone mic/PWA need it;'
-      + ' install openssl and restart, or configure SIDEKICK_HTTPS_CERT_FILE)\n',
+      + ' install openssl and restart, or configure PARLEY_HTTPS_CERT_FILE)\n',
     );
   }
 }
@@ -193,11 +195,11 @@ const proxy = spawnPrefixed(
   proxyArgs,
   { env: {
       PORT: String(proxyPort),
-      SIDEKICK_PLATFORM_URL: upstreamUrl,
+      PARLEY_PLATFORM_URL: upstreamUrl,
       ...(httpsInfo ? {
-        SIDEKICK_HTTPS_CERT_FILE: httpsInfo.certFile,
-        SIDEKICK_HTTPS_KEY_FILE: httpsInfo.keyFile,
-        SIDEKICK_HTTPS_PORT: String(httpsInfo.port),
+        PARLEY_HTTPS_CERT_FILE: httpsInfo.certFile,
+        PARLEY_HTTPS_KEY_FILE: httpsInfo.keyFile,
+        PARLEY_HTTPS_PORT: String(httpsInfo.port),
       } : {}),
   } },
 );
