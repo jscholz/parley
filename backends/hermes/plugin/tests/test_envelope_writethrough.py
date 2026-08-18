@@ -227,7 +227,7 @@ def test_missing_chat_id_skipped(db):
 
 
 def test_chat_id_source_prefix_stripped(db):
-    """PWA-supplied `parley:<uuid>` ids and bare UUIDs land in the
+    """PWA-supplied `sidekick:<uuid>` ids and bare UUIDs land in the
     same chat. The dispatcher path strips the prefix; record_envelope
     mirrors that so a turn that came in prefixed doesn't fork into a
     second chat row."""

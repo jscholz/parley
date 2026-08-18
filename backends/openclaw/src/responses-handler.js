@@ -162,7 +162,7 @@ function persistUserMessageLink({ db, sessionKey, chatId, userMessageId, dispatc
 function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, logger }) {
   try {
     const stateDir = resolveStateDir({ profile: PROFILE });
-    // sessionKey is the canonical form (agent:dev:parley:abc); we
+    // sessionKey is the canonical form (agent:dev:sidekick:abc); we
     // need the sessionId (uuid) to find the jsonl.
     const sessions = listSessions({ stateDir, agentId: AGENT_ID });
     const entry = sessions[sessionKey];
@@ -271,7 +271,7 @@ export function makeResponsesHandler({ gatewayClient, eventBus, db, turnBuffer, 
     // Dispatch the turn. chat.send returns { runId, status:"started" }.
     let runId;
     // PWA mints `sidekick:<uuid>`; openclaw stores under
-    // `agent:{agentId}:parley:<uuid>`. Normalize incoming chat ids
+    // `agent:{agentId}:sidekick:<uuid>`. Normalize incoming chat ids
     // to canonical form before chat.send to keep the per-chat session
     // store consistent (so subsequent /v1/responses on the same chat
     // hit the same openclaw session, not a fresh one).

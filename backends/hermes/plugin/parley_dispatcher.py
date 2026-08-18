@@ -92,7 +92,7 @@ class EngagementState:
     Note: callers must use the SAME chat_id shape on both sides.
     The plugin's envelope path uses the source-stripped id (UUID
     only); ``handle_visibility`` normalizes the PWA-supplied
-    ``parley:<uuid>`` form via ``_strip_source_prefix`` before
+    ``sidekick:<uuid>`` form via ``_strip_source_prefix`` before
     recording. See parley_routes.py.
     """
 

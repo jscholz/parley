@@ -16,10 +16,10 @@ import { firstUserMessageText, isDeliveryMirror } from './openclaw-store.js';
  *  so PWA-minted chat ids (e.g. `sidekick:<uuid>`) roundtrip stably.
  *
  *  Why: when the PWA POSTs /v1/responses with `conversation:"sidekick:abc"`,
- *  openclaw normalizes that to `agent:dev:parley:abc` and returns it
+ *  openclaw normalizes that to `agent:dev:sidekick:abc` and returns it
  *  in subsequent sessions.list calls. Without normalization, the PWA's
  *  IDB row keyed by `sidekick:abc` doesn't match the server-returned
- *  `agent:dev:parley:abc`, so the drawer shows two rows for one chat
+ *  `agent:dev:sidekick:abc`, so the drawer shows two rows for one chat
  *  (which breaks continuity on subsequent sends).
  *
  *  Reverse normalization (`prefixChatId`) is idempotent — openclaw's

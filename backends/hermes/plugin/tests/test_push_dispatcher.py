@@ -146,7 +146,7 @@ def test_engagement_hidden_clears_immediately(dispatcher, db):
 
 def test_engagement_key_uses_stripped_chat_id(dispatcher, db):
     """Field bug 2026-05-18: visibility was recorded under the
-    PWA-supplied `parley:<uuid>` form but the dispatch path checks
+    PWA-supplied `sidekick:<uuid>` form but the dispatch path checks
     the stripped form. The route handler now normalizes via
     `_strip_source_prefix`. This test pins the DISPATCH-side contract:
     engagement is keyed on the stripped chat_id, so a route handler

@@ -229,8 +229,8 @@ export default definePluginEntry({
           // DELETE / PATCH /v1/conversations/{id} (no /items suffix).
           const bareMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/?$/);
           if (bareMatch && (req.method === 'DELETE' || req.method === 'PATCH')) {
-            // Incoming id may be PWA-form (parley:abc) or canonical
-            // (agent:dev:parley:abc). Normalize to canonical for the
+            // Incoming id may be PWA-form (sidekick:abc) or canonical
+            // (agent:dev:sidekick:abc). Normalize to canonical for the
             // openclaw call.
             const incomingId = decodeURIComponent(bareMatch[1]);
             const sessionKey = prefixChatId(incomingId, AGENT_ID);
@@ -268,7 +268,7 @@ export default definePluginEntry({
           const m = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/items\/?$/);
           if (!m) return false;  // not us — let other handlers (or 404) handle
           // PWA may send either stripped (`sidekick:abc`) or canonical
-          // (`agent:dev:parley:abc`) — normalize before store lookup.
+          // (`agent:dev:sidekick:abc`) — normalize before store lookup.
           const incomingId = decodeURIComponent(m[1]);
           const sessionKey = prefixChatId(incomingId, AGENT_ID);
 

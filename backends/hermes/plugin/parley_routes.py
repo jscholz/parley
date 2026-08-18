@@ -34,7 +34,7 @@ from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
 def _strip_source_prefix(chat_id: Any) -> str:
     """Normalize a chat_id to the form the plugin's envelope handlers
     use internally (no `<source>:` prefix). PWA-facing routes accept
-    either shape — the parley proxy passes the FULL `parley:<uuid>`
+    either shape — the parley proxy passes the FULL `sidekick:<uuid>`
     form, but the plugin's _safe_send_envelope downstream uses the
     stripped UUID. Without this normalization,
     EngagementState.mark_visible records under the prefixed key while
