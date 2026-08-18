@@ -17,6 +17,8 @@ agent/data/
 backends/stub/data/
 # Top-level data/ in case the stub gets booted from repo root.
 /data/
+parley.config.yaml
+# legacy name, predates Parley rename
 sidekick.config.yaml
 config.yaml
 .DS_Store

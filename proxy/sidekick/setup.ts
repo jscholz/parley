@@ -11,7 +11,7 @@
  * already-configured stubs report needsSetup=false and the PWA never
  * shows the gate, so existing installs see zero behavior change.
  *
- * Persistence is the .env file (SIDEKICK_ENV_FILE when the npx
+ * Persistence is the .env file (PARLEY_ENV_FILE when the npx
  * launcher set one, else <repo>/.env) — the same file start-all loads
  * on boot, so choices survive restarts. Hot-apply happens through the
  * stub's loopback-only POST /v1/admin/llm (LLM swap without restart)
@@ -180,9 +180,9 @@ export async function handleSetupApply(
   } else if (path === 'custom') {
     const platformUrl = String(body?.platformUrl || '').trim();
     if (!platformUrl) return json(res, 400, { error: 'platformUrl required for the custom path' });
-    envPatch.SIDEKICK_PLATFORM_URL = platformUrl;
+    envPatch.PARLEY_PLATFORM_URL = platformUrl;
     const token = String(body?.platformToken || '').trim();
-    if (token) envPatch.SIDEKICK_PLATFORM_TOKEN = token;
+    if (token) envPatch.PARLEY_PLATFORM_TOKEN = token;
     // The proxy binds its upstream at boot — swapping it live would mean
     // re-initing the whole sidekick module (SSE channel, prefetch, ...).
     // Honest v1: persist + tell the user to restart.

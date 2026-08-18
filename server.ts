@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
+import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as sidekick from './proxy/sidekick/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/sidekick/setup.ts';
 import {
@@ -47,18 +48,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // PARLEY_CONFIG env var can point at a config path outside the repo
 // (e.g. a private fork with keys and personal keyterms). Useful so the
 // public repo stays generic while deployment config lives privately.
-function resolveConfigPath(): string | null {
-  const envPath = readEnv('PARLEY_CONFIG');
-  if (envPath && fsSync.existsSync(envPath)) {
-    return envPath;
-  }
-  for (const name of ['sidekick.config.yaml', 'config.yaml']) {
-    const p = path.join(__dirname, name);
-    if (fsSync.existsSync(p)) return p;
-  }
-  return null;
-}
-const CONFIG_PATH = resolveConfigPath();
+// Filename preference: parley.config.yaml, then the legacy
+// sidekick.config.yaml, then config.yaml (proxy/configPath.mjs).
+const CONFIG_PATH = resolveConfigPath(__dirname);
 /** Parse the deployment config. Preserves comments via YAML.Document for
  *  round-trippable edits (used by the keyterms save path). */
 function loadDeployConfigDoc(): YAML.Document.Parsed | null {
