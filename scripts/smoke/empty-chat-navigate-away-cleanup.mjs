@@ -53,7 +53,7 @@ export function MOCK_SETUP(mock) {
  *  has initialized the store on its own. */
 async function seedOrphanIdbRow(page, chatId) {
   await page.evaluate(async (id) => {
-    const DB_NAME = 'sidekick-conversations';
+    const DB_NAME = 'parley-conversations';
     const STORE = 'conversations';
     const META = 'meta';
     // v2 schema (matches src/conversations.ts post-v0.383). Test must

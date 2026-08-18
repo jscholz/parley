@@ -86,7 +86,7 @@ export default async function run({ page, log }) {
   // Stage the upgrade-boot snapshot wipe: a deploy bumps the snapshot
   // schema fingerprint, so the first boot after the forced reload runs
   // ensureSchemaFresh's deleteDatabase. Same end state here.
-  await page.evaluate(() => localStorage.setItem('sidekick.idb-schema-version', 'smoke-stale-fingerprint'));
+  await page.evaluate(() => localStorage.setItem('parley.idb-schema-version', 'smoke-stale-fingerprint'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await waitForReady(page);
   log('reloaded with snapshot DB nuked (stale schema fingerprint)');

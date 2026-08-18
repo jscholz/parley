@@ -115,7 +115,7 @@ export default async function run({ page, log }) {
   // Diagnostic — what's actually in IDB for these chats?
   const idbState = await page.evaluate(async () => {
     return new Promise((resolve) => {
-      const req = indexedDB.open('sidekick-conversations');
+      const req = indexedDB.open('parley-conversations');
       req.onsuccess = () => {
         const db = req.result;
         const tx = db.transaction('conversations', 'readonly');

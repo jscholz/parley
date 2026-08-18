@@ -6,7 +6,7 @@
 // server data with the wrong format.
 //
 // Implementation: chat.ts:46 stores SCHEMA_VERSION in localStorage
-// (`sidekick.idb-schema-version`). chat.init's first await is
+// (`parley.idb-schema-version`). chat.init's first await is
 // ensureSchemaFresh which reads the stored version, compares to
 // the const, and on mismatch calls indexedDB.deleteDatabase.
 //
@@ -30,10 +30,10 @@ export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
 const STALE_FINGERPRINT = 'never-going-to-match-this-string';
-const DB_NAME = 'sidekick-chat';
+const DB_NAME = 'parley-chat';
 const STORE = 'transcripts';
 const SNAPSHOT_KEY = 'current';
-const FINGERPRINT_KEY = 'sidekick.idb-schema-version';
+const FINGERPRINT_KEY = 'parley.idb-schema-version';
 
 export default async function run({ page, log }) {
   await waitForReady(page);

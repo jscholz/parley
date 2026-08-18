@@ -101,7 +101,7 @@ export default async function run({ page, log, mock }) {
   // read/New pill is governed by tray seen-on-open timing (separate
   // machinery); here we only assert the row itself round-trips through
   // reload, proving the mark-unread write is server-backed.
-  await page.evaluate(() => localStorage.removeItem('sidekick.activity.items.v1'));
+  await page.evaluate(() => localStorage.removeItem('parley.activity.items.v1'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#composer-input', { timeout: 5_000 });
   await openSidebar(page);

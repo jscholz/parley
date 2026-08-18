@@ -57,7 +57,7 @@ export default async function run({ page, log, mock }) {
   // (it predates them), exactly what the incident phone carried.
   await page.evaluate(async (terms) => {
     await new Promise((resolve, reject) => {
-      const req = indexedDB.open('sidekick-keyterms', 1);
+      const req = indexedDB.open('parley-keyterms', 1);
       req.onsuccess = () => {
         const db = req.result;
         const tx = db.transaction('keyterms', 'readwrite');

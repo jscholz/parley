@@ -53,7 +53,7 @@ async function idbConversations(page) {
   // src/conversations.ts — store 'conversations' in 'parley-
   // conversations' db.
   return page.evaluate(() => new Promise((resolve) => {
-    const req = indexedDB.open('sidekick-conversations');
+    const req = indexedDB.open('parley-conversations');
     req.onsuccess = () => {
       const db = req.result;
       const tx = db.transaction('conversations', 'readonly');

@@ -58,7 +58,7 @@ export default async function run({ page, log, mock }) {
   );
   log('fresh profile hydrated Activity from server ✓');
 
-  await page.evaluate(() => localStorage.removeItem('sidekick.activity.items.v1'));
+  await page.evaluate(() => localStorage.removeItem('parley.activity.items.v1'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#composer-input', { timeout: 5_000 });
   await openActivity(page);

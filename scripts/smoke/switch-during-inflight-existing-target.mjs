@@ -71,7 +71,7 @@ export function MOCK_SETUP(mock) {
 async function readIDB(page, chatId) {
   return page.evaluate(async (id) => {
     return new Promise((resolve) => {
-      const req = indexedDB.open('sidekick-conversations');
+      const req = indexedDB.open('parley-conversations');
       req.onsuccess = () => {
         const db = req.result;
         const r = db.transaction('conversations', 'readonly').objectStore('conversations').get(id);
