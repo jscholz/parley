@@ -154,18 +154,63 @@ function copyStore(oldDb: IDBDatabase, newDb: IDBDatabase, shape: StoreShape): P
   });
 }
 
+/** Marker store created (same-version, alongside the real stores) in
+ *  every migration-built DB. Interruption forensics: a reload/navigation
+ *  mid-copy (SW-claim reload on first install, user reload, tab kill)
+ *  aborts the record copy but the already-committed structure survives.
+ *  Without a marker, the next boot can't tell that half-copy apart from
+ *  a genuinely app-created new-name DB — it would adopt the empty husk
+ *  as 'new-exists' and strand the legacy data FOREVER (real bug, found
+ *  by the rename-idb-migration smoke flaking under the double-boot).
+ *  The marker store's presence says "migration built this"; its 'done'
+ *  record says "and finished". App code opens these DBs with explicit
+ *  store names, so the extra store is inert. */
+const MIGRATION_META_STORE = '__parley-migration';
+
+function readMigrationDone(db: IDBDatabase): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(MIGRATION_META_STORE, 'readonly');
+      const req = tx.objectStore(MIGRATION_META_STORE).get('done');
+      req.onsuccess = () => resolve(req.result != null);
+      req.onerror = () => resolve(false);
+    } catch { resolve(false); }
+  });
+}
+
+function writeMigrationDone(db: IDBDatabase): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(MIGRATION_META_STORE, 'readwrite');
+    tx.objectStore(MIGRATION_META_STORE).put({ at: Date.now() }, 'done');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('migration done-mark failed'));
+  });
+}
+
 /** Copy one database old → new. Returns a status string for logging. */
 async function copyDatabase(oldName: string, newName: string): Promise<string> {
-  // Probe the new name. If it pre-existed with real stores, never touch
-  // it again. An empty version-1 DB can only be a probe artifact from a
-  // crashed earlier run (every real store is created in its own v1
-  // upgrade), so treat it like our own probe-create and clear it.
+  // Probe the new name and classify what's there:
+  //   - marker store + 'done' record → a finished copy whose localStorage
+  //     flag was lost (or a concurrent boot won the race) → 'copied'.
+  //   - marker store, NO 'done' record → an interrupted half-copy →
+  //     delete and redo (the old DB is still intact).
+  //   - real stores, no marker → genuinely app-created → never touch.
+  //   - empty version-1 DB → probe artifact from a crashed earlier run
+  //     (every real store is created in its own v1 upgrade) → clear it.
   const probeNew = await openRaw(newName);
   const newPreExisted = !probeNew.created
     && !(probeNew.db.version === 1 && probeNew.db.objectStoreNames.length === 0);
-  probeNew.db.close();
-  if (newPreExisted) return 'new-exists';
-  await deleteDb(newName); // remove the empty probe-created DB
+  if (newPreExisted) {
+    const builtByMigration = probeNew.db.objectStoreNames.contains(MIGRATION_META_STORE);
+    const done = builtByMigration && await readMigrationDone(probeNew.db);
+    probeNew.db.close();
+    if (done) return 'copied';
+    if (!builtByMigration) return 'new-exists';
+    // Half-copy artifact — fall through to delete + redo.
+  } else {
+    probeNew.db.close();
+  }
+  await deleteDb(newName); // remove the probe artifact / half-copy
 
   // Probe the old name. If the probe created it, there is nothing to
   // migrate — clean up the accidental empty DB.
@@ -188,9 +233,14 @@ async function copyDatabase(oldName: string, newName: string): Promise<string> {
           st.createIndex(ix.name, ix.keyPath, { unique: ix.unique, multiEntry: ix.multiEntry });
         }
       }
+      // Interruption forensics — see MIGRATION_META_STORE docstring.
+      db.createObjectStore(MIGRATION_META_STORE);
     });
     try {
       for (const s of structure) await copyStore(oldDb, newDb, s);
+      // Commit the done-mark LAST: its absence is what lets the next
+      // boot recognize (and redo) an interrupted copy.
+      await writeMigrationDone(newDb);
     } finally {
       newDb.close();
     }
