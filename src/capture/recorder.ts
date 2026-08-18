@@ -490,7 +490,9 @@ export async function stopMeetingCapture(): Promise<void> {
   await new Promise((r) => setTimeout(r, 400));
   const postStop = async () => {
     try {
-      await fetch(apiUrl(`/api/sidekick/captures/${captureId}/stop`), { method: 'POST' });
+      await fetch(apiUrl(`/api/sidekick/captures/${captureId}/stop`), {
+        method: 'POST', headers: lifecycleHeaders(),
+      });
     } catch { /* server unreachable — stale heal completes it server-side */ }
   };
   const drainP = ensureUploader().drained();

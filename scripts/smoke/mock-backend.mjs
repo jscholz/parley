@@ -482,9 +482,14 @@ export async function installMockBackend(page) {
     // the real dev proxy here would leak whatever real captures exist
     // on the host into the smoke.
     if (route.request().method() === 'GET') {
+      // Default view hides Recently Deleted, like the real server
+      // (?include=discarded opts in).
+      const includeDiscarded = /[?&]include=discarded\b/.test(route.request().url());
+      const rows = Array.from(captures.values())
+        .filter((c) => includeDiscarded || c.status !== 'discarded');
       return route.fulfill({
         status: 200, contentType: 'application/json',
-        body: JSON.stringify({ captures: Array.from(captures.values()) }),
+        body: JSON.stringify({ captures: rows }),
       });
     }
     if (route.request().method() !== 'POST') return route.fallback();

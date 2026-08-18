@@ -37,8 +37,13 @@ export default async function run({ page, log, mock }) {
     document.getElementById('mic-menu-record-meeting')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true }));
   });
+  // Wait past the honest 'starting' phase — the capture is live once
+  // the pill leaves it (activation confirmed).
   await page.waitForFunction(
-    () => !document.getElementById('capture-pill')?.hidden,
+    () => {
+      const pill = document.getElementById('capture-pill');
+      return !!(pill && !pill.hidden && !pill.classList.contains('starting'));
+    },
     null, { timeout: 8000, polling: 50 },
   );
   log('capture started');

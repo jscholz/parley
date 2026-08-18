@@ -36,10 +36,15 @@ export default async function run({ page, log, mock }) {
   assert(minted && minted !== CHAT_SEED, `new-chat hotkey minted nothing useful: ${minted}`);
   log(`Cmd+Shift+O minted ${minted}`);
 
-  // 2. Cmd+Shift+M — meeting capture must land in THAT chat.
+  // 2. Cmd+Shift+M — meeting capture must land in THAT chat. Wait past
+  //    the honest 'starting' phase (activation confirmed) so the
+  //    toggle-stop below acts on a live recording.
   await page.keyboard.press('Control+Shift+M');
   await page.waitForFunction(
-    () => !document.getElementById('capture-pill')?.hidden,
+    () => {
+      const pill = document.getElementById('capture-pill');
+      return !!(pill && !pill.hidden && !pill.classList.contains('starting'));
+    },
     null, { timeout: 15000, polling: 50 },
   );
   const caps = mock.getCaptures();

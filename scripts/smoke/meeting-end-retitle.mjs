@@ -36,8 +36,13 @@ export default async function run({ page, log, mock }) {
   // 1. App-level start (header button): mints a dedicated meeting
   //    session and jumps the view into it.
   await page.click('#btn-capture-header');
+  // Wait past the honest 'starting' phase (activation confirmed) so the
+  // stop click below acts on a live recording, not a no-op.
   await page.waitForFunction(
-    () => !document.getElementById('capture-pill')?.hidden,
+    () => {
+      const pill = document.getElementById('capture-pill');
+      return !!(pill && !pill.hidden && !pill.classList.contains('starting'));
+    },
     null, { timeout: 8000, polling: 50 },
   );
   const cap = mock.getCaptures()[0];
