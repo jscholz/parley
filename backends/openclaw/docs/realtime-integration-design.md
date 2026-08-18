@@ -38,7 +38,7 @@ API key is configured (`extensions/openai/realtime-voice-provider.ts:312`).
 
 ## Proposed approach
 
-When porting realtime to sidekick, log and dedupe the audio transcript
+When porting realtime to parley, log and dedupe the audio transcript
 into the session logs. Annotate as realtime-dialog and visualise
 differently (collapsed by default) so users can see the full
 interaction. Multiple turns of audio per single turn of LLM, so
@@ -94,7 +94,7 @@ proxy/plugin during the call, not after.
 The hook point: the relay's `transcript` events
 (`talk-realtime-relay.ts:38-44` — payload
 `{role: "user"|"assistant", text, final}`). Subscribe, persist each
-`final: true` entry into a sidekick-owned table keyed by chat_id +
+`final: true` entry into a parley-owned table keyed by chat_id +
 relaySessionId + monotonic seq.
 
 Schema sketch (add to `src/schema.sql` when implemented):
@@ -134,14 +134,14 @@ voice transcript rows until the next consult fires.
 `chat.history` already has a deduplication trap: openclaw double-writes
 substantive assistant text — once as the real `openai-codex` row, once
 as a `provider: "openclaw", model: "delivery-mirror"` row. We need to
-filter mirrors out before showing them in sidekick (matches against
+filter mirrors out before showing them in parley (matches against
 `__openclaw.idempotencyKey` ending `:internal-source-reply:0` or
 `provider === "openclaw" && model === "delivery-mirror"`).
 
 For voice: the voice agent's spoken text is NOT mirrored into
 chat.history (it bypasses the text agent unless a consult fires). So
 voice rows don't dedup against chat.history rows — they're additive.
-Sidekick's UI just needs to render both streams.
+Parley's UI just needs to render both streams.
 
 ## Open questions to defer
 
@@ -160,12 +160,12 @@ Sidekick's UI just needs to render both streams.
   expose specific hermes capabilities as their own voice-callable
   function tools (memory_search, send_message, query_calendar etc.)
   for lower-latency, more-predictable behavior? The granular approach
-  is probably better for sidekick — hermes has a richer tool surface
+  is probably better for parley — hermes has a richer tool surface
   than openclaw's text agent does.
 
 ## Status
 
 Not on the critical path for the openclaw-as-second-backend project.
 Revisit once `/v1/conversations` + `/v1/responses` work against
-openclaw and sidekick can A/B both backends. Voice mode is the natural
+openclaw and parley can A/B both backends. Voice mode is the natural
 Phase 2 of the multi-backend project.

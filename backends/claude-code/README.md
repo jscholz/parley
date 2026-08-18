@@ -1,9 +1,9 @@
-# backends/claude-code — Claude Code as a sidekick backend (v1 skeleton)
+# backends/claude-code — Claude Code as a parley backend (v1 skeleton)
 
-Runs your existing Claude Code install as a sidekick agent via the
+Runs your existing Claude Code install as a parley agent via the
 **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) — no forks, no CLI
 scraping, no protocol changes. Design per
-`sidekick-claude-code-backend-research-2026-07-07.md` (hermes-agent-private
+`parley-claude-code-backend-research-2026-07-07.md` (hermes-agent-private
 workspace docs).
 
 **Status: standalone module + unit tests.** Compiles (strict tsc) and is
@@ -27,8 +27,8 @@ PWA ──POST /api/parley/messages──▶ proxy dispatch (messages.ts)
 
 Unlike `backends/hermes` (HTTP `/v1/*` plugin) and `backends/stub` (HTTP
 `/v1/*` server), this backend implements the proxy's **TypeScript upstream
-contract directly** (`proxy/sidekick/upstream.ts` → `UpstreamAgent`):
-`sendMessage` is an async generator of sidekick envelopes, so there is no
+contract directly** (`proxy/parley/upstream.ts` → `UpstreamAgent`):
+`sendMessage` is an async generator of parley envelopes, so there is no
 OAI-SSE translation layer at all. The proxy's dispatch (`messages.ts`),
 stream multiplexer (`stream.ts`), and drawer/history handlers work unchanged.
 
@@ -38,7 +38,7 @@ stream multiplexer (`stream.ts`), and drawer/history handlers work unchanged.
 |---|---|
 | `adapter.ts` | `ClaudeCodeUpstream` — the upstream contract over the SDK; turn pipeline, envelope translation, conversations API |
 | `sdkTypes.ts` | Structural mirror of the Agent SDK surface we consume + the injectable `AgentSdk` interface (tests fake it, wiring injects the real module) |
-| `envelopes.ts` | Envelope types: re-exports the proxy's `SidekickEnvelope` union (type-only import — zero runtime coupling) + local `agent_question` / `doc_show` definitions; `docIdFor` (djb2, PWA-compatible) |
+| `envelopes.ts` | Envelope types: re-exports the proxy's `ParleyEnvelope` union (type-only import — zero runtime coupling) + local `agent_question` / `doc_show` definitions; `docIdFor` (djb2, PWA-compatible) |
 | `sessionMap.ts` | Persisted `chat_id → {sessionId, cwd}` map (JSON file, tmp+rename) |
 | `questions.ts` | Pending-question registry: `canUseTool` ↔ `agent_question` ↔ `answerQuestion` |
 | `docShim.ts` | Per-turn in-process MCP server exposing `display_doc` → `doc_show` envelope |
@@ -47,7 +47,7 @@ stream multiplexer (`stream.ts`), and drawer/history handlers work unchanged.
 
 ### Session mapping (conversation key ↔ SDK session)
 
-- A sidekick `chat_id` maps to the **pair** `{sessionId, cwd}`, persisted in
+- A parley `chat_id` maps to the **pair** `{sessionId, cwd}`, persisted in
   a JSON file (`SessionMap`). Both halves matter: SDK session lookup is
   cwd-scoped, and resuming with a mismatched cwd silently forks a fresh
   session (claude-agent-sdk-python#555, claude-code#4926). Persistence
@@ -56,7 +56,7 @@ stream multiplexer (`stream.ts`), and drawer/history handlers work unchanged.
   message's `session_id` is captured, stored, and announced via a
   `session_changed` envelope (title = first user message, truncated).
   Subsequent turns pass `resume: sessionId` with the same `cwd`.
-- Sessions that exist on disk but were never started from sidekick (i.e.
+- Sessions that exist on disk but were never started from parley (i.e.
   created by the CLI directly) appear in the drawer as `cc:<sessionId>` rows;
   opening one adopts it into the map and resumes it in place.
 
@@ -110,7 +110,7 @@ your own machine).
 
 ### display_doc → doc_show
 
-`docShim.ts` builds a tiny in-process MCP server (`sidekick.display_doc`)
+`docShim.ts` builds a tiny in-process MCP server (`parley.display_doc`)
 **per turn**, closing over that turn's `chat_id` + queue — which is how a
 tool call attributes itself to the right chat under concurrent turns. The
 handler reads the file server-side (1 MB cap), pushes a `doc_show`
@@ -188,12 +188,12 @@ Nothing here is wired yet. The steps, in order:
    `docShim.ts` with `{ path: z.string(), title: z.string().optional() }`).
    Then reconcile `sdkTypes.ts` against the installed `.d.ts` (keep the
    `AgentSdk` indirection so tests stay SDK-free).
-2. **`proxy/sidekick/upstream.ts`** — add `agent_question` and `doc_show`
-   to the `SidekickEnvelope` union (runtime allowlist in `stream.ts`
+2. **`proxy/parley/upstream.ts`** — add `agent_question` and `doc_show`
+   to the `ParleyEnvelope` union (runtime allowlist in `stream.ts`
    already carries both); delete the local copies in `envelopes.ts`.
-3. **`proxy/sidekick/index.ts`** — `init()` grows a backend switch: when
+3. **`proxy/parley/index.ts`** — `init()` grows a backend switch: when
    config selects claude-code (e.g. `backend: claude-code` in
-   `sidekick.config.yaml` / `SIDEKICK_BACKEND=claude-code` + a
+   `parley.config.yaml` / `PARLEY_BACKEND=claude-code` + a
    `claude_code:` config block), construct
    `new ClaudeCodeUpstream({sdk: await import('@anthropic-ai/claude-agent-sdk'), config}).asUpstreamAgent()`
    instead of `HTTPAgentUpstream`.
@@ -206,7 +206,7 @@ Nothing here is wired yet. The steps, in order:
    `true → 200 {ok: true}`.
 5. **Config plumbing** — teach the config loader the `claude_code` block
    (cwd, allowlist, model, approvals, persistPath) and document it in
-   `example.sidekick.config.yaml`.
+   `example.parley.config.yaml`.
 6. **Smoke** — live end-to-end pass against the real CLI: text turn, tool
    turn with an approval on a phone, doc push, barge-in in call mode.
 

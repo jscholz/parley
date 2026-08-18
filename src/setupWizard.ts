@@ -2,7 +2,7 @@
  * First-run setup wizard — the "model gate" (FTUE research 2026-07-07,
  * Agent Zero pattern). Engages ONLY when the backend reports
  * needsSetup=true (in-tree stub still on its echo LLM — a fresh
- * `npx sidekick-portal` trial). Real deployments never see it.
+ * `npx parleyvoo` trial). Real deployments never see it.
  *
  * Three provider paths, then an optional voice step:
  *   Cloud key  — any OpenAI-compatible API (OpenRouter default).

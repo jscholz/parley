@@ -1,7 +1,7 @@
-# Sidekick Audio Bridge Protocol
+# Parley Audio Bridge Protocol
 
-This is the internal contract between the sidekick PWA and the
-sidekick audio bridge. The aiortc service at
+This is the internal contract between the parley PWA and the
+parley audio bridge. The aiortc service at
 `audio-bridge/` is the **reference implementation**; alternative
 implementations (e.g. node-webrtc on a Mac) are valid as long as they
 satisfy this contract.
@@ -12,7 +12,7 @@ The audio bridge converts between two protocol families:
 - **Real-time media** (WebRTC: Opus packets, ICE, peer connection
   lifecycle) on the PWA-facing side.
 - **Text** (HTTP/SSE — utterance dispatch, transcript stream) on the
-  agent-facing side, routed through the sidekick proxy.
+  agent-facing side, routed through the parley proxy.
 
 It's a media-↔-text bridge, not a network hop between PWA and proxy.
 The PWA still talks to the proxy directly for everything that isn't
@@ -34,7 +34,7 @@ hit the proxy when they need to dispatch to the agent.
                │               │
                ▼               ▼
         ┌─────────────┐    ┌──────────────────┐
-        │   sidekick  │    │   audio bridge   │
+        │   parley  │    │   audio bridge   │
         │   proxy     │◄───┤   (Python :8643) │
         │ (Node :3001)│    │                  │
         │             │    │  user transcripts│
@@ -73,7 +73,7 @@ Open a new peer connection.
   "sdp": "<offer SDP>",
   "type": "offer",
   "mode": "stream" | "talk",
-  "conv_name": "sidekick-example-2026-04-26",   // optional; legacy /v1/responses path
+  "conv_name": "parley-example-2026-04-26",   // optional; legacy /v1/responses path
   "chat_id": "uuid-…"                        // optional; hermes-gateway path
 }
 ```
@@ -90,7 +90,7 @@ transcripts to `<proxy>/api/<be>/responses` with
 `chat_id` is the hermes-gateway path's session-routing primitive (an
 opaque UUID minted PWA-side per conversation). When set, the bridge
 dispatches to `<proxy>/api/parley/messages` with `{chat_id, text}`
-instead. The proxy WS-forwards to the hermes sidekick platform adapter.
+instead. The proxy WS-forwards to the hermes parley platform adapter.
 
 `conv_name` and `chat_id` are mutually exclusive in practice — the PWA
 sets exactly one based on the active backend (`backend.type: hermes` or
@@ -238,7 +238,7 @@ offer payload carried:
    `<proxy_url>/api/<be>/responses` where `<be>` is the active backend
    slug (the proxy routes; the bridge is configured with the proxy URL
    only and doesn't know the backend name in code — it gets it from
-   the `SIDEKICK_BACKEND` env var or falls back to the proxy default).
+   the `PARLEY_BACKEND` env var or falls back to the proxy default).
 2. Parses the SSE stream as the agent protocol's Responses API events
    (`response.output_text.delta` → user-visible deltas;
    `response.completed` → terminal).
@@ -260,17 +260,17 @@ so the field has been retired.)_
 
 ## Bridge dispatch behavior
 
-The bridge MUST POST utterances through the sidekick proxy
+The bridge MUST POST utterances through the parley proxy
 (`<proxy_url>/api/<be>/responses`), NOT directly to the agent backend.
-The proxy is the sole sidekick→agent gateway; this keeps the bridge
+The proxy is the sole parley→agent gateway; this keeps the bridge
 agent-agnostic and centralizes auth / rate-limiting / logging on a
 single hop. `<be>` is whichever backend is wired up on the proxy
 (e.g. `hermes`, `openai-compat`); the bridge ships the same body shape
 regardless.
 
-`<proxy_url>` is supplied via the `SIDEKICK_PROXY_URL` env var
+`<proxy_url>` is supplied via the `PARLEY_PROXY_URL` env var
 (default `http://127.0.0.1:3001`); bridges that ship behind a non-
-default sidekick deployment must accept this configuration.
+default parley deployment must accept this configuration.
 
 Body shape:
 ```json
@@ -296,7 +296,7 @@ cd audio-bridge
 .venv/bin/python bridge.py
 ```
 
-systemd unit: `sidekick-audio.service`.
+systemd unit: `parley-audio.service`.
 
 Provider plug-ins under `audio-bridge/providers/`. Default: Deepgram
 nova-3 STT + Deepgram Aura TTS. Local Whisper / Piper stubs land in
@@ -314,7 +314,7 @@ the same directory.
       `{type:'transcript', role:'user', text, is_final:true}` —
       pass-through, no buffering.
 - [ ] On `{type:'dispatch', text}` from the client: POST to
-      `<SIDEKICK_PROXY_URL>/api/<be>/responses` (where `<be>` is the
+      `<PARLEY_PROXY_URL>/api/<be>/responses` (where `<be>` is the
       active backend slug) with the body shape above; parse the SSE
       stream; mirror `output_text.delta`
       events as `role:'assistant'` transcripts; emit a terminal
@@ -322,8 +322,8 @@ the same directory.
       `response.completed`.
 - [ ] (Talk mode) Add an outbound audio track in the answer SDP; feed
       it from the TTS provider's PCM stream.
-- [ ] Configurable via env: `SIDEKICK_AUDIO_HOST`,
-      `SIDEKICK_AUDIO_PORT`, `SIDEKICK_PROXY_URL`, plus any provider
+- [ ] Configurable via env: `PARLEY_AUDIO_HOST`,
+      `PARLEY_AUDIO_PORT`, `PARLEY_PROXY_URL`, plus any provider
       API keys.
 
 ---
@@ -331,8 +331,8 @@ the same directory.
 ## Hermes-Gateway WS contract
 
 Separate protocol from the audio bridge above. This is the wire shape
-between the **sidekick proxy** (Node, port 3001) and the **hermes
-sidekick platform adapter** (Python, in-process inside hermes-gateway,
+between the **parley proxy** (Node, port 3001) and the **hermes
+parley platform adapter** (Python, in-process inside hermes-gateway,
 port 8645 by default). The adapter is a peer of telegram/slack/signal
 in hermes-agent's gateway/platforms/* — not an audio thing.
 
@@ -343,8 +343,8 @@ Reference implementation of the adapter: `backends/hermes/plugin/sidekick_platfo
 - Transport: persistent WebSocket from proxy → adapter, single
   connection for the lifetime of the proxy.
 - URL: `ws://127.0.0.1:<port>/ws`. Default port `8645`. Override via
-  the `SIDEKICK_PLATFORM_URL` env var on the proxy or
-  `SIDEKICK_PLATFORM_PORT` on the adapter.
+  the `PARLEY_PLATFORM_URL` env var on the proxy or
+  `PARLEY_PLATFORM_PORT` on the adapter.
 - Auth: shared-secret bearer token in the WS upgrade `Authorization`
   header — `Authorization: Bearer <SIDEKICK_PLATFORM_TOKEN>`. Both
   sides read the same env var name; the adapter rejects upgrades

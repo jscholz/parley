@@ -16,11 +16,11 @@ isolates audio failure modes from the proxy.
 | `dispatch_listener.py` | Per-turn `/api/parley/stream` subscription (`?live_only=1`) so the bridge knows when the agent's reply text is ready to TTS. |
 | `providers/` | STT + TTS provider abstractions (Deepgram is the default for both). |
 | `tests/` | Pytest suite — runs against the in-process app. |
-| `sidekick-audio.service` | systemd unit installed under `~/.config/systemd/user/`. |
+| `parley-audio.service` | systemd unit installed under `~/.config/systemd/user/`. |
 
 ## Wire protocol
 
-See [`docs/SIDEKICK_AUDIO_PROTOCOL.md`](../docs/SIDEKICK_AUDIO_PROTOCOL.md)
+See [`docs/PARLEY_AUDIO_PROTOCOL.md`](../docs/PARLEY_AUDIO_PROTOCOL.md)
 for the data-channel events, dispatch path, listening + barge
 envelopes.
 

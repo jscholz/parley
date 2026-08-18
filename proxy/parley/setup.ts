@@ -6,7 +6,7 @@
  *
  * Design (FTUE research 2026-07-07, "Agent Zero model gate" pattern):
  * the wizard only ever ENGAGES when the upstream is the in-tree stub
- * still running its echo LLM — i.e. a fresh `npx sidekick-portal` /
+ * still running its echo LLM — i.e. a fresh `npx parleyvoo` /
  * install.sh trial. Real deployments (hermes/openclaw/custom URL) and
  * already-configured stubs report needsSetup=false and the PWA never
  * shows the gate, so existing installs see zero behavior change.

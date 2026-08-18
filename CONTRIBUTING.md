@@ -1,4 +1,4 @@
-# Contributing to Sidekick
+# Contributing to Parley
 
 Thanks for wanting to contribute.
 
@@ -16,7 +16,7 @@ Open `http://localhost:3001`. If you don't have an agent backend running, most o
 
 ### System deps
 
-The hermes sidekick plugin (`backends/hermes/plugin/`) shells out to
+The hermes parley plugin (`backends/hermes/plugin/`) shells out to
 `pdftoppm` (poppler-utils) when a PDF attachment arrives, so the
 hermes host needs poppler installed. Without it the plugin logs an
 error and drops the PDF; the rest of the turn proceeds.
@@ -28,9 +28,9 @@ sudo apt install poppler-utils
 brew install poppler
 ```
 
-Knobs (`~/.hermes/.env`): `SIDEKICK_PDF_DPI` (150),
-`SIDEKICK_PDF_MAX_PAGES` (50), `SIDEKICK_PDF_RASTERIZE_TIMEOUT_S` (30),
-`SIDEKICK_PDF_MAX_BYTES` (20 MiB). See
+Knobs (`~/.hermes/.env`): `PARLEY_PDF_DPI` (150),
+`PARLEY_PDF_MAX_PAGES` (50), `PARLEY_PDF_RASTERIZE_TIMEOUT_S` (30),
+`PARLEY_PDF_MAX_BYTES` (20 MiB). See
 `docs/archive/PDF_RASTERIZATION_PROPOSAL.md` for design notes.
 
 ## Tests
@@ -52,9 +52,9 @@ Generic / backend-agnostic tests live in `test/`:
 - `tts-clean.test.ts`, `fallback.test.ts`, `sessionFilter.test.ts`
 
 Backend-specific tests are co-located with the proxy module under
-`proxy/sidekick/__tests__/` (`proxy.test.ts` + harness, `settings.test.ts`).
+`proxy/parley/__tests__/` (`proxy.test.ts` + harness, `settings.test.ts`).
 A fork swapping hermes for another backend deletes
-`proxy/sidekick/` + `backends/hermes/plugin/` and loses no tests
+`proxy/parley/` + `backends/hermes/plugin/` and loses no tests
 elsewhere.
 
 UX tests (browser-DOM scenarios) belong in `test/` because they test the
@@ -70,7 +70,7 @@ Tier 1/2/3 test plan and which seams are worth pinning.
   delete) so any future regression has a name.
 - **Hermetic by default.** Tests for the proxy or any backend
   abstraction MUST run without a live hermes / network / LLM. The
-  `proxy/sidekick/__tests__/proxy-harness.ts` pattern (mock upstream
+  `proxy/parley/__tests__/proxy-harness.ts` pattern (mock upstream
   + scratch state) is the template — copy it for new backends.
 - **UX tests should never depend on a specific backend.** If a UX test
   fails one way against hermes-gateway and another way against
@@ -86,9 +86,9 @@ change any of the `/api/parley/*` HTTP+SSE surface or the upstream
 agent contract:
 1. Update `docs/ABSTRACT_AGENT_PROTOCOL.md` if the upstream contract
    shifted.
-2. Add a contract test under `proxy/sidekick/__tests__/proxy.test.ts`
+2. Add a contract test under `proxy/parley/__tests__/proxy.test.ts`
    that pins the new behavior.
-3. Run the suite (`npm test -- proxy/sidekick/__tests__/proxy.test.ts`)
+3. Run the suite (`npm test -- proxy/parley/__tests__/proxy.test.ts`)
    before committing.
 
 ### Diagnostic recipes (when a UX bug repros)
@@ -113,7 +113,7 @@ curl -X POST http://127.0.0.1:3001/api/parley/messages \
   -d '{"chat_id":"test-cli","text":"hi"}'
 
 # Run the proxy contract suite
-npm test -- proxy/sidekick/__tests__/proxy.test.ts
+npm test -- proxy/parley/__tests__/proxy.test.ts
 ```
 
 ### Smoke tests (Playwright)
@@ -148,12 +148,12 @@ hermes (used when validating that mock matches reality).
 
 Please include:
 - Browser + OS + whether you're running as an installed PWA
-- The `?debug=1` panel output or `localStorage.sidekick_debug='1'` log dump covering the failure
+- The `?debug=1` panel output or `localStorage.parley_debug='1'` log dump covering the failure
 - Which backend you're pointing at (hermes, openclaw, openai-compat, zeroclaw) and its version
 
 ## Scope
 
-Sidekick is a voice-first PWA for agent backends. New backends plug in via the
+Parley is a voice-first PWA for agent backends. New backends plug in via the
 adapter interface — see `src/proxyClientTypes.ts` and the existing adapters in
 `src/`. Per-provider quirks (e.g. Deepgram wedge detection) stay in
 their provider modules.

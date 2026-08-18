@@ -19,17 +19,17 @@ platform-neutral and emits / consumes platform-agnostic events
 |---|---|
 | `ios/App/App/` | Xcode project. `App.xcworkspace` is the entry point. |
 | `ios/App/App/AppDelegate.swift` | App lifecycle, AVAudioSession config, silent keepalive engine, lockscreen Now Playing widget, MPRemoteCommandCenter wiring (`CallControls` singleton). |
-| `ios/App/App/WebViewDelegate.swift` | `SidekickBridgeViewController` — WKWebView UIDelegate (auto-grants getUserMedia), Cap-only viewport / safe-area / body-class injection, lockscreen webView provider, hardware volume button observer. |
+| `ios/App/App/WebViewDelegate.swift` | `ParleyBridgeViewController` — WKWebView UIDelegate (auto-grants getUserMedia), Cap-only viewport / safe-area / body-class injection, lockscreen webView provider, hardware volume button observer. |
 | `android/` | Gradle project. Generated but not actively maintained — iOS is the primary mobile target. |
 | `webdir/` | Placeholder bundled webDir. Unused in our `server.url` setup; the actual JS comes over the network. |
 
 ## Loading model
 
-`capacitor.config.ts` sets `server.url = $SIDEKICK_NATIVE_URL` so the
+`capacitor.config.ts` sets `server.url = $PARLEY_NATIVE_URL` so the
 Cap WebView **fetches the JS bundle from the proxy over the network**
 (rather than from a bundled file:// inside the .app). Updates ship
 exactly like a PWA refresh: `git push` + `systemctl restart
-sidekick.service` on the proxy host + dev-reload in the app.
+parley.service` on the proxy host + dev-reload in the app.
 
 This means **`npx cap copy ios` is irrelevant for JS-only changes** —
 it copies `dist/` into `webdir/`, which we don't load from. Only
@@ -42,7 +42,7 @@ re-run `npx cap sync ios` when:
 
 | Change type | Where | Steps |
 |---|---|---|
-| **JS-only** (`src/`, `proxy/`, `index.html`, CSS) | Proxy host (cortex) | git push → `systemctl --user restart sidekick.service` → dev-reload in Cap |
+| **JS-only** (`src/`, `proxy/`, `index.html`, CSS) | Proxy host (cortex) | git push → `systemctl --user restart parley.service` → dev-reload in Cap |
 | **Native (Swift)** (`mobile/ios/App/App/*.swift`) | Mac | `git pull` → `npx cap sync ios` → open `mobile/ios/App/App.xcworkspace` in Xcode → ⌘R |
 | **Capacitor config / plugins** | Mac | same as native — `npx cap sync ios` propagates plugin changes into the Xcode project |
 | **Production build** (TestFlight / App Store) | Mac | full Xcode archive + signing flow. See [`docs/MAC_BOOTSTRAP.md`](../docs/MAC_BOOTSTRAP.md) |
@@ -73,7 +73,7 @@ some of the functionality.
 - **Audio interruption + route change handlers** (`handleAudioInterruption`,
   `handleAudioRouteChange`) — restore session after phone calls,
   Siri, BT pairing changes, headset plug/unplug. Without these,
-  Sidekick's audio doesn't recover from common iOS interruptions.
+  Parley's audio doesn't recover from common iOS interruptions.
 - *PWA fallback:* none. Safari aggressively suspends Web Audio in
   background, kills `getUserMedia` tracks on lock. Cap is the only
   way to keep a live mic on iOS.
@@ -131,7 +131,7 @@ some of the functionality.
 - **Audio session re-activation on `applicationDidBecomeActive`** —
   some iOS interruption flows (incoming phone call, Siri) leave
   AVAudioSession deactivated. The lifecycle hook re-activates so
-  Sidekick's mic is ready when the user returns.
+  Parley's mic is ready when the user returns.
 - *PWA fallback:* `visibilitychange` event in JS, but limited control
   over the audio session (it's owned by Safari, not the page).
 

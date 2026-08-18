@@ -83,7 +83,7 @@ drawerHost = createRightDrawerHost({
     notesModule,
   ],
   bodyClass: 'pin-drawer-open',
-  prefKey: 'sidekick.pin-drawer.expanded',
+  prefKey: 'parley.pin-drawer.expanded',
 });
 ```
 

@@ -69,11 +69,16 @@ export function init(): void {
   installed = true;
 
   // Cap surface — AppDelegate posts these.
-  window.addEventListener('parley:remote-control', (e: Event) => {
-    const ce = e as CustomEvent<{ action?: string }>;
-    const action = ce.detail?.action;
-    if (action) dispatch(action);
-  });
+  // Both spellings: the iOS native shell (AppDelegate.swift) dispatches
+  // the legacy 'sidekick:remote-control' event; installed shells keep
+  // doing so until rebuilt. New code dispatches 'parley:remote-control'.
+  for (const evName of ['parley:remote-control', 'sidekick:remote-control']) {
+    window.addEventListener(evName, (e: Event) => {
+      const ce = e as CustomEvent<{ action?: string }>;
+      const action = ce.detail?.action;
+      if (action) dispatch(action);
+    });
+  }
 
   // PWA surface — Media Session API. Available in modern Safari /
   // Chrome / Edge. Wrapped in try/catch because the API throws if a

@@ -1,12 +1,12 @@
 # Mac bootstrap — building the iOS Capacitor shell
 
-First-time setup for building Sidekick's iOS native shell on macOS. The
+First-time setup for building Parley's iOS native shell on macOS. The
 shell is a thin Capacitor wrapper that loads the live PWA over the
 network — there's no JS bundle to ship, just the Swift shell + signing.
 
 Aimed at someone who has never opened Xcode before. If you've shipped
 iOS apps before, skim — the only project-specific bit is the
-`SidekickBridgeViewController` class in step 5.
+`ParleyBridgeViewController` class in step 5.
 
 ---
 
@@ -24,11 +24,11 @@ iOS apps before, skim — the only project-specific bit is the
     limit per Apple ID. Fine for your-own-device use.
   - Apple Developer Program ($99/yr) gets you 1-year certs + TestFlight
     + App Store distribution. Skip until you decide to ship to others.
-- **Node + the sidekick repo cloned to your Mac.** The repo's
+- **Node + the parley repo cloned to your Mac.** The repo's
   `mobile/ios/App/` is the Xcode project; the Swift code is committed.
   No CocoaPods step (this Capacitor uses Swift Package Manager).
-  - `git clone git@github.com:jscholz/sidekick.git`
-  - `cd sidekick && npm install`
+  - `git clone git@github.com:jscholz/parley.git`
+  - `cd parley && npm install`
 
 ---
 
@@ -45,18 +45,18 @@ npx cap copy ios        # mirrors build/ → mobile/webdir/ for the iOS bundle
 
 Re-run `npx cap copy ios` whenever the PWA bundle changes — though for
 the live-server model it's mostly cosmetic; the wrapper navigates to
-`SIDEKICK_NATIVE_URL` immediately on launch. Keeping `webdir/`
+`PARLEY_NATIVE_URL` immediately on launch. Keeping `webdir/`
 populated is just so Xcode's build phase doesn't error on a missing dir.
 
 ---
 
 ## 2. Set the live URL the wrapper will load
 
-The wrapper navigates to `SIDEKICK_NATIVE_URL` at launch — that's where
+The wrapper navigates to `PARLEY_NATIVE_URL` at launch — that's where
 your PWA is served from (cortex via Tailscale, in our case).
 
 ```bash
-export SIDEKICK_NATIVE_URL=https://cortex-lon1.taile0c895.ts.net:3001
+export PARLEY_NATIVE_URL=https://cortex-lon1.taile0c895.ts.net:3001
 npx cap sync ios
 ```
 
@@ -96,7 +96,7 @@ Xcode's left sidebar → click `App` (the blue project icon at the top)
 - **Bundle Identifier** — Personal Teams require a globally-unique
   bundle ID. The default is `com.reimaginerobotics.sidekick`; change
   it to something with your own prefix, e.g.
-  `com.<your-handle>.sidekick.dev`. Xcode will warn-then-let-you save.
+  `com.<your-handle>.parley.dev`. Xcode will warn-then-let-you save.
 
 If you see a red banner *"No matching profiles found"*, click the
 **Try Again** / **Register Device** button under it. First time may
@@ -107,14 +107,14 @@ prompt you to enable a personal team or accept terms.
 ## 5. (Already done in-repo — sanity check only)
 
 `Main.storyboard` is committed with the bridge VC's `customClass` set
-to `SidekickBridgeViewController` — that's the wiring that makes
+to `ParleyBridgeViewController` — that's the wiring that makes
 `WebViewDelegate.swift`'s `requestMediaCapturePermissionFor` callback
 fire and grants mic-capture without re-prompting per launch.
 
 If you're curious or troubleshooting: Project navigator → `App > App`
 → `Main.storyboard` → click the Bridge View Controller object →
 Identity Inspector (right pane, ⒤ icon) → Class should already say
-`SidekickBridgeViewController` with Module `App`.
+`ParleyBridgeViewController` with Module `App`.
 
 ---
 
@@ -155,11 +155,11 @@ Once the app opens on the phone:
   WKWebView-level capture; the iOS-level permission persists across
   launches because it's a real native install, not a PWA.
 - Voice mode → talk → confirm round-trip works through the live
-  server. This validates: Tailscale connectivity, `SIDEKICK_NATIVE_URL`
+  server. This validates: Tailscale connectivity, `PARLEY_NATIVE_URL`
   HTTPS, mic capture, audio playback, WebRTC peer connection.
 
 Smoke checklist:
-- [ ] App icon shows on home screen with the Sidekick logo
+- [ ] App icon shows on home screen with the Parley logo
 - [ ] First launch prompts for mic permission ONCE, never again
 - [ ] PTT memo records + sends successfully
 - [ ] Talk-mode call connects + plays back agent TTS
@@ -212,13 +212,13 @@ If 7-day churn becomes annoying:
 dropdown in Signing & Capabilities. Or try a more-unique bundle ID.
 
 **App launches but transcript is blank, "Could not load page"** —
-`SIDEKICK_NATIVE_URL` isn't reachable from the phone. Test from
+`PARLEY_NATIVE_URL` isn't reachable from the phone. Test from
 Safari on the iPhone first (`https://cortex-lon1.taile0c895.ts.net:3001`).
 If Safari can reach it, re-run `npx cap sync ios` and rebuild.
 
 **Mic prompts every launch** — `Main.storyboard` class wasn't updated
 in step 5. Double-check Identity Inspector → Class =
-`SidekickBridgeViewController`. Or
+`ParleyBridgeViewController`. Or
 add `print("capacitorDidLoad fired")` to `WebViewDelegate.swift` to
 verify the subclass instantiates.
 

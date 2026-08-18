@@ -185,5 +185,5 @@ Until then, `mode.ts` is the documented contract and `main.ts` runs parallel pat
 ## Pointers
 
 - Top-level `README.md` "Two voice modes" — wire-level / endpoint view.
-- `docs/SIDEKICK_AUDIO_PROTOCOL.md` — bridge ↔ proxy ↔ PWA contract details.
+- `docs/PARLEY_AUDIO_PROTOCOL.md` — bridge ↔ proxy ↔ PWA contract details.
 - `audio-bridge/README.md` — Python-side architecture.

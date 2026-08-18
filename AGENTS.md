@@ -3,25 +3,25 @@
 > This file follows the [agents.md](https://agents.md/) convention. It's
 > for AI coding assistants (Claude Code, Cursor, Aider, ...) that the
 > user has pointed at this repo. Most users land here via:
-> *"set Sidekick up to talk to my agent."*
+> *"set Parley up to talk to my agent."*
 
-## What Sidekick is
+## What Parley is
 
 A voice-first PWA chat client. It talks to any backend that speaks the
 **OpenAI Responses API** (`POST /v1/responses` with SSE), plus a few
-optional sidekick-specific endpoints for richer features (drawer,
+optional parley-specific endpoints for richer features (drawer,
 search, settings, attachments). See [`docs/ABSTRACT_AGENT_PROTOCOL.md`](docs/ABSTRACT_AGENT_PROTOCOL.md)
 for the full contract.
 
 ## What you're (probably) being asked to do
 
-Wire Sidekick up to the user's existing agent backend so they can use
+Wire Parley up to the user's existing agent backend so they can use
 the PWA as the frontend for it. Three shapes this usually takes,
 ordered easiest → hardest:
 
 1. **The user's agent already speaks `/v1/responses`** (e.g. it's
    already an OpenAI-compatible server, or a wrapper around one).
-   → Point Sidekick at it via env vars. No code needed.
+   → Point Parley at it via env vars. No code needed.
 2. **The user's agent speaks a different protocol** (their own HTTP
    shape, gRPC, a CLI, ...). → Write a small adapter. Cleanest place
    is a fork of [`backends/stub/`](backends/stub/) — that's the
@@ -36,7 +36,7 @@ ordered easiest → hardest:
 Edit `.env`:
 
 ```
-SIDEKICK_PLATFORM_URL=https://your-agent.example.com
+PARLEY_PLATFORM_URL=https://your-agent.example.com
 SIDEKICK_PLATFORM_TOKEN=<bearer token if your agent requires auth>
 ```
 
@@ -44,7 +44,7 @@ SIDEKICK_PLATFORM_TOKEN=<bearer token if your agent requires auth>
 
 If the user's agent doesn't fully implement the contract (e.g. no
 `/v1/conversations` for the drawer, no `/v1/events` for cross-device
-sync), Sidekick degrades gracefully — those features just disappear
+sync), Parley degrades gracefully — those features just disappear
 from the UI. Read the **Optional vs required** section of
 [`docs/ABSTRACT_AGENT_PROTOCOL.md`](docs/ABSTRACT_AGENT_PROTOCOL.md)
 to see what each endpoint unlocks.
@@ -70,7 +70,7 @@ What to change:
 
 Boot via `npm start` from the project root — `scripts/start-all.mjs`
 will spawn the proxy + your new adapter together. Override the agent
-command via `SIDEKICK_AGENT_CMD`.
+command via `PARLEY_AGENT_CMD`.
 
 ## Path 3 — write a plugin
 
@@ -99,7 +99,7 @@ If your adapter / plugin matches that behavior, you're done.
 
 ## Pushing media into the chat
 
-A runtime agent on the Sidekick host can push produced files (video /
+A runtime agent on the Parley host can push produced files (video /
 audio / images) into the chat UI with a two-step lane that works for
 every backend: register the file, then reference the returned URL in
 reply text as a markdown image. See
@@ -107,7 +107,7 @@ reply text as a markdown image. See
 
 ## What NOT to do
 
-- Don't modify the proxy (`server.ts` / `proxy/sidekick/*`) or the PWA
+- Don't modify the proxy (`server.ts` / `proxy/parley/*`) or the PWA
   (`src/`) for backend-specific quirks. Those layers are agent-
   agnostic by design — the seam is the `/v1/*` contract. Backend
   quirks live in the adapter or plugin.
@@ -115,7 +115,7 @@ reply text as a markdown image. See
   something the user wants, file an issue or PR — adding to the
   shared contract is preferable to per-fork extensions.
 - Don't paste the user's API keys or tokens into committed config.
-  `.env` is gitignored; `sidekick.config.yaml` is for non-secret
+  `.env` is gitignored; `parley.config.yaml` is for non-secret
   deployment tuning only.
 
 ## Shipping it

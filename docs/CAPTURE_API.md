@@ -1,6 +1,6 @@
 # Meeting Capture API
 
-Sidekick's meeting capture is **proxy-owned and backend-neutral**: the
+Parley's meeting capture is **proxy-owned and backend-neutral**: the
 pipeline (storage → rolling transcription → optional diarization →
 ingest turn) runs entirely in the proxy + audio-bridge, and everything
 agent-facing is plain files + ordinary chat messages. The PWA's
@@ -93,8 +93,8 @@ byte-sliced stream). Headers:
 | Header | Meaning |
 |---|---|
 | `Content-Type` | segment mime (`audio/mp4`, `audio/webm`, `audio/wav`) |
-| `x-sidekick-t0-ms` | capture-relative start of this segment, ms |
-| `x-sidekick-sha256` | optional integrity hash; mismatch → `409` (retry) |
+| `x-parley-t0-ms` | capture-relative start of this segment, ms |
+| `x-parley-sha256` | optional integrity hash; mismatch → `409` (retry) |
 
 Idempotent: re-uploading the same bytes acks `{duplicate: true}` —
 safe-by-construction for at-least-once uploaders (delete your durable
@@ -185,7 +185,7 @@ mic don't need this — call the endpoints above directly.
                          per-capture dirs; survives discard/purge/delete
 ```
 
-`capturesDir` = `$SIDEKICK_CAPTURES_DIR`, else `<data home>/captures`.
+`capturesDir` = `$PARLEY_CAPTURES_DIR`, else `<data home>/captures`.
 Point it inside your agent's workspace and any backend with file tools
 reads transcripts natively — that's the backend-neutrality trick.
 

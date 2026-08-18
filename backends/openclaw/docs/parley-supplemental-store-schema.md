@@ -1,4 +1,4 @@
-# Sidekick supplemental store — schema draft
+# Parley supplemental store — schema draft
 
 **Status:** approved; implementation complete.
 
@@ -10,7 +10,7 @@ This doc describes the consolidated schema.
 
 ## Goals
 
-1. **Single source-of-truth for sidekick-owned state.** Pins,
+1. **Single source-of-truth for parley-owned state.** Pins,
    notifications, mutes, push subscriptions, prefs, inflight
    envelopes — one SQLite file per backend. The proxy reads/writes
    through the plugin; the plugin owns the schema.
@@ -28,9 +28,9 @@ This doc describes the consolidated schema.
 
 ## Non-goals
 
-- Touching hermes `state.db.messages` schema. The sidekick plugin
+- Touching hermes `state.db.messages` schema. The parley plugin
   reads from `messages` for transcript replay; it does not write
-  there. The new sidekick store is a separate database file.
+  there. The new parley store is a separate database file.
 - Replacing the hermes state.db for transcript content. That stays
   authoritative for messages. The supplemental store augments.
 - Per-user multi-tenancy. Today it's single-user. Schema is shaped
@@ -39,8 +39,8 @@ This doc describes the consolidated schema.
 
 ## File location
 
-- Hermes plugin: `~/.hermes/sidekick.db` (alongside `state.db`)
-- OpenClaw plugin: `~/.openclaw-sk-integ/sidekick.db` (or whatever
+- Hermes plugin: `~/.hermes/parley.db` (alongside `state.db`)
+- OpenClaw plugin: `~/.openclaw-sk-integ/parley.db` (or whatever
   the profile state dir resolves to)
 - Each plugin opens its own file; no cross-runtime sharing. If the
   user runs both hermes AND openclaw, they have two stores. (That's
@@ -56,12 +56,12 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 -- Row example: ('schema_version', '1')
 
--- ── Messages (sidekick-owned augmentation) ────────────────────────
+-- ── Messages (parley-owned augmentation) ────────────────────────
 -- Mirrors a subset of state.db.messages, plus the discriminator
--- columns sidekick needs that hermes' core table doesn't carry.
+-- columns parley needs that hermes' core table doesn't carry.
 -- For hermes plugin: write-through on every reply_delta/reply_final
 -- the proxy emits, so the supplemental store IS the source of truth
--- for "what bubbles exist in this chat" from the sidekick PWA's
+-- for "what bubbles exist in this chat" from the parley PWA's
 -- perspective. State.db continues to be authoritative for the LLM
 -- context loop.
 --
@@ -185,7 +185,7 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
 
 ## Decisions to confirm
 
-1. **One file or many.** Single SQLite file (`sidekick.db`) with all
+1. **One file or many.** Single SQLite file (`parley.db`) with all
    tables vs separate files per concern (pins.db / inflight.db /
    etc.). Recommend single file — simpler backup, single connection,
    transactional cross-table writes possible. Tradeoff: schema
@@ -193,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
 
 2. **Message id space.** All ids are SSE-shape strings — `umsg_*`
    for user, `msg_*` for assistant, `notif_*` for notifications,
-   `sk-*` for sidekick-adapter-emitted. The agent runtime's integer
+   `sk-*` for parley-adapter-emitted. The agent runtime's integer
    id (hermes' state.db row id) goes in a separate
    `agent_row_id` column for traceability. No integer auto-increment
    on `messages.id` — that forces consumers to dedup against two
@@ -212,8 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
 4. **Four tiers of state ownership**:
    - **Tier 1 — Agent runtime authoritative.** `state.db.messages`
      for transcript content. Hermes' / openclaw's native store.
-     Sidekick plugin reads, doesn't write.
-   - **Tier 2 — Sidekick supplemental DB authoritative.** Pins,
+     Parley plugin reads, doesn't write.
+   - **Tier 2 — Parley supplemental DB authoritative.** Pins,
      unread, push (subscriptions / mutes / prefs), inflight
      envelopes, kind discriminators, scroll positions if we ever
      want them synced. Single source of truth, the source the
@@ -260,7 +260,7 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
 
 ## Implementation sequence (proposed)
 
-1. Schema + open/migrate helper in the sidekick-openclaw-plugin.
+1. Schema + open/migrate helper in the parley-openclaw-plugin.
    Same helper module gets copied (or extracted to a shared package)
    into hermes plugin.
 2. `/v1/conversations` + `/v1/conversations/{id}/items` reading from
@@ -270,7 +270,7 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
 3. `POST /v1/responses` writing to `inflight` + `messages` as
    envelopes emit. Drives the openclaw turn dispatch.
 4. Migrate pins / push files into the supplemental store on hermes
-   plugin (preserving existing user data). Sidekick PWA gains
+   plugin (preserving existing user data). Parley PWA gains
    cross-device pin sync as a side effect.
 5. Reassess in-memory inflight cache in the proxy. With persistent
    store backing it, the cache can shrink to "session-scoped fan-out

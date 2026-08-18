@@ -1,4 +1,7 @@
-# Sidekick — Changelog
+# Parley — Changelog
+
+*Renamed from Sidekick in August 2026 — entries below the rename note keep
+the original product name; history is not rewritten.*
 
 A feature-level digest of work since the start of **May 2026**, distilled
 from ~600 commits. Granularity is weekly, grouped by theme rather than by
@@ -8,6 +11,32 @@ marker at each week's end is noted to track progression until we adopt
 proper versioning.
 
 ---
+
+## Week of Aug 18 — product rename: Sidekick → Parley  · v0.4.0 / ~v0.629
+
+- **Parley (formerly Sidekick).** Full rebrand: npm package/bin
+  `parleyvoo` (legacy `sidekick-portal` bin kept), PWA name, docs, and
+  every internal identifier. Backward compatibility everywhere an old
+  name persists outside the repo:
+  - **Env vars** — `PARLEY_*` primary, `SIDEKICK_*` honored (new wins;
+    one shim per language: `proxy/env.mjs`, `parley_env.py`).
+  - **HTTP** — `/api/parley/*` primary; `/api/sidekick/*` served as a
+    deprecated alias for installed PWA/CAP clients. Plugin serves
+    `/v1/parley/*` + legacy alias.
+  - **Config** — `parley.config.yaml` preferred, `sidekick.config.yaml`
+    honored; `~/.parley` data home with `~/.sidekick` read in place.
+  - **DB file** — `sidekick.db` → `parley.db` renamed atomically (with
+    WAL/SHM sidecars) on first plugin/proxy boot.
+  - **Client state** — one-time localStorage/IndexedDB migration; user
+    data copied, server-derived caches rebuilt; stale legacy stores can
+    never be re-adopted once a new-name store exists.
+  - **Deliberately unchanged** (persisted in live state): hermes plugin
+    registration name + platform id `sidekick`, source value
+    `sidekick`, session-key prefix `agent:main:sidekick:dm:`, the
+    `sidekick_id` wire field, `sidekick_msg_links` state.db table,
+    openclaw plugin id, iOS `sidekickReset` bridge handler, appId
+    `com.reimaginerobotics.sidekick`, `/health` `app:'sidekick'`
+    sentinel.
 
 ## Week of May 1–3 — voice stack split + per-bubble TTS  · ~v0.403
 

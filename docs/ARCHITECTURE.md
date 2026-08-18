@@ -1,6 +1,6 @@
 # Architecture
 
-Sidekick is a **four-process system**: a browser PWA, a Node proxy, a Python audio bridge, and a separate agent upstream. The PWA, proxy, and bridge are sidekick code. The agent is whatever you point upstream at (`backends/hermes/plugin`, the in-tree stub, or any third-party `/v1/*`-speaking server).
+Parley is a **four-process system**: a browser PWA, a Node proxy, a Python audio bridge, and a separate agent upstream. The PWA, proxy, and bridge are parley code. The agent is whatever you point upstream at (`backends/hermes/plugin`, the in-tree stub, or any third-party `/v1/*`-speaking server).
 
 The PWA only ever talks to the proxy and the audio bridge — never to the agent directly. The bridge only ever talks to the proxy.
 
@@ -20,7 +20,7 @@ The PWA only ever talks to the proxy and the audio bridge — never to the agent
                                  │                    │
                                  ▼                    ▼
               ┌──────────────────────────┐    ┌────────────────────────────┐
-              │ Sidekick proxy           │    │ Audio bridge                │
+              │ Parley proxy           │    │ Audio bridge                │
               │   (Node, server.ts)      │◀───│   (Python, aiortc)          │
               │                          │    │                             │
               │ - serves static assets   │    │ Realtime mode:              │
@@ -74,48 +74,48 @@ Both modes use the same handsfree commit triggers — silence timeout and a send
 
 **Wire contracts**:
 - `/api/parley/*` — the PWA-and-bridge-facing surface served by the proxy. Fully agent-agnostic. POST messages, GET drawer rows, GET a persistent SSE multiplexer, DELETE chats.
-- `/v1/*` — the upstream-facing surface the proxy speaks to whichever agent it's wired to. OpenAI Responses-shaped, plus a sidekick-defined `/v1/gateway/conversations` extension for cross-platform drawer. See [`ABSTRACT_AGENT_PROTOCOL.md`](ABSTRACT_AGENT_PROTOCOL.md).
+- `/v1/*` — the upstream-facing surface the proxy speaks to whichever agent it's wired to. OpenAI Responses-shaped, plus a parley-defined `/v1/gateway/conversations` extension for cross-platform drawer. See [`ABSTRACT_AGENT_PROTOCOL.md`](ABSTRACT_AGENT_PROTOCOL.md).
 
 ## Endpoint inventory
 
-Every HTTP+SSE endpoint sidekick speaks, with a one-line purpose and a classification: **OAI-standard** (mirrors OpenAI's Conversations / Responses API, drop-in compatible), **sidekick-extension** (we invented), or **mixed** (OAI shape with sidekick-extension fields).
+Every HTTP+SSE endpoint parley speaks, with a one-line purpose and a classification: **OAI-standard** (mirrors OpenAI's Conversations / Responses API, drop-in compatible), **parley-extension** (we invented), or **mixed** (OAI shape with parley-extension fields).
 
 ### Upstream contract — `/v1/*` (proxy → agent)
 
 | Method+Path | Class | Purpose |
 |---|---|---|
-| `POST /v1/responses` | mixed | Dispatch a turn. OAI Responses shape; sidekick adds optional body fields `attachments`, `voice`, `user_message_id`. Streams `response.output_text.delta` / `response.completed` SSE events. |
+| `POST /v1/responses` | mixed | Dispatch a turn. OAI Responses shape; parley adds optional body fields `attachments`, `voice`, `user_message_id`. Streams `response.output_text.delta` / `response.completed` SSE events. |
 | `GET /v1/conversations` | OAI-standard | Drawer list (channel-scoped). Returns `ConversationSummary[]`. |
 | `GET /v1/conversations/{id}/items` | OAI-standard | Transcript replay. Returns `ConversationItem[]` plus `first_id` / `has_more` cursor. |
 | `DELETE /v1/conversations/{id}` | OAI-standard | Cascade-delete a session (transcript + memory store). |
-| `PATCH /v1/conversations/{id}` | sidekick-ext | Rename a conversation. Server-side persistence so renames cross devices via `session_changed`. |
-| `GET /v1/conversations/search` | sidekick-ext | Full-text search across messages (FTS5-backed when the upstream supports it). 404 = unsupported, PWA cmd+K Messages section stays empty. |
-| `GET /v1/events` | sidekick-ext | Persistent out-of-turn SSE channel: notifications, session_changed, tool events fired outside any active `/v1/responses` turn, **user_message broadcasts** for cross-device user-bubble propagation. Reconnect-aware via `Last-Event-ID`. |
-| `GET /v1/gateway/conversations` | sidekick-ext | Cross-platform drawer. Same shape as `/v1/conversations` plus `metadata.source` (telegram/slack/whatsapp/sidekick) + `chat_type`. 404 = agent doesn't implement; proxy falls back to channel-only view. |
-| `GET /v1/settings/schema` | sidekick-ext | Agent-declared user-facing settings catalog. 404 = unsupported, sidekick hides the Agent group. |
-| `POST /v1/settings/{id}` | sidekick-ext | Update one agent setting. 400 propagates as a UI revert + error message. |
-| `GET /v1/commands` | sidekick-ext | Slash-command catalog (composer autocomplete). 404 = unsupported. |
-| `GET /v1/parley/auxiliary-models` | sidekick-ext | Advertises the auxiliary vision model the agent will auto-route image attachments through. PWA uses this to enable the attach button when the primary model is text-only but a fallback is configured. |
-| `GET /health` | sidekick-ext | Liveness probe used by the proxy's healthcheck poll. |
+| `PATCH /v1/conversations/{id}` | parley-ext | Rename a conversation. Server-side persistence so renames cross devices via `session_changed`. |
+| `GET /v1/conversations/search` | parley-ext | Full-text search across messages (FTS5-backed when the upstream supports it). 404 = unsupported, PWA cmd+K Messages section stays empty. |
+| `GET /v1/events` | parley-ext | Persistent out-of-turn SSE channel: notifications, session_changed, tool events fired outside any active `/v1/responses` turn, **user_message broadcasts** for cross-device user-bubble propagation. Reconnect-aware via `Last-Event-ID`. |
+| `GET /v1/gateway/conversations` | parley-ext | Cross-platform drawer. Same shape as `/v1/conversations` plus `metadata.source` (telegram/slack/whatsapp/parley) + `chat_type`. 404 = agent doesn't implement; proxy falls back to channel-only view. |
+| `GET /v1/settings/schema` | parley-ext | Agent-declared user-facing settings catalog. 404 = unsupported, parley hides the Agent group. |
+| `POST /v1/settings/{id}` | parley-ext | Update one agent setting. 400 propagates as a UI revert + error message. |
+| `GET /v1/commands` | parley-ext | Slash-command catalog (composer autocomplete). 404 = unsupported. |
+| `GET /v1/parley/auxiliary-models` | parley-ext | Advertises the auxiliary vision model the agent will auto-route image attachments through. PWA uses this to enable the attach button when the primary model is text-only but a fallback is configured. |
+| `GET /health` | parley-ext | Liveness probe used by the proxy's healthcheck poll. |
 
 ### PWA-facing surface — `/api/parley/*` (browser → proxy)
 
 | Method+Path | Class | Purpose |
 |---|---|---|
-| `POST /api/parley/messages` | sidekick-ext | Send a turn. Body `{chat_id, text, attachments?, voice?, user_message_id?}`. 202 fire-and-forget — replies arrive on the persistent SSE channel. |
-| `GET /api/parley/stream` | sidekick-ext | Persistent SSE multiplexer. Fans every upstream envelope (`reply_delta`, `reply_final`, `tool_call`, `tool_result`, `notification`, `session_changed`, `image`, `error`, `user_message`) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
+| `POST /api/parley/messages` | parley-ext | Send a turn. Body `{chat_id, text, attachments?, voice?, user_message_id?}`. 202 fire-and-forget — replies arrive on the persistent SSE channel. |
+| `GET /api/parley/stream` | parley-ext | Persistent SSE multiplexer. Fans every upstream envelope (`reply_delta`, `reply_final`, `tool_call`, `tool_result`, `notification`, `session_changed`, `image`, `error`, `user_message`) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
 | `GET /api/parley/sessions` | mixed | Drawer list. Wraps `/v1/gateway/conversations` (when available) or `/v1/conversations`. |
 | `GET /api/parley/sessions/{id}/messages` | mixed | Transcript replay. Wraps `/v1/conversations/{id}/items`. |
 | `DELETE /api/parley/sessions/{id}` | mixed | Cascade delete. |
-| `PATCH /api/parley/sessions/{id}` | sidekick-ext | Rename. Wraps `PATCH /v1/conversations/{id}`. |
-| `GET /api/parley/search` | sidekick-ext | Cross-conversation FTS search. Wraps `GET /v1/conversations/search`. |
-| `GET /api/parley/settings/schema` | sidekick-ext | Wraps `GET /v1/settings/schema`. |
-| `POST /api/parley/settings/{id}` | sidekick-ext | Wraps `POST /v1/settings/{id}`. |
-| `GET /api/parley/commands` | sidekick-ext | Wraps `GET /v1/commands`. |
-| `GET /api/parley/model-capabilities?model=Y[&provider=X]` | sidekick-ext | Ground-truth ModelCapabilities from hermes's models.dev registry (powers attach-button gating). Wraps `GET /v1/parley/model-capabilities`. |
-| `GET /api/parley/auxiliary-models` | sidekick-ext | Auxiliary-vision-model advertisement (`{vision: <id> \| null}`) — drives the "images route via X" hint when the primary is non-vision. Wraps `GET /v1/parley/auxiliary-models`. |
-| `GET /api/parley/config` | sidekick-ext | PWA-frontend settings snapshot (yaml-backed). Distinct from `/v1/settings/*` — those are agent-owned. |
-| `POST /api/parley/config/{key}` | sidekick-ext | Write one frontend setting back to `sidekick.config.yaml`. |
+| `PATCH /api/parley/sessions/{id}` | parley-ext | Rename. Wraps `PATCH /v1/conversations/{id}`. |
+| `GET /api/parley/search` | parley-ext | Cross-conversation FTS search. Wraps `GET /v1/conversations/search`. |
+| `GET /api/parley/settings/schema` | parley-ext | Wraps `GET /v1/settings/schema`. |
+| `POST /api/parley/settings/{id}` | parley-ext | Wraps `POST /v1/settings/{id}`. |
+| `GET /api/parley/commands` | parley-ext | Wraps `GET /v1/commands`. |
+| `GET /api/parley/model-capabilities?model=Y[&provider=X]` | parley-ext | Ground-truth ModelCapabilities from hermes's models.dev registry (powers attach-button gating). Wraps `GET /v1/parley/model-capabilities`. |
+| `GET /api/parley/auxiliary-models` | parley-ext | Auxiliary-vision-model advertisement (`{vision: <id> \| null}`) — drives the "images route via X" hint when the primary is non-vision. Wraps `GET /v1/parley/auxiliary-models`. |
+| `GET /api/parley/config` | parley-ext | PWA-frontend settings snapshot (yaml-backed). Distinct from `/v1/settings/*` — those are agent-owned. |
+| `POST /api/parley/config/{key}` | parley-ext | Write one frontend setting back to `parley.config.yaml`. |
 
 ### Audio + utility — proxy-owned
 
@@ -186,10 +186,10 @@ The proxy owns no durable state. That stays in the upstream.
 ## Module layout
 
 ```
-sidekick/
+parley/
 ├── server.ts                 proxy entry point
 ├── proxy/                    proxy-side TS (handlers, upstream client)
-│   └── sidekick/                /api/parley/* PWA-facing routes
+│   └── parley/                /api/parley/* PWA-facing routes
 ├── src/                      PWA (browser) code
 ├── audio-bridge/             Python WebRTC bridge (STT + TTS + barge-in)
 ├── backends/                 each subdirectory = one /v1/*-speaking agent
@@ -201,7 +201,7 @@ sidekick/
 ├── styles/                   app.css + manifest
 ├── sw.js                     service worker (PWA app-shell cache)
 ├── install.sh                one-command Mac/Linux installer (curl-pipe-bash)
-└── example.sidekick.config.yaml   copy to sidekick.config.yaml + fill in
+└── example.parley.config.yaml   copy to parley.config.yaml + fill in
 ```
 
 PWA breakdown:

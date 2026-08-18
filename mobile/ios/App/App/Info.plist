@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Sidekick</string>
+	<string>Parley</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -25,9 +25,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Sidekick uses the camera for image attachments.</string>
+	<string>Parley uses the camera for image attachments.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Sidekick uses your microphone for voice messages and dictation.</string>
+	<string>Parley uses your microphone for voice messages and dictation.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Sidekick uses speech recognition to detect the hands-free send word during voice calls.</string>
 	<key>UILaunchStoryboardName</key>

@@ -1,6 +1,6 @@
 # Barge-in
 
-Sidekick lets you interrupt the agent mid-sentence by speaking — same way you'd interrupt a person on a call. This doc covers the user-facing model, the detection algorithm, the tunable knobs, and the file layout for engineers debugging false-fires or missed-fires.
+Parley lets you interrupt the agent mid-sentence by speaking — same way you'd interrupt a person on a call. This doc covers the user-facing model, the detection algorithm, the tunable knobs, and the file layout for engineers debugging false-fires or missed-fires.
 
 > **Status convention**: the *Current behaviour* table at the bottom is updated as we ship fixes. Defaults change over time; the table is the source of truth. Anything in the body that contradicts the table is stale.
 
@@ -8,7 +8,7 @@ Sidekick lets you interrupt the agent mid-sentence by speaking — same way you'
 
 ## What "barge" does
 
-When the agent is speaking (TTS playback in progress) and you start speaking, sidekick:
+When the agent is speaking (TTS playback in progress) and you start speaking, parley:
 
 1. **Halts the agent's reply** — playback stops, no completion of the current sentence.
 2. **Plays a short chime** — audible feedback that the interrupt was registered.
@@ -18,7 +18,7 @@ Barge fires once per detected speech onset, then mutes itself for a cooldown win
 
 ## Two modes
 
-Sidekick has two voice modes; barge works the same way conceptually but routes through different transports:
+Parley has two voice modes; barge works the same way conceptually but routes through different transports:
 
 | Mode | When active | TTS playback | Barge halts via |
 |---|---|---|---|
@@ -107,7 +107,7 @@ The detector itself is initialised via `BargeDetector.start({ micStream, isPlayi
 | `scripts/smoke/realtime-barge-hangup-before-reply.mjs` | Hangup during MicVAD warmup doesn't leak refs. |
 | `scripts/smoke/vad-warm-after-prefetch.mjs` + `vad-init-real.mjs` | Silero asset prefetch + first-call latency budgets. |
 
-Heavier real-audio rig at `scripts/smoke-barge/` (run via `npm run smoke:barge`). Boots stub agent + audio-bridge with fixture TTS + sidekick proxy on isolated ports; chromium drives a real WebRTC call with mic-injected fixture WAVs. Catches end-to-end pipeline regressions:
+Heavier real-audio rig at `scripts/smoke-barge/` (run via `npm run smoke:barge`). Boots stub agent + audio-bridge with fixture TTS + parley proxy on isolated ports; chromium drives a real WebRTC call with mic-injected fixture WAVs. Catches end-to-end pipeline regressions:
 
 | Scenario | What it pins |
 |---|---|

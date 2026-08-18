@@ -212,7 +212,7 @@ async function build({ watch }) {
  * server.mjs at the repo root, so an npm-installed package can run it:
  * Node refuses --experimental-strip-types for files under node_modules
  * (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), which kills `npx
- * sidekick-portal` if start-all points at server.ts.
+ * parleyvoo` if start-all points at server.ts.
  *
  * Root outfile (not dist/) is load-bearing: server.ts derives __dirname
  * from import.meta.url and serves static assets (index.html, build/,

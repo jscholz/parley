@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 /**
- * `npx sidekick-portal` / `sidekick-portal` — one-command front door.
+ * `npx parleyvoo` / `parleyvoo` — one-command front door. (`parleyvoo`
+ * because npm's `parley` is taken; the legacy `sidekick-portal` bin
+ * still points here.)
  *
  * Boots the whole trial stack (proxy + in-tree stub agent) from wherever
  * the package lives, with zero repo knowledge required of the user:
  *
- *   npx sidekick-portal            # from the npm registry
+ *   npx parleyvoo                  # from the npm registry
  *   npx github:jscholz/parley    # straight from GitHub (prepare builds)
  *
  * What it does, in order:

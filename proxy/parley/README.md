@@ -1,4 +1,4 @@
-# Sidekick proxy (`proxy/sidekick/`)
+# Parley proxy (`proxy/parley/`)
 
 Node-side handlers for the `/api/parley/*` PWA-facing surface plus
 the `UpstreamAgent` adapter the proxy uses to talk `/v1/*` to whichever
@@ -17,12 +17,12 @@ agent is wired in (hermes plugin, stub agent, raw OAI third-party).
 | `commands.ts` | `GET /api/parley/commands` — slash-command catalog. |
 | `modelModalities.ts` | Model capabilities + auxiliary-vision passthrough — thin proxy to hermes plugin's models.dev lookup; powers attach-button gating. (Filename pre-dates the refactor; content is now ground-truth caps, not modalities.) |
 | `frontend-config.ts` | yaml-backed PWA settings (`/api/parley/config`). Distinct from `/v1/settings` — those are agent-owned. |
-| `upstream.ts` | The `UpstreamAgent` interface + `HTTPAgentUpstream` implementation. The `SidekickEnvelope` union here is the canonical wire-shape reference. |
+| `upstream.ts` | The `UpstreamAgent` interface + `HTTPAgentUpstream` implementation. The `ParleyEnvelope` union here is the canonical wire-shape reference. |
 | `__tests__/proxy.test.ts` | Integration tests against a `FakeAgent`. Run via `npm test`. |
 
 ## Wire shape
 
-The `SidekickEnvelope` union near the top of `upstream.ts` is the
+The `ParleyEnvelope` union near the top of `upstream.ts` is the
 canonical list of envelope types fanned out on
 `/api/parley/stream` — see also the top-level
 [`README.md`](../../README.md) endpoint inventory.

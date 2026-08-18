@@ -1,5 +1,5 @@
-# Sidekick deployment config. Copy to `sidekick.config.yaml` (or
-# anywhere; point at it via `SIDEKICK_CONFIG=/abs/path/.../sidekick.config.yaml`).
+# Parley deployment config. Copy to `parley.config.yaml` (or
+# anywhere; point at it via `PARLEY_CONFIG=/abs/path/.../parley.config.yaml`).
 #
 # Two halves:
 #
@@ -19,22 +19,22 @@
 
 # Branding — shown in the header, manifest, and lockscreen label.
 app:
-  name: SideKick
+  name: Parley
   subtitle: Agent Portal
   agent_label: Clawdian
   # Optional override for the --primary CSS variable. Any CSS color
   # (hex / rgb() / hsl()). Empty/null = stylesheet default (sage).
   theme_primary: ~
 
-# Backend/upstream agent. Sidekick speaks the abstract agent contract
+# Backend/upstream agent. Parley speaks the abstract agent contract
 # (see docs/ABSTRACT_AGENT_PROTOCOL.md); any compliant `/v1/*` server
 # drops in. The token + URL go through env vars in production
-# (SIDEKICK_PLATFORM_URL / SIDEKICK_PLATFORM_TOKEN).
+# (PARLEY_PLATFORM_URL / SIDEKICK_PLATFORM_TOKEN).
 backend:
   # Which upstream to run. 'http' (default) = any /v1 abstract-agent
   # server (hermes plugin, bundled stub). 'claude-code' = your local
   # Claude Code install via the Agent SDK, in-process (configure the
-  # claude_code block below). Env override: SIDEKICK_BACKEND.
+  # claude_code block below). Env override: PARLEY_BACKEND.
   name: http
   sidekick_platform:
     url: http://127.0.0.1:8645
@@ -62,12 +62,12 @@ server:
   host: ~                 # null = 127.0.0.1; '0.0.0.0' to bind all interfaces
   disable_screenshot: false  # set true to skip Playwright link-preview cards
   # Voice capture requires a browser secure context. For remote access,
-  # run Sidekick over HTTPS by setting both files below, or use a
+  # run Parley over HTTPS by setting both files below, or use a
   # trusted reverse proxy such as Tailscale Serve / Caddy in front of
   # the local HTTP listener.
   https:
-    cert_file: ~          # env override: SIDEKICK_HTTPS_CERT_FILE
-    key_file: ~           # env override: SIDEKICK_HTTPS_KEY_FILE
+    cert_file: ~          # env override: PARLEY_HTTPS_CERT_FILE
+    key_file: ~           # env override: PARLEY_HTTPS_KEY_FILE
 
 # Ambient corner widget — leave null to use browser geolocation.
 weather:
@@ -86,5 +86,5 @@ weather:
 # users' IDB.
 stt:
   keyterms:
-    - Sidekick
+    - Parley
     - Deepgram
