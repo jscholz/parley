@@ -21,7 +21,7 @@ export const STATUS = 'install-only';
 export const BACKEND = 'real';
 
 const RUN = Math.random().toString(36).slice(2, 8);
-const FINAL_MARKER = `SIDEKICK_TOOL_FINAL_${RUN}`;
+const FINAL_MARKER = `PARLEY_TOOL_FINAL_${RUN}`;
 
 export default async function run({ page, log }) {
   await waitForReady(page);
@@ -32,7 +32,7 @@ export default async function run({ page, log }) {
 
   try {
     const t0 = await send(page,
-      `Temporary Sidekick smoke ${RUN}. ` +
+      `Temporary Parley smoke ${RUN}. ` +
       `You must search the web for the current weather in London before answering. ` +
       `Do not use terminal and do not ask for approval. After the search/tool returns, reply with exactly: ${FINAL_MARKER}`,
     );

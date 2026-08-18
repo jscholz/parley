@@ -7,7 +7,7 @@ outbound transcripts.  Schema:
     {type: 'dispatch', text: '<utterance to send to the agent>'}
 
         Bridge calls stt_bridge.dispatch_to_agent(peer, text).  The bridge
-        POSTs to the sidekick proxy and streams the reply back as
+        POSTs to the parley proxy and streams the reply back as
         assistant transcript envelopes.
 
     {type: 'interrupt'}

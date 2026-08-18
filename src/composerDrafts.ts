@@ -52,7 +52,7 @@ function notifyChanged(): void {
   if (notifyTimer) clearTimeout(notifyTimer);
   notifyTimer = setTimeout(() => {
     notifyTimer = null;
-    try { window.dispatchEvent(new CustomEvent('sidekick:draft-changed')); } catch { /* noop */ }
+    try { window.dispatchEvent(new CustomEvent('parley:draft-changed')); } catch { /* noop */ }
   }, 250);
 }
 let boundChatId: string | null = null;

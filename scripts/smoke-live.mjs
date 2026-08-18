@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Read-only LIVE smoke against a *deployed* sidekick instance.
+ * Read-only LIVE smoke against a *deployed* parley instance.
  *
  * The mock-backend smoke suite (`npm run smoke`) proves the frontend
  * logic against a stubbed API; it intercepts `/api/parley/*` with

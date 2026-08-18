@@ -12,7 +12,7 @@
  *      approval because a newer heartbeat row was in the snapshot).
  *  Two matchers: the ⏳-prefixed form, plus a structural fallback in case
  *  the emoji is stripped upstream. KEEP IN SYNC with the server-side push
- *  gate in proxy/sidekick/notifications/dispatch.ts (isProgressHeartbeat)
+ *  gate in proxy/parley/notifications/dispatch.ts (isProgressHeartbeat)
  *  — same predicate, different runtime. */
 export function isProgressHeartbeatText(raw: string): boolean {
   const s = (raw || '').trim();

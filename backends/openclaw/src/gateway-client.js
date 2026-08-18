@@ -33,7 +33,7 @@ const CONNECT_TIMEOUT_MS = 5_000;
 
 const CLIENT_INFO = {
   id: 'gateway-client',
-  displayName: 'Sidekick plugin',
+  displayName: 'Parley plugin',
   version: '0.0.1',
   platform: 'linux',
   mode: 'backend',
@@ -68,7 +68,7 @@ export class GatewayClient {
       ws.once('close', (code, reason) => {
         this.connected = false;
         this.ws = null;
-        this.logger.warn?.(`[sidekick] gateway WS closed (${code}): ${reason}`);
+        this.logger.warn?.(`[parley] gateway WS closed (${code}): ${reason}`);
         for (const { reject, timer } of this.pending.values()) {
           clearTimeout(timer);
           reject(new Error(`gateway WS closed: ${code} ${reason}`));
@@ -76,7 +76,7 @@ export class GatewayClient {
         this.pending.clear();
         if (!this.stopped) this._scheduleReconnect();
       });
-      // Issue connect handshake. Auth omitted — sidekick plugin
+      // Issue connect handshake. Auth omitted — parley plugin
       // connects on loopback to its own gateway, which the plugin's
       // systemd unit launches with `--auth none`. The gateway treats
       // loopback unauthenticated connections as operator scope (see
@@ -106,7 +106,7 @@ export class GatewayClient {
           scopes: ['operator.read', 'operator.write', 'operator.admin'],
         },
       });
-      this.logger.info?.(`[sidekick] gateway WS connected (proto=${helloOk?.protocol ?? '?'}, scopes=${(helloOk?.scopes ?? []).join(',')})`);
+      this.logger.info?.(`[parley] gateway WS connected (proto=${helloOk?.protocol ?? '?'}, scopes=${(helloOk?.scopes ?? []).join(',')})`);
       this.connected = true;
       this.connecting = null;
       this.reconnectAttempts = 0;
@@ -122,7 +122,7 @@ export class GatewayClient {
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts++;
     setTimeout(() => {
-      if (!this.stopped) this.connect().catch((e) => this.logger.warn?.(`[sidekick] reconnect failed: ${e?.message}`));
+      if (!this.stopped) this.connect().catch((e) => this.logger.warn?.(`[parley] reconnect failed: ${e?.message}`));
     }, delay);
   }
 

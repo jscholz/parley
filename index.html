@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <meta name="theme-color" content="#0a0a0a" id="meta-theme-color"/>
-<title>SideKick</title>
+<title>Parley</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg"/>
 <link rel="icon" type="image/png" href="/assets/icon.png"/>
 <link rel="apple-touch-icon" href="/assets/icon.png"/>
@@ -57,9 +57,9 @@
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/></svg>
       <span class="sb-label">Refresh</span>
     </button>
-    <button id="sb-info" class="sb-icon-btn" title="About SideKick">
+    <button id="sb-info" class="sb-icon-btn" title="About Parley">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      <span class="sb-label">About SideKick</span>
+      <span class="sb-label">About Parley</span>
     </button>
     <button id="sb-settings" class="sb-icon-btn" title="Settings">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -75,7 +75,7 @@
 </aside>
 
 <div class="header">
-  <h1 class="brand" aria-label="SideKick Agent Portal">
+  <h1 class="brand" aria-label="Parley Agent Portal">
     <span class="wm-s" aria-hidden="true">
       <span class="wm-bars"></span>
       <span class="wm-chevron"></span>
@@ -209,7 +209,7 @@
 <div id="info-panel" class="info-panel hidden" aria-hidden="true">
   <div class="info-panel-inner">
     <button class="info-close" id="info-close" title="Close">×</button>
-    <h2>SideKick</h2>
+    <h2>Parley</h2>
     <p class="info-tagline">A voice-first portal to your agent.</p>
 
     <h3>Toolbar</h3>
@@ -257,11 +257,11 @@
     <p><strong>Commit word</strong> (Settings): saying the configured word — default "over" — auto-sends the transcript while streaming. Blank = disabled.</p>
 
     <h3>Install as a PWA</h3>
-    <p>Installing gives SideKick its own home-screen icon, runs fullscreen without browser chrome, and on iOS enables the Pocket Lock background-audio path.</p>
+    <p>Installing gives Parley its own home-screen icon, runs fullscreen without browser chrome, and on iOS enables the Pocket Lock background-audio path.</p>
     <ul>
       <li><strong>iPhone / iPad (Safari):</strong> tap the Share button → Add to Home Screen. Other iOS browsers can't install PWAs — Apple only permits this via Safari.</li>
       <li><strong>Android (Chrome / Edge / Firefox):</strong> three-dot menu → Install app, or Add to Home Screen.</li>
-      <li><strong>Desktop Chrome / Edge:</strong> install icon in the address bar, or three-dot menu → Install SideKick.</li>
+      <li><strong>Desktop Chrome / Edge:</strong> install icon in the address bar, or three-dot menu → Install Parley.</li>
       <li><strong>Desktop Safari:</strong> File → Add to Dock (macOS Sonoma 14+).</li>
     </ul>
 
@@ -371,7 +371,7 @@
       <span class="hint" id="set-push-hint">checking support…</span>
     </div>
     <!-- Per-kind toggles. Expose only categories Hermes naturally emits
-         into Sidekick today: regular agent replies, cron output, and approval prompts. The
+         into Parley today: regular agent replies, cron output, and approval prompts. The
          plugin-side dispatcher consults push_kind_<name> before dispatch. -->
     <div class="row">
       <label for="set-push-categories-toggle">Categories</label>
@@ -471,7 +471,7 @@
       src/agentSettings.ts. The agent declares a SettingDef[] over
       /v1/settings/schema; the renderer injects rows with
       `data-agent-setting`. Static rows below ("Preferred models")
-      are sidekick-side knobs that don't depend on the agent.
+      are parley-side knobs that don't depend on the agent.
     -->
     <!--
       Static placeholder shown while /v1/settings/schema is in flight

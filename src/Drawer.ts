@@ -277,7 +277,7 @@ function initResizer(
   // (raising the ceiling is a no-op here — clamp only shrinks). Guard: only
   // touch the width if one is actually set, so we don't force the CSS default
   // onto a drawer the user never resized.
-  window.addEventListener('sidekick:panel-max-width-changed', () => {
+  window.addEventListener('parley:panel-max-width-changed', () => {
     const raw = getComputedStyle(document.documentElement)
       .getPropertyValue(cfg.cssVar).trim();
     const current = parseInt(raw, 10);

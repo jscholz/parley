@@ -91,7 +91,7 @@ export default async function run({ page, log, mock }) {
   // finger is down before the request even starts; the response lands
   // ~450ms later, mid-gesture.
   await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('sidekick:draft-changed'));
+    window.dispatchEvent(new CustomEvent('parley:draft-changed'));
   });
   await page.mouse.move(cx, cy);
   await page.mouse.down();

@@ -6,7 +6,7 @@
 // re-type, re-send, transcript ends up with duplicates.
 //
 // Test plan (mocked, FAILURE PATH ONLY):
-//   1. Pre-populate one sidekick chat (so drawer has something).
+//   1. Pre-populate one parley chat (so drawer has something).
 //   2. Override the mock POST to return 503 from the start.
 //   3. Click into the chat. Send "test-fail-marker".
 //   4. Bubble should appear (briefly pending) then flip to .failed

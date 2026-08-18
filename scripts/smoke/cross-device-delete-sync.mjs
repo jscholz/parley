@@ -7,7 +7,7 @@
 //
 // Fix (commit 5b9c713): plugin emits `conversation_deleted` envelope
 // after the cascade. proxy added it to FANOUT_TYPES. proxyClient
-// removes the IDB row + dispatches sidekick:server-conversation-
+// removes the IDB row + dispatches parley:server-conversation-
 // deleted. sessionDrawer listens and schedules a refresh.
 //
 // What this test does:
@@ -50,7 +50,7 @@ async function drawerChatIds(page) {
 
 async function idbConversations(page) {
   // Open the conversations DB and return all chat_ids. Schema: see
-  // src/conversations.ts — store 'conversations' in 'sidekick-
+  // src/conversations.ts — store 'conversations' in 'parley-
   // conversations' db.
   return page.evaluate(() => new Promise((resolve) => {
     const req = indexedDB.open('sidekick-conversations');

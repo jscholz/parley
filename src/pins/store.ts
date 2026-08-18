@@ -1,7 +1,7 @@
 // Pinned-messages store — server-driven, cross-device coherent.
 //
 // SSOT for pins lives in the backend plugin's `pins` table (see
-// project_hermes_sidekick_parity.md). This module is a read-through
+// project_hermes_parley_parity.md). This module is a read-through
 // cache + thin client over those routes:
 //   GET    /api/parley/pins              → snapshot
 //   POST   /api/parley/pins              ← {chat_id, msg_id, role, text, timestamp}
@@ -64,7 +64,7 @@ function parsePin(p: any): PinnedItem | null {
 function notifyPinError(message: string): void {
   try {
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new CustomEvent('sidekick:pin-error', { detail: { message } }));
+      window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message } }));
     }
   } catch { /* non-DOM hosts (test runner) */ }
 }
@@ -75,8 +75,8 @@ const store = new ServerBackedStore<PinnedItem>({
   extract: (data) => (data?.pins ?? []),
   parse: parsePin,
   idOf: (item) => key(item.chatId, item.msgId),
-  changeEvent: 'sidekick:pins-changed',
-  serverChangeEvent: 'sidekick:server-pins-changed',
+  changeEvent: 'parley:pins-changed',
+  serverChangeEvent: 'parley:server-pins-changed',
   // Foreground refresh — iOS PWA can come back after long background.
   refreshOnVisible: true,
   // Pin mutations are typically user-initiated singletons, not

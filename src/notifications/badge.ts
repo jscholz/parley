@@ -1,7 +1,7 @@
 // App-icon badge + per-chat unread state, server-driven.
 //
 // SSOT for sidebar badges + app badge + push dispatch is the backend
-// plugin's `unread_state` table (see project_hermes_sidekick_parity.md).
+// plugin's `unread_state` table (see project_hermes_parley_parity.md).
 // This module is a read-through cache + thin client over those routes:
 //   GET  /api/parley/notifications/unread     → snapshot
 //   POST /api/parley/notifications/seen       ← {chat_id}
@@ -321,15 +321,15 @@ export function totalUnreadCount(): number { return totalUnread(); }
 
 function notifyChange() {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:unread-changed'));
+    window.dispatchEvent(new CustomEvent('parley:unread-changed'));
   } catch { /* SSR / non-window environments */ }
 }
 
 // Server-pushed change notifications fan in here. backendEvents emits
-// `sidekick:server-unread-changed` when it sees an `unread_changed`
+// `parley:server-unread-changed` when it sees an `unread_changed`
 // envelope on /api/parley/stream — re-fetch immediately.
 if (typeof window !== 'undefined') {
-  window.addEventListener('sidekick:server-unread-changed', () => requestRefresh());
+  window.addEventListener('parley:server-unread-changed', () => requestRefresh());
   // NOTE for the stale-snapshot guard: both foreground triggers below
   // funnel through requestRefresh → refreshFromServer, so an iOS
   // foregrounding that fires visibilitychange AND focus while a seen/

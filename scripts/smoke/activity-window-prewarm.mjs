@@ -14,8 +14,8 @@
 //
 // Fix: prewarmActivityWindows() warms each activity item's around-window
 // into drillWindowCache in the background — on boot (after activity
-// hydrates, via `sidekick:activity-changed`) and on the cross-device
-// reconcile (`sidekick:server-activity-changed`).
+// hydrates, via `parley:activity-changed`) and on the cross-device
+// reconcile (`parley:server-activity-changed`).
 //
 // Discriminator (NO drill anywhere in this test): after the app boots with
 // a server-seeded activity item whose messageId points at a DEEP message
@@ -89,7 +89,7 @@ export default async function run({ page, log }) {
   await waitForReady(page);
 
   // 1. Boot trigger: the server-seeded activity item hydrates, fires
-  //    `sidekick:activity-changed`, and prewarmActivityWindows warms its
+  //    `parley:activity-changed`, and prewarmActivityWindows warms its
   //    deep around-window — with NO drill. Poll the cache until it lands.
   await pollUntil(page,
     async (m) => {
@@ -111,7 +111,7 @@ export default async function run({ page, log }) {
     `precondition: ${runtimeMsg} must be cold before its item is ingested, got len ${beforeRuntime}`);
 
   // 2. activity-changed trigger: ingest a SECOND item at runtime via the
-  //    store's upsertNotification path (fires `sidekick:activity-changed`).
+  //    store's upsertNotification path (fires `parley:activity-changed`).
   //    The prewarm should warm its window — again with no drill.
   await page.evaluate(({ chatId, msgId }) =>
     import('/build/notifications/activityStore.mjs').then((mod) => mod.upsertNotification({
@@ -129,7 +129,7 @@ export default async function run({ page, log }) {
   const runtimeLen = await cachedWindowLen(page, CHAT_ID, runtimeMsg);
   assert(runtimeLen > 0,
     `BUG: activity item ingested at runtime did not prewarm its around-window ` +
-    `(getWindow → ${runtimeLen}). the sidekick:activity-changed listener should ` +
+    `(getWindow → ${runtimeLen}). the parley:activity-changed listener should ` +
     `kick prewarmActivityWindows.`);
   log(`activity-changed prewarmed: ${runtimeMsg} window n=${runtimeLen} (no drill) ✓`);
 

@@ -33,7 +33,7 @@ export type SessionRow = {
   source?: string | null;
   /** Space-joined raw hermes session ids rolled up into this row.
    *  Lets a pasted session id (e.g. 20260611_223425_98bd2b) match
-   *  even though the row's own id is the sidekick:<uuid> chat id. */
+   *  even though the row's own id is the parley:<uuid> chat id. */
   sessionIds?: string | null;
   [k: string]: any;
 };

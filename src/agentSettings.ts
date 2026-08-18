@@ -9,7 +9,7 @@
  * (the updated def) replaces the local copy. On error, we revert the
  * input to the previous value so a rejection is visible.
  *
- * Sidekick-owned settings (theme, hotkeys, mic, TTS) stay in their
+ * Parley-owned settings (theme, hotkeys, mic, TTS) stay in their
  * original groups; this module only renders rows the agent declares.
  *
  * Refresh policy: load() on settings-panel open AND close — the panel

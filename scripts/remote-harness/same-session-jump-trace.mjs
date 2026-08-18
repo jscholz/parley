@@ -9,7 +9,7 @@
 // is the exact slow case.
 //
 // Env:
-//   SIDEKICK_URL   (default http://127.0.0.1:3001)
+//   PARLEY_URL   (default http://127.0.0.1:3001)
 //   CHAT           bare/full chat id to confine jumps to (default the
 //                  pitch deck: ae6435b5-53aa-4819-b594-d21652c89397)
 //   DRILL_TIMEOUT  ms to wait for the target bubble (default 30000)
@@ -19,10 +19,10 @@ import { chromium } from 'playwright-core';
 import os from 'node:os';
 import path from 'node:path';
 
-const URL = process.env.PARLEY_URL || process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
-const CHAT_FILTER = (process.env.CHAT || 'ae6435b5-53aa-4819-b594-d21652c89397').replace(/^sidekick:/, '');
+const URL = process.env.PARLEY_URL || process.env.PARLEY_URL || 'https://fontbrain.taile0c895.ts.net:3001';
+const CHAT_FILTER = (process.env.CHAT || 'ae6435b5-53aa-4819-b594-d21652c89397').replace(/^parley:/, '');
 const DRILL_TIMEOUT = Number(process.env.DRILL_TIMEOUT || 30000);
-const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.sidekick-harness-profile');
+const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.parley-harness-profile');
 
 function instrument() {
   const T = (window.__trace = { clickT: 0, fetches: [] });
@@ -119,7 +119,7 @@ async function main() {
 
     const allPins = await page.$$eval('.pin-drawer-item', (els) =>
       els.map((el) => ({ chatId: el.getAttribute('data-chat-id'), msgId: el.getAttribute('data-msg-id') })));
-    const pins = allPins.filter((p) => String(p.chatId || '').replace(/^sidekick:/, '') === CHAT_FILTER);
+    const pins = allPins.filter((p) => String(p.chatId || '').replace(/^parley:/, '') === CHAT_FILTER);
     report.pinsInChat = pins.length;
     if (pins.length < 2) throw new Error(`need >=2 pins in chat ${CHAT_FILTER}, found ${pins.length}`);
 

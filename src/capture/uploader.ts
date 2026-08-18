@@ -1,7 +1,7 @@
 // Serial segment uploader — drains the durable segmentStore buffer to
 // POST /api/parley/captures/{id}/segments/{seq} (capture plan §3.2).
 //
-// Contract with the server (proxy/sidekick/capture.ts):
+// Contract with the server (proxy/parley/capture.ts):
 //   * exactly-once by construction: the IDB copy is deleted only on a
 //     2xx ack; a re-send after a lost ack gets `duplicate: true` and
 //     acks again (same sha) — still safe to delete.
@@ -82,9 +82,9 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     const sha = await sha256Hex(seg.blob);
     const headers: Record<string, string> = {
       'content-type': seg.mime || 'application/octet-stream',
-      'x-sidekick-t0-ms': String(seg.t0Ms),
+      'x-parley-t0-ms': String(seg.t0Ms),
     };
-    if (sha) headers['x-sidekick-sha256'] = sha;
+    if (sha) headers['x-parley-sha256'] = sha;
     let res: Response;
     try {
       res = await fetchFn(

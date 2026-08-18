@@ -45,7 +45,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // the viewed chat with a mismatched prefix took the off-screen path
   // (spurious banner, #234) AND failed to render its in-chat row.
   const focusedAtEntry = switchCtl.focusedId();
-  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^sidekick:/, ''));
+  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^parley:/, ''));
   if (chatId && focusedAtEntry && bareId(chatId) === bareId(focusedAtEntry)) {
     chatId = focusedAtEntry;
   }
@@ -76,7 +76,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // there's a new event waiting in another chat. clearUnread fires
   // from sessionDrawer.setViewed when they switch in. The system
   // notification (OS-level) is dispatched separately by the proxy
-  // (proxy/sidekick/notifications/dispatch.ts); this is the in-app
+  // (proxy/parley/notifications/dispatch.ts); this is the in-app
   // counterpart for badge state.
   if (chatId && chatId !== switchCtl.focusedId()) {
     if (replay) {

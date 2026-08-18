@@ -1,7 +1,7 @@
 /**
  * @fileoverview Video card kind — agent-pushed video files rendered
  * inline on the reply bubble (2026-08-04 multimedia lane; the serving
- * side is proxy/sidekick/media.ts). Mirrors image.ts; the <video>
+ * side is proxy/parley/media.ts). Mirrors image.ts; the <video>
  * attribute set matches the transcript's user-attachment echo player
  * (chat.ts): controls + playsInline (iOS must not force fullscreen) +
  * preload=metadata (first frame + duration, not the whole file — the

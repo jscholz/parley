@@ -58,7 +58,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-banner-focused\n\n' +
+      'printf parley-banner-focused\n\n' +
       'Reason: focused-chat banner smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: 'notif_bf_approval_1',

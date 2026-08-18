@@ -21,7 +21,7 @@
 //      another device after this PWA was already booted).
 //   5. Add a second pin server-side BEFORE pushing the envelope.
 //   6. After the envelope's 800ms debounce, the PWA's
-//      `sidekick:server-pins-changed` listener should trigger a
+//      `parley:server-pins-changed` listener should trigger a
 //      re-fetch and the count banner should reflect both pins.
 
 import { waitForReady, assert } from './lib.mjs';
@@ -59,9 +59,9 @@ export default async function run({ page, log, mock }) {
   await page.addInitScript(() => {
     /** @ts-ignore */
     window.__pinSyncDiag = { serverPinsChanged: 0, localPinsChanged: 0 };
-    window.addEventListener('sidekick:server-pins-changed',
+    window.addEventListener('parley:server-pins-changed',
       () => { window.__pinSyncDiag.serverPinsChanged++; });
-    window.addEventListener('sidekick:pins-changed',
+    window.addEventListener('parley:pins-changed',
       () => { window.__pinSyncDiag.localPinsChanged++; });
   });
   await waitForReady(page);

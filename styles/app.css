@@ -348,7 +348,7 @@
   }
   /* DEV-mode pill — visible substitute for URL bar transparency in
      standalone PWA mode. When this is showing, log()/diag() are
-     emitting and the relay is streaming to /tmp/sidekick-debug/. See
+     emitting and the relay is streaming to /tmp/parley-debug/. See
      src/util/devMode.ts. Long-press version label to toggle.
      Tap the pill itself to emit a [mark #N] line in the log
      (useful for "this is the moment I hit the bug" annotations). */
@@ -643,7 +643,7 @@
   /* Per-chat unread indicator — bold snippet + small inline pill, mirrors
    * the WhatsApp pattern of "this row needs your attention". Driven by
    * the badge module's in-memory unread map; class is added/removed
-   * by sessionDrawer.repaintUnreadIndicators on sidekick:unread-changed. */
+   * by sessionDrawer.repaintUnreadIndicators on parley:unread-changed. */
   .sessions-list li.unread .sess-snippet { font-weight: 600; color: var(--fg); }
   .sess-unread-chip {
     display: inline-block; vertical-align: middle; margin-left: 6px;

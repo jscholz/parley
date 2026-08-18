@@ -39,7 +39,7 @@ test('buildMapsEmbed: path-style /maps/dir/ORIGIN/DESTINATION → directions emb
 });
 
 test('buildMapsEmbed: hybrid junk URL (path-style ORIGIN&destination=DEST) does NOT crash + falls through', () => {
-  // The agent-broken format Sidekick saw in the wild: path slot has
+  // The agent-broken format Parley saw in the wild: path slot has
   // `&destination=` mashed in instead of `/`.
   const url = 'https://www.google.com/maps/dir/Buckingham%20Palace%2C%20London&destination=Tesco';
   const out = buildMapsEmbed(url, KEY);

@@ -6,7 +6,7 @@
 // to a visible EXPIRED state instead of silently vanishing.
 //
 // Field incident this prevents: the agent blocked invisibly for 58
-// minutes on a clarify question sidekick never rendered.
+// minutes on a clarify question parley never rendered.
 
 import { waitForReady, openSidebar, clickRow, waitForDrawerQuiet } from './lib.mjs';
 

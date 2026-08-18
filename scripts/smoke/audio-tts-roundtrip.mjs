@@ -42,7 +42,7 @@ export default async function run({ url, log }) {
     res = await fetch(target, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: 'Hello from the sidekick smoke test.', model: VOICE }),
+      body: JSON.stringify({ text: 'Hello from the parley smoke test.', model: VOICE }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (e) {

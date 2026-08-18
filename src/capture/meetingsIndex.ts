@@ -6,7 +6,7 @@
 // proxy-owned truth; sessions know nothing about captures (by design:
 // capture is an entity linked BY REFERENCE, §3.6). Refreshes on boot
 // and on capture_changed envelopes; consumers listen for
-// `sidekick:meetings-changed`.
+// `parley:meetings-changed`.
 
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
@@ -23,7 +23,7 @@ let loaded = false;
 
 function notify(): void {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:meetings-changed'));
+    window.dispatchEvent(new CustomEvent('parley:meetings-changed'));
   } catch { /* non-browser */ }
 }
 
@@ -62,9 +62,9 @@ export function meetingChatIds(): Set<string> {
 export function meetingsLoaded(): boolean { return loaded; }
 
 /** Boot + envelope wiring. capture_changed envelopes arrive via
- *  backendEventHandlers → `sidekick:capture-changed-remote`. */
+ *  backendEventHandlers → `parley:capture-changed-remote`. */
 export function initMeetingsIndex(): void {
-  window.addEventListener('sidekick:capture-changed-remote', () => {
+  window.addEventListener('parley:capture-changed-remote', () => {
     void refreshMeetingsIndex();
   });
   void refreshMeetingsIndex();

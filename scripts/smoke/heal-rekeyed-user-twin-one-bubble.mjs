@@ -1,6 +1,6 @@
 // Pin the 2026-07-15 fix: the plugin's reconcile pass can DOUBLE-persist a
 // user message — a second state.db row with a fresh heal-minted umsg_* key,
-// same content + timestamp (field chat sidekick:a7d55680…, rows 74399/74532).
+// same content + timestamp (field chat parley:a7d55680…, rows 74399/74532).
 // The projection's duplicate dedup then has to choose a winner, and before
 // the fix the id tiebreak picked the heal twin while the live client's
 // inflight echo + pendingSend were keyed by its OWN mint — the echo walk

@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 import { mkdirSync, readFileSync } from 'node:fs';
 
 const URL = 'http://localhost:3020';
-const OUT = '/tmp/sidekick-shots';
+const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const CHAT_ID = readFileSync('/tmp/demo-d', 'utf-8').trim().split(/\s+/)[1];

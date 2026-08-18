@@ -4,9 +4,9 @@
 // male for another).
 //
 // Persistence: rides the synced `sessionIdentities` setting (see
-// src/settings.ts DEFAULTS + proxy/sidekick/frontend-config.ts). That
+// src/settings.ts DEFAULTS + proxy/parley/frontend-config.ts). That
 // setting is a STRING because the prefs store is scalar-only; this module
-// owns the JSON encode/decode. Because prefs is sidekick.db-backed +
+// owns the JSON encode/decode. Because prefs is parley.db-backed +
 // cross-device, identities sync across devices for free — same model as
 // src/sessionPins.ts, no dedicated server table.
 //
@@ -18,12 +18,12 @@
 // In-memory `map` is the sync source of truth for renders (the drawer's
 // per-row nicknameFor() and the TTS voiceFor() resolver can't await).
 // Mutations write through to settings.set() (PUT /api/parley/prefs) and
-// emit a `sidekick:session-identity-changed` event so the drawer repaints.
+// emit a `parley:session-identity-changed` event so the drawer repaints.
 
 import * as settings from './settings.ts';
 import { log } from './util/log.ts';
 
-const CHANGE_EVENT = 'sidekick:session-identity-changed';
+const CHANGE_EVENT = 'parley:session-identity-changed';
 
 export interface SessionIdentity {
   nickname?: string;

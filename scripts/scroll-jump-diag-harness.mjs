@@ -14,12 +14,12 @@
 // Usage: node /tmp/scroll-jump-repro.mjs [--headed] [--no-disable-smooth]
 //        [--stop-mid-flight]
 
-import { chromium } from '/home/jscholz/code/sidekick/node_modules/playwright-core/index.mjs';
+import { chromium } from '/home/jscholz/code/parley/node_modules/playwright-core/index.mjs';
 import {
   CHROMIUM, DEFAULT_URL, waitForReady, openSidebar, clickRow,
   attachConsoleCapture,
-} from '/home/jscholz/code/sidekick/scripts/smoke/lib.mjs';
-import { installMockBackend } from '/home/jscholz/code/sidekick/scripts/smoke/mock-backend.mjs';
+} from '/home/jscholz/code/parley/scripts/smoke/lib.mjs';
+import { installMockBackend } from '/home/jscholz/code/parley/scripts/smoke/mock-backend.mjs';
 import { writeFileSync } from 'node:fs';
 
 const HEADED = process.argv.includes('--headed');

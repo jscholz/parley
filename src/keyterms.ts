@@ -1,5 +1,5 @@
 /**
- * Per-user STT keyterm storage. Server-backed (sidekick.db
+ * Per-user STT keyterm storage. Server-backed (parley.db
  * `user_settings`, key `stt_keyterms`) so the list syncs across devices.
  * IndexedDB is kept as a write-through cache so reads still work offline
  * and so existing device-local lists migrate forward automatically.
@@ -30,7 +30,7 @@ const STORE = 'keyterms';
 const DB_VERSION = 1;
 const RECORD_ID = 'list';
 
-// Synced settings key on the server (sidekick.db user_settings).
+// Synced settings key on the server (parley.db user_settings).
 const PREFS_KEY = 'stt_keyterms';
 const PREFS_URL = `/api/parley/prefs/${PREFS_KEY}`;
 

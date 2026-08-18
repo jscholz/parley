@@ -374,19 +374,19 @@ self.addEventListener('message', (e) => {
 // ─── Web Push (Phase 3) ──────────────────────────────────────────────────
 // Display incoming push payloads as system notifications + focus the
 // matching chat on click. Payload shape (set server-side by
-// proxy/sidekick/notifications/dispatch.ts in Phase 3c):
+// proxy/parley/notifications/dispatch.ts in Phase 3c):
 //   { title, body, chat_id?, tag?, icon?, url? }
 // chat_id + tag both default to a synthetic id so coalescing still works
 // when the dispatcher hasn't supplied them. Bodies that fail to parse
-// fall back to "Sidekick" / payload-text so we never silently drop a
+// fall back to "Parley" / payload-text so we never silently drop a
 // delivery.
 self.addEventListener('push', (e) => {
   let payload = {};
   if (e.data) {
     try { payload = e.data.json(); }
-    catch { payload = { title: 'Sidekick', body: e.data.text() || 'New message' }; }
+    catch { payload = { title: 'Parley', body: e.data.text() || 'New message' }; }
   }
-  const title = payload.title || 'Sidekick';
+  const title = payload.title || 'Parley';
   const body = payload.body || '';
   const chatId = payload.chat_id || '';
   // tag coalesces per-thread: same tag replaces the prior notification

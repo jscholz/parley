@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Sidekick smoke runner.
+ * Parley smoke runner.
  *
  * Discovers every `scripts/smoke/*.mjs` (except `lib.mjs`), runs each
  * scenario in sequence in its own fresh Chromium context, and prints
@@ -243,7 +243,7 @@ async function main() {
   } catch { /* dev proxy down — skip */ }
 
   // Notification push-prefs tripwire (incident 2026-07-25: push_kind_*
-  // rows in the LIVE sidekick.db were flipped to all-false during a
+  // rows in the LIVE parley.db were flipped to all-false during a
   // dev/test session and stayed that way for 9 days — zero pushes,
   // zero alarms). Mocked scenarios are now fully intercepted
   // (mock-backend.mjs serves preferences in-memory), so any drift seen

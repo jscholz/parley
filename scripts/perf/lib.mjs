@@ -1,4 +1,4 @@
-// Shared helpers for sidekick PWA perf measurement scripts.
+// Shared helpers for parley PWA perf measurement scripts.
 //
 // Distinct from scripts/smoke/: smoke verifies behavior (binary pass/fail),
 // perf measures latency (numbers). Each scenario captures one or more

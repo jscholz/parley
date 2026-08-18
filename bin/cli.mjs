@@ -6,7 +6,7 @@
  * the package lives, with zero repo knowledge required of the user:
  *
  *   npx sidekick-portal            # from the npm registry
- *   npx github:jscholz/sidekick    # straight from GitHub (prepare builds)
+ *   npx github:jscholz/parley    # straight from GitHub (prepare builds)
  *
  * What it does, in order:
  *   1. Friendly Node >= 22 check (strip-types + loadEnvFile need it).
@@ -14,10 +14,10 @@
  *      repo itself (unchanged dev behavior). From an npx cache / global
  *      install — both ephemeral or read-only — it's ~/.sidekick:
  *        ~/.sidekick/.env                  secrets (seeded from .env.example)
- *        ~/.sidekick/sidekick.config.yaml  optional deployment tuning
+ *        ~/.sidekick/parley.config.yaml  optional deployment tuning
  *        ~/.sidekick/data/                 stub-agent conversation store
  *      Wired through the env contracts the stack already honors:
- *      SIDEKICK_ENV_FILE (start-all), SIDEKICK_CONFIG (server.ts),
+ *      PARLEY_ENV_FILE (start-all), PARLEY_CONFIG (server.ts),
  *      AGENT_DATA_DIR (backends/stub).
  *   3. Ensures a client build exists (published tarballs ship build/;
  *      a git checkout builds on demand).

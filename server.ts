@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SideKick server.
+ * Parley server.
  * - GET /              → serves index.html
  * - GET /<path>        → serves static assets
  * - GET /config        → runtime config (gateway token) from env
@@ -27,8 +27,8 @@ import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import { rewriteLegacyApiPath } from './proxy/legacyPaths.mjs';
-import * as sidekick from './proxy/sidekick/index.ts';
-import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/sidekick/setup.ts';
+import * as parley from './proxy/parley/index.ts';
+import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/parley/setup.ts';
 import {
   FRONTEND_SETTINGS,
   readAllFrontend,
@@ -36,12 +36,12 @@ import {
   writeOne as writeFrontendSetting,
   persist as persistDeployDoc,
   type FrontendSettingKey,
-} from './proxy/sidekick/frontend-config.ts';
+} from './proxy/parley/frontend-config.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ── Deployment config ────────────────────────────────────────────────
-// Non-secret tuning lives in sidekick.config.yaml (gitignored). Secrets
+// Non-secret tuning lives in parley.config.yaml (gitignored). Secrets
 // stay in .env. Env vars ALWAYS override the file — convenient for
 // Docker/CI where mounting a file is awkward but env injection is easy.
 // Missing file is fine; defaults + env vars cover the ground.
@@ -50,7 +50,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // (e.g. a private fork with keys and personal keyterms). Useful so the
 // public repo stays generic while deployment config lives privately.
 // Filename preference: parley.config.yaml, then the legacy
-// sidekick.config.yaml, then config.yaml (proxy/configPath.mjs).
+// parley.config.yaml, then config.yaml (proxy/configPath.mjs).
 const CONFIG_PATH = resolveConfigPath(__dirname);
 /** Parse the deployment config. Preserves comments via YAML.Document for
  *  round-trippable edits (used by the keyterms save path). */
@@ -80,7 +80,7 @@ let lastConfigMtime = CONFIG_PATH && fsSync.existsSync(CONFIG_PATH)
  *  + rebuild any derived state (preferred-model globs). Called from
  *  endpoints that get polled by the settings UI (models-catalog on a
  *  30s interval, /config on settings-panel open) so VSCode edits to
- *  sidekick.config.yaml get picked up without a service restart. */
+ *  parley.config.yaml get picked up without a service restart. */
 function reloadConfigIfChanged(): boolean {
   if (!CONFIG_PATH || !fsSync.existsSync(CONFIG_PATH)) return false;
   try {
@@ -381,7 +381,7 @@ async function handleLinkPreview(req, res) {
       signal: ctrl.signal,
       redirect: 'follow',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Sidekick/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; Parley/1.0)',
         'Accept': 'text/html,application/xhtml+xml',
       },
     });
@@ -766,15 +766,15 @@ async function handleTranscribe(req, res) {
 // (app name, default coords) can be set without a rebuild.
 const GW_TOKEN = process.env.GW_TOKEN || '';
 
-// STT keyterm seed list. Read from sidekick.config.yaml's `stt.keyterms`
+// STT keyterm seed list. Read from parley.config.yaml's `stt.keyterms`
 // (a YAML list); the PWA fetches this ONCE on first boot to seed each
 // user's IndexedDB-backed list, then reads/writes only IDB thereafter.
 // Edits to the yaml affect new users only — existing installs keep
 // their per-user IDB list. Falls back to FALLBACK_KEYTERMS if the yaml
-// is missing the section (or sidekick is running without a config).
-const FALLBACK_KEYTERMS: string[] = ['Sidekick', 'Deepgram'];
+// is missing the section (or parley is running without a config).
+const FALLBACK_KEYTERMS: string[] = ['Parley', 'Deepgram'];
 
-/** Resolve the keyterm seed list from sidekick.config.yaml. Strings
+/** Resolve the keyterm seed list from parley.config.yaml. Strings
  *  are trimmed + deduped (case-insensitive). Anything non-string in
  *  the array is dropped silently. Reads via the live DEPLOY_CFG so a
  *  yaml mtime-triggered reload picks up edits without a restart. */
@@ -808,16 +808,16 @@ async function handleKeytermsGet(_req, res) {
 
 /** GET /api/parley/config — flat snapshot of every PWA setting
  *  with its current value (yaml override or built-in default). */
-function handleSidekickConfigGet(_req, res) {
+function handleParleyConfigGet(_req, res) {
   const snapshot = readAllFrontend(DEPLOY_CFG);
   res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
   res.end(JSON.stringify({ settings: snapshot }));
 }
 
 /** POST /api/parley/config/<key> — write one setting. Body is
- *  `{value: <new>}`. Persists to sidekick.config.yaml under
+ *  `{value: <new>}`. Persists to parley.config.yaml under
  *  `frontend.<category>.<key>:`. Returns the updated value. */
-async function handleSidekickConfigSet(req, res, key: string) {
+async function handleParleyConfigSet(req, res, key: string) {
   if (!Object.prototype.hasOwnProperty.call(FRONTEND_SETTINGS, key)) {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { message: `unknown setting: ${key}` } }));
@@ -848,7 +848,7 @@ async function handleSidekickConfigSet(req, res, key: string) {
   }
   if (!CONFIG_PATH) {
     res.writeHead(503, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: 'no sidekick.config.yaml configured (set PARLEY_CONFIG)' } }));
+    res.end(JSON.stringify({ error: { message: 'no parley.config.yaml configured (set PARLEY_CONFIG)' } }));
     return;
   }
   if (!deployDoc) deployDoc = YAML.parseDocument('frontend: {}\n');
@@ -873,9 +873,9 @@ async function handleSidekickConfigSet(req, res, key: string) {
 //
 // When the PWA has `?debug-relay=1` (or `localStorage.debug_relay=1`), it
 // POSTs batches of log lines here every 250ms. We append to a per-session
-// file under `${tmpdir}/sidekick-debug/` and update a `latest.log` symlink
+// file under `${tmpdir}/parley-debug/` and update a `latest.log` symlink
 // to the most recent file. AI agents and developers can
-// `cat /tmp/sidekick-debug/latest.log` to see live diagnostic output
+// `cat /tmp/parley-debug/latest.log` to see live diagnostic output
 // without copy-pasting from the browser console.
 //
 // /tmp is the right home: ephemeral by definition (tmpfs on Pi, cleared
@@ -884,7 +884,7 @@ async function handleSidekickConfigSet(req, res, key: string) {
 // don't set the flag, so the dir only accumulates real interactive
 // sessions either way.
 
-const DEBUG_LOG_DIR = path.join(os.tmpdir(), 'sidekick-debug');
+const DEBUG_LOG_DIR = path.join(os.tmpdir(), 'parley-debug');
 const DEBUG_LOG_KEEP = 20;
 const DEBUG_LOG_MAX_BODY = 256 * 1024;       // 256 KB per POST
 const DEBUG_LOG_SID_RE = /^[A-Za-z0-9._-]{1,80}$/;
@@ -986,9 +986,9 @@ function handleConfig(_req, res) {
     gwToken: GW_TOKEN,
     mapsEmbedKey: process.env.MAPS_EMBED_KEY || '',
     // Skinning — per-install overrides for app name / agent label / primary
-    // theme color. Resolved via sidekick.config.yaml (app.*) then env var
+    // theme color. Resolved via parley.config.yaml (app.*) then env var
     // then default. See config.example.yaml.
-    appName: cfgVal('PARLEY_APP_NAME', 'app.name', 'SideKick'),
+    appName: cfgVal('PARLEY_APP_NAME', 'app.name', 'Parley'),
     appSubtitle: cfgVal('PARLEY_APP_SUBTITLE', 'app.subtitle', 'Agent Portal'),
     agentLabel: cfgVal('PARLEY_AGENT_LABEL', 'app.agent_label', 'Clawdian'),
     // Any valid CSS color (hex, rgb(), hsl()). Empty = keep stylesheet default.
@@ -1001,11 +1001,11 @@ function handleConfig(_req, res) {
   }));
 }
 
-// Sidekick audio bridge — standalone Python aiortc service for WebRTC
+// Parley audio bridge — standalone Python aiortc service for WebRTC
 // signaling + STT + TTS. The proxy forwards /api/rtc/* to the bridge;
 // the bridge POSTs back to /api/parley/messages with {chat_id, text}
-// for agent dispatch (single sidekick→agent gateway). See
-// ~/code/sidekick/audio-bridge/.
+// for agent dispatch (single parley→agent gateway). See
+// ~/code/parley/audio-bridge/.
 const AUDIO_BRIDGE_UPSTREAM = cfgVal(
   'PARLEY_AUDIO_BRIDGE_URL',
   'backend.audio_bridge.url',
@@ -1014,7 +1014,7 @@ const AUDIO_BRIDGE_UPSTREAM = cfgVal(
 
 const HOME = os.homedir();
 
-// ─── Sidekick agent contract ────────────────────────────────────────────
+// ─── Parley agent contract ────────────────────────────────────────────
 // The proxy talks to ANY upstream that speaks the abstract agent
 // contract (HTTP+SSE — see docs/ABSTRACT_AGENT_PROTOCOL.md).
 // backends/hermes/plugin is the typical upstream; the stub agent under
@@ -1025,20 +1025,20 @@ const HOME = os.homedir();
 const PARLEY_UPSTREAM_URL = cfgVal('PARLEY_PLATFORM_URL',
   ['backend.parley_platform.url', 'backend.sidekick_platform.url'],
   'http://127.0.0.1:8645') as string;
-sidekick.init({
+parley.init({
   token: readEnv('PARLEY_PLATFORM_TOKEN')
     || (cfgVal('PARLEY_PLATFORM_TOKEN',
       ['backend.parley_platform.token', 'backend.sidekick_platform.token'], '') as string),
   url: PARLEY_UPSTREAM_URL,
   // Backend switch (claude-code wiring 2026-07-14): `backend: claude-code`
-  // in sidekick.config.yaml (or PARLEY_BACKEND env, which wins inside
+  // in parley.config.yaml (or PARLEY_BACKEND env, which wins inside
   // init) selects the in-process Agent SDK upstream; the claude_code
   // block carries its config (cwd, allowlist, model, approvals, …).
   backend: cfgVal('PARLEY_BACKEND', 'backend.name', 'http') as string,
   claudeCode: (cfgVal('', 'claude_code', null) as Record<string, unknown> | null) ?? undefined,
 });
 
-// Meeting-capture transcription pipeline (proxy/sidekick/
+// Meeting-capture transcription pipeline (proxy/parley/
 // captureTranscribe.ts): hooks segment arrivals into audio-bridge
 // batch STT → rolling transcript.md → doc_show pushes, plus the
 // start-message + post-stop ingest turn. Wired only when the bridge
@@ -1055,13 +1055,13 @@ sidekick.init({
 // for "the bridge can transcribe"; a key added later via the setup
 // wizard wires the pipeline on the next restart.
 if (DEEPGRAM_KEY) {
-  sidekick.initCaptureTranscription({
+  parley.initCaptureTranscription({
     bridgeUrl: AUDIO_BRIDGE_UPSTREAM,
     // Same vocabulary biasing the memo/dictate paths get (§Phase 4b) —
     // live closure so yaml config reloads apply without a restart.
     keytermsFn: readSeedKeyterms,
   });
-  void sidekick.recoverPendingTranscriptions(sidekick.listCaptures);
+  void parley.recoverPendingTranscriptions(parley.listCaptures);
 } else {
   console.warn('[capture] transcription pipeline not wired (no DEEPGRAM_API_KEY) — captures record+store only');
 }
@@ -1073,12 +1073,12 @@ if (DEEPGRAM_KEY) {
 // retention window. Also runs inline on every create; the timer covers
 // the no-new-capture case. unref(): never keeps the process alive.
 setInterval(() => {
-  void sidekick.sweepCaptures().catch((e: unknown) => {
+  void parley.sweepCaptures().catch((e: unknown) => {
     console.warn(`[capture] sweep failed: ${String(e)}`);
   });
 }, 60_000).unref();
 
-// First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
+// First-run wizard backing (proxy/parley/setup.ts). Persists to the
 // same .env start-all loads (PARLEY_ENV_FILE from the npx launcher,
 // else the repo-root .env) and live-swaps the TTS key above.
 initSetup({
@@ -1089,10 +1089,10 @@ initSetup({
 });
 
 // ── WebRTC voice transport proxy: /api/rtc/* → audio-bridge /v1/rtc/* ────────
-// The audio bridge (~/code/sidekick/audio-bridge/) is a standalone Python
+// The audio bridge (~/code/parley/audio-bridge/) is a standalone Python
 // aiortc service on :8643. The bridge owns WebRTC signaling, STT, and
 // TTS; it POSTs back through this proxy at /api/parley/messages with
-// {chat_id, text} for agent dispatch (single sidekick→agent gateway).
+// {chat_id, text} for agent dispatch (single parley→agent gateway).
 //
 // Body sizes are tiny (an SDP offer is <4KB, ICE candidates <1KB) so no
 // special streaming concerns. No auth header forwarding — the bridge is
@@ -1208,11 +1208,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
   }
   // WebRTC voice signaling proxy → /v1/rtc/* on hermes upstream.
   if (req.url && req.url.startsWith('/api/rtc')) return handleRtcProxy(req, res);
-  // Sidekick agent-contract endpoints. Match before the static
+  // Parley agent-contract endpoints. Match before the static
   // fallback. The DELETE pattern's chat_id capture group is permissive
   // on character class to match the IDB-minted UUIDs we expect.
   if (req.url) {
-    // First-run setup wizard surface (see proxy/sidekick/setup.ts).
+    // First-run setup wizard surface (see proxy/parley/setup.ts).
     if (req.method === 'GET' && req.url === '/api/parley/setup/status') {
       return handleSetupStatus(req, res);
     }
@@ -1220,29 +1220,29 @@ const requestHandler: http.RequestListener = async (req, res) => {
       return handleSetupApply(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/messages') {
-      return sidekick.handleSidekickMessage(req, res);
+      return parley.handleParleyMessage(req, res);
     }
     // Large-file staging (task #158) — raw-bytes upload streamed to the
     // upstream plugin; returns { upload_id } the PWA references on its
     // next message. Match before the static fallback.
     if (req.method === 'POST' && req.url === '/api/parley/upload') {
-      return sidekick.handleSidekickUpload(req, res);
+      return parley.handleParleyUpload(req, res);
     }
     // Meeting capture — proxy-owned public API (capture.ts; design doc
     // §3.3). Order matters: /control and the id-scoped subroutes match
     // before the bare /captures collection routes.
     if (req.method === 'POST' && req.url === '/api/parley/captures/control') {
-      return sidekick.handleCaptureControl(req, res);
+      return parley.handleCaptureControl(req, res);
     }
     const capSegment = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/segments\/(\d+)$/);
     if (capSegment) {
-      return sidekick.handleCaptureSegment(req, res, capSegment[1], capSegment[2]);
+      return parley.handleCaptureSegment(req, res, capSegment[1], capSegment[2]);
     }
     const capStop = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/stop$/);
     if (capStop) {
-      return sidekick.handleCaptureStop(req, res, capStop[1]);
+      return parley.handleCaptureStop(req, res, capStop[1]);
     }
     // Two-phase lifecycle (2026-08-18 postmortem): activate confirms a
     // real recorder is running (pending→recording, fires the announce);
@@ -1277,134 +1277,134 @@ const requestHandler: http.RequestListener = async (req, res) => {
     const capMark = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/marks$/);
     if (capMark) {
-      return sidekick.handleCaptureMark(req, res, capMark[1]);
+      return parley.handleCaptureMark(req, res, capMark[1]);
     }
     const capAudio = req.method === 'GET'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/audio(?:\?.*)?$/);
     if (capAudio) {
-      return sidekick.handleCaptureAudio(req, res, capAudio[1]);
+      return parley.handleCaptureAudio(req, res, capAudio[1]);
     }
-    // Agent-pushed media (proxy/sidekick/media.ts): any local agent
+    // Agent-pushed media (proxy/parley/media.ts): any local agent
     // registers a produced file, embeds the returned url in its reply
     // as markdown, and the client renders a video/image card. Backend-
     // agnostic by design — hermes, claude-code and openclaw agents all
     // hit the same two routes.
     if (req.method === 'POST' && req.url === '/api/parley/media/register') {
-      return sidekick.handleMediaRegister(req, res);
+      return parley.handleMediaRegister(req, res);
     }
     const mediaGet = req.method === 'GET'
       && req.url.match(/^\/api\/parley\/media\/([a-f0-9]+)(?:\.[A-Za-z0-9]+)?(?:\?.*)?$/);
     if (mediaGet) {
-      return sidekick.handleMediaGet(req, res, mediaGet[1]);
+      return parley.handleMediaGet(req, res, mediaGet[1]);
     }
     const capPurge = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/purge-audio$/);
     if (capPurge) {
-      return sidekick.handleCapturePurgeAudio(req, res, capPurge[1]);
+      return parley.handleCapturePurgeAudio(req, res, capPurge[1]);
     }
     const capRediarize = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/diarize$/);
     if (capRediarize) {
-      return sidekick.handleCaptureRetroDiarize(req, res, capRediarize[1]);
+      return parley.handleCaptureRetroDiarize(req, res, capRediarize[1]);
     }
     const capPatch = req.method === 'PATCH'
       && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capPatch) {
-      return sidekick.handleCapturePatch(req, res, capPatch[1]);
+      return parley.handleCapturePatch(req, res, capPatch[1]);
     }
     const capDelete = req.method === 'DELETE'
       && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capDelete) {
-      return sidekick.handleCaptureDelete(req, res, capDelete[1]);
+      return parley.handleCaptureDelete(req, res, capDelete[1]);
     }
     const capGet = req.method === 'GET'
       && req.url.match(/^\/api\/parley\/captures\/([^/?]+)$/);
     if (capGet) {
-      return sidekick.handleCaptureGet(req, res, capGet[1]);
+      return parley.handleCaptureGet(req, res, capGet[1]);
     }
     if (req.method === 'GET' && /^\/api\/parley\/captures(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleCaptureList(req, res);
+      return parley.handleCaptureList(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/captures') {
-      return sidekick.handleCaptureCreate(req, res);
+      return parley.handleCaptureCreate(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/stream(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickStream(req, res);
+      return parley.handleParleyStream(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/sessions(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickSessionsList(req, res);
+      return parley.handleParleySessionsList(req, res);
     }
     // Per-chat_id transcript history. Match BEFORE the generic
     // /sessions/<id> DELETE pattern so the more-specific subroute wins.
-    const sidekickHistory = req.method === 'GET'
+    const parleyHistory = req.method === 'GET'
       && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)\/messages(?:\?.*)?$/);
-    if (sidekickHistory) {
-      return sidekick.handleSidekickSessionMessages(req, res, decodeURIComponent(sidekickHistory[1]));
+    if (parleyHistory) {
+      return parley.handleParleySessionMessages(req, res, decodeURIComponent(parleyHistory[1]));
     }
-    const sidekickDelete = req.method === 'DELETE'
+    const parleyDelete = req.method === 'DELETE'
       && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)(?:\?.*)?$/);
-    if (sidekickDelete) {
-      return sidekick.handleSidekickSessionDelete(req, res, decodeURIComponent(sidekickDelete[1]));
+    if (parleyDelete) {
+      return parley.handleParleySessionDelete(req, res, decodeURIComponent(parleyDelete[1]));
     }
-    const sidekickRename = req.method === 'PATCH'
+    const parleyRename = req.method === 'PATCH'
       && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)(?:\?.*)?$/);
-    if (sidekickRename) {
-      return sidekick.handleSidekickSessionRename(req, res, decodeURIComponent(sidekickRename[1]));
+    if (parleyRename) {
+      return parley.handleParleySessionRename(req, res, decodeURIComponent(parleyRename[1]));
     }
     if (req.method === 'GET' && /^\/api\/parley\/settings\/schema(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickSettingsSchema(req, res);
+      return parley.handleParleySettingsSchema(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/commands(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickCommands(req, res);
+      return parley.handleParleyCommands(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/model-capabilities(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickModelCapabilities(req, res);
+      return parley.handleParleyModelCapabilities(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/auxiliary-models(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickAuxiliaryModels(req, res);
+      return parley.handleParleyAuxiliaryModels(req, res);
     }
     if (req.method === 'GET' && /^\/api\/parley\/search(?:\?.*)?$/.test(req.url)) {
-      return sidekick.handleSidekickSearch(req, res);
+      return parley.handleParleySearch(req, res);
     }
     // Web Push (Phase 3) — VAPID public-key probe + subscribe /
     // unsubscribe / test. Routes implemented in
-    // proxy/sidekick/notifications/routes.ts; the 503-on-unconfigured
+    // proxy/parley/notifications/routes.ts; the 503-on-unconfigured
     // gate lives inside each handler so this dispatch stays uniform.
     if (req.method === 'GET' && req.url === '/api/parley/notifications/vapid-public-key') {
-      return sidekick.handleSidekickVapidPublicKey(req, res);
+      return parley.handleParleyVapidPublicKey(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/subscribe') {
-      return sidekick.handleSidekickSubscribe(req, res);
+      return parley.handleParleySubscribe(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/unsubscribe') {
-      return sidekick.handleSidekickUnsubscribe(req, res);
+      return parley.handleParleyUnsubscribe(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/test') {
-      return sidekick.handleSidekickTest(req, res);
+      return parley.handleParleyTest(req, res);
     }
     if (req.method === 'GET' && req.url === '/api/parley/notifications/mutes') {
-      return sidekick.handleSidekickListMutes(req, res);
+      return parley.handleParleyListMutes(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/mute') {
-      return sidekick.handleSidekickSetMute(req, res);
+      return parley.handleParleySetMute(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/visibility') {
-      return sidekick.handleSidekickVisibility(req, res);
+      return parley.handleParleyVisibility(req, res);
     }
     if (req.method === 'GET' && req.url === '/api/parley/notifications/preferences') {
-      return sidekick.handleSidekickGetPreferences(req, res);
+      return parley.handleParleyGetPreferences(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/preferences') {
-      return sidekick.handleSidekickSetPreferences(req, res);
+      return parley.handleParleySetPreferences(req, res);
     }
     if (req.method === 'GET' && req.url && req.url.startsWith('/api/parley/notifications/diagnostics')) {
-      return sidekick.handleSidekickDiagnostics(req, res);
+      return parley.handleParleyDiagnostics(req, res);
     }
     // ── Unread + pins (plugin-owned SSOT; proxy forwards). ───────────
     // The PWA's badge module + pin drawer call these; the proxy
     // delegates to the upstream plugin's /v1/unread + /v1/pins.
     {
-      const delegate = await import('./proxy/sidekick/notifications/delegate.ts');
+      const delegate = await import('./proxy/parley/notifications/delegate.ts');
       if (req.method === 'GET' && req.url === '/api/parley/notifications/unread') {
         return delegate.delegateUnread(req, res);
       }
@@ -1453,7 +1453,7 @@ const requestHandler: http.RequestListener = async (req, res) => {
       if (activityDelete) {
         return delegate.delegateActivityDelete(req, res, decodeURIComponent(activityDelete[1]));
       }
-      // Synced user settings (sidekick.db user_settings): STT key-terms
+      // Synced user settings (parley.db user_settings): STT key-terms
       // today, more as the YAML→DB migration proceeds. Distinct from
       // /api/parley/config (YAML) and /api/parley/settings (agent).
       if (req.method === 'GET' && /^\/api\/parley\/prefs(?:\?.*)?$/.test(req.url)) {
@@ -1470,22 +1470,22 @@ const requestHandler: http.RequestListener = async (req, res) => {
         return delegate.delegateUserSettingSet(req, res, prefSet[1]);
       }
     }
-    const sidekickSettingsUpdate = req.method === 'POST'
+    const parleySettingsUpdate = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/settings\/([^/?]+)(?:\?.*)?$/);
-    if (sidekickSettingsUpdate) {
-      return sidekick.handleSidekickSettingsUpdate(
-        req, res, decodeURIComponent(sidekickSettingsUpdate[1]),
+    if (parleySettingsUpdate) {
+      return parley.handleParleySettingsUpdate(
+        req, res, decodeURIComponent(parleySettingsUpdate[1]),
       );
     }
     // Frontend settings store (yaml-backed PWA settings: theme,
     // hotkeys, voice phrases, etc.).
     if (req.method === 'GET' && /^\/api\/parley\/config(?:\?.*)?$/.test(req.url)) {
-      return handleSidekickConfigGet(req, res);
+      return handleParleyConfigGet(req, res);
     }
-    const sidekickConfigSet = req.method === 'POST'
+    const parleyConfigSet = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/config\/([A-Za-z0-9_]+)(?:\?.*)?$/);
-    if (sidekickConfigSet) {
-      return handleSidekickConfigSet(req, res, sidekickConfigSet[1]);
+    if (parleyConfigSet) {
+      return handleParleyConfigSet(req, res, parleyConfigSet[1]);
     }
   }
   if (req.method === 'POST' && req.url === '/api/debug/logs') return handleDebugLogs(req, res);
@@ -1535,7 +1535,7 @@ const ZC_TOKEN = readEnv('PARLEY_ZEROCLAW_TOKEN') || '';  // secret — env only
 // previous `POST /canvas/show` + `/ws/canvas` standalone-panel path
 // was a leftover from openclaw's deployment model where the canvas
 // rendered in its own browser window separate from the chat shell.
-// Sidekick never wired a `/ws/canvas` subscriber, so every POST to
+// Parley never wired a `/ws/canvas` subscriber, so every POST to
 // that endpoint silently returned `clients: 0`. Both removed
 // 2026-05-11 — one delivery path, less confusion when a skill
 // reports "I emitted a canvas card." The cards/validators.ts module
@@ -1609,7 +1609,7 @@ server.on('upgrade', upgradeHandler);
 
 server.listen(PORT, HOST, () => {
   const protocol = HTTPS_ENABLED && !DUAL_HTTPS ? 'https' : 'http';
-  console.log(`SideKick server on ${protocol}://${HOST}:${PORT} (TTS: ${DEFAULT_TTS_MODEL})`);
+  console.log(`Parley server on ${protocol}://${HOST}:${PORT} (TTS: ${DEFAULT_TTS_MODEL})`);
 });
 
 // ── Auxiliary HTTPS listener (auto-HTTPS trial path) ─────────────────
@@ -1626,6 +1626,6 @@ if (DUAL_HTTPS) {
   }, requestHandler);
   httpsServer.on('upgrade', upgradeHandler);
   httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
-    console.log(`SideKick HTTPS on https://0.0.0.0:${HTTPS_PORT} (self-signed — phones accept the one-time warning)`);
+    console.log(`Parley HTTPS on https://0.0.0.0:${HTTPS_PORT} (self-signed — phones accept the one-time warning)`);
   });
 }

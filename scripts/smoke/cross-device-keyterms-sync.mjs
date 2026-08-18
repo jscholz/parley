@@ -1,9 +1,9 @@
-// Regression gate for the keyterms IDB→sidekick.db migration
+// Regression gate for the keyterms IDB→parley.db migration
 // (Phase 1 of the settings→DB consolidation).
 //
 // What changed: STT key-terms were device-local in IndexedDB for
 // months, so a list curated on one device never reached another. The
-// migration made the server (sidekick.db user_settings, key
+// migration made the server (parley.db user_settings, key
 // `stt_keyterms`, surfaced at /api/parley/prefs/stt_keyterms) the
 // source of truth, with IDB demoted to a write-through offline mirror.
 //

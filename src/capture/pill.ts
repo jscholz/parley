@@ -102,7 +102,7 @@ function render(state: CaptureUiState): void {
 function toast(message: string): void {
   // Reuse the pin drawer's status line if present; else log only.
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:pin-error', { detail: { message } }));
+    window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message } }));
   } catch { /* non-browser */ }
   log(`[capture] ${message}`);
 }
@@ -161,7 +161,7 @@ export function hotkeyToggleMeetingCapture(): void {
 
 export function initCapturePill(opts: { openChat?: (chatId: string) => void } = {}): void {
   openChatCb = opts.openChat ?? null;
-  window.addEventListener('sidekick:capture-state', (ev) => {
+  window.addEventListener('parley:capture-state', (ev) => {
     render((ev as CustomEvent<CaptureUiState>).detail);
   });
 
@@ -223,7 +223,7 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   // POST /api/parley/captures/control. Only a foregrounded page
   // should grab the mic — a background tab starting a recorder would
   // race the visible one.
-  window.addEventListener('sidekick:capture-control', (ev) => {
+  window.addEventListener('parley:capture-control', (ev) => {
     const action = (ev as CustomEvent<{ action?: string }>).detail?.action;
     if (document.visibilityState !== 'visible') return;
     if (action === 'start' && !getCaptureState().active) void startFromUi();

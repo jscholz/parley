@@ -20,7 +20,7 @@
  *   stream="error"                       → response.error
  *
  * Mirrors the hermes plugin's /v1/responses streaming path. See
- * `~/code/sidekick/backends/hermes/plugin/__init__.py` line 3105.
+ * `~/code/parley/backends/hermes/plugin/__init__.py` line 3105.
  */
 import { randomUUID } from 'node:crypto';
 import { prefixChatId } from './mappers.js';
@@ -52,13 +52,13 @@ async function readJsonBody(req, capBytes = 1024 * 1024) {
 
 /** Pull the sessionKey + text out of the OAI Responses-API body.
  *  Tolerates both:
- *    - sidekick proxy shape: `{ input: "...", metadata: {chat_id: "..."} }`
+ *    - parley proxy shape: `{ input: "...", metadata: {chat_id: "..."} }`
  *    - openclaw-native shape: `{ input: [...], conversation: "agent:dev:main" }`
  *  Returns null when the body doesn't carry enough to dispatch. */
 function parseResponsesBody(body) {
   if (!body || typeof body !== 'object') return null;
   // sessionKey: prefer explicit `conversation` (OAI standard),
-  // fall back to `metadata.chat_id` (sidekick proxy ships it there).
+  // fall back to `metadata.chat_id` (parley proxy ships it there).
   const sessionKey = body.conversation
     ?? body.metadata?.chat_id
     ?? null;
@@ -155,18 +155,18 @@ function persistUserMessageLink({ db, sessionKey, chatId, userMessageId, dispatc
       agent_row_id: target.wrapperId,
     });
   } catch (err) {
-    logger.warn?.(`[sidekick] user link write failed: ${err?.message ?? err}`);
+    logger.warn?.(`[parley] user link write failed: ${err?.message ?? err}`);
   }
 }
 
 function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, logger }) {
   try {
     const stateDir = resolveStateDir({ profile: PROFILE });
-    // sessionKey is the canonical form (agent:dev:sidekick:abc); we
+    // sessionKey is the canonical form (agent:dev:parley:abc); we
     // need the sessionId (uuid) to find the jsonl.
     const sessions = listSessions({ stateDir, agentId: AGENT_ID });
     const entry = sessions[sessionKey];
-    if (!entry) { logger.warn?.(`[sidekick] link: no session for ${sessionKey}`); return; }
+    if (!entry) { logger.warn?.(`[parley] link: no session for ${sessionKey}`); return; }
     const all = readSessionMessages({ stateDir, agentId: AGENT_ID, sessionId: entry.sessionId });
     // Find the assistant row this turn produced that the items handler
     // will render. Preference order:
@@ -192,7 +192,7 @@ function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, l
       if (!target) target = m;   // candidate but keep scanning for tool row
     }
     if (!target) {
-      logger.warn?.(`[sidekick] link: no target found for ${sessionKey}, all=${all.length}, dispatchedMs=${dispatchedMs}`);
+      logger.warn?.(`[parley] link: no target found for ${sessionKey}, all=${all.length}, dispatchedMs=${dispatchedMs}`);
       return;
     }
     // The jsonl wrapper carries a top-level `id` (uuid) per message —
@@ -200,8 +200,8 @@ function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, l
     // the stable cross-read key (chat.history's `__openclaw.id` is
     // computed at response time and not persisted to the jsonl).
     const openclawId = target?.wrapperId;
-    if (!openclawId) { logger.warn?.(`[sidekick] link: target has no wrapperId`); return; }
-    logger.info?.(`[sidekick] link write: ${chatId} ${messageId} -> openclaw ${openclawId}`);
+    if (!openclawId) { logger.warn?.(`[parley] link: target has no wrapperId`); return; }
+    logger.info?.(`[parley] link write: ${chatId} ${messageId} -> openclaw ${openclawId}`);
     // Flatten content for storage. The supplemental row mainly serves
     // as the id-mapping table; the canonical content stays in openclaw's
     // jsonl. Use `agent_row_id` as the openclaw foreign key.
@@ -219,7 +219,7 @@ function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, l
       agent_row_id: openclawId,
     });
   } catch (err) {
-    logger.warn?.(`[sidekick.responses] link write failed: ${err?.message ?? err}`);
+    logger.warn?.(`[parley.responses] link write failed: ${err?.message ?? err}`);
   }
 }
 
@@ -271,7 +271,7 @@ export function makeResponsesHandler({ gatewayClient, eventBus, db, turnBuffer, 
     // Dispatch the turn. chat.send returns { runId, status:"started" }.
     let runId;
     // PWA mints `sidekick:<uuid>`; openclaw stores under
-    // `agent:{agentId}:sidekick:<uuid>`. Normalize incoming chat ids
+    // `agent:{agentId}:parley:<uuid>`. Normalize incoming chat ids
     // to canonical form before chat.send to keep the per-chat session
     // store consistent (so subsequent /v1/responses on the same chat
     // hit the same openclaw session, not a fresh one).
@@ -509,7 +509,7 @@ export function makeResponsesHandler({ gatewayClient, eventBus, db, turnBuffer, 
         // pass once basic turn dispatch is solid.
       }
     } catch (err) {
-      logger.warn?.(`[sidekick] /v1/responses error: ${err?.message ?? err}`);
+      logger.warn?.(`[parley] /v1/responses error: ${err?.message ?? err}`);
       if (!completedEmitted) {
         writeSse('response.error', {
           type: 'response.error',

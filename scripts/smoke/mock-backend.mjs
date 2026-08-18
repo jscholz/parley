@@ -1,4 +1,4 @@
-// Mock backend for sidekick PWA smoke scenarios.
+// Mock backend for parley PWA smoke scenarios.
 //
 // Intercepts /api/parley/* via Playwright page.route() and serves
 // scripted responses. No real hermes/LLM/Deepgram calls.
@@ -14,7 +14,7 @@
 //
 // /api/parley/stream is served by a real in-process http.Server on
 // an ephemeral 127.0.0.1 port (mirrors the proxy-test harness pattern
-// at proxy/sidekick/__tests__/proxy-harness.ts).
+// at proxy/parley/__tests__/proxy-harness.ts).
 // Playwright forwards the PWA's /api/parley/stream request to that
 // local server via `route.continue({ url })`, so the EventSource sees
 // a single long-lived connection — `pushReply` / `pushSessionChanged`
@@ -247,7 +247,7 @@ export async function installMockBackend(page) {
   // GET /api/parley/sessions/<chat_id>/messages — canned transcript.
   // Each message's `id` matches the SSE envelope `message_id` the
   // proxy emitted for that same content — mirrors the real proxy
-  // (proxy/sidekick/history.ts maps `id: it.id` and upstream.ts
+  // (proxy/parley/history.ts maps `id: it.id` and upstream.ts
   // emits the same `it.id` as `message_id` on reply_delta /
   // reply_final). Tests rely on this alignment for cross-path dedup.
   await page.route(/.*\/api\/parley\/sessions\/[^/]+\/messages/, async (route) => {
@@ -303,12 +303,12 @@ export async function installMockBackend(page) {
         role: m.role,
         content: m.content,
         // Use `!=` so smokes can intentionally drive timestamp=0
-        // (mirrors the field-bug shape where sidekick.db.msg_links
+        // (mirrors the field-bug shape where parley.db.msg_links
         // had `created_at=0` and the bubble rendered at unix 0).
         timestamp: m.timestamp != null ? m.timestamp : (chat.lastActiveAt / 1000),
       };
       // Mirror the real plugin's surfacing of sidekick_id from
-      // sidekick_msg_links — present when the live SSE round-trip
+      // parley_msg_links — present when the live SSE round-trip
       // recorded a link, absent for legacy / other-channel rows.
       // Tests can opt in per-message by setting `sidekick_id` on the
       // mock chat's message dict.
@@ -787,7 +787,7 @@ export async function installMockBackend(page) {
       contentType: 'application/json',
       body: JSON.stringify({
         gwToken: 'mock-token',
-        appName: 'SideKick',
+        appName: 'Parley',
         appSubtitle: 'Agent Portal',
         agentLabel: 'Clawdian',
         themePrimary: '',
@@ -894,7 +894,7 @@ export async function installMockBackend(page) {
 
   // ── Server-driven unread state (SSOT after the 2026-05 refactor) ──
   //
-  // Real plugin owns unread_state in sidekick.db; the proxy forwards
+  // Real plugin owns unread_state in parley.db; the proxy forwards
   // /api/parley/notifications/{unread,seen,mark} to /v1/unread/*.
   // Mock mirrors that surface here so tests can drive the badge flow
   // through the same code paths the PWA uses in production.
@@ -964,7 +964,7 @@ export async function installMockBackend(page) {
   // 2026-07-25) ──
   //
   // These endpoints write through the live proxy into the REAL
-  // sidekick.db (push_prefs / push_mutes) — the only notifications
+  // parley.db (push_prefs / push_mutes) — the only notifications
   // routes with durable server state that mocked smokes could
   // corrupt. Serve them from in-memory state so no mocked scenario
   // can EVER touch production push prefs, no matter what UI it
@@ -1014,7 +1014,7 @@ export async function installMockBackend(page) {
 
   // ── Server-driven pin state (SSOT after the 2026-05 refactor) ──
   //
-  // Real plugin owns the `pins` table in sidekick.db; the proxy
+  // Real plugin owns the `pins` table in parley.db; the proxy
   // forwards /api/parley/pins/* to /v1/pins/*. Mock mirrors that
   // surface here so tests that use pinMessage() / unpinMessage() drive
   // the real server-roundtrip code paths.
@@ -1060,7 +1060,7 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true,"removed":true}' });
   });
 
-  // ── Synced user settings (sidekick.db user_settings) ──
+  // ── Synced user settings (parley.db user_settings) ──
   //
   // Real plugin owns the `user_settings` table; the proxy forwards
   // GET/PUT /api/parley/prefs/<key> to /v1/user-settings. Mock keys
@@ -1551,7 +1551,7 @@ export async function installMockBackend(page) {
     /** Configure /api/parley/commands. Pass null to declare the
      *  agent doesn't implement the extension (route returns 404).
      *  Each entry is a CommandDef from
-     *  proxy/sidekick/upstream.ts — { name, description, category,
+     *  proxy/parley/upstream.ts — { name, description, category,
      *  aliases, args_hint, subcommands }. */
     setCommandsCatalog(catalog) { commandsCatalog = catalog; },
 

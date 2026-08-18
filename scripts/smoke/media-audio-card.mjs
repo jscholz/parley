@@ -9,7 +9,7 @@
 // its reply_final, and handleReplyFinal's parseCardsFromText fallback
 // classifies the markdown link by extension. The media GET is
 // page.route-stubbed — this proves the client lane; the server route has
-// its own unit coverage (proxy/sidekick/__tests__/media.test.ts).
+// its own unit coverage (proxy/parley/__tests__/media.test.ts).
 
 import { waitForReady, assert } from './lib.mjs';
 

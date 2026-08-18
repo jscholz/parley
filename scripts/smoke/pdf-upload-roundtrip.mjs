@@ -16,7 +16,7 @@
 //     isn't vision-capable, the test SHOULD fail loudly because the
 //     PWA's attach-button vision-gate would prevent the upload UI
 //     from enabling — that itself is a test of the gate.
-//   - sidekick proxy on http://127.0.0.1:3001 (default).
+//   - parley proxy on http://127.0.0.1:3001 (default).
 //
 // What this test does NOT cover (handled elsewhere):
 //   - Plugin-level unit tests for _rasterize_pdf with edge cases (cap,
@@ -40,7 +40,7 @@ const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'marker.pdf');
 // as a PNG, gemma/claude/etc. transcribe it back. Unique enough to be
 // unambiguous in a model reply (no false positives from "PDF" or
 // "test" alone).
-const PDF_MARKER = 'SidekickPDFTestMarker0451';
+const PDF_MARKER = 'ParleyPDFTestMarker0451';
 
 export default async function run({ page, log, fail }) {
   await waitForReady(page);

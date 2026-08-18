@@ -400,7 +400,7 @@ export function handleToolEvent({ kind, payload, conversation, isReplay }: any) 
     // module, which gates on visibility so only the foregrounded
     // device grabs the mic. Replays are dropped in proxyClient.
     try {
-      window.dispatchEvent(new CustomEvent('sidekick:capture-control', {
+      window.dispatchEvent(new CustomEvent('parley:capture-control', {
         detail: { action: payload.action },
       }));
     } catch { /* non-browser */ }
@@ -410,7 +410,7 @@ export function handleToolEvent({ kind, payload, conversation, isReplay }: any) 
     // Cross-device lifecycle: refresh the session↔meetings index so
     // sidebar badges/filtering track creates/stops/deletes live.
     try {
-      window.dispatchEvent(new CustomEvent('sidekick:capture-changed-remote', {
+      window.dispatchEvent(new CustomEvent('parley:capture-changed-remote', {
         detail: { kind: payload?.captureKind, capture: payload?.capture },
       }));
     } catch { /* non-browser */ }

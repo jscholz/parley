@@ -1,7 +1,7 @@
 /**
  * @fileoverview Audio card kind — agent-pushed audio files rendered
  * inline on the reply bubble (media lane round 2; the serving side is
- * proxy/sidekick/media.ts, which streams m4a/mp3/wav/ogg with Range so
+ * proxy/parley/media.ts, which streams m4a/mp3/wav/ogg with Range so
  * scrubbing stays cheap). Mirrors video.ts: a native <audio controls>
  * element is enough here — unlike the meeting-capture player strip
  * (rightDrawer/modules/doc.ts) this is a self-contained produced file,

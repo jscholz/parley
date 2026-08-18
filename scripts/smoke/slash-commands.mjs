@@ -2,7 +2,7 @@
 // /v1/commands catalog, filters as the user types, and dispatches the
 // highlighted command on Enter. Plus: typed session-boundary commands
 // (/new, /clear, /reset) — hidden from the catalog — get the right
-// Sidekick-side mapping (see sendTypedMessage):
+// Parley-side mapping (see sendTypedMessage):
 //   /new   → New Chat button codepath ("New chat started" marker).
 //   /clear → New Chat hint line (no gateway behavior; cli_only).
 //   /reset → sent upstream as a real command (in-place session reset);
@@ -14,7 +14,7 @@
 // after confirming gateway /reset is a distinct in-place reset worth
 // keeping and gateway /new is NOT a new-thread action.
 //
-// /reset is surfaced via a Sidekick-side SYNTHETIC catalog entry
+// /reset is surfaced via a Parley-side SYNTHETIC catalog entry
 // (slashCommands.ts) even though the gateway hides it — so it appears as
 // a popover row and dispatches upstream. /new stays unsurfaced.
 //
@@ -64,7 +64,7 @@ export default async function run({ page, log }) {
   assert(rowCount0 >= 1, `expected >=1 popover row, got ${rowCount0}`);
   log(`popover rendered ${rowCount0} rows`);
 
-  // /reset is a Sidekick-injected synthetic row (not in the mocked
+  // /reset is a Parley-injected synthetic row (not in the mocked
   // catalog above) — it must surface even though the upstream catalog
   // doesn't list it. /new is deliberately NOT surfaced (New Chat button
   // covers it).

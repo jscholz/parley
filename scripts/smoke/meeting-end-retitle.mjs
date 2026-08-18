@@ -1,7 +1,7 @@
 // Meeting-polish #25 titling, client leg: when the capture pipeline
 // re-titles the meeting session at end-of-meeting (proxy-side logic —
 // captureTranscribe finalize → upstream rename → session_changed
-// envelope; unit-tested in proxy/sidekick/__tests__), the DRAWER must
+// envelope; unit-tested in proxy/parley/__tests__), the DRAWER must
 // pick the new title up in place, including for a session that was
 // MINTED by the capture (freshly materialized upstream mid-meeting,
 // not part of the boot-time sessions list).

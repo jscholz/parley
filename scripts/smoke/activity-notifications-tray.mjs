@@ -1,4 +1,4 @@
-// Activity tray v1: all OS-push-worthy Sidekick events get a recoverable row.
+// Activity tray v1: all OS-push-worthy Parley events get a recoverable row.
 //
 // Covers the two non-approval cases that users actually see as push
 // notifications:
@@ -81,7 +81,7 @@ export default async function run({ page, log, mock }) {
       '(job_id: smoke-tea-timer)\n' +
       '--------------------------\n' +
       'Your tea timer fired.\n\n' +
-      'To stop or manage this job, open Sidekick.',
+      'To stop or manage this job, open Parley.',
     sidekick_id: 'notif_activity_cron_1',
   });
   await waitForActivityDot(page, true);

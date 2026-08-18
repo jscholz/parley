@@ -1,5 +1,5 @@
 // Docs drawer tab — the doc SHELF: a compact list of agent-pushed
-// documents + a single reader (design doc: sidekick-docs-panel-ux-
+// documents + a single reader (design doc: parley-docs-panel-ux-
 // research-2026-07-07.md — "list + reader", the Claude/Gemini/Open WebUI
 // consensus; never a tab strip).
 //
@@ -156,7 +156,7 @@ export function createDocModule(opts: {
     rm.onclick = () => {
       removeDoc(doc.id);
       try {
-        window.dispatchEvent(new CustomEvent('sidekick:doc-removed', {
+        window.dispatchEvent(new CustomEvent('parley:doc-removed', {
           detail: { title: doc.title },
         }));
       } catch { /* non-browser */ }

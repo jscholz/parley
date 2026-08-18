@@ -6,7 +6,7 @@
 // correct chronological order.
 //
 // This smoke exercises the read path that B2 will refactor (items
-// endpoint reading state.db.messages + JOINing sidekick.db.msg_links
+// endpoint reading state.db.messages + JOINing parley.db.msg_links
 // for the sidekick_id annotation). Establishes a green baseline
 // BEFORE B2 lands; afterward it's a regression gate that breaks loudly
 // if B2's JOIN drops fields, dupes rows, or mis-orders the page.

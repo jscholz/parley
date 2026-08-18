@@ -9,7 +9,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { project } from './projection.ts';
 import { miniMarkdown } from '../util/markdown.ts';
-import type { ChatState, ConversationItem, SidekickEnvelope, PendingSend } from './types.ts';
+import type { ChatState, ConversationItem, ParleyEnvelope, PendingSend } from './types.ts';
 
 function state(partial: Partial<ChatState>): ChatState {
   return {
@@ -81,7 +81,7 @@ describe('project: durable only', () => {
 
 describe('project: inflight', () => {
   it('user_message envelope produces a user bubble when no durable match', () => {
-    const env: SidekickEnvelope = { type: 'user_message', chat_id: 'c', message_id: 'umsg_2', text: 'hello' };
+    const env: ParleyEnvelope = { type: 'user_message', chat_id: 'c', message_id: 'umsg_2', text: 'hello' };
     const s = state({ inflight: [env] });
     const out = project(s);
     assert.equal(out.length, 1);
@@ -358,7 +358,7 @@ describe('project: dedup keys', () => {
   });
 
   it('durable-vs-durable: items endpoint returning two assistant rows with same content renders ONE bubble (field bug 2026-05-19)', () => {
-    // Server-side bug shape: `sidekick.db.msg_links` had two rows for
+    // Server-side bug shape: `parley.db.msg_links` had two rows for
     // the same logical assistant message — one from envelope write-
     // through (sidekick_id="msg_xyz", real timestamp), one from
     // reconcile Pass 2 fallback (sidekick_id="legacy:101", timestamp=0
@@ -580,7 +580,7 @@ describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
 });
 
 describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15)', () => {
-  // Field shape (chat sidekick:a7d55680…, dump missing-bubble-repro-20260715):
+  // Field shape (chat parley:a7d55680…, dump missing-bubble-repro-20260715):
   // the plugin's reconcile pass DOUBLE-persisted two user messages, appending
   // a second state.db row per message with a heal-minted umsg_* key whose
   // embedded mint time PREDATES the send. Same content, same timestamp,
@@ -603,7 +603,7 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
       durable: dupPair(),
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
-      ] as SidekickEnvelope[],
+      ] as ParleyEnvelope[],
     });
     const userSpecs = project(s).filter(x => x.kind === 'user');
     assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
@@ -637,7 +637,7 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147977585_8ed1ppse', text: 'did this turn die?' },
         { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
         { type: 'reply_final', chat_id: 'c', message_id: 'msg_ab2a043662146c9ebbdf', text: 'Deleted and verified all four are gone. 🧹' },
-      ] as SidekickEnvelope[],
+      ] as ParleyEnvelope[],
       pendingSends: [{ messageId: CLIENT_KEY, text: TEXT, sentAt: SENT_SEC * 1000 + 542 }],
     });
     const out = project(s);
@@ -662,7 +662,7 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
         { type: 'reply_final', chat_id: 'c', message_id: 'msg_replayed_final', text: '' },
-      ] as SidekickEnvelope[],
+      ] as ParleyEnvelope[],
     });
     const userSpecs = project(s).filter(x => x.kind === 'user');
     assert.equal(userSpecs.length, 1, `expected 1 user bubble, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
@@ -680,7 +680,7 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
       ],
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784148200000_fresh', text: TEXT },
-      ] as SidekickEnvelope[],
+      ] as ParleyEnvelope[],
     });
     const userSpecs = project(s).filter(x => x.kind === 'user');
     assert.equal(userSpecs.length, 2, `new send must render, got ${userSpecs.length} (${userSpecs.map(u => u.key).join(', ')})`);
@@ -702,7 +702,7 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
         { type: 'reply_final', chat_id: 'c', message_id: 'msg_r1', text: 'first' },
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147100000_b', text: 'ok' },
         { type: 'reply_final', chat_id: 'c', message_id: 'msg_r2', text: 'second' },
-      ] as SidekickEnvelope[],
+      ] as ParleyEnvelope[],
     });
     const userSpecs = project(s).filter(x => x.kind === 'user');
     assert.equal(userSpecs.length, 2, `legit repeat must keep both bubbles, got ${userSpecs.length}`);

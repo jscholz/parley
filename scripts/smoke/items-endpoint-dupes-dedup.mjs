@@ -4,7 +4,7 @@
 //
 // Root cause (server-side): the items endpoint's
 // `reconcile_from_state_db` tries to LINK the envelope-written
-// sidekick.db row to its state.db twin by `(role, content)` match
+// parley.db row to its state.db twin by `(role, content)` match
 // (Pass 1). When that fails — e.g. whitespace differs, hermes
 // post-processed the assistant content slightly, or the link was
 // raced — Pass 2 inserts a `legacy:<state_id>` row alongside the
@@ -12,7 +12,7 @@
 // rows; PWA projection keys them by their (different) sidekick_ids
 // and renders BOTH bubbles.
 //
-// This is a sidekick.db.msg_links integrity bug; the proper fix is
+// This is a parley.db.msg_links integrity bug; the proper fix is
 // server-side (see structural notes in the same commit). This smoke
 // pins a PWA-side defense: even when the wire response contains
 // duplicate (role, content) assistant rows, the projection's

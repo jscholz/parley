@@ -603,7 +603,7 @@ function applyViewChangedEffects(prev: string | null, id: string | null): void {
   // a clearAll'd ChatState loses decorations, and unlike durable rows
   // they can't be refetched from the server).
   if (prev !== id && id) {
-    try { window.dispatchEvent(new CustomEvent('sidekick:view-committed', { detail: { chatId: id } })); } catch { /* noop */ }
+    try { window.dispatchEvent(new CustomEvent('parley:view-committed', { detail: { chatId: id } })); } catch { /* noop */ }
   }
   // DERIVED-VIEW NOTIFY (structural contract, 2026-07-13): the sidebar
   // is a pure function of local state, re-derived synchronously at
@@ -660,7 +660,7 @@ let refreshInFlight = false;
  *  drawer rows and adds/removes `.unread` + the count chip based on
  *  the badge module's current state. Doesn't trigger a backend fetch —
  *  unread state is pure client-side, no server roundtrip needed.
- *  Wired to the `sidekick:unread-changed` event by setupUnreadListener
+ *  Wired to the `parley:unread-changed` event by setupUnreadListener
  *  below. */
 function repaintUnreadIndicators(): void {
   const listEl = document.getElementById('sessions-list');
@@ -709,7 +709,7 @@ function setupUnreadListener(): void {
   if (unreadListenerWired) return;
   unreadListenerWired = true;
   if (typeof window === 'undefined') return;
-  window.addEventListener('sidekick:unread-changed', () => {
+  window.addEventListener('parley:unread-changed', () => {
     repaintUnreadIndicators();   // instant chip paint (no fetch)
     resortOnUnreadChange();      // ordering catches up (fingerprint-gated)
   });
@@ -717,11 +717,11 @@ function setupUnreadListener(): void {
   // and broadcast this event. Schedule a sidebar refresh so the DOM
   // row drops. Without this, a cross-device delete leaves a straggler
   // row in the sidebar until the next poll.
-  window.addEventListener('sidekick:server-conversation-deleted', () => scheduleRefresh());
+  window.addEventListener('parley:server-conversation-deleted', () => scheduleRefresh());
   // Draft snippet tracking: composerDrafts debounces this broadcast;
   // the row fingerprint carries draft state, so the refresh no-ops
   // when nothing visible changed.
-  window.addEventListener('sidekick:draft-changed', () => scheduleRefresh());
+  window.addEventListener('parley:draft-changed', () => scheduleRefresh());
   // Pin/unpin/reorder repaints the drawer so the pinned region at the
   // top reflects the new set + order. sessionPins emits this after it
   // updates its in-memory order (the PUT to the synced setting is
@@ -730,10 +730,10 @@ function setupUnreadListener(): void {
   // behind an in-flight server listSessions (3-4s on a slow link). The
   // pinned set is read from the store, not the server, so the local
   // repaint is fully authoritative.
-  window.addEventListener('sidekick:session-pins-changed', () => repaintSessionsLocal());
+  window.addEventListener('parley:session-pins-changed', () => repaintSessionsLocal());
   // A nickname/voice edit repaints rows so the nickname chip appears
   // immediately. Local repaint from cachedSessions — no server round-trip.
-  window.addEventListener('sidekick:session-identity-changed', () => repaintSessionsLocal());
+  window.addEventListener('parley:session-identity-changed', () => repaintSessionsLocal());
 }
 // Wire at module load — idempotent + no DOM lookup needed (event
 // listener attaches on window which exists in the PWA from the start).
@@ -1056,8 +1056,8 @@ export function getCachedSessions(): any[] {
 }
 
 /** Look up the platform source for a chat_id from the cached session
- *  list. Returns 'sidekick' if not found (sane default — sidekick is
- *  the primary platform; non-sidekick rows must come from server data
+ *  list. Returns 'sidekick' if not found (sane default — parley is
+ *  the primary platform; non-parley rows must come from server data
  *  that's already been fetched). Used by the composer-read-only path
  *  in main.ts: when source !== 'sidekick', composer is disabled
  *  because cross-platform send isn't supported. */
@@ -1452,7 +1452,7 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
   }
   // Per-chat unread indicator — `.unread` adds bold + a count chip
   // (see app.css). Source-of-truth is the in-memory badge map; we
-  // re-render on `sidekick:unread-changed` events so toggling state
+  // re-render on `parley:unread-changed` events so toggling state
   // (push arrival, switch-into-chat) updates instantly without polling.
   const unread = unreadFor(s.id);
   if (unread > 0) li.classList.add('unread');
@@ -1497,10 +1497,10 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
 
   const meta = document.createElement('div');
   meta.className = 'sess-meta';
-  // Source badge — shown only for non-sidekick sessions so telegram/
+  // Source badge — shown only for non-parley sessions so telegram/
   // slack/whatsapp/etc rows are visually distinguished from the user's
-  // primary sidekick transcripts. Sidekick is the default; we don't
-  // clutter every row with a redundant "SIDEKICK" label. (api_server
+  // primary parley transcripts. Parley is the default; we don't
+  // clutter every row with a redundant "PARLEY" label. (api_server
   // is the legacy hermes-backend default name; preserved here for
   // back-compat with any older entries that still report that source.)
   // No "· current" text — the border highlight from li.active communicates
@@ -2478,7 +2478,7 @@ function ensureFilterInput(): HTMLInputElement | null {
 
   // Re-render rows when the meetings index refreshes (boot fetch or a
   // capture_changed envelope) so badges + the lens stay live.
-  window.addEventListener('sidekick:meetings-changed', rerenderRows);
+  window.addEventListener('parley:meetings-changed', rerenderRows);
   const updateClearVisibility = () => { clearBtn.hidden = !input!.value; };
   const clearFilter = () => {
     input!.value = '';
@@ -2806,14 +2806,14 @@ export function applyCapabilities() {
 
 // ── Background refresh polling ──────────────────────────────────────
 //
-// Cross-platform sessions (telegram, slack, etc.) don't fire a sidekick-
+// Cross-platform sessions (telegram, slack, etc.) don't fire a parley-
 // targeted `session_changed` envelope when they get activity — only
-// chats backends/hermes/plugin owns (Platform.SIDEKICK) do. To get sub-1s lag
+// chats backends/hermes/plugin owns (Platform.PARLEY) do. To get sub-1s lag
 // for "telegram chat just got a new message" → drawer reflects it,
 // we'd need a backends/hermes/plugin extension that emits cross-platform
 // session_activity envelopes. Pragmatic v1: poll listSessions every
 // few seconds while the tab is foregrounded. ~3-5s lag for non-
-// sidekick chats; sidekick chats already update live via the existing
+// parley chats; parley chats already update live via the existing
 // session_changed handler so nothing changes for the primary path.
 //
 // Pauses when document.visibilityState !== 'visible' so a backgrounded

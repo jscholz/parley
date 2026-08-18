@@ -65,7 +65,7 @@ from peer import (
 # Filled in by register_routes(); used by the request handlers.
 _VOICE_CONFIG: Optional[VoiceConfig] = None
 _API_SERVER_REF: Any = None  # legacy: reference to in-process APIServerAdapter
-_PROXY_URL: Optional[str] = None  # sidekick proxy URL, e.g. http://127.0.0.1:3001
+_PROXY_URL: Optional[str] = None  # parley proxy URL, e.g. http://127.0.0.1:3001
                                   # — bridge dispatches to <proxy>/api/<backend>/responses
 _BACKEND: str = "hermes"  # active backend slug for the proxy responses endpoint
 
@@ -113,8 +113,8 @@ async def handle_offer(request: "web.Request") -> "web.Response":
     if mode not in {"stream", "talk"}:
         return _err(f"invalid mode {mode!r}; expected 'stream' or 'talk'")
 
-    # conv_name is sidekick's stable conversation identifier
-    # (sidekick-<slug>), the same key the classic-mode chat path sends.
+    # conv_name is parley's stable conversation identifier
+    # (parley-<slug>), the same key the classic-mode chat path sends.
     # Backwards-compat: an older client using `session_id` is read but
     # treated as conv_name; the bridge passes it through as
     # body["conversation"] when dispatching to /api/<backend>/responses,
@@ -154,8 +154,8 @@ async def handle_offer(request: "web.Request") -> "web.Response":
     peer.extra["conv_name"] = conv_name
     peer.extra["chat_id"] = chat_id
     # Bridge dispatches to <proxy>/api/<be>/responses, NOT directly to the
-    # agent backend. The sidekick proxy is the sole gateway between
-    # sidekick-land and agent-land. <be> is the active backend slug
+    # agent backend. The parley proxy is the sole gateway between
+    # parley-land and agent-land. <be> is the active backend slug
     # configured at startup (default 'hermes'). When peer.extra["chat_id"]
     # is set, dispatch routes through /api/parley/messages instead.
     peer.extra["proxy_url"] = _PROXY_URL
@@ -224,7 +224,7 @@ async def handle_offer(request: "web.Request") -> "web.Response":
         # Peer-scoped persistent subscriber to /api/parley/stream.
         # No-op when chat_id is missing (legacy /v1/responses route
         # owns its own per-POST SSE inside _dispatch_to_agent).
-        stt_bridge.start_sidekick_stream(peer)
+        stt_bridge.start_parley_stream(peer)
     dispatch_listener.attach(peer)
 
     # Lifecycle logging — useful for postmortems.
@@ -445,7 +445,7 @@ async def handle_close(request: "web.Request") -> "web.Response":
 async def handle_transcribe(request: "web.Request") -> "web.Response":
     """POST /v1/transcribe — batch-transcribe a blob via the configured STT provider.
 
-    Body is the raw audio (the sidekick proxy forwards what the browser
+    Body is the raw audio (the parley proxy forwards what the browser
     POSTs to /transcribe verbatim — no multipart wrapping).  Content-Type
     must indicate the mime so providers can decode appropriately; we
     default to ``audio/webm`` to match what the PWA records.
@@ -539,7 +539,7 @@ async def handle_transcribe_diarized(request: "web.Request") -> "web.Response":
     """POST /v1/transcribe-diarized — full-audio batch pass with speaker
     labels (meeting-capture canonical pass; capture plan §3.3 Phase 3).
 
-    Body is ONE contiguous audio file (the sidekick proxy stitches the
+    Body is ONE contiguous audio file (the parley proxy stitches the
     capture's segments first — diarize_model=v2 is batch-only and
     speaker ids can't be correlated across separate calls). Returns
     ``{ok, utterances: [{speaker, start, text}]}``.
@@ -640,10 +640,10 @@ def register_routes(
 ) -> None:
     """Register the /v1/rtc/* routes onto an aiohttp Application.
 
-    *proxy_url* is the sidekick proxy base URL (e.g. http://127.0.0.1:3001).
+    *proxy_url* is the parley proxy base URL (e.g. http://127.0.0.1:3001).
     The bridge dispatches utterances to ``<proxy_url>/api/<backend>/responses``
     rather than POSTing directly to the agent backend. Routing through the
-    proxy keeps the proxy as the sole sidekick→agent gateway and lets
+    proxy keeps the proxy as the sole parley→agent gateway and lets
     bridge implementations (aiortc / node-webrtc / future) stay agent-agnostic.
 
     *backend* is the active backend slug whose responses endpoint the

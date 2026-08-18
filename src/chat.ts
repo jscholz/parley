@@ -816,7 +816,7 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
   // paints with correct state on the first render. Fire-and-forget —
   // server fetch is fast (~50ms on LAN); a bubble rendered before the
   // hydrate resolves just gets a momentary "unpinned" indicator that
-  // flips via the sidekick:pins-changed listener once the server-
+  // flips via the parley:pins-changed listener once the server-
   // driven cache populates.
   void hydratePins();
   // Flush the pending scroll-position write on page unload so a reload
@@ -840,7 +840,7 @@ export async function init(el: HTMLElement | null): Promise<boolean> {
   // elements only (most bubbles don't have one — only those with a
   // stable msgId), reads isPinned() synchronously.
   if (typeof window !== 'undefined') {
-    window.addEventListener('sidekick:pins-changed', () => {
+    window.addEventListener('parley:pins-changed', () => {
       if (!transcriptEl || !viewedSessionIdRef) return;
       const chatId = viewedSessionIdRef;
       transcriptEl.querySelectorAll<HTMLElement>('.line[data-message-id]').forEach((line) => {
@@ -1409,7 +1409,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   // (2026-05-12).
   //
   // Icon swap is CSS-driven (.pin-btn.pinned hides outline, shows
-  // filled) so the global sidekick:pins-changed listener at init()
+  // filled) so the global parley:pins-changed listener at init()
   // only needs to toggle the `.pinned` class — no innerHTML rebuild
   // per repaint cycle.
   if (opts.messageId) {
@@ -1425,7 +1425,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     `;
     // Initial paint: we don't know the chat_id yet if this is an
     // optimistic bubble on a fresh chat. Re-paint will fire via
-    // sidekick:pins-changed once trackViewedSession stamps it.
+    // parley:pins-changed once trackViewedSession stamps it.
     if (viewedSessionIdRef && isPinMsg(viewedSessionIdRef, msgId)) {
       pinBtn.classList.add('pinned');
       pinBtn.title = 'Unpin message';

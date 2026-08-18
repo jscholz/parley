@@ -1,12 +1,12 @@
 /**
  * GET /v1/events — long-lived SSE for out-of-turn envelopes.
  *
- * Sidekick proxy connects on startup and listens forever; envelopes
+ * Parley proxy connects on startup and listens forever; envelopes
  * for chats that don't have an active /v1/responses turn ride this
  * channel (notifications, session_changed, late tool events,
  * cross-platform incoming messages, errors).
  *
- * Reference shape: `~/code/sidekick/backends/hermes/plugin/__init__.py`
+ * Reference shape: `~/code/parley/backends/hermes/plugin/__init__.py`
  * `_handle_events` (line 3293). Wire format:
  *
  *   retry: 1000\n\n
@@ -19,7 +19,7 @@
  * v0 scope (this commit):
  *   - Hold connection open so the proxy is satisfied.
  *   - Drain `eventBus.globalIterator` for events without a claimed run.
- *   - Translate the few translatable agent-event shapes into sidekick
+ *   - Translate the few translatable agent-event shapes into parley
  *     envelopes (assistant text → reply_delta + reply_final).
  *   - Drop anything else silently. Out-of-turn cron / notification /
  *     session_changed integration lands in follow-up commits once we
@@ -60,7 +60,7 @@ export function makeEventsHandler({ eventBus, logger = console }) {
 
       for await (const event of eventBus.globalIterator({ signal: abort.signal })) {
         if (!event) break;
-        // pushEnvelope() sentinel: a pre-translated sidekick envelope
+        // pushEnvelope() sentinel: a pre-translated parley envelope
         // injected by /v1/responses (user_message broadcast) or other
         // out-of-band emitters. Pass through verbatim.
         if (event.__envelope) {
@@ -130,12 +130,12 @@ export function makeEventsHandler({ eventBus, logger = console }) {
         }
         // Drop everything else for now: thinking, plan, item-stream,
         // command_output, patch, approval, codex_app_server.* —
-        // surfacing these requires bespoke sidekick envelopes
+        // surfacing these requires bespoke parley envelopes
         // (notifications, approval prompts) we'll add as we discover
         // the user-facing need.
       }
     } catch (err) {
-      logger.warn?.(`[sidekick] /v1/events error: ${err?.message ?? err}`);
+      logger.warn?.(`[parley] /v1/events error: ${err?.message ?? err}`);
     } finally {
       try { res.end(); } catch {}
     }

@@ -305,7 +305,7 @@ async function runUnifiedSearch(q: string) {
     // the section with "No matching sessions."
     if (backend.hasSearch()) {
       const topSessions = result.sessions.slice(0, 10);
-      // The user's RENAMED session title lives in sidekick.db
+      // The user's RENAMED session title lives in parley.db
       // conversation_titles (client-cached), NOT in the hermes FTS index —
       // so server search results carry the stale/auto title (often empty,
       // → renderSessionRow falls back to the raw `sidekick:<uuid>` id).

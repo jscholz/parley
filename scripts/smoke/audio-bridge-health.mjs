@@ -6,7 +6,7 @@
 // the same thing. No DG quota usage — the bridge's /v1/rtc/health
 // just reports what providers it WOULD use; doesn't call them.
 //
-// Marked BACKEND='real' because it requires an actual sidekick
+// Marked BACKEND='real' because it requires an actual parley
 // proxy + audio bridge running; not exercisable against the mock
 // backend.
 

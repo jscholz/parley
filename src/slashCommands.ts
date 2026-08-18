@@ -12,7 +12,7 @@
  * Hard constraints:
  *   1. All command logic stays in hermes (this module is rendering +
  *      dispatch, NOT validation or execution).
- *   2. Core sidekick machinery (main.ts/settings.ts/chat.ts) gets only
+ *   2. Core parley machinery (main.ts/settings.ts/chat.ts) gets only
  *      a small `init({input, onDispatch})` hook; the composer textarea
  *      is the only DOM element this module attaches to.
  *
@@ -51,15 +51,15 @@ interface CommandDef {
 let inputEl: HTMLTextAreaElement | null = null;
 let onDispatchCb: ((text: string) => void) | null = null;
 
-/** Sidekick-only popover entry injected client-side. The gateway hides
+/** Parley-only popover entry injected client-side. The gateway hides
  *  "reset" from its catalog (it's an alias of "new", which collides with
- *  TUI-only semantics) — but Sidekick wants /reset surfaced as a
+ *  TUI-only semantics) — but Parley wants /reset surfaced as a
  *  browsable action: an in-place context reset that keeps this thread
  *  (sent upstream; see the gateway's _handle_reset_command). /new is
  *  deliberately NOT surfaced — the New Chat button already covers it.
  *  Injected here rather than server-side to keep this
- *  Sidekick-frontend-only (no gateway restart). */
-const SIDEKICK_SYNTHETIC_COMMANDS: CommandDef[] = [
+ *  Parley-frontend-only (no gateway restart). */
+const PARLEY_SYNTHETIC_COMMANDS: CommandDef[] = [
   {
     name: 'reset',
     description: "Reset the agent's context — keeps this thread",
@@ -70,12 +70,12 @@ const SIDEKICK_SYNTHETIC_COMMANDS: CommandDef[] = [
   },
 ];
 
-/** Merge synthetic Sidekick entries onto the fetched catalog: synthetic
+/** Merge synthetic Parley entries onto the fetched catalog: synthetic
  *  rows come first, and any fetched row sharing a synthetic name/alias is
- *  dropped so the Sidekick-specific description/routing wins. */
+ *  dropped so the Parley-specific description/routing wins. */
 function withSyntheticCommands(fetched: CommandDef[]): CommandDef[] {
   const synthNames = new Set<string>();
-  for (const c of SIDEKICK_SYNTHETIC_COMMANDS) {
+  for (const c of PARLEY_SYNTHETIC_COMMANDS) {
     synthNames.add(c.name.toLowerCase());
     for (const a of c.aliases) synthNames.add(a.toLowerCase());
   }
@@ -83,7 +83,7 @@ function withSyntheticCommands(fetched: CommandDef[]): CommandDef[] {
     if (synthNames.has(c.name.toLowerCase())) return false;
     return !c.aliases.some((a) => synthNames.has(a.toLowerCase()));
   });
-  return [...SIDEKICK_SYNTHETIC_COMMANDS, ...deduped];
+  return [...PARLEY_SYNTHETIC_COMMANDS, ...deduped];
 }
 
 /** Last successfully-fetched (or 404-cleared) upstream catalog, before

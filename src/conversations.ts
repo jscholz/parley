@@ -38,7 +38,7 @@ const DB_VERSION = 2;
 
 export interface Conversation {
   /** Prefixed chat_id (`${source}:${native_id}`) — the SAME contract-
-   *  unique gateway id the server uses. Sidekick is the only platform
+   *  unique gateway id the server uses. Parley is the only platform
    *  that mints client-side; `mintChatId()` produces `sidekick:<uuid>`.
    *  Cross-device chats hydrated from /api/parley/sessions arrive
    *  already-prefixed (any source). v2 schema invariant: never store
@@ -95,7 +95,7 @@ function reqP<T = any>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
-/** Mint a fresh prefixed chat_id. Sidekick is the only platform that
+/** Mint a fresh prefixed chat_id. Parley is the only platform that
  *  client-mints; we stamp `sidekick:` so the id matches the gateway's
  *  prefix-encoded contract from the moment it exists. Lets the adapter
  *  lazy-allocate without writing the IDB conversation row (Option B —

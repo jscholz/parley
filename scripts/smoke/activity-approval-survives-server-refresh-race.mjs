@@ -60,7 +60,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-refresh-race\n\n' +
+      'printf parley-refresh-race\n\n' +
       'Reason: refresh-race smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: approvalId,

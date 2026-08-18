@@ -3,7 +3,7 @@
 // rows via the SSE-shape sidekick_id, the without-link rows via the
 // integer-id fallback.
 //
-// Why this matters: after the plugin's sidekick_msg_links table
+// Why this matters: after the plugin's parley_msg_links table
 // landed, only NEW turns get a link row. Pre-existing messages and
 // messages from other channels (telegram, slack, ...) won't have a
 // link and rely on the integer-id fallback in renderHistoryMessage.
@@ -11,7 +11,7 @@
 //
 // Test plan (mocked):
 //   1. Seed a chat with 4 messages: 2 with sidekick_id (modeling new
-//      sidekick turns), 2 without (modeling legacy / cross-channel).
+//      parley turns), 2 without (modeling legacy / cross-channel).
 //   2. Click into the chat.
 //   3. page.reload().
 //   4. After replay, assert: exactly 4 .line elements, no duplicate

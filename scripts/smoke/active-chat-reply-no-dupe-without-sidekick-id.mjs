@@ -3,7 +3,7 @@
 // "Hey — received." text rendered twice for a single response.
 //
 // Repro shape: when the plugin mirrors the assistant row into
-// state.db / sidekick.db but the link write doesn't include a
+// state.db / parley.db but the link write doesn't include a
 // sidekick_id (whether because the link table write failed, raced,
 // or hasn't run yet), the projection sees TWO rows for the same
 // message:
@@ -41,7 +41,7 @@ import {
   clickNewChat, clickRow, assert,
 } from './lib.mjs';
 
-export const NAME = 'active-chat-reply-no-dupe-without-sidekick-id';
+export const NAME = 'active-chat-reply-no-dupe-without-parley-id';
 export const DESCRIPTION = 'Assistant reply renders ONCE even when durable mirror lacks sidekick_id';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
@@ -122,7 +122,7 @@ export default async function run({ page, log, mock }) {
   });
   // Re-call addChat to overwrite the in-memory chat record with the
   // full message set — durable assistant row included, but WITHOUT
-  // sidekick_id. Mirrors what state.db / sidekick.db would look like
+  // sidekick_id. Mirrors what state.db / parley.db would look like
   // if the plugin's link write skipped this row.
   mock.addChat(chatA, {
     title: 'Chat A',

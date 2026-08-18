@@ -195,7 +195,7 @@ export function initPinDrawer(opts: {
         : []),
     ],
     bodyClass: 'pin-drawer-open',
-    prefKey: 'sidekick.pin-drawer.expanded',
+    prefKey: 'parley.pin-drawer.expanded',
     // Header drawer-toggle (mobile consolidation 2026-07-09): one button
     // opens/closes the right drawer at its last-active tab; the per-tab
     // pin + bell header buttons are gone (tabs live inside the drawer).
@@ -213,23 +213,23 @@ export function initPinDrawer(opts: {
     resizer: {
       handleId: 'pin-drawer-resizer',
       cssVar: '--pin-drawer-width',
-      widthPrefKey: 'sidekick.pinDrawerWidth.v3',
+      widthPrefKey: 'parley.pinDrawerWidth.v3',
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
       maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
     },
   });
 
-  window.addEventListener('sidekick:unread-changed', () => refreshCombinedBanner());
-  window.addEventListener('sidekick:pins-changed', () => {
+  window.addEventListener('parley:unread-changed', () => refreshCombinedBanner());
+  window.addEventListener('parley:pins-changed', () => {
     refreshCountBanner();
     if (isOpen() && activePanel === 'pins') drawerHost?.render();
   });
-  window.addEventListener('sidekick:activity-changed', () => {
+  window.addEventListener('parley:activity-changed', () => {
     refreshActivityCountBanner();
     if (isOpen() && activePanel === 'activity') drawerHost?.render();
   });
-  window.addEventListener('sidekick:doc-changed', (ev) => {
+  window.addEventListener('parley:doc-changed', (ev) => {
     const detail = (ev as CustomEvent<{ autoOpen?: boolean; kind?: string }>).detail;
     const autoOpen = !!detail?.autoOpen;
     if (autoOpen) {
@@ -248,14 +248,14 @@ export function initPinDrawer(opts: {
     }
     if (isOpen() && activePanel === 'doc') drawerHost?.render();
   });
-  window.addEventListener('sidekick:pin-error', (ev) => {
+  window.addEventListener('parley:pin-error', (ev) => {
     const detail = (ev as CustomEvent<{ message?: string }>).detail;
     showPinStatus(detail?.message || 'Could not update pinned messages.');
   });
   // Closing a doc only drops the shelf entry — the file on disk is
   // untouched. Say exactly that (field nit 2026-07-07: the old trash
   // icon + "Removed" wording read as deletion).
-  window.addEventListener('sidekick:doc-removed', (ev) => {
+  window.addEventListener('parley:doc-removed', (ev) => {
     const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
     // info, not error: closing a doc is benign (red implied breakage).
     showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`, 'info');

@@ -17,7 +17,7 @@ import * as activityStore from './notifications/activityStore.ts';
 import { apiUrl } from './apiBase.ts';
 
 const STORAGE_KEY = 'parley.settings.v2'; // migrated from sidekick.settings.v2
-// Last-good snapshot of the SYNCED settings (sidekick.db-backed). Written
+// Last-good snapshot of the SYNCED settings (parley.db-backed). Written
 // after every successful /prefs read so the next boot can hydrate synced
 // values synchronously from localStorage instead of awaiting the network —
 // see load() / revalidate().
@@ -127,7 +127,7 @@ async function refreshModelState() {
 
     if (preferred.length > 0) {
       // Curated filter is active — show only the preferred set. Widening
-      // the picker is a server-side concern (edit SIDEKICK_PREFERRED_MODELS
+      // the picker is a server-side concern (edit PARLEY_PREFERRED_MODELS
       // or clear it to get the full catalog back), not a per-user toggle.
       for (const entry of preferred) appendOption(sel, entry);
     } else {
@@ -184,7 +184,7 @@ function startModelPoll() {
 // fall through to DEFAULTS on parse failure). Schema version bumps do
 // NOT reset — we read the old shape and migrate in-place.
 //
-// ## Synced (sidekick.db `user_settings`) — everything else
+// ## Synced (parley.db `user_settings`) — everything else
 //
 // Settings whose right value is the user's account-level preference,
 // independent of which device they're on:
@@ -195,14 +195,14 @@ function startModelPoll() {
 //   * **Workflow defaults**: model selection, attach-image vision
 //     gate, realtime call mode.
 //
-// Persists in `~/.hermes/sidekick.db` (table `user_settings`, one row
+// Persists in `~/.hermes/parley.db` (table `user_settings`, one row
 // per key). Read via GET /api/parley/prefs, written via PUT
-// /api/parley/prefs/<key>. YAML (`sidekick.config.yaml`, GET
+// /api/parley/prefs/<key>. YAML (`parley.config.yaml`, GET
 // /api/parley/config) survives ONLY as a one-time read-only seed: a
 // synced key absent from the DB is backfilled from the YAML value on
 // first load, then the DB wins. **Reset triggers**: an explicit DB edit
 // (CLI or another device). Survives all device-level state clears, syncs
-// across devices, and rides the sidekick.db snapshot for backup +
+// across devices, and rides the parley.db snapshot for backup +
 // host migration.
 //
 // ## The DEFAULTS object below
@@ -213,7 +213,7 @@ function startModelPoll() {
 //   2. A new key was added to the schema and existing yamls don't
 //      have it yet.
 //
-// Keys + values match `proxy/sidekick/frontend-config.ts`'s
+// Keys + values match `proxy/parley/frontend-config.ts`'s
 // FRONTEND_SETTINGS table for the server-side keys. For per-device
 // keys, only DEFAULTS holds the fallback (no server entry).
 //
@@ -223,7 +223,7 @@ function startModelPoll() {
 //   2. A new key was added to the schema and existing yamls don't
 //      have it yet.
 //
-// Keys + values match `proxy/sidekick/frontend-config.ts`'s
+// Keys + values match `proxy/parley/frontend-config.ts`'s
 // FRONTEND_SETTINGS table. If you add a setting, add it to BOTH.
 const DEFAULTS = {
   // Speak-replies + realtime default ON for fresh installs: a
@@ -360,8 +360,8 @@ const PER_DEVICE_KEYS = new Set<string>([
 ]);
 
 /** The synced settings — every DEFAULTS key that isn't per-device. These
- *  live in sidekick.db (`user_settings`) and sync across devices. The set
- *  matches proxy/sidekick/frontend-config.ts FRONTEND_SETTINGS. */
+ *  live in parley.db (`user_settings`) and sync across devices. The set
+ *  matches proxy/parley/frontend-config.ts FRONTEND_SETTINGS. */
 function syncedKeys(): string[] {
   return Object.keys(DEFAULTS).filter(k => !PER_DEVICE_KEYS.has(k));
 }
@@ -525,7 +525,7 @@ function persistSyncedCache(): void {
  *  localStorage, so boot never awaits the network here (the old blocking
  *  `await fetch('/prefs')` was the dominant relaunch stall). The server is
  *  revalidated in the background; when fresh values land, a
- *  `sidekick:settings-changed` event re-syncs the UI. Use reload() when you
+ *  `parley:settings-changed` event re-syncs the UI. Use reload() when you
  *  need to AWAIT fresh server values (the Refresh button). */
 export async function load() {
   applyPerDevice();
@@ -538,12 +538,12 @@ let revalidateInFlight: Promise<void> | null = null;
 
 /** Pull synced settings from the server and reconcile `current`. On a
  *  successful DB read, persist the synced snapshot for the next cache-first
- *  boot and broadcast `sidekick:settings-changed` so live UI re-syncs.
+ *  boot and broadcast `parley:settings-changed` so live UI re-syncs.
  *  Single-flight: concurrent callers share the in-flight fetch. */
 async function revalidate(): Promise<void> {
   if (revalidateInFlight) return revalidateInFlight;
   revalidateInFlight = (async () => {
-    // Synced settings: sidekick.db `user_settings` (GET /api/parley/prefs)
+    // Synced settings: parley.db `user_settings` (GET /api/parley/prefs)
     // is the source of truth. We apply every synced key the DB carries.
     let dbOk = false;
     const dbSettings: Record<string, any> = {};
@@ -566,7 +566,7 @@ async function revalidate(): Promise<void> {
       // not clobber DB-resident settings with stale YAML defaults.
     }
 
-    // YAML (sidekick.config.yaml, GET /api/parley/config) survives ONLY
+    // YAML (parley.config.yaml, GET /api/parley/config) survives ONLY
     // as a one-time read-only seed. Any synced key absent from the DB is
     // backfilled from the YAML value, then the DB wins forever after. Once
     // every synced key has a DB row, YAML is never read again.
@@ -605,7 +605,7 @@ async function revalidate(): Promise<void> {
     // hydrate() handler re-applies form controls + visuals).
     try {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('sidekick:settings-changed'));
+        window.dispatchEvent(new CustomEvent('parley:settings-changed'));
       }
     } catch {}
   })();
@@ -631,7 +631,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key !== STORAGE_KEY) return;
     void load().then(() => {
-      window.dispatchEvent(new CustomEvent('sidekick:settings-changed'));
+      window.dispatchEvent(new CustomEvent('parley:settings-changed'));
     });
   });
 }
@@ -653,7 +653,7 @@ export function save() {
 /** @returns {Readonly<typeof DEFAULTS>} */
 export function get() { return current; }
 
-/** Persist one synced setting to sidekick.db via the prefs endpoint
+/** Persist one synced setting to parley.db via the prefs endpoint
  *  (one row per key in the `user_settings` table). Fire-and-forget; on
  *  failure the local cache keeps the user's value and the next load()
  *  resyncs from the DB. */
@@ -672,7 +672,7 @@ function putServerSetting(key: string, value: any): void {
 }
 
 /** Update one setting. Per-device keys land in localStorage; all
- *  others write to sidekick.db (PUT /api/parley/prefs/<key>). The
+ *  others write to parley.db (PUT /api/parley/prefs/<key>). The
  *  local cache updates synchronously regardless so call sites that read
  *  settings.get() right after set() see the new value. */
 export function set(key: string, value: any) {
@@ -831,13 +831,13 @@ export function hydrate(handlers: {
   }
   applyToDOM();
 
-  // Cross-tab sync: re-apply on `sidekick:settings-changed` so the
+  // Cross-tab sync: re-apply on `parley:settings-changed` so the
   // <select> / <input> elements catch up after another tab wrote to
   // localStorage. Also re-apply visual side-effects (theme handler,
   // font size CSS var, TTS engine row visibility) so the page LOOKS
   // consistent — not just the form controls. handlers.onThemeChange
   // is the canonical "make the theme stick" callback in main.ts.
-  window.addEventListener('sidekick:settings-changed', () => {
+  window.addEventListener('parley:settings-changed', () => {
     applyToDOM();
     applyVisuals();
     applyTtsEngineVisibility();
@@ -850,7 +850,7 @@ export function hydrate(handlers: {
     if (handlers.onStreamingEngineChange) handlers.onStreamingEngineChange();
   };
   // Keyterms: chip-based input, persisted PER USER server-side
-  // (sidekick.db user_settings, via src/keyterms.ts) so the list syncs
+  // (parley.db user_settings, via src/keyterms.ts) so the list syncs
   // across devices; IDB is a write-through offline mirror. On first boot
   // the list seeds from /api/keyterms (default_stt_keyterms.txt on the
   // server). Each chip is one keyterm — Enter or comma commits, × on a
@@ -1033,7 +1033,7 @@ export function hydrate(handlers: {
   // Cheap: getActiveSubscription is a single SW lookup. Without this,
   // a subscribe done in tab A wouldn't surface in tab B's toggle until
   // the user re-opened the panel.
-  window.addEventListener('sidekick:settings-changed', () => { void refreshPushUi(); });
+  window.addEventListener('parley:settings-changed', () => { void refreshPushUi(); });
 
   // ── Quiet hours — server-side prefs at /api/parley/notifications/preferences.
   // The UI is GLOBAL (matches Option A: applies to all subscriptions).
@@ -1129,7 +1129,7 @@ export function hydrate(handlers: {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          title: 'Sidekick test',
+          title: 'Parley test',
           body: 'Test push from the Notifications settings panel.',
         }),
       });
@@ -1217,7 +1217,7 @@ export function hydrate(handlers: {
 
   // ── Mark all read — escape hatch for a stuck badge. Clears the
   // in-memory unread map, fires syncBadge → clears the app icon
-  // dot, and triggers a sidekick:unread-changed event so the drawer
+  // dot, and triggers a parley:unread-changed event so the drawer
   // strips per-row indicators. Hint shows current total so the
   // user knows what they're clearing.
   function refreshMarkAllReadHint(): void {
@@ -1229,7 +1229,7 @@ export function hydrate(handlers: {
   }
   refreshMarkAllReadHint();
   if (typeof window !== 'undefined') {
-    window.addEventListener('sidekick:unread-changed', refreshMarkAllReadHint);
+    window.addEventListener('parley:unread-changed', refreshMarkAllReadHint);
   }
   if (setMarkAllRead) setMarkAllRead.onclick = () => {
     clearAllUnread();
@@ -1289,7 +1289,7 @@ export function hydrate(handlers: {
     // drag, so raising the ceiling takes effect immediately with no reload.
     // Broadcast so any open drawer wider than a freshly-LOWERED ceiling can
     // re-clamp itself now rather than waiting for the next drag.
-    window.dispatchEvent(new CustomEvent('sidekick:panel-max-width-changed'));
+    window.dispatchEvent(new CustomEvent('parley:panel-max-width-changed'));
   };
   // Hotkey inputs — click-to-capture. Focus the field, press a key
   // combination, and we format it as a string and save. Cmd is used as
@@ -1339,7 +1339,7 @@ export function hydrate(handlers: {
   // single subscriber today (applyMicModeUi).
   function broadcastHotkeyChange(): void {
     try {
-      window.dispatchEvent(new CustomEvent('sidekick:hotkeys-changed'));
+      window.dispatchEvent(new CustomEvent('parley:hotkeys-changed'));
     } catch { /* SSR / event-disallowed env */ }
   }
   attachHotkeyCapture(setHotkeyCall, 'hotkeyToggleCall');

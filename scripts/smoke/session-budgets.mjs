@@ -1,5 +1,5 @@
 // Session-op BUDGETS — invariant #5 of the session-hardening proposal
-// (sidekick-session-hardening-proposal-2026-07-12.md): "snappy" is a
+// (parley-session-hardening-proposal-2026-07-12.md): "snappy" is a
 // CI number, not a feeling. All cells here are WARM/LOCAL (mock
 // backend, content already in memory or trivially served), so the
 // numbers are deterministic on any machine — no network in the

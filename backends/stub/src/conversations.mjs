@@ -1,7 +1,7 @@
 // Conversation state for the stub agent.
 //
 // `conversation` (string) is a stable thread key supplied by the
-// caller (sidekick passes things like `sidekick-foo-2026-04-29`).
+// caller (parley passes things like `parley-foo-2026-04-29`).
 // We keep an in-memory Map of conversation → message[] and mirror
 // it to a single JSON file on disk so the agent survives restarts.
 //

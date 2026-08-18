@@ -1,9 +1,9 @@
-// /background isolation: bg sessions must NOT leak into the sidekick
+// /background isolation: bg sessions must NOT leak into the parley
 // drawer rollup or the current chat's transcript items.
 //
 // Why install-only:
 //
-// Currently, /background works cleanly in sidekick because of
+// Currently, /background works cleanly in parley because of
 // a load-bearing upstream "bug": hermes-agent's _ensure_db_session()
 // in run_agent.py:2438 hardcodes user_id=None when it INSERTs the
 // session row, regardless of what user_id was passed to the AIAgent
@@ -12,13 +12,13 @@
 // bypassing gateway/session.py's SessionStore.get_or_create_session()
 // (which is the only path that propagates user_id). So bg sessions
 // land orphan in state.db (user_id=NULL, parent_session_id=NULL)
-// and the sidekick drawer's recursive CTE filters them out via
+// and the parley drawer's recursive CTE filters them out via
 // WHERE user_id IS NOT NULL.
 //
 // If upstream "fixes" _ensure_db_session() to propagate self.user_id
 // (which is what the constructor receives), every bg session in
-// sidekick will start landing with user_id=current-chat-id (because
-// for sidekick, source.user_id IS source.chat_id). The drawer's
+// parley will start landing with user_id=current-chat-id (because
+// for parley, source.user_id IS source.chat_id). The drawer's
 // CTE would then roll those sessions UNDER the user's current chat —
 // inflating message_count, polluting items, etc.
 //
@@ -98,7 +98,7 @@ export default async function run({ page, log, url }) {
       bgLikeRows.length === 0,
       `BUG: a bg_* session is visible in the drawer rollup — ` +
       `upstream's _ensure_db_session may have started propagating user_id, ` +
-      `which breaks sidekick's drawer isolation. Found rows: ` +
+      `which breaks parley's drawer isolation. Found rows: ` +
       JSON.stringify(bgLikeRows.map(r => ({ id: r.chatId || r.id, mc: r.messageCount }))),
     );
 

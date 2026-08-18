@@ -14,7 +14,7 @@
 // agent doing work.
 //
 // Fix: proxy maintains an in-memory inflight
-// cache keyed by chat_id (`proxy/sidekick/inflight.ts`). Every
+// cache keyed by chat_id (`proxy/parley/inflight.ts`). Every
 // envelope from `dispatchTurnViaUpstream` is recorded with a
 // timestamp + per-chat queue. History fetch includes them as
 // `inflight: [...]` alongside `messages: [...]`. PWA's

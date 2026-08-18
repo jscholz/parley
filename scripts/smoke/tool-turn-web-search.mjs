@@ -118,7 +118,7 @@ export default async function run({ page, log, fail }) {
     //
     // We can't map chat_id → state.db session_id from the proxy
     // anymore: /api/parley/sessions only exposes chat_id (the
-    // sidekick-side identity), and state.db's sessions table has
+    // parley-side identity), and state.db's sessions table has
     // no chat_id column (hermes manages session identity by its
     // own `id`). Instead, query the most-recent session in state.db
     // that started AFTER this test began (t0). Smokes are sequential,

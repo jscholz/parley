@@ -190,7 +190,7 @@ export async function add(file) {
   if (!file) return;
   // Accept images + videos + PDFs. The gateway currently bundles
   // images and videos as `{ type: 'image', ... }`; PDFs are rasterized
-  // server-side by the hermes sidekick plugin (per-page PNGs), so by
+  // server-side by the hermes parley plugin (per-page PNGs), so by
   // the time the agent sees them they're back to image content blocks.
   // Some multimodal models (Gemini, some Gemma variants) decode video
   // frames; others reject. We keep the client permissive — if the

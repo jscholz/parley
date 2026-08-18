@@ -105,7 +105,7 @@ let lastChunkAt = 0;         // epoch ms of the last dataavailable
 
 function emit(): void {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:capture-state', { detail: { ...state } }));
+    window.dispatchEvent(new CustomEvent('parley:capture-state', { detail: { ...state } }));
   } catch { /* non-browser */ }
 }
 

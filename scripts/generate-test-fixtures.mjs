@@ -24,7 +24,7 @@
 //                                                TTS scenario (asserts
 //                                                no self-barge).
 //
-// Source voices come from the live sidekick proxy on localhost:3001 via
+// Source voices come from the live parley proxy on localhost:3001 via
 // the existing /tts endpoint, so we get exactly the same Deepgram Aura
 // voices that ship in production. Cached to fixtures so the smokes
 // don't depend on network or Deepgram credentials.
@@ -37,7 +37,7 @@ import { dirname, join } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..');
 const FIXTURE_DIR = join(REPO_ROOT, 'test/fixtures/audio');
-const PROXY_URL = process.env.PARLEY_PROXY_URL || process.env.SIDEKICK_PROXY_URL || 'http://localhost:3001';
+const PROXY_URL = process.env.PARLEY_PROXY_URL || process.env.PARLEY_PROXY_URL || 'http://localhost:3001';
 
 const FIXTURES = [
   {
@@ -83,7 +83,7 @@ function generateSilence(wavPath, seconds) {
   );
 }
 
-const tmpDir = '/tmp/sidekick-fixture-gen';
+const tmpDir = '/tmp/parley-fixture-gen';
 execSync(`mkdir -p "${tmpDir}"`);
 
 for (const f of FIXTURES) {

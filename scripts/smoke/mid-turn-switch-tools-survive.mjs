@@ -109,7 +109,7 @@ async function transcriptIncludes(page, marker, timeout = 4000) {
 
 function buildInflightEnvelopes(chatId, n) {
   // Same shape the proxy emits live + caches in its inflight ring
-  // (proxy/sidekick/inflight.ts). Order matches the live broadcast
+  // (proxy/parley/inflight.ts). Order matches the live broadcast
   // order so replayInflight reconstructs the row identically.
   const out = [];
   for (let i = 0; i < n; i++) {
@@ -161,7 +161,7 @@ export default async function run({ page, log, mock }) {
   // a switch-away-and-back would lose the row even with the fix in
   // place — because the mock's clear-and-replay path has no cache
   // to draw from. The real proxy populates inflightByChat in
-  // proxy/sidekick/inflight.ts as envelopes broadcast.
+  // proxy/parley/inflight.ts as envelopes broadcast.
   mock.setInflight(CHAT_A, liveEnvelopes);
   log(`staged inflight cache for A: ${liveEnvelopes.length} envelopes ✓`);
 

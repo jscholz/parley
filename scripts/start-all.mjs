@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Boot the sidekick proxy AND the in-tree stub agent in one command.
+ * Boot the parley proxy AND the in-tree stub agent in one command.
  *
  * Spawns two child processes:
  *   - proxy: `node --experimental-strip-types ... server.ts`
@@ -154,7 +154,7 @@ function spawnPrefixed(label, cmd, args, opts = {}) {
 
 // ── Auto-HTTPS (trial path) ──────────────────────────────────────────
 // Phones need a secure context for mic/PWA/push; localhost is exempt
-// but LAN access is not. When enabled (SIDEKICK_AUTO_HTTPS=1 — the npx
+// but LAN access is not. When enabled (PARLEY_AUTO_HTTPS=1 — the npx
 // launcher's default) and no cert is explicitly configured, provision a
 // self-signed cert and have the proxy serve HTTPS on HTTPS_PORT
 // alongside HTTP (server.ts dual mode). Opt-in for plain `npm start`
@@ -233,7 +233,7 @@ const phoneUrl = httpsInfo?.lan ? `https://${httpsInfo.lan}:${httpsInfo.port}` :
 process.stdout.write(
   '\n' +
   '────────────────────────────────────────────────────────\n' +
-  `  Sidekick is ready — open ${userUrl} in your browser.\n` +
+  `  Parley is ready — open ${userUrl} in your browser.\n` +
   (phoneUrl
     ? `  On your phone (same wifi): ${phoneUrl}\n` +
       '  (self-signed cert — accept the one-time browser warning)\n'

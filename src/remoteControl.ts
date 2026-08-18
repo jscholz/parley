@@ -5,7 +5,7 @@
  *
  *   1. Cap (iOS native): AppDelegate.swift's CallControls
  *      MPRemoteCommandCenter callbacks fire
- *      `window.dispatchEvent(new CustomEvent('sidekick:remote-control', ...))`
+ *      `window.dispatchEvent(new CustomEvent('parley:remote-control', ...))`
  *      via webView.evaluateJavaScript. Bluetooth headset transport
  *      buttons (play/pause/skip on AirPods, etc.) route through
  *      MPRemoteCommandCenter on iOS, so they hit this path too.
@@ -69,7 +69,7 @@ export function init(): void {
   installed = true;
 
   // Cap surface — AppDelegate posts these.
-  window.addEventListener('sidekick:remote-control', (e: Event) => {
+  window.addEventListener('parley:remote-control', (e: Event) => {
     const ce = e as CustomEvent<{ action?: string }>;
     const action = ce.detail?.action;
     if (action) dispatch(action);

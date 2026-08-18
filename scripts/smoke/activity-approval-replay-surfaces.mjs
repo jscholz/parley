@@ -59,7 +59,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-replay-approval\n\n' +
+      'printf parley-replay-approval\n\n' +
       'Reason: replayed approval must surface\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: approvalId,

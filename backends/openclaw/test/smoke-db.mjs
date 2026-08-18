@@ -11,7 +11,7 @@ import {
   finalizeMessage, listChats,
 } from '../src/messages.js';
 
-const dir = mkdtempSync(join(tmpdir(), 'sidekick-db-smoke-'));
+const dir = mkdtempSync(join(tmpdir(), 'parley-db-smoke-'));
 const dbPath = join(dir, 'sidekick.db');
 let pass = 0, fail = 0;
 const assert = (cond, msg) => {

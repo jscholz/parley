@@ -1,5 +1,5 @@
 /**
- * @fileoverview Cross-backend conformance harness for the sidekick
+ * @fileoverview Cross-backend conformance harness for the parley
  * `/v1/*` agent contract.
  *
  * Three interchangeable backends each re-implement the same HTTP+SSE

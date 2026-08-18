@@ -1,15 +1,15 @@
 /**
  * @fileoverview Backend dispatcher — picks a BackendAdapter based on
- * install-time config (SIDEKICK_BACKEND env var → /config → this module)
+ * install-time config (PARLEY_BACKEND env var → /config → this module)
  * and re-exports its methods as the shell's single entry point.
  *
- * Post-refactor, sidekick has a single backend: the proxy's hermes-
+ * Post-refactor, parley has a single backend: the proxy's hermes-
  * gateway (the agent contract over /api/parley/*). The legacy
  * openclaw / openai-compat / zeroclaw direct-PWA-to-LLM adapters were
- * removed in step 7 of the sidekick backend refactor; new
+ * removed in step 7 of the parley backend refactor; new
  * deployments wire any agent — hermes, stub, openclaw plugin,
  * a third-party `/v1/responses`-speaker — through the proxy by
- * setting SIDEKICK_PLATFORM_URL + SIDEKICK_PLATFORM_TOKEN.
+ * setting PARLEY_PLATFORM_URL + PARLEY_PLATFORM_TOKEN.
  *
  * @typedef {import('./proxyClientTypes.ts').BackendAdapter} BackendAdapter
  */
@@ -200,7 +200,7 @@ export async function fetchMessagesAround(id, target, limit?) {
 
 // Replay inflight envelopes through the live-SSE router. Called from
 // replaySessionMessages AFTER state.db render+clear, so the clear
-// path doesn't wipe the replayed bubbles. See proxy/sidekick/
+// path doesn't wipe the replayed bubbles. See proxy/parley/
 // inflight.ts for the server-side lifecycle.
 export async function replayInflight(id, envelopes) {
   const a = await loadAdapter();

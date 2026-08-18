@@ -11,7 +11,7 @@
 //      prefixed sibling.
 //   3. cleanupAbandonedChat saw the 0-msg ghost on navigate-away,
 //      called backend.deleteSession(bare_id).
-//   4. Plugin's bare-id DELETE fallback defaulted source=sidekick,
+//   4. Plugin's bare-id DELETE fallback defaulted source=parley,
 //      found the real session, deleted it. 9 chats wiped silently.
 //
 // Post-v0.383 unification (current shape):

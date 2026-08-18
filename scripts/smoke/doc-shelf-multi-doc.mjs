@@ -1,4 +1,4 @@
-// Doc shelf v2 (design: sidekick-docs-panel-ux-research-2026-07-07.md):
+// Doc shelf v2 (design: parley-docs-panel-ux-research-2026-07-07.md):
 // multiple agent-pushed docs coexist on a shelf (list + single reader).
 //
 // Covered here:

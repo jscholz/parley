@@ -31,7 +31,7 @@ const SAMPLES = [
   '15551234567@s.whatsapp.net',         // whatsapp direct
   '1234567890',                           // telegram numeric
   'C01234ABCDE',                          // slack channel
-  '550e8400-e29b-41d4-a716-446655440000', // sidekick UUID
+  '550e8400-e29b-41d4-a716-446655440000', // parley UUID
 ];
 
 function assert(cond, msg) {

@@ -9,7 +9,7 @@
  *   3. Per-subscription web-push send via VAPID-signed POST. Mark used.
  *   4. Prune 404 / 410 (subscription dead).
  *
- * Mirrors the proxy's `proxy/sidekick/notifications/dispatch.ts` but
+ * Mirrors the proxy's `proxy/parley/notifications/dispatch.ts` but
  * stripped to essentials. Refinements (cron parser, watch-readable
  * body, ack/run_id filters) come later.
  */
@@ -66,7 +66,7 @@ function messageIdForEvent(event) {
 function buildPayload({ chatId, text, kind, messageId = '' }) {
   const normalizedChatId = normalizeChatId(chatId);
   const titleEmoji = kind === 'cron' ? '⏰' : '💬';
-  const speaker = 'Sidekick';
+  const speaker = 'Parley';
   const body = (text || '').slice(0, 200);
   let url = '/';
   if (normalizedChatId) {
@@ -149,7 +149,7 @@ export class PushDispatcher {
       const chatId = sessionKey || event.sessionKey || event?.data?.sessionKey;
       if (!text || !chatId) return;
       this.dispatchPush({ chatId, text, messageId: messageIdForEvent(event) }).catch((err) => {
-        this.logger.warn?.(`[sidekick.push] dispatch failed: ${err?.message ?? err}`);
+        this.logger.warn?.(`[parley.push] dispatch failed: ${err?.message ?? err}`);
       });
     }
   }
@@ -157,11 +157,11 @@ export class PushDispatcher {
   async dispatchPush({ chatId, text, kind = 'reply_final', messageId = '' }) {
     const normalizedChatId = normalizeChatId(chatId);
     if (this.engagement.isEngaged(normalizedChatId)) {
-      this.logger.debug?.(`[sidekick.push] skip: user engaged with ${normalizedChatId}`);
+      this.logger.debug?.(`[parley.push] skip: user engaged with ${normalizedChatId}`);
       return { delivered: 0, pruned: 0, skipped: 'user_engaged' };
     }
     if (isMuted(this.db, normalizedChatId)) {
-      this.logger.debug?.(`[sidekick.push] skip: chat ${normalizedChatId} muted`);
+      this.logger.debug?.(`[parley.push] skip: chat ${normalizedChatId} muted`);
       return { delivered: 0, pruned: 0, skipped: 'muted' };
     }
     this.ensureVapid();
@@ -187,11 +187,11 @@ export class PushDispatcher {
           removeSubscription(this.db, sub.endpoint);
           pruned += 1;
         } else {
-          this.logger.warn?.(`[sidekick.push] send failed (${code}): ${err?.body ?? err?.message ?? err}`);
+          this.logger.warn?.(`[parley.push] send failed (${code}): ${err?.body ?? err?.message ?? err}`);
         }
       }
     }
-    this.logger.info?.(`[sidekick.push] dispatched chat=${normalizedChatId} delivered=${delivered} pruned=${pruned}`);
+    this.logger.info?.(`[parley.push] dispatched chat=${normalizedChatId} delivered=${delivered} pruned=${pruned}`);
     if (delivered > 0) {
       this.persistActivityForPush({ chatId: normalizedChatId, text, kind, itemId });
     }
@@ -221,7 +221,7 @@ export class PushDispatcher {
         cause: 'push',
       });
     } catch (err) {
-      this.logger.warn?.(`[sidekick.push] activity persist failed: ${err?.message ?? err}`);
+      this.logger.warn?.(`[parley.push] activity persist failed: ${err?.message ?? err}`);
     }
   }
 }

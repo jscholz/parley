@@ -1,8 +1,8 @@
 {
-  "name": "@jscholz/sidekick-openclaw-plugin",
+  "name": "@jscholz/parley-openclaw-plugin",
   "version": "0.0.1",
   "private": true,
-  "description": "OpenClaw plugin that exposes the sidekick /v1/* HTTP+SSE contract.",
+  "description": "OpenClaw plugin that exposes the parley /v1/* HTTP+SSE contract.",
   "type": "module",
   "openclaw": {
     "extensions": [

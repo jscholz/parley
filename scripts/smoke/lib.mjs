@@ -1,4 +1,4 @@
-// Shared helpers for sidekick PWA smoke scenarios.
+// Shared helpers for parley PWA smoke scenarios.
 //
 // Each scenario file in scripts/smoke/ exports a default async function
 // that takes a SmokeContext { page, log, fail, url } and returns when
@@ -105,7 +105,7 @@ export async function launchBrowser(browser, { headed: _headed = false, mobile =
         hasTouch: true,
       })
     : await browser.newContext({
-        // Desktop viewport — sidekick's mobile breakpoint auto-collapses
+        // Desktop viewport — parley's mobile breakpoint auto-collapses
         // the sidebar drawer on small screens, which would make drawer
         // rows non-clickable in tests. Pin to a stable desktop size.
         viewport: { width: 1280, height: 800 },
@@ -275,7 +275,7 @@ export async function pollUntil(page, fn, arg = undefined, {
 }
 
 /** Reset proxy-side yaml-backed settings to known values BEFORE the
- *  page boots. Smokes share the server's sidekick.config.yaml across
+ *  page boots. Smokes share the server's parley.config.yaml across
  *  scenarios — per-scenario BrowserContext gives clean localStorage +
  *  IDB, but the proxy's settings table is global. Tests that flip
  *  settings (mic-mode toggles, agent schema POSTs, etc.) leak state
@@ -349,7 +349,7 @@ export async function tapMic(page, { afterPrevTapMs = 0 } = {}) {
 }
 
 /** Ensure the sidebar drawer is expanded (so drawer rows are clickable).
- *  Sidekick collapses by default on every fresh load — no LocalStorage
+ *  Parley collapses by default on every fresh load — no LocalStorage
  *  preference saved → drawer hidden. Tests need it open. */
 export async function openSidebar(page, { timeout = 3_000 } = {}) {
   const isExpanded = await page.evaluate(() => {

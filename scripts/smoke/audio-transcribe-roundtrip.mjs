@@ -2,10 +2,10 @@
 //
 // PWA → POST /transcribe (raw audio body) → proxy forwards to
 // audio-bridge /v1/transcribe → bridge calls Deepgram REST →
-// transcript returns. The fixture says "hello sidekick" (synthesized
+// transcript returns. The fixture says "hello parley" (synthesized
 // once via Deepgram Aura — see scripts/smoke/fixtures/README if/when
 // we need to regenerate). The assertion is a substring match —
-// Deepgram may capitalize / punctuate ("Hello, sidekick.") and we
+// Deepgram may capitalize / punctuate ("Hello, parley.") and we
 // don't want to spec-fight model drift.
 //
 // What this catches that audio-bridge-health doesn't:
@@ -29,7 +29,7 @@ export const STATUS = 'implemented';
 export const BACKEND = 'real';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURE = path.join(__dirname, 'fixtures', 'hello-sidekick.wav');
+const FIXTURE = path.join(__dirname, 'fixtures', 'hello-parley.wav');
 /** Substring match — Deepgram normalizes (capitalizes, may add a
  *  period). Assert on the unique noun rather than exact equality. */
 const EXPECT_SUBSTRING = 'sidekick';

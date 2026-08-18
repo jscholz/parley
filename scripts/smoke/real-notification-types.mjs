@@ -145,7 +145,7 @@ export default async function run({ page, log }) {
   assert(agentActivity.includes('Reply'), `expected agent reply Activity row, got: ${agentActivity}`);
   log(`agent_reply Activity row visible ✓`);
   const logsAfterAgent = await recentHermesLogs(since);
-  const agentBare = agentChat.replace(/^sidekick:/, "");
+  const agentBare = agentChat.replace(/^parley:/, "");
   const agentDispatch = logsAfterAgent.includes(`dispatch type=reply_final chat=${agentBare}`);
   const agentEngagedSkip = logsAfterAgent.includes(`skip type=reply_final chat=${agentBare} reason=user_engaged`);
   log(`agent_reply journal: dispatch=${agentDispatch} user_engaged_skip=${agentEngagedSkip}`);
@@ -165,7 +165,7 @@ export default async function run({ page, log }) {
   created.push(cronChat);
   const cronPrompt =
     `Notification smoke. Use the cronjob tool to create a one-time job that runs about one minute from now. ` +
-    `Name it sidekick-smoke-${RUN}. The job prompt must instruct the cron agent to reply with exactly this single token and no other text: ${CRON_MARKER}. ` +
+    `Name it parley-smoke-${RUN}. The job prompt must instruct the cron agent to reply with exactly this single token and no other text: ${CRON_MARKER}. ` +
     `After scheduling it, reply only with SCHEDULED_${RUN}.`;
   await send(page, cronPrompt);
   await waitForAgentBubble(page, `SCHEDULED_${RUN}`, 90_000);
@@ -195,7 +195,7 @@ export default async function run({ page, log }) {
 
   const logs = await recentHermesLogs(since);
   const hasReplyDispatch = logs.includes('dispatch type=reply_final') || logs.includes('skip type=reply_final');
-  const hasCronNotification = logs.includes('type=notification') && logs.includes(cronChat.replace(/^sidekick:/, ''));
+  const hasCronNotification = logs.includes('type=notification') && logs.includes(cronChat.replace(/^parley:/, ''));
   log(`journal hints: reply_final=${hasReplyDispatch} cronNotificationForChat=${hasCronNotification}`);
 
   // Cleanup the smoke chats. The one-shot job should already have fired; if

@@ -71,7 +71,7 @@ export default async function run({ page, log, mock }) {
     { timeout: 8_000 },
   );
   await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('sidekick:server-unread-changed'));
+    window.dispatchEvent(new CustomEvent('parley:server-unread-changed'));
   });
   await staleGet;
   const tStale = Date.now();

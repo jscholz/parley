@@ -34,7 +34,7 @@ export default async function run({ page, log, url }) {
   // wildcard query the plugin builds. Pure alphanumeric is safe and
   // exercises the common-case indexing path which is what we're gating
   // on here. Edge-case tokenizer bugs (dash, @, dot) are a separate
-  // backlog item (see notes/backlog/sidekick.md).
+  // backlog item (see notes/backlog/parley.md).
   const MARKER = `smokesearchmarker${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let chatId = null;
 

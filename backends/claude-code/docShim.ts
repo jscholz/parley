@@ -53,7 +53,7 @@ export function buildDocServer(opts: {
   const now = opts.now ?? Date.now;
   const displayDoc = opts.sdk.tool(
     DISPLAY_DOC_TOOL,
-    'Display a document in the Sidekick app\'s Docs side panel — use when ' +
+    'Display a document in the Parley app\'s Docs side panel — use when ' +
       'the user asks to see/read a file you wrote (notes, a report, deck ' +
       'content) without opening an editor. Renders markdown and HTML; ' +
       'other text shows as plain text. Re-calling with the same path ' +

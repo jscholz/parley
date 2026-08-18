@@ -2,10 +2,10 @@
 // pinned to the top of the session drawer.
 //
 // Persistence: rides the synced `pinnedSessions` setting (see
-// src/settings.ts DEFAULTS + proxy/sidekick/frontend-config.ts). That
+// src/settings.ts DEFAULTS + proxy/parley/frontend-config.ts). That
 // setting is a STRING because the prefs store is scalar-only; this
 // module owns the JSON encode/decode. Because prefs is already
-// sidekick.db-backed + cross-device, pins sync across devices for free —
+// parley.db-backed + cross-device, pins sync across devices for free —
 // no dedicated server table (unlike message-pins in src/pins/store.ts,
 // which needed one only because IDB couldn't sync).
 //
@@ -17,12 +17,12 @@
 // In-memory `order` array is the sync source of truth for renders
 // (sessionDrawer's per-row isPinned() check can't await). Mutations
 // write through to settings.set() (PUT /api/parley/prefs) and emit a
-// `sidekick:session-pins-changed` event so the drawer repaints.
+// `parley:session-pins-changed` event so the drawer repaints.
 
 import * as settings from './settings.ts';
 import { log } from './util/log.ts';
 
-const CHANGE_EVENT = 'sidekick:session-pins-changed';
+const CHANGE_EVENT = 'parley:session-pins-changed';
 
 // Ordered, deduped session ids. index 0 = top = landing default.
 let order: string[] = [];

@@ -1,8 +1,8 @@
 """
-Sidekick audio bridge — standalone aiohttp service.
+Parley audio bridge — standalone aiohttp service.
 
-This is the reference Python/aiortc implementation of the sidekick
-audio bridge contract (see ``docs/SIDEKICK_AUDIO_PROTOCOL.md`` in this
+This is the reference Python/aiortc implementation of the parley
+audio bridge contract (see ``docs/PARLEY_AUDIO_PROTOCOL.md`` in this
 repo for the wire format). It owns:
 
   - WebRTC peer connection lifecycle (offer / answer / ICE / close)
@@ -11,25 +11,25 @@ repo for the wire format). It owns:
   - DataChannel events (transcripts, future control messages)
   - (Talk mode) TTS provider PCM → outbound RTP track
 
-The bridge does NOT talk to the agent backend directly. All sidekick
-→ agent traffic flows through the sidekick proxy, which is the sole
+The bridge does NOT talk to the agent backend directly. All parley
+→ agent traffic flows through the parley proxy, which is the sole
 gateway. The bridge POSTs utterances to
-``<SIDEKICK_PROXY_URL>/api/<backend>/responses`` (the active backend is
+``<PARLEY_PROXY_URL>/api/<backend>/responses`` (the active backend is
 configured on the proxy) and streams the SSE reply back over the data
 channel as transcript envelopes.
 
 Environment variables:
 
-    SIDEKICK_AUDIO_HOST   bind host (default 127.0.0.1)
-    SIDEKICK_AUDIO_PORT   bind port (default 8643)
-    SIDEKICK_PROXY_URL    sidekick proxy base URL (default http://127.0.0.1:3001)
-    SIDEKICK_BACKEND      active backend slug for the proxy responses
+    PARLEY_AUDIO_HOST   bind host (default 127.0.0.1)
+    PARLEY_AUDIO_PORT   bind port (default 8643)
+    PARLEY_PROXY_URL    parley proxy base URL (default http://127.0.0.1:3001)
+    PARLEY_BACKEND      active backend slug for the proxy responses
                           endpoint (default ``hermes``). The bridge POSTs
                           utterances to ``<proxy>/api/<be>/responses``;
                           ``<be>`` is this value. Set to whatever slug
                           the proxy is wired to dispatch.
-    SIDEKICK_AUDIO_LOG_FILE  optional path to a log file. Falls back to
-                          ``/tmp/sidekick-audio.log`` if the bridge is
+    PARLEY_AUDIO_LOG_FILE  optional path to a log file. Falls back to
+                          ``/tmp/parley-audio.log`` if the bridge is
                           launched under systemd (so logs are still
                           tailable when journald isn't capturing this
                           unit for whatever reason). Set to empty
@@ -55,10 +55,10 @@ def main() -> None:
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
 
-    # File handler — defaults to /tmp/sidekick-audio.log so logs are
+    # File handler — defaults to /tmp/parley-audio.log so logs are
     # tailable even when user-level journald isn't capturing this unit.
     # `tail -f` works regardless of journald state.
-    log_file = env_get("PARLEY_AUDIO_LOG_FILE", "/tmp/sidekick-audio.log")
+    log_file = env_get("PARLEY_AUDIO_LOG_FILE", "/tmp/parley-audio.log")
     if log_file:
         try:
             handlers.append(logging.FileHandler(log_file))
@@ -101,7 +101,7 @@ def main() -> None:
         )
 
     # aiohttp's default body limit is 1MB. /v1/transcribe receives raw
-    # webm blobs from the PWA via the sidekick proxy (a 3-minute memo is
+    # webm blobs from the PWA via the parley proxy (a 3-minute memo is
     # ~6MB), and /v1/transcribe-diarized receives a WHOLE MEETING's
     # stitched mono AAC from the capture pipeline — ~22MB/hour, so a
     # 3-hour meeting is ~65MB. The old 25MB cap silently rejected the
@@ -114,7 +114,7 @@ def main() -> None:
     register_routes(app, voice_config=voice_config, proxy_url=proxy_url, backend=backend)
 
     logging.getLogger(__name__).info(
-        "starting sidekick audio bridge host=%s port=%d proxy=%s backend=%s",
+        "starting parley audio bridge host=%s port=%d proxy=%s backend=%s",
         host, port, proxy_url, backend,
     )
     web.run_app(app, host=host, port=port, access_log=None)

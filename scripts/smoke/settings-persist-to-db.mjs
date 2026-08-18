@@ -1,6 +1,6 @@
-// Regression gate for Phase 2/3 of the settings→sidekick.db migration:
+// Regression gate for Phase 2/3 of the settings→parley.db migration:
 // synced (non-device) settings now live in the `user_settings` table
-// (GET /api/parley/prefs), with the YAML (sidekick.config.yaml,
+// (GET /api/parley/prefs), with the YAML (parley.config.yaml,
 // GET /api/parley/config) demoted to a one-time read-only SEED.
 //
 // What this proves, end-to-end through the real fetch paths the PWA
@@ -24,7 +24,7 @@
 import { waitForReady, openSettingsSection, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'settings-persist-to-db';
-export const DESCRIPTION = 'synced settings seed-forward from YAML into sidekick.db, UI edits PUT to /prefs (not POST /config), and the DB wins on reload';
+export const DESCRIPTION = 'synced settings seed-forward from YAML into parley.db, UI edits PUT to /prefs (not POST /config), and the DB wins on reload';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 

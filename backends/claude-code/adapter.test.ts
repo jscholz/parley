@@ -364,8 +364,8 @@ test('display_doc MCP tool pushes a doc_show envelope into the live turn stream'
   try {
     const sdk = new FakeSdk(async function* (ctx) {
       yield init();
-      // Simulate the model calling the injected sidekick.display_doc tool.
-      const server = ctx.options.mcpServers?.sidekick as { instance?: { tools: SdkToolDefinition[] } };
+      // Simulate the model calling the injected parley.display_doc tool.
+      const server = ctx.options.mcpServers?.parley as { instance?: { tools: SdkToolDefinition[] } };
       const displayDoc = server?.instance?.tools.find((t) => t.name === 'display_doc');
       assert.ok(displayDoc, 'display_doc registered on the per-turn MCP server');
       const res = await displayDoc!.handler({ path: docPath }, {});
@@ -423,7 +423,7 @@ test('listConversations maps SDK sessions to drawer rows; unmapped sessions get 
   assert.equal(rows[0].metadata.title, 'started from the CLI');
   assert.equal(rows[0].metadata.first_user_message, 'cli prompt');
   assert.equal(rows[1].id, 'chatA');
-  assert.equal(rows[1].metadata.title, 'map me'); // sidekick-derived title wins
+  assert.equal(rows[1].metadata.title, 'map me'); // parley-derived title wins
   assert.equal(rows[1].metadata.session_ids, 'sess-mapped');
   assert.equal(rows[1].created_at, 1_700_000_000);
   assert.equal(rows[1].object, 'conversation');

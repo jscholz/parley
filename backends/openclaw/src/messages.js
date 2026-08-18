@@ -1,5 +1,5 @@
 /**
- * Messages CRUD — sidekick supplemental store.
+ * Messages CRUD — parley supplemental store.
  *
  * Wraps the `messages` table from src/schema.sql. All helpers take
  * a DatabaseSync handle (opened by src/db.js) as the first arg —

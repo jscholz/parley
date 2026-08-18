@@ -51,14 +51,14 @@ const TARGET_CHAT_ID = process.env.SMOKE_SCROLL_CHAT
 // invoke, but with zero proxy/network-to-proxy overhead.
 const GATEWAY_PORT = Number(process.env.SMOKE_GATEWAY_PORT || 8645);
 const HERMES_TOKEN = process.env.PARLEY_PLATFORM_TOKEN
-  || process.env.SIDEKICK_PLATFORM_TOKEN
+  || process.env.PARLEY_PLATFORM_TOKEN
   || readTokenFromEnv()
   || '';
 
 function readTokenFromEnv() {
   try {
     const env = readFileSync(`${process.env.HOME}/.hermes/.env`, 'utf8');
-    const m = env.match(/^SIDEKICK_PLATFORM_TOKEN=(.+)$/m);
+    const m = env.match(/^PARLEY_PLATFORM_TOKEN=(.+)$/m);
     return m ? m[1].trim() : null;
   } catch { return null; }
 }

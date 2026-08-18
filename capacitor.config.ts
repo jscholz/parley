@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
- * Capacitor configuration for the Sidekick native shell.
+ * Capacitor configuration for the Parley native shell.
  *
  * Loading model (local-asset shell, changed 2026-06-09):
  *   The WebView serves the app's ASSETS locally from the bundled
@@ -43,7 +43,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.reimaginerobotics.sidekick',
-  appName: 'Sidekick',
+  appName: 'Parley',
   webDir: 'mobile/webdir',
   ios: { path: 'mobile/ios' },
   android: { path: 'mobile/android' },

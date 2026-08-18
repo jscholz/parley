@@ -4,7 +4,7 @@
  *
  * When ON, behaves as if `?debug=1&debug-relay=1&dictate-debug=1` were
  * present in the URL: high-frequency log()/diag() emit, dictate.ts
- * dlog phase logs fire, log lines stream to /tmp/sidekick-debug/<sid>.log
+ * dlog phase logs fire, log lines stream to /tmp/parley-debug/<sid>.log
  * via the relay endpoint.
  *
  * Why a single flag (not three): in mobile/PWA usage you typically

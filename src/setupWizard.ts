@@ -98,7 +98,7 @@ function buildOverlay(): HTMLElement {
     if (e.key === 'Escape' && overlay && !overlay.hidden) close();
   });
 
-  const h = el('h2', 'setup-wizard-title', 'Welcome to Sidekick');
+  const h = el('h2', 'setup-wizard-title', 'Welcome to Parley');
   card.appendChild(h);
   card.appendChild(el('p', 'setup-wizard-sub',
     'You’re chatting with a demo echo agent. Connect a real brain — it takes under a minute.'));
@@ -266,7 +266,7 @@ function renderCustom(host: HTMLElement): void {
   field(host, 'Token', token);
   host.appendChild(applyButton('Save', async (_b, out) => {
     await apply({ path: 'custom', platformUrl: url.value.trim(), platformToken: token.value.trim() });
-    out.textContent = 'Saved — restart Sidekick to connect';
+    out.textContent = 'Saved — restart Parley to connect';
     out.classList.add('ok');
     completedThisSession = true;
     if (status) status.needsSetup = false;
@@ -300,7 +300,7 @@ function renderVoiceStep(): void {
     try {
       const r = await fetch('/tts', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Sidekick voice is ready.' }),
+        body: JSON.stringify({ text: 'Parley voice is ready.' }),
       });
       if (r.ok) {
         const blob = await r.blob();

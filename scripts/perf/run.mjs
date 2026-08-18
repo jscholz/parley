@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Sidekick perf measurement runner.
+ * Parley perf measurement runner.
  *
  * Discovers every scripts/perf/*.mjs scenario (except lib.mjs and this
  * file), runs each, collects p50/p95/min/max for the metrics it

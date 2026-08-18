@@ -71,7 +71,7 @@ const REPLY_TEXT = [
   '## Active Agents',
   '',
   '**Active agents:** 1',
-  '1. agent:main:sidekick:dm:abc — running — 2m 30s',
+  '1. agent:main:parley:dm:abc — running — 2m 30s',
   '',
   '**Running background processes:** 0',
   '**Gateway async jobs:** 0',

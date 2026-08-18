@@ -109,7 +109,7 @@ interface CallSession {
  *                    frames into the speech-to-text service. Fires at
  *                    call-start AND after every TTS-end transition.
  *                    PWA chimes "your turn." See
- *                    docs/SIDEKICK_AUDIO_PROTOCOL.md.
+ *                    docs/PARLEY_AUDIO_PROTOCOL.md.
  */
 interface TranscriptEvent {
   type: 'transcript';
@@ -825,7 +825,7 @@ export async function open(
       // would be a half-second early (data channel + STT pipe init
       // happens after peer is "connected") AND would double up at
       // call-start with the bridge's first-frame envelope. See
-      // docs/SIDEKICK_AUDIO_PROTOCOL.md.
+      // docs/PARLEY_AUDIO_PROTOCOL.md.
     } else if (cs === 'disconnected') {
       // Transient connectivity loss (cellular/wifi handoff). For a live
       // call this is the earliest, best moment to start recovering —
@@ -885,7 +885,7 @@ export async function open(
   // POST the offer. Two routing identifiers, mutually exclusive in
   // practice but both fields are forwarded so the bridge can pick:
   //
-  //   conv_name — sidekick's legacy conversation slug (sidekick-<…>),
+  //   conv_name — parley's legacy conversation slug (parley-<…>),
   //               used when the active backend is the /v1/responses
   //               path. Bridge passes it as body.conversation when
   //               dispatching to /api/<backend>/responses.

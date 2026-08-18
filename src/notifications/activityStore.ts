@@ -65,8 +65,8 @@ const store = new ServerBackedStore<ActivityItem>({
   extract: (data) => (Array.isArray(data?.items) ? data.items : []),
   parse: normalizeItem,
   idOf: (item) => item.id,
-  changeEvent: 'sidekick:activity-changed',
-  serverChangeEvent: 'sidekick:server-activity-changed',
+  changeEvent: 'parley:activity-changed',
+  serverChangeEvent: 'parley:server-activity-changed',
   debounceMs: 150,
   persistCap: 200,
   persistSort: (a, b) => b.createdAt - a.createdAt,
@@ -82,8 +82,8 @@ const store = new ServerBackedStore<ActivityItem>({
       setInterval(runApprovalStaleCheck, 60_000);
       // Test seams: exposed on window so the smoke can drive the check
       // deterministically (set a small threshold + fire the check now).
-      (window as any).__sidekickSetApprovalStaleMsForTest = setApprovalStaleMsForTest;
-      (window as any).__sidekickRunApprovalStaleCheckForTest = runApprovalStaleCheck;
+      (window as any).__parleySetApprovalStaleMsForTest = setApprovalStaleMsForTest;
+      (window as any).__parleyRunApprovalStaleCheckForTest = runApprovalStaleCheck;
     }
   },
 });
@@ -265,7 +265,7 @@ export function markRead(id: string): void {
  *  can't action it yet and wants it to resurface as a "New" tray row.
  *
  *  If an activity item already exists for this message (its `id` is the
- *  message's sidekick id for agent_reply rows) we just clear `read`.
+ *  message's parley id for agent_reply rows) we just clear `read`.
  *  Otherwise we synthesize an `agent_reply` row so the message HAS a tray
  *  presence to come back to — e.g. a reply that arrived while the chat was
  *  focused never became a notification, so no row exists yet. */
@@ -359,7 +359,7 @@ export function runApprovalStaleCheck(): void {
 
 /** Test seam: shrink the stale window so smokes finish in seconds, not
  *  30 minutes. Only callable from debug mode. Pairs with the smoke's
- *  `window.__sidekickSetApprovalStaleMsForTest`. */
+ *  `window.__parleySetApprovalStaleMsForTest`. */
 export function setApprovalStaleMsForTest(ms: number): void {
   if (typeof ms !== 'number' || !(ms > 0)) return;
   approvalStaleMs = ms;

@@ -5,9 +5,9 @@
 // from sessions the user abandoned.
 //
 // The stale-check module exposes a small test seam:
-//   - `window.__sidekickSetApprovalStaleMsForTest(N)` — override the
+//   - `window.__parleySetApprovalStaleMsForTest(N)` — override the
 //     30-min threshold to N ms (debug-mode only; throws otherwise).
-//   - `window.__sidekickRunApprovalStaleCheckForTest()` — run the check
+//   - `window.__parleyRunApprovalStaleCheckForTest()` — run the check
 //     synchronously (the production path runs it on a slow interval).
 // This lets the smoke complete in seconds instead of waiting 30 minutes.
 
@@ -48,8 +48,8 @@ export default async function run({ page, log, mock }) {
   // Throws if the test seam isn't wired (debug-mode requirement
   // enforced by the impl).
   await page.evaluate(() => {
-    const fn = window.__sidekickSetApprovalStaleMsForTest;
-    if (typeof fn !== 'function') throw new Error('__sidekickSetApprovalStaleMsForTest not exposed');
+    const fn = window.__parleySetApprovalStaleMsForTest;
+    if (typeof fn !== 'function') throw new Error('__parleySetApprovalStaleMsForTest not exposed');
     fn(300);
   });
 
@@ -60,7 +60,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-stale\n\n' +
+      'printf parley-stale\n\n' +
       'Reason: stale auto-dismiss\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: approvalId,
@@ -79,8 +79,8 @@ export default async function run({ page, log, mock }) {
   // trigger it manually so the smoke is deterministic).
   await page.waitForTimeout(450);
   await page.evaluate(() => {
-    const fn = window.__sidekickRunApprovalStaleCheckForTest;
-    if (typeof fn !== 'function') throw new Error('__sidekickRunApprovalStaleCheckForTest not exposed');
+    const fn = window.__parleyRunApprovalStaleCheckForTest;
+    if (typeof fn !== 'function') throw new Error('__parleyRunApprovalStaleCheckForTest not exposed');
     fn();
   });
 

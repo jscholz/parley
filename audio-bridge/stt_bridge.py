@@ -42,7 +42,7 @@ Dispatch path:
     back over the data channel as assistant transcript envelopes.
 
     Bridge → proxy → agent: the bridge does NOT POST directly to the
-    agent backend.  The sidekick proxy is the sole sidekick→agent
+    agent backend.  The parley proxy is the sole parley→agent
     gateway.  proxy_url is stashed on the PeerSession at offer time.
 """
 
@@ -441,10 +441,10 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
 async def dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[str] = None) -> None:
     """Public dispatch entry point invoked by the PWA-driven dispatch listener.
 
-    POSTs *utterance* to the sidekick proxy. For the chat_id (sidekick-
+    POSTs *utterance* to the parley proxy. For the chat_id (parley-
     platform) route the agent reply arrives on the peer-scoped
     persistent stream subscriber started at peer-attach
-    (``start_sidekick_stream``); this function is fire-and-forget POST.
+    (``start_parley_stream``); this function is fire-and-forget POST.
     For the legacy /v1/responses route there is no persistent stream,
     so we still consume the per-POST SSE inline.
 
@@ -459,7 +459,7 @@ async def dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[s
     )
 
 
-# ── Persistent sidekick-stream subscriber ───────────────────────────────
+# ── Persistent parley-stream subscriber ───────────────────────────────
 #
 # Long-lived per-peer SSE subscriber to /api/parley/stream?chat_id=X.
 # Replaces the legacy per-utterance subscriber that broke out of the
@@ -483,8 +483,8 @@ async def dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[s
 # subscriber keeps its replay cursor for cross-device sync; only the
 # bridge needs the live-only opt-out.
 
-class _SidekickStreamReader:
-    """Stateful SSE-frame consumer for the sidekick-platform route.
+class _ParleyStreamReader:
+    """Stateful SSE-frame consumer for the parley-platform route.
 
     Holds per-message-id cumulative-text state so reply_delta diffs
     work correctly when multiple bubbles interleave. Idempotent on
@@ -608,7 +608,7 @@ class _SidekickStreamReader:
         # we're only interested in audio synth.
 
 
-def start_sidekick_stream(peer) -> None:
+def start_parley_stream(peer) -> None:
     """Start the peer-scoped persistent stream subscriber.
 
     Caller (signaling.handle_offer) invokes this AFTER tts_bridge.attach
@@ -623,19 +623,19 @@ def start_sidekick_stream(peer) -> None:
     text_queue = peer.extra.get("tts_text_queue")
     if text_queue is None:
         logger.warning(
-            "[stt-bridge] peer %s start_sidekick_stream: no tts_text_queue (talk mode but TTS attach skipped?)",
+            "[stt-bridge] peer %s start_parley_stream: no tts_text_queue (talk mode but TTS attach skipped?)",
             peer.peer_id,
         )
         return
-    if peer.sidekick_stream_task is not None and not peer.sidekick_stream_task.done():
+    if peer.parley_stream_task is not None and not peer.parley_stream_task.done():
         return  # idempotent
-    peer.sidekick_stream_task = asyncio.create_task(
-        _run_sidekick_stream(peer, chat_id, text_queue),
-        name=f"webrtc-sidekick-stream-{peer.peer_id[:8]}",
+    peer.parley_stream_task = asyncio.create_task(
+        _run_parley_stream(peer, chat_id, text_queue),
+        name=f"webrtc-parley-stream-{peer.peer_id[:8]}",
     )
 
 
-async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
+async def _run_parley_stream(peer, chat_id: str, text_queue) -> None:
     """Stay subscribed to /api/parley/stream for the peer's lifetime,
     feeding every reply_delta delta into ``text_queue``. Reconnects with
     bounded backoff if the connection drops; exits cleanly on
@@ -647,15 +647,15 @@ async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
     try:
         import aiohttp  # type: ignore
     except ImportError:  # pragma: no cover
-        logger.error("[stt-bridge] aiohttp missing for sidekick stream")
+        logger.error("[stt-bridge] aiohttp missing for parley stream")
         return
 
-    reader = _SidekickStreamReader(peer, text_queue)
+    reader = _ParleyStreamReader(peer, text_queue)
     backoff_s = 0.5
     BACKOFF_MAX = 8.0
 
     logger.info(
-        "[stt-bridge] peer %s sidekick stream subscriber starting (chat_id=%s)",
+        "[stt-bridge] peer %s parley stream subscriber starting (chat_id=%s)",
         peer.peer_id, chat_id[:12],
     )
     try:
@@ -669,7 +669,7 @@ async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
                         if resp.status != 200:
                             err = (await resp.text())[:200]
                             logger.warning(
-                                "[stt-bridge] peer %s sidekick stream open %d: %s (retry in %.1fs)",
+                                "[stt-bridge] peer %s parley stream open %d: %s (retry in %.1fs)",
                                 peer.peer_id, resp.status, err, backoff_s,
                             )
                             await asyncio.sleep(backoff_s)
@@ -682,7 +682,7 @@ async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
                         # stream. Reconnect with a small delay.
                         if not peer.closed:
                             logger.info(
-                                "[stt-bridge] peer %s sidekick stream EOF, reconnecting",
+                                "[stt-bridge] peer %s parley stream EOF, reconnecting",
                                 peer.peer_id,
                             )
                             await asyncio.sleep(0.5)
@@ -690,7 +690,7 @@ async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
                     raise
                 except Exception as e:
                     logger.warning(
-                        "[stt-bridge] peer %s sidekick stream error: %s (retry in %.1fs)",
+                        "[stt-bridge] peer %s parley stream error: %s (retry in %.1fs)",
                         peer.peer_id, e, backoff_s,
                     )
                     await asyncio.sleep(backoff_s)
@@ -699,7 +699,7 @@ async def _run_sidekick_stream(peer, chat_id: str, text_queue) -> None:
         pass
     finally:
         logger.info(
-            "[stt-bridge] peer %s sidekick stream subscriber exiting",
+            "[stt-bridge] peer %s parley stream subscriber exiting",
             peer.peer_id,
         )
         # Final flush so any tail text in the TTS provider gets
@@ -719,7 +719,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
 
     - **chat_id present** (hermes-gateway backend): POST
       <proxy_url>/api/parley/messages with {chat_id, text}. The proxy
-      forwards via WebSocket to the hermes sidekick platform adapter;
+      forwards via WebSocket to the hermes parley platform adapter;
       the SSE response carries `event: <envelope_type>` frames with the
       adapter envelope (reply_delta / reply_final / typing / etc) as the
       data payload.
@@ -746,7 +746,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
         body: Dict[str, Any] = {"chat_id": chat_id, "text": utterance}
         if user_message_id:
             body["user_message_id"] = user_message_id
-        route = "sidekick-platform"
+        route = "parley-platform"
     else:
         backend = peer.extra.get("backend") or "hermes"
         url = f"{proxy_url}/api/{backend}/responses"
@@ -783,7 +783,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
     # Two event vocabularies depending on `route`:
     #   responses        — response.output_text.delta (per-token delta) /
     #                      response.completed (terminal)
-    #   sidekick-platform — reply_delta (cumulative text) / reply_final
+    #   parley-platform — reply_delta (cumulative text) / reply_final
     #                       (terminal). See backends/hermes/plugin/sidekick_platform.py.
     #
     # For the cumulative-text path we diff against the previously-seen
@@ -894,11 +894,11 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
 
     async with aiohttp.ClientSession() as sess:
         try:
-            if route == "sidekick-platform":
+            if route == "parley-platform":
                 # Platform-adapter path: fire-and-forget POST. Reply
                 # envelopes arrive on the peer-scoped persistent
-                # subscriber started at peer-attach (start_sidekick_stream).
-                # See _run_sidekick_stream for the consumer.
+                # subscriber started at peer-attach (start_parley_stream).
+                # See _run_parley_stream for the consumer.
                 async with sess.post(url, json=body, headers=headers) as post_resp:
                     if post_resp.status not in (200, 202):
                         err = (await post_resp.text())[:200]
@@ -908,7 +908,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
                         )
                         return
                 logger.info(
-                    "[stt-bridge] peer %s dispatch posted (route=sidekick-platform)",
+                    "[stt-bridge] peer %s dispatch posted (route=parley-platform)",
                     peer.peer_id,
                 )
             else:
@@ -928,7 +928,7 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
                     async for raw in resp.content:
                         if await _process_sse_frame(raw):
                             break
-                # Legacy-route end-of-reply housekeeping. Sidekick-
+                # Legacy-route end-of-reply housekeeping. Parley-
                 # platform route doesn't run this finally because the
                 # persistent stream owns the lifecycle.
                 if text_queue is not None:
@@ -952,4 +952,4 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
             logger.warning("[stt-bridge] peer %s agent dispatch error: %s", peer.peer_id, e)
 
 
-__all__ = ["attach", "dispatch_to_agent", "start_sidekick_stream"]
+__all__ = ["attach", "dispatch_to_agent", "start_parley_stream"]
