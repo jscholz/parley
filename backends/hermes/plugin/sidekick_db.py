@@ -93,6 +93,7 @@ phase shipped is recorded in the ``meta`` table under
 ``sidekick_db_phase``.
 """
 
+import logging
 import os
 from .parley_env import env_get
 import sqlite3
@@ -394,12 +395,43 @@ class SidekickDB:
             self._conn.close()
 
 
+def migrate_legacy_db_file(new_path: Path, legacy_path: Path) -> bool:
+    """One-time file rename ``sidekick.db`` → ``parley.db`` (2026-08).
+
+    Same-directory ``os.rename`` is atomic. Sidecar ``-wal``/``-shm``
+    files (left by a crash mid-WAL) move along with the main file so a
+    checkpoint replay isn't orphaned. Strictly no-op when the new file
+    already exists — once ``parley.db`` is live, a stale legacy file
+    must NEVER be re-adopted as fresh truth — or when there is nothing
+    to migrate. Idempotent; returns True when a rename happened.
+
+    Removal condition: delete once no deployment still has a
+    ``sidekick.db`` on disk.
+    """
+    if new_path.exists() or not legacy_path.exists():
+        return False
+    for suffix in ("", "-wal", "-shm"):
+        src = Path(str(legacy_path) + suffix)
+        dst = Path(str(new_path) + suffix)
+        if src.exists() and not dst.exists():
+            os.rename(src, dst)
+    logging.getLogger("hermes.parley.db").info(
+        "[parley] migrated legacy DB file %s -> %s", legacy_path, new_path
+    )
+    return True
+
+
 def open_sidekick_db(state_dir: str | None = None) -> SidekickDB:
-    """Open (or create) the sidekick supplemental DB.
+    """Open (or create) the parley supplemental DB (parley.db,
+    formerly sidekick.db — renamed in place on first open).
 
     `state_dir` defaults to ``$HERMES_STATE_DIR`` or ``~/.hermes``.
     """
     if not state_dir:
         state_dir = os.environ.get("HERMES_STATE_DIR") or os.path.expanduser("~/.hermes")
-    path = Path(state_dir) / "sidekick.db"
+    path = Path(state_dir) / "parley.db"
+    # Guard BEFORE the legacy-file rename so a test pointing at a live
+    # state dir can't move the production DB.
+    _assert_not_live_db_under_test_guard(path)
+    migrate_legacy_db_file(path, Path(state_dir) / "sidekick.db")
     return SidekickDB(path)

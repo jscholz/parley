@@ -41,7 +41,7 @@ import { GatewayClient } from './src/gateway-client.js';
 import { AgentEventBus } from './src/event-bus.js';
 import { makeResponsesHandler } from './src/responses-handler.js';
 import { makeEventsHandler } from './src/events-handler.js';
-import { openDb } from './src/db.js';
+import { openDb, migrateLegacyDbFile } from './src/db.js';
 import { upsertMessage, listMessagesForChat } from './src/messages.js';
 import { PushDispatcher } from './src/push-dispatch.js';
 import { registerPushRoutes } from './src/push-routes.js';
@@ -76,7 +76,10 @@ export default definePluginEntry({
     // cache against the history replay (without it, every reply
     // duplicates on reload). Schema is created lazily on first open.
     const stateDir = resolveStateDir({ profile: PROFILE });
-    const dbPath = join(stateDir, 'sidekick.db');
+    // parley.db (formerly sidekick.db) — legacy file renamed in place
+    // on first open (see migrateLegacyDbFile).
+    const dbPath = join(stateDir, 'parley.db');
+    migrateLegacyDbFile(dbPath, join(stateDir, 'sidekick.db'));
     const db = openDb({ path: dbPath });
 
     // ── Gateway WS client + event bus (shared across handlers) ─────

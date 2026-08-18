@@ -21,9 +21,35 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
 
 const SCHEMA_VERSION = '1';
+
+/**
+ * One-time file rename `sidekick.db` → `parley.db` (2026-08 rename).
+ *
+ * Same-directory renameSync is atomic; WAL/SHM sidecars move along so
+ * a crash-interrupted WAL isn't orphaned. Strictly no-op when the new
+ * file already exists — once parley.db is live, a stale legacy file
+ * must NEVER be re-adopted as fresh truth — or when there is nothing
+ * to migrate. Idempotent; returns true when a rename happened.
+ *
+ * Removal condition: delete once no install still has a sidekick.db.
+ *
+ * @param {string} newPath
+ * @param {string} legacyPath
+ * @returns {boolean}
+ */
+export function migrateLegacyDbFile(newPath, legacyPath) {
+  if (existsSync(newPath) || !existsSync(legacyPath)) return false;
+  for (const suffix of ['', '-wal', '-shm']) {
+    const src = legacyPath + suffix;
+    const dst = newPath + suffix;
+    if (existsSync(src) && !existsSync(dst)) renameSync(src, dst);
+  }
+  console.log(`[parley] migrated legacy DB file ${legacyPath} -> ${newPath}`);
+  return true;
+}
 
 /**
  * Open (or create) sidekick.db at `path`. Runs schema migrations
