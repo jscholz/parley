@@ -41,13 +41,13 @@ import secrets
 import time
 from typing import Any, Dict, Optional
 
-# Guarded aiohttp import — see sidekick_route_conversations for why.
+# Guarded aiohttp import — see parley_route_conversations for why.
 try:
     from aiohttp import web  # type: ignore[assignment]
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
 
 
 logger = logging.getLogger(__name__)
@@ -127,8 +127,8 @@ async def _handle_blocking(
         )
     finally:
         adapter._turn_queues.pop(chat_id, None)
-        # Linking is now done by sidekick.db's content-fingerprint
-        # match (Phase 3, see sidekick_state.reconcile_from_state_db).
+        # Linking is now done by parley.db's content-fingerprint
+        # match (Phase 3, see parley_state.reconcile_from_state_db).
         # The legacy `_write_msg_links_after_turn` heuristic is dead
         # code as of 2026-05-19 — kept on the class for one more
         # release so emergency rollback can re-enable it via a flag,
@@ -268,7 +268,7 @@ async def _handle_streaming(
         # Client disconnected mid-stream. Cleanup in finally.
         pass
     except Exception as exc:
-        logger.warning("[sidekick] /v1/responses error for %s: %s", chat_id, exc)
+        logger.warning("[parley] /v1/responses error for %s: %s", chat_id, exc)
         with contextlib.suppress(Exception):
             await write_sse("response.error", {
                 "type": "response.error",
@@ -299,7 +299,7 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     conversation = body.get("conversation")
     input_field = body.get("input")
     stream = bool(body.get("stream", True))
-    # Sidekick extension: optional `attachments` array — each entry
+    # Parley extension: optional `attachments` array — each entry
     # is `{type, mimeType, fileName, content}` where `content` is a
     # `data:<mime>;base64,<payload>` URL. NOT part of the OpenAI
     # Responses API today; tolerated as an additive field so a
@@ -307,7 +307,7 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     # interoperates.
     raw_attachments = body.get("attachments")
     attachments = raw_attachments if isinstance(raw_attachments, list) else None
-    # Sidekick extension: `voice: true` flags the input as dictated.
+    # Parley extension: `voice: true` flags the input as dictated.
     # We prepend `[voice]` so the agent can recognise it (AGENTS.md
     # tells the agent to expect occasional STT errors in such turns
     # and to interpret them charitably). Lives in metadata
@@ -340,8 +340,8 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
 
     # Decode the gateway-prefixed conversation id. The drawer hands
     # back ids of the form `${source}:${chat_id}` (see
-    # _format_gateway_id rationale). Sidekick's /v1/responses path
-    # only dispatches for sidekick-source chats — the composer is
+    # _format_gateway_id rationale). Parley's /v1/responses path
+    # only dispatches for parley-source chats — the composer is
     # read-only for any other source upstream — so reject prefixes
     # that aren't ours rather than silently routing to a wrong-chat
     # adapter. Bare ids (no prefix) are accepted for backward compat
@@ -351,14 +351,14 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
         return web.json_response(
             {"error": {"type": "invalid_request_error",
                        "message": (f"`conversation` source `{parsed_source}` "
-                                   "is read-only via sidekick plugin")}},
+                                   "is read-only via parley plugin")}},
             status=400,
         )
     response_id = f"resp_{secrets.token_hex(12)}"
     message_id = f"msg_{secrets.token_hex(10)}"
     created_at = int(time.time())
 
-    # Sidekick extension: PWA may pre-mint the user-message id and
+    # Parley extension: PWA may pre-mint the user-message id and
     # ship it as `metadata.user_message_id` (OAI Responses API
     # `metadata: Dict[str, str]` — a documented extension point
     # vanilla servers preserve unchanged; we read ours out). The
@@ -389,7 +389,7 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     # Out-of-turn channel: this fires before _dispatch_message, so
     # there's no in-turn queue to bypass — _safe_send_envelope will
     # route it through _publish_out_of_turn which prefixes the
-    # chat_id to `sidekick:<chat_id>` on the wire.
+    # chat_id to `parley:<chat_id>` on the wire.
     await adapter._safe_send_envelope({
         "type": "user_message",
         "chat_id": chat_id,
@@ -410,14 +410,14 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     # race-free — and (b) before the turn buffer below replaces the
     # previous TurnEntry, because the barrier inside (close any stale
     # open window as aborted) needs the PREVIOUS turn's call-id set.
-    # No-op when SIDEKICK_TURN_LINKER=0. Writes shadow tables only.
-    from . import sidekick_turn_linker as _linker  # noqa: WPS433
+    # No-op when PARLEY_TURN_LINKER=0. Writes shadow tables only.
+    from . import parley_turn_linker as _linker  # noqa: WPS433
     try:
         await _linker.open_turn_watermark(
             adapter, chat_id, user_message_id, user_text=text,
         )
     except Exception as exc:
-        logger.warning("[sidekick] turn-linker open failed: %s", exc)
+        logger.warning("[parley] turn-linker open failed: %s", exc)
 
     # Open the in-flight turn buffer. Source of truth for
     # /v1/conversations/{id}/items between POST receipt and

@@ -1,4 +1,4 @@
-"""HTTP route handlers for the hermes-side sidekick plugin's
+"""HTTP route handlers for the hermes-side parley plugin's
 unread + pins + push surface.
 
 Mirrors the openclaw plugin's ``src/push-routes.js`` +
@@ -9,7 +9,7 @@ out-of-turn channel so connected PWAs refresh.
 Wiring contract: this module exports a `register_routes(app, ctx)`
 function. `ctx` is the calling plugin's reference container with
 fields:
-  - db                : SidekickDB
+  - db                : ParleyDB
   - dispatcher        : PushDispatcher (engagement.mark_visible used)
   - state_db_path     : Path to hermes state.db (for unread compute)
   - emit_envelope     : callable(env: Dict) → publishes to /v1/events
@@ -25,16 +25,16 @@ from typing import Any, Dict
 
 from aiohttp import web
 
-from . import sidekick_state as state
-from .sidekick_unread import compute_unread, invalidate_unread_cache
-from .sidekick_state import vapid_public_key_b64url, ensure_vapid_keys
-from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from . import parley_state as state
+from .parley_unread import compute_unread, invalidate_unread_cache
+from .parley_state import vapid_public_key_b64url, ensure_vapid_keys
+from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
 
 
 def _strip_source_prefix(chat_id: Any) -> str:
     """Normalize a chat_id to the form the plugin's envelope handlers
     use internally (no `<source>:` prefix). PWA-facing routes accept
-    either shape — the sidekick proxy passes the FULL `sidekick:<uuid>`
+    either shape — the parley proxy passes the FULL `parley:<uuid>`
     form, but the plugin's _safe_send_envelope downstream uses the
     stripped UUID. Without this normalization,
     EngagementState.mark_visible records under the prefixed key while
@@ -146,8 +146,8 @@ async def handle_push_health(ctx, request: web.Request) -> web.Response:
     diagnostics surface: the divergence monitor's aggregate — degraded
     chats, sweep coverage, migrated-chat count — so transcript drift is
     visible without journal access, same pattern as push_health."""
-    from .sidekick_dispatcher import build_push_health
-    from .sidekick_transcript_monitor import build_transcript_health
+    from .parley_dispatcher import build_push_health
+    from .parley_transcript_monitor import build_transcript_health
 
     return _json({
         "push_health": build_push_health(ctx.db, ctx.dispatcher),
@@ -161,7 +161,7 @@ async def handle_push_health(ctx, request: web.Request) -> web.Response:
 async def handle_transcript_health(ctx, request: web.Request) -> web.Response:
     """GET /v1/transcript/health — the divergence monitor's aggregate
     on its own path (also folded into /v1/push/health above)."""
-    from .sidekick_transcript_monitor import build_transcript_health
+    from .parley_transcript_monitor import build_transcript_health
 
     return _json({"transcript_health": build_transcript_health(ctx.db)})
 
@@ -171,15 +171,15 @@ async def handle_transcript_repair(ctx, request: web.Request) -> web.Response:
     point (transcript v3 Phase 4): force_full content reconcile +
     re-audit + re-mint for ONE chat. Explicit and operator-triggered
     only; O(history), so it runs on the bounded worker pool."""
-    from .sidekick_chat_migration import repair_chat_sync
-    from .sidekick_perf_trace import run_in_sidekick_worker
+    from .parley_chat_migration import repair_chat_sync
+    from .parley_perf_trace import run_in_parley_worker
 
     body = await _read_json(request)
     chat_id = _strip_source_prefix(body.get("chat_id") or body.get("chatId"))
     if not chat_id:
         return _json({"error": "invalid_request", "message": "chat_id required"},
                      status=400)
-    result = await run_in_sidekick_worker(
+    result = await run_in_parley_worker(
         repair_chat_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
     )
     return _json({
@@ -196,15 +196,15 @@ async def handle_transcript_adopt(ctx, request: web.Request) -> web.Response:
     without ``confirm: true`` this is a DRY RUN returning the
     would-adopt candidate list; unmarked chats are refused (409, the
     legacy reconcile path owns them)."""
-    from .sidekick_perf_trace import run_in_sidekick_worker
-    from .sidekick_transcript_monitor import adopt_orphans_sync
+    from .parley_perf_trace import run_in_parley_worker
+    from .parley_transcript_monitor import adopt_orphans_sync
 
     body = await _read_json(request)
     chat_id = _strip_source_prefix(body.get("chat_id") or body.get("chatId"))
     if not chat_id:
         return _json({"error": "invalid_request", "message": "chat_id required"},
                      status=400)
-    result = await run_in_sidekick_worker(
+    result = await run_in_parley_worker(
         adopt_orphans_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
         confirm=body.get("confirm") is True,
     )
@@ -274,7 +274,7 @@ async def handle_visibility(ctx, request: web.Request) -> web.Response:
 
 async def handle_test(ctx, request: web.Request) -> web.Response:
     body = await _read_json(request)
-    chat_id = body.get("chat_id") or body.get("chatId") or "sidekick-test"
+    chat_id = body.get("chat_id") or body.get("chatId") or "parley-test"
     kind = body.get("kind") if isinstance(body.get("kind"), str) else ""
     env_type = body.get("type") if isinstance(body.get("type"), str) else ""
     if not env_type:
@@ -319,10 +319,10 @@ async def handle_unread(ctx, request: web.Request) -> web.Response:
     # to run synchronously on the asyncio loop thread, which py-spy caught
     # 2026-06-23 as the dominant cause of the gateway's 8s loop-lag during
     # PWA bursts (the PWA polls /unread on every drawer-list refresh). Push
-    # it to the sidekick worker pool so the loop stays responsive and the
-    # SIDEKICK_WORKER_CONCURRENCY cap keeps the GIL pressure bounded.
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433
-    data = await _perf.run_in_sidekick_worker(
+    # it to the parley worker pool so the loop stays responsive and the
+    # PARLEY_WORKER_CONCURRENCY cap keeps the GIL pressure bounded.
+    from . import parley_perf_trace as _perf  # noqa: WPS433
+    data = await _perf.run_in_parley_worker(
         compute_unread,
         db=ctx.db, state_db_path=ctx.state_db_path, source="sidekick",
     )
@@ -340,7 +340,7 @@ async def handle_unread_seen(ctx, request: web.Request) -> web.Response:
     # atomically with the chat unread, instead of relying on a separate
     # client POST /v1/activity/seen landing (field 2026-07-20: 8 unread
     # activity items whose created_at <= their chat's last_read_at).
-    # Activity rows store the prefixed `sidekick:<id>` chat form while
+    # Activity rows store the prefixed `parley:<id>` chat form while
     # this route accepts either shape — mark both. Unresolved approvals
     # are blocking workflow events and are never auto-read here.
     parsed_source, stripped = _parse_gateway_id(chat_id)

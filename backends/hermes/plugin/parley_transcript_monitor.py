@@ -2,7 +2,7 @@
 
 Design-doc core move 5: **monitor, never heal-by-insert.** With the
 content reconcile retired from the serving chain (Phase 4,
-``SIDEKICK_RECONCILE_RETIRED``), nothing silently repairs drift for
+``PARLEY_RECONCILE_RETIRED``), nothing silently repairs drift for
 migrated chats anymore — BY DESIGN (healing-by-inference is how v1 and
 v2 both rotted). This module surfaces the drift instead:
 
@@ -42,15 +42,15 @@ v2 both rotted). This module surfaces the drift instead:
     "plugin down while core writes" (design-doc edge case): imports the
     unlinked live set into msg_links as ``legacy:<id>`` twins via THE
     shared legacy-import representation
-    (sidekick_state.insert_legacy_twin — reconcile Pass 2's own shape).
+    (parley_state.insert_legacy_twin — reconcile Pass 2's own shape).
     Assisted, never automatic: the default call is a DRY RUN returning
     the would-adopt list; ``confirm=True`` performs it. Refuses
     unmarked chats (the legacy reconcile path owns those). For drift
     with a plausible ENVELOPE twin (content-linkable damage), the
-    offline repair (sidekick_chat_migration.repair_chat_sync) is the
+    offline repair (parley_chat_migration.repair_chat_sync) is the
     right tool — adopting there would mint a duplicate body.
 
-Cadence: no timers. ``sidekick_route_items._spawn_background_reconcile``
+Cadence: no timers. ``parley_route_items._spawn_background_reconcile``
 runs the sweep in exactly the chain slot the retired reconcile used
 (items-poll triggered, per-chat throttled, worker-thread only). A
 stats fast-path (chain MAX(id)+COUNT plus the chat's linked-row count,
@@ -73,13 +73,13 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from .sidekick_ids import SIDEKICK_SOURCE
-from .sidekick_state import (
+from .parley_ids import SIDEKICK_SOURCE
+from .parley_state import (
     _classify_replay_duplicate_state_ids,
     _is_compaction_seed,
     insert_legacy_twin,
 )
-from .sidekick_turn_linker import _CHAIN_CTE, _connect_state_ro, _row_get
+from .parley_turn_linker import _CHAIN_CTE, _connect_state_ro, _row_get
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,7 @@ def sweep_chat_sync(
     no alarm). Alert-only: NOTHING is written to msg_links here."""
     if db is None or state_db_path is None:
         return None
-    from . import sidekick_chat_migration as _migration  # noqa: WPS433
+    from . import parley_chat_migration as _migration  # noqa: WPS433
     if _migration.get_migration(db, chat_id) is None:
         return None
 
@@ -282,7 +282,7 @@ def sweep_chat_sync(
     # stderr; logger.info dies at the gateway's WARN-and-up config).
     # Full sweeps only — the fast-path above returns before here.
     print(
-        f"[perf-trace INFO] [sidekick] transcript-monitor chat={chat_id} "
+        f"[perf-trace INFO] [parley] transcript-monitor chat={chat_id} "
         f"status={snap['status']} live={snap['state_live']} "
         f"represented={snap['represented']} "
         f"unlinked_live={len(snap['unlinked_live'])} "
@@ -296,7 +296,7 @@ def sweep_chat_sync(
             _warned[chat_id] = fp
             first = (snap["unlinked_live"] or snap["claimed_missing"])[0]
             logger.warning(
-                "[sidekick] transcript-diverge chat=%s unlinked_live=%d "
+                "[parley] transcript-diverge chat=%s unlinked_live=%d "
                 "claimed_missing=%d first_row=%s — these messages are "
                 "invisible/liveness-blind on the v3 read; repair via "
                 "orphan-adopt (POST /v1/transcript/adopt-orphans) or "
@@ -316,7 +316,7 @@ def build_transcript_health(db=None) -> Dict[str, Any]:
     proxy's diagnostics response). Aggregates the in-process sweep
     registry; ``migrated_chats`` comes from the durable marker table
     when a db handle is supplied."""
-    from .sidekick_turn_linker import reconcile_retired  # noqa: WPS433
+    from .parley_turn_linker import reconcile_retired  # noqa: WPS433
 
     degraded = [
         {
@@ -365,7 +365,7 @@ def adopt_orphans_sync(
     leave the candidate set). Worker thread only."""
     if db is None or state_db_path is None:
         return {"ok": False, "error": "unconfigured"}
-    from . import sidekick_chat_migration as _migration  # noqa: WPS433
+    from . import parley_chat_migration as _migration  # noqa: WPS433
     if _migration.get_migration(db, chat_id) is None:
         # Unmarked chats belong to the legacy reconcile path — adopting
         # here would race its own import.
@@ -387,7 +387,7 @@ def adopt_orphans_sync(
     if not confirm:
         # Show, don't touch — the operator reviews this list first.
         print(
-            f"[perf-trace INFO] [sidekick] orphan-adopt DRY-RUN "
+            f"[perf-trace INFO] [parley] orphan-adopt DRY-RUN "
             f"chat={chat_id} candidates={len(candidates)}",
             flush=True, file=sys.stderr,
         )
@@ -406,7 +406,7 @@ def adopt_orphans_sync(
     # channel it answers), plus refresh the health registry so the
     # diagnostics flip back without waiting for the next poll.
     logger.warning(
-        "[sidekick] orphan-adopt chat=%s adopted=%d ids=%s",
+        "[parley] orphan-adopt chat=%s adopted=%d ids=%s",
         chat_id, len(adopted_ids), ",".join(adopted_ids[:20]),
     )
     sweep_chat_sync(db, state_db_path, chat_id, source, now=now)

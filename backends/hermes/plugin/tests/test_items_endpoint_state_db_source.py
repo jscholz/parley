@@ -1,19 +1,19 @@
 """Items endpoint read path: state.db is the canonical body store,
-sidekick.db.msg_links supplies sidekick_id / kind annotations.
+parley.db.msg_links supplies sidekick_id / kind annotations.
 
 Exercises ``list_messages_for_chat_with_state_db_source`` — the
-default read path (``SIDEKICK_ITEMS_READ_FROM_STATE_DB`` defaults to
-on). The fallback reader ``list_messages_for_chat`` (sidekick.db.
+default read path (``PARLEY_ITEMS_READ_FROM_STATE_DB`` defaults to
+on). The fallback reader ``list_messages_for_chat`` (parley.db.
 msg_links as the body store, used when the env flag is off) is
-covered in test_items_endpoint_sidekick_db.py.
+covered in test_items_endpoint_parley_db.py.
 
 Why state.db is canonical for bodies: the older dual-body model
-(envelope write-through to sidekick.db PLUS state.db backfill via
+(envelope write-through to parley.db PLUS state.db backfill via
 reconcile) could leave the same logical message stored twice when
 reconcile's content-match failed — surfaced as duplicate bubbles in
 the PWA as duplicate bubbles with mismatched timestamps. Reading
 bodies from state.db only
-eliminates the dupe class structurally; sidekick.db's role narrows to
+eliminates the dupe class structurally; parley.db's role narrows to
 linkage.
 """
 
@@ -25,8 +25,8 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
@@ -34,7 +34,7 @@ CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -120,7 +120,7 @@ def test_reads_state_db_messages_in_chronological_order(db, state_db):
 
 
 def test_surfaces_sidekick_id_when_link_exists(db, state_db):
-    """sidekick.db.msg_links provides the sidekick_id annotation via
+    """parley.db.msg_links provides the sidekick_id annotation via
     its ``agent_row_id`` linkage to state.db.messages.id."""
     _add_session(state_db, "s1")
     state_msg_id = _add_msg(state_db, "s1", "assistant", "linked reply", ts=2000.0)
@@ -138,7 +138,7 @@ def test_surfaces_sidekick_id_when_link_exists(db, state_db):
 
 
 def test_handles_legacy_rows_with_no_link(db, state_db):
-    """state.db rows without a sidekick.db.msg_links twin still surface
+    """state.db rows without a parley.db.msg_links twin still surface
     — they just don't carry a sidekick_id. PWA falls back to integer-id
     keying for these (cross-channel / pre-write-through legacy rows)."""
     _add_session(state_db, "s1")
@@ -156,7 +156,7 @@ def test_handles_legacy_rows_with_no_link(db, state_db):
 
 def test_no_duplicate_rows_even_when_msg_links_has_extra_entries(db, state_db):
     """Reading bodies from state.db is structurally immune to the
-    2026-05-19 dupe bug. Even if sidekick.db.msg_links has a row that
+    2026-05-19 dupe bug. Even if parley.db.msg_links has a row that
     doesn't correspond to a real state.db message (e.g. a stale row
     from a turn that got /retry'd out), the read path only returns one
     row per state.db.messages entry."""
@@ -168,7 +168,7 @@ def test_no_duplicate_rows_even_when_msg_links_has_extra_entries(db, state_db):
         content="Hey — received.", agent_row_id=str(state_msg_id),
     )
     # A stale or duplicate link with same content but no corresponding
-    # state.db row (mimics what would have made the sidekick.db-body
+    # state.db row (mimics what would have made the parley.db-body
     # reader render the message twice).
     state.upsert_msg_link(
         db, id="legacy:999", chat_id=CHAT_ID, role="assistant",
@@ -401,7 +401,7 @@ def test_envelope_only_chat_still_surfaces_msg_links_rows(db, state_db):
     actually has. Otherwise the items endpoint is a strict subset of
     reality and breaks any consumer that addresses messages within the
     envelope-to-flush window."""
-    # Envelope wrote three rows to sidekick.db (envelope write-through).
+    # Envelope wrote three rows to parley.db (envelope write-through).
     # State.db has nothing — agent hasn't post-turn-flushed yet.
     state.record_envelope(db, {
         "type": "user_message", "chat_id": CHAT_ID,

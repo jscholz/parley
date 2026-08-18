@@ -1,9 +1,9 @@
-"""Perf-investigation instrumentation for the sidekick plugin.
+"""Perf-investigation instrumentation for the parley plugin.
 
-All helpers in this module are gated behind ``SIDEKICK_PERF_TRACE`` so
+All helpers in this module are gated behind ``PARLEY_PERF_TRACE`` so
 the production cost is zero by default; flip the env to ``1`` to engage
 the watchers. Logs go to the standard plugin logger so they show up in
-journalctl --user-unit hermes-gateway under the `sidekick.perf_trace`
+journalctl --user-unit hermes-gateway under the `parley.perf_trace`
 namespace.
 
 Created 2026-06-23 to chase the "gateway gets slower the longer it
@@ -23,11 +23,11 @@ instrumentation answers three questions:
 
 3. **Is ``reconcile_from_state_db`` cheap on no-drift chats?** The
    ``trace_reconcile_run`` context manager logs per-call wall time, sql
-   op counts, and time spent waiting for the sidekick.db lock vs holding
+   op counts, and time spent waiting for the parley.db lock vs holding
    it. A no-op reconcile should be ms-scale; a heavy one is the smoking
    gun.
 
-Off-switch: unset ``SIDEKICK_PERF_TRACE`` or set it to anything truthy-
+Off-switch: unset ``PARLEY_PERF_TRACE`` or set it to anything truthy-
 negative. The module functions still exist but become near-no-ops.
 """
 
@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 
-# Sidekick's existing items-trace writes to stderr via plain `print` so
+# Parley's existing items-trace writes to stderr via plain `print` so
 # the lines land in journalctl regardless of the gateway's stdlib
 # logging level config. Match that pattern here for consistency and to
 # avoid INFO logs being dropped by the gateway's default WARN-and-up
@@ -192,7 +192,7 @@ _reconcile_ctx: dict = {}
 @contextmanager
 def trace_reconcile_run(chat_id: str, source: str):
     """Wrap a reconcile_from_state_db invocation. Logs total wall time,
-    number of sidekick.db SELECT/UPDATE/INSERT/DELETE calls observed,
+    number of parley.db SELECT/UPDATE/INSERT/DELETE calls observed,
     and (best-effort) the wall time spent inside those calls.
 
     Use as:
@@ -201,7 +201,7 @@ def trace_reconcile_run(chat_id: str, source: str):
             t.add_op('SELECT', dt_ms)
             ...
 
-    When SIDEKICK_PERF_TRACE is off, this is a no-op context that yields
+    When PARLEY_PERF_TRACE is off, this is a no-op context that yields
     a dummy recorder.
     """
     class _Recorder:
@@ -235,19 +235,19 @@ def trace_reconcile_run(chat_id: str, source: str):
         )
 
 
-# ── 4. sidekick.db growth snapshot ───────────────────────────────────
+# ── 4. parley.db growth snapshot ───────────────────────────────────
 
-def log_db_stats(sidekick_db, label: str = "snapshot") -> None:
-    """One-shot snapshot of sidekick.db size + key table row counts.
+def log_db_stats(parley_db, label: str = "snapshot") -> None:
+    """One-shot snapshot of parley.db size + key table row counts.
     Cheap (one COUNT per table, ms-scale) but still gated so it doesn't
     fire on every gateway start when nobody's investigating.
     """
     if not _is_enabled():
         return
     try:
-        # sidekick.db path lives on the SidekickDB instance as ._path.
+        # parley.db path lives on the ParleyDB instance as ._path.
         # Fall back gracefully if the attribute name differs.
-        db_path = getattr(sidekick_db, "_path", None) or getattr(sidekick_db, "path", None)
+        db_path = getattr(parley_db, "_path", None) or getattr(parley_db, "path", None)
         size_bytes = None
         if db_path is not None:
             try:
@@ -258,7 +258,7 @@ def log_db_stats(sidekick_db, label: str = "snapshot") -> None:
         for table in ("msg_links", "activity_items", "pins", "push_subscriptions",
                       "push_mutes", "user_settings"):
             try:
-                row = sidekick_db.fetchone(f"SELECT COUNT(*) AS n FROM {table}")
+                row = parley_db.fetchone(f"SELECT COUNT(*) AS n FROM {table}")
                 counts[table] = int(row["n"]) if row else None
             except Exception:
                 pass  # Table may not exist on older installs.
@@ -270,64 +270,64 @@ def log_db_stats(sidekick_db, label: str = "snapshot") -> None:
 
 
 async def db_stats_periodic_loop(
-    sidekick_db,
+    parley_db,
     *,
     interval_s: float = 3600.0,
 ) -> None:
-    """Periodic background snapshot of sidekick.db. Hourly by default
+    """Periodic background snapshot of parley.db. Hourly by default
     so the size/row-count growth over a long uptime is visible in the
     journal without manual prodding.
     """
     if not _is_enabled():
         return
     while True:
-        log_db_stats(sidekick_db, label=f"hourly t+{int(time.time())}")
+        log_db_stats(parley_db, label=f"hourly t+{int(time.time())}")
         await asyncio.sleep(interval_s)
 
 
-# ── 5. Bounded concurrency for sidekick worker threads ──────────────
+# ── 5. Bounded concurrency for parley worker threads ──────────────
 #
-# Sidekick's hot-path /items + drawer-list routes all use
+# Parley's hot-path /items + drawer-list routes all use
 # ``asyncio.to_thread`` to push SQL+Python work to the default executor
 # (size ~16 on a 12-core box). A PWA drawer-prefetch burst can spawn
 # 30+ concurrent to_thread submissions; with each holding the GIL for
 # stretches of Python list-comp / dict-build / set-membership work,
 # the asyncio loop thread starves (caught 2026-06-23 — loop lag 8s
 # during traffic, 0ms at idle, no single slow callback). Capping
-# sidekick concurrency to a small number of in-flight workers gives
+# parley concurrency to a small number of in-flight workers gives
 # the loop thread fair GIL share back.
 #
 # Implemented as an asyncio.Semaphore (not a separate executor) so
 # the existing to_thread call sites stay simple — just wrap them in
-# ``run_in_sidekick_worker``. The default executor is still used; we
-# just bound how many sidekick tasks compete for it at any moment.
+# ``run_in_parley_worker``. The default executor is still used; we
+# just bound how many parley tasks compete for it at any moment.
 #
-# Tunable via env (SIDEKICK_WORKER_CONCURRENCY); default 3 is enough
+# Tunable via env (PARLEY_WORKER_CONCURRENCY); default 3 is enough
 # for the steady-state PWA load + a couple of background tasks
 # without giving back enough GIL share to actually move the needle.
 
-_SIDEKICK_WORKER_CONCURRENCY = int(
+_PARLEY_WORKER_CONCURRENCY = int(
     env_get("PARLEY_WORKER_CONCURRENCY", "3") or 3
 )
-_sidekick_sem: Optional[asyncio.Semaphore] = None
+_parley_sem: Optional[asyncio.Semaphore] = None
 
 
-def _get_sidekick_sem() -> asyncio.Semaphore:
+def _get_parley_sem() -> asyncio.Semaphore:
     """Lazily create the semaphore. Avoids touching asyncio primitives
     at import time so unit tests don't bind to the wrong loop."""
-    global _sidekick_sem
-    if _sidekick_sem is None:
-        _sidekick_sem = asyncio.Semaphore(_SIDEKICK_WORKER_CONCURRENCY)
-    return _sidekick_sem
+    global _parley_sem
+    if _parley_sem is None:
+        _parley_sem = asyncio.Semaphore(_PARLEY_WORKER_CONCURRENCY)
+    return _parley_sem
 
 
-async def run_in_sidekick_worker(func: Callable, *args, **kwargs):
+async def run_in_parley_worker(func: Callable, *args, **kwargs):
     """Drop-in replacement for ``asyncio.to_thread`` that bounds the
-    number of concurrent sidekick worker calls. Excess calls await
+    number of concurrent parley worker calls. Excess calls await
     the semaphore (cheap async wait — no thread is held). Once the
     semaphore is acquired, the func runs in the default executor
     just like ``asyncio.to_thread`` would have."""
     if kwargs:
         func = functools.partial(func, **kwargs)
-    async with _get_sidekick_sem():
+    async with _get_parley_sem():
         return await asyncio.to_thread(func, *args)

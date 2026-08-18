@@ -143,9 +143,9 @@ class TurnBuffer:
             return self._by_chat.get(chat_id)
 
     def render_envelopes(self, entry: TurnEntry) -> List[Dict[str, Any]]:
-        """Render the in-flight turn as a sequence of ``SidekickEnvelope``
-        dicts (the live SSE wire shape — see ``proxy/sidekick/upstream.ts``
-        ``SidekickEnvelope``). The PWA's ``backend.replayInflight()`` path
+        """Render the in-flight turn as a sequence of ``ParleyEnvelope``
+        dicts (the live SSE wire shape — see ``proxy/parley/upstream.ts``
+        ``ParleyEnvelope``). The PWA's ``backend.replayInflight()`` path
         feeds these through the same handlers the live SSE stream uses,
         so a reconnected client gets STREAMING bubbles (with the right
         ``message_id`` for follow-up dedup) instead of static finalized

@@ -1,7 +1,7 @@
-"""Shared test stubs for running the Sidekick Hermes plugin tests standalone.
+"""Shared test stubs for running the Parley Hermes plugin tests standalone.
 
 The real plugin imports Hermes gateway modules at package import time. In the
-Sidekick repo test environment those modules are not installed, so install the
+Parley repo test environment those modules are not installed, so install the
 small surface the plugin needs before test modules import backends.hermes.plugin.
 Individual older tests still carry local copies of this setup; keeping this
 central version makes collection order deterministic.
@@ -22,7 +22,7 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
     # real state dirs (~/.hermes, ~/.parley, ~/.sidekick,
     # ~/.openclaw-sk-integ). Every test must use tmp paths; a fixture that
     # accidentally resolves to the live store fails at open instead of
-    # writing production state. Legacy SIDEKICK_TEST_GUARD spelling is
+    # writing production state. Legacy PARLEY_TEST_GUARD spelling is
     # honored too (parley_env shim).
     os.environ["PARLEY_TEST_GUARD"] = "1"
     if "gateway" not in sys.modules:
@@ -32,7 +32,7 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
         cfg = types.ModuleType("gateway.config")
 
         class Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class PlatformConfig:
             pass
@@ -152,8 +152,8 @@ def _flush_plugin_caches():
     """
     import sys as _sys
     candidate_paths = (
-        "backends.hermes.plugin.sidekick_unread",
-        "plugin.sidekick_unread",
+        "backends.hermes.plugin.parley_unread",
+        "plugin.parley_unread",
     )
     for path in candidate_paths:
         mod = _sys.modules.get(path)
@@ -163,8 +163,8 @@ def _flush_plugin_caches():
             except Exception:
                 pass
     candidate_paths = (
-        "backends.hermes.plugin.sidekick_route_conversations",
-        "plugin.sidekick_route_conversations",
+        "backends.hermes.plugin.parley_route_conversations",
+        "plugin.parley_route_conversations",
     )
     for path in candidate_paths:
         mod = _sys.modules.get(path)

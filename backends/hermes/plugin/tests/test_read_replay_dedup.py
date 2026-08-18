@@ -1,6 +1,6 @@
 """Read-path filtering of compaction-replay duplicate rows.
 
-Field incident 2026-07-16 (chat sidekick:20249e46, hermes session
+Field incident 2026-07-16 (chat parley:20249e46, hermes session
 20260715_133109_8bdaf262, "Preparing for Ben Coaching Session"): after
 an in-place context compaction, hermes-core's turn-end flush
 re-appended the ENTIRE rebuilt context into the SAME session (rows
@@ -43,8 +43,8 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 CHAT_ID = "20249e46-3bf1-4eaa-8ba5-ac6d0a3772f8"
@@ -73,7 +73,7 @@ TOOL_CALL_ID = "call_CCdyCfrAT8P0tDmGVygH0UfE"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 

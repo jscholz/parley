@@ -2,7 +2,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from backends.hermes.plugin.sidekick_routes import handle_test
+from backends.hermes.plugin.parley_routes import handle_test
 
 PUSH_KINDS = [
     "agent_reply",

@@ -1,7 +1,7 @@
-"""Chat delete must purge the chat's sidekick.db rows (2026-08-06 disk
+"""Chat delete must purge the chat's parley.db rows (2026-08-06 disk
 audit): msg_links is the v3 transcript body store — before this cascade
 leg, a deleted chat's bodies (tool results are the bulk) survived
-forever in sidekick.db and rode every daily snapshot. Pins, unread,
+forever in parley.db and rode every daily snapshot. Pins, unread,
 activity, title and replay_dups rows ride the same cascade.
 
 Failing-first: the msg_links/pins/unread/title assertions fail without
@@ -56,7 +56,7 @@ def _state_db(tmp_path):
     return path
 
 
-def _seed_sidekick_rows(db, chat_id, tag):
+def _seed_parley_rows(db, chat_id, tag):
     now = time.time()
     db.exec(
         "INSERT INTO msg_links (id, chat_id, role, content, created_at, updated_at) "
@@ -92,20 +92,20 @@ def _count(db, table, chat_id):
     return row["n"] if row is not None else 0
 
 
-def test_delete_conversation_purges_sidekick_rows(plugin, tmp_path):
-    from backends.hermes.plugin.sidekick_db import SidekickDB
+def test_delete_conversation_purges_parley_rows(plugin, tmp_path):
+    from backends.hermes.plugin.parley_db import ParleyDB
 
     state_path = _state_db(tmp_path)
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     try:
-        _seed_sidekick_rows(db, CHAT, "del")
-        _seed_sidekick_rows(db, OTHER, "keep")
+        _seed_parley_rows(db, CHAT, "del")
+        _seed_parley_rows(db, OTHER, "keep")
 
         class _Adapter:
             _state_db_path = state_path
-            _sidekick_db = db
+            _parley_db = db
 
-        from backends.hermes.plugin import sidekick_route_conversations as route_conv
+        from backends.hermes.plugin import parley_route_conversations as route_conv
         result = route_conv.delete_conversation_sync(_Adapter(), CHAT)
         assert result == "ok"
 

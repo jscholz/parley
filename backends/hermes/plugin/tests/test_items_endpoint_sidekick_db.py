@@ -1,7 +1,7 @@
-"""sidekick.db-backed items reader + state.db reconciliation.
+"""parley.db-backed items reader + state.db reconciliation.
 
 Covers ``list_messages_for_chat`` (the body-store reader used when
-``SIDEKICK_ITEMS_READ_FROM_STATE_DB`` is off) and the
+``PARLEY_ITEMS_READ_FROM_STATE_DB`` is off) and the
 ``reconcile_from_state_db`` linker, which runs on every read
 regardless of which body source is active. The state.db-canonical
 reader is covered in test_items_endpoint_state_db_source.py.
@@ -11,7 +11,7 @@ Pins down:
     created_at, sidekick_id, kind/tool_name/tool_call_id when set)
   - Pagination by rowid (before cursor + first_id)
   - reconcile_from_state_db pulls state.db rows missing from
-    sidekick.db, idempotent on second call
+    parley.db, idempotent on second call
   - The content-fingerprint + order-fallback linker attaches
     agent_row_id to envelope-written rows
   - Orphan-drop self-heal when state.db rows disappear (delete/retry)
@@ -30,8 +30,8 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 CHAT_ID = "c0a01ab1-2b3c-4d5e-6f70-8090a0b0c0d0"
@@ -39,7 +39,7 @@ CHAT_ID = "c0a01ab1-2b3c-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -240,7 +240,7 @@ def test_recent_envelope_not_hidden_behind_legacy_backfill(db, state_db):
         _add_msg(state_db, "s1", "user", f"historic msg {i}", base_ts + i)
     state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
 
-    # Now: sidekick.db has 251 rows. The fresh row's rowid is LOW
+    # Now: parley.db has 251 rows. The fresh row's rowid is LOW
     # (inserted first), the historic rows' rowids are HIGH.
     fresh_row = db.fetchone(
         "SELECT rowid FROM msg_links WHERE id='umsg_fresh'"
@@ -292,7 +292,7 @@ def test_pagination_load_earlier(db):
 # ── reconciliation ────────────────────────────────────────────────────
 
 
-def test_reconcile_pulls_state_db_rows_missing_from_sidekick_db(db, state_db):
+def test_reconcile_pulls_state_db_rows_missing_from_parley_db(db, state_db):
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "from state.db", 1000.0)
     _add_msg(state_db, "s1", "assistant", "reply from state.db", 1001.0)
@@ -333,7 +333,7 @@ def test_reconcile_skips_rows_already_linked(db, state_db):
 
 def test_reconcile_drops_compaction_seed_rows(db, state_db):
     """The [CONTEXT COMPACTION] marker injected by hermes when minting a
-    child session never reaches sidekick.db."""
+    child session never reaches parley.db."""
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "real prompt", 1000.0)
     _add_msg(state_db, "s1", "system", "[CONTEXT COMPACTION] internal seed", 1001.0)
@@ -512,7 +512,7 @@ def test_linker_order_fallback_preserves_role_separation(db, state_db):
 
 def test_linker_order_fallback_skips_tool_rows(db, state_db):
     """role='tool' is intentionally NOT covered by order-fallback:
-    sidekick writes two tool msg_links rows per call (tc:* + tr:*) but
+    parley writes two tool msg_links rows per call (tc:* + tr:*) but
     state.db has only one (the result). Order-fallback on tool would
     mis-pair the call envelope to the result row."""
     _add_session(state_db, "s1")
@@ -538,7 +538,7 @@ def test_linker_order_fallback_skips_tool_rows(db, state_db):
 
 def test_linker_skips_state_db_row_already_claimed(db, state_db):
     """A state.db row that's the target of a prior link doesn't get
-    re-claimed for a second unlinked sidekick.db row with the same
+    re-claimed for a second unlinked parley.db row with the same
     content."""
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "shared text", 1000.0)
@@ -607,7 +607,7 @@ def test_fast_path_skips_full_scan_on_no_drift(db, state_db):
 
 
 def test_orphan_drop_when_state_db_session_deleted(db, state_db):
-    """Sidekick.db rows linked to state.db ids that no longer exist
+    """Parley.db rows linked to state.db ids that no longer exist
     get dropped. Models an explicit session delete or 90-day prune."""
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "before delete", 1000.0)
@@ -686,7 +686,7 @@ def test_orphan_drop_preserves_unlinked_envelope_rows(db, state_db):
 def test_orphan_drop_skipped_when_state_db_unreachable(db, tmp_path):
     """A locked or missing state.db must NOT trigger orphan drops —
     that'd wipe legitimate rows on a transient sqlite hiccup."""
-    # Pre-populate sidekick.db with a linked row.
+    # Pre-populate parley.db with a linked row.
     state.upsert_msg_link(
         db, id="umsg_safe", chat_id=CHAT_ID, role="user",
         content="not gone", agent_row_id="42",

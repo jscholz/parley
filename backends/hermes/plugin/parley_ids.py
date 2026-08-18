@@ -1,7 +1,7 @@
-"""Shared ID-encoding helpers for the hermes-side sidekick plugin.
+"""Shared ID-encoding helpers for the hermes-side parley plugin.
 
 Extracted from ``__init__.py`` 2026-05-17 so route-handler submodules
-(``sidekick_route_*``) can import the same encoding logic without a
+(``parley_route_*``) can import the same encoding logic without a
 circular dep on the package init. ``__init__.py`` re-exports these
 symbols for backward compat with any code that still references them
 from the package root.
@@ -13,9 +13,9 @@ purpose. Functions only, plus the source-name constants.
 # The agent contract guarantees ``ConversationSummary.id`` is globally
 # unique. Hermes natively keys sessions by ``(source, user_id)`` —
 # ``user_id`` IS the platform chat_id, and the same chat_id can recur
-# across sources (e.g. a sidekick test session that happens to use a
+# across sources (e.g. a parley test session that happens to use a
 # WhatsApp ``@lid`` as its chat_id, or a telegram numeric id that
-# coincides with a sidekick UUID). Exposing user_id alone as ``id``
+# coincides with a parley UUID). Exposing user_id alone as ``id``
 # violates uniqueness; the drawer then renders two LIs with the same
 # ``data-chat-id``, click activates both, and history fetches go
 # through ``_resolve_source_for_chat_id`` which picks one source
@@ -57,10 +57,14 @@ GATEWAY_DRAWER_SOURCES: Tuple[str, ...] = (
     "openclaw",
 )
 
-# Sidekick's own source — used by the channel-only ``/v1/conversations``
+# Parley's own source — used by the channel-only ``/v1/conversations``
 # endpoint and by tool-event hook resolution (which only cares about
-# sidekick sessions; non-sidekick tool calls never make it past the
+# parley sessions; non-parley tool calls never make it past the
 # adapter's filter).
+# Legacy name + value, predates the Parley rename: "sidekick" is the
+# source stamped on every existing row in the live DBs and embedded in
+# session keys (agent:main:sidekick:dm:<chat_id>) — renaming the VALUE
+# orphans all history. Keep constant name and value together.
 SIDEKICK_SOURCE: str = "sidekick"
 
 _GATEWAY_ID_SEP = ":"

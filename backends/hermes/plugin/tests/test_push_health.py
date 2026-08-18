@@ -1,5 +1,5 @@
 """Push-health guardrails — regression suite for the 2026-07 outage
-where every push_kind_* pref sat at false in the live sidekick.db for
+where every push_kind_* pref sat at false in the live parley.db for
 9+ days and nothing louder than per-skip journal WARNINGs said so.
 
 Coverage:
@@ -18,7 +18,7 @@ Coverage:
     writes are canonicalized to per-key rows, never stored nested.
   - Legacy `kinds` push_prefs row migration: idempotent, per-key rows
     always win, legacy row deleted.
-  - SIDEKICK_TEST_GUARD: SidekickDB refuses to open a DB under the
+  - PARLEY_TEST_GUARD: ParleyDB refuses to open a DB under the
     live state dirs while the guard env is set (the isolation that
     would have prevented the incident's corrupting write).
 """
@@ -31,16 +31,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from ..sidekick_dispatcher import (
+from ..parley_db import ParleyDB
+from ..parley_dispatcher import (
     PushDispatcher,
     PushHealthMonitor,
     _kind_pref_enabled,
     _SUPPORTED_PUSH_KINDS,
     build_push_health,
 )
-from ..sidekick_routes import handle_prefs, handle_push_health
-from .. import sidekick_state as state
+from ..parley_routes import handle_prefs, handle_push_health
+from .. import parley_state as state
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ from .. import sidekick_state as state
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -57,7 +57,7 @@ def db(tmp_path):
 def dispatcher_factory(db, monkeypatch):
     """Build a dispatcher with pywebpush stubbed, AFTER the test has
     arranged prefs — the startup health check runs at construction."""
-    from .. import sidekick_dispatcher as sd
+    from .. import parley_dispatcher as sd
 
     sent = []
 
@@ -293,7 +293,7 @@ def test_expand_kinds_drops_unknown_kind_names():
     assert out == {"agent_reply": True}
 
 
-# ── SIDEKICK_TEST_GUARD live-DB tripwire ───────────────────────────────
+# ── PARLEY_TEST_GUARD live-DB tripwire ───────────────────────────────
 
 
 def test_guard_blocks_live_state_dirs(tmp_path, monkeypatch):
@@ -306,23 +306,23 @@ def test_guard_blocks_live_state_dirs(tmp_path, monkeypatch):
     for dirname in (".hermes", ".parley", ".sidekick", ".openclaw-sk-integ"):
         live_path = tmp_path / dirname / "parley.db"
         with pytest.raises(RuntimeError, match="TEST_GUARD"):
-            SidekickDB(live_path)
+            ParleyDB(live_path)
         assert not live_path.parent.exists()  # raised before mkdir
 
 
 def test_guard_blocks_live_state_dirs_under_legacy_env_spelling(tmp_path, monkeypatch):
-    """The pytest command line historically sets SIDEKICK_TEST_GUARD=1;
-    the tripwire must keep honoring that spelling post-rename."""
+    """The pytest command line historically sets SIDEKICK_TEST_GUARD=1
+    (legacy spelling); the tripwire must keep honoring it post-rename."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
     monkeypatch.setenv("SIDEKICK_TEST_GUARD", "1")
     with pytest.raises(RuntimeError, match="TEST_GUARD"):
-        SidekickDB(tmp_path / ".hermes" / "parley.db")
+        ParleyDB(tmp_path / ".hermes" / "parley.db")
 
 
 def test_guard_allows_tmp_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    db = SidekickDB(tmp_path / "elsewhere" / "sidekick.db")
+    db = ParleyDB(tmp_path / "elsewhere" / "sidekick.db")
     db.close()
 
 
@@ -332,5 +332,5 @@ def test_guard_disabled_without_env(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
     monkeypatch.delenv("SIDEKICK_TEST_GUARD", raising=False)
-    db = SidekickDB(tmp_path / ".hermes" / "parley.db")
+    db = ParleyDB(tmp_path / ".hermes" / "parley.db")
     db.close()

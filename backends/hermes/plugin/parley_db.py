@@ -1,16 +1,16 @@
-"""Supplemental sqlite for sidekick-shaped state — push subs, mutes,
+"""Supplemental sqlite for parley-shaped state — push subs, mutes,
 prefs, VAPID keys, pins, unread state, and the message store.
 
 Mirrors the openclaw plugin's ``src/schema.sql`` so the two backends
 expose an identical /v1/* contract. Per-backend isolation: openclaw
-stores at ``~/.openclaw-sk-integ/sidekick.db``; hermes stores at
-``$HERMES_STATE_DIR/sidekick.db`` (default ``~/.hermes/sidekick.db``).
+stores at ``~/.openclaw-sk-integ/parley.db``; hermes stores at
+``$HERMES_STATE_DIR/parley.db`` (default ``~/.hermes/parley.db``).
 
-# Architecture — sidekick.db as the message store
+# Architecture — parley.db as the message store
 
-This file is the **canonical local store for messages the sidekick PWA
+This file is the **canonical local store for messages the parley PWA
 renders.** Hermes' own ``state.db`` remains the LLM-context substrate
-(turn limits, compaction, etc.); sidekick.db is the UI-facing view that
+(turn limits, compaction, etc.); parley.db is the UI-facing view that
 the items endpoint reads from. The two are decoupled so hermes-core can
 evolve its schema without breaking the PWA.
 
@@ -27,7 +27,7 @@ queued, see Phase 2 below)
   read.
 - ``content`` is the full message text. Yes, this duplicates state.db's
   content column. This is the **deliberate pattern** the design memo
-  ``hosts/cortex/sidekick-supplemental-store-schema.md`` called for,
+  ``hosts/cortex/parley-supplemental-store-schema.md`` called for,
   matching what iMessage / Slack / WhatsApp do
   for the same problem: one local store keyed by a stable UI id with
   full content, server is sync substrate not content cache.
@@ -43,19 +43,19 @@ delete+reinsert all rows in session; explicit session delete; 90-day
 prune). These trigger a session_changed envelope which the heal path
 hooks (Phase 4 below).
 
-Bug-driven drift (a sidekick.db write-path bug producing a row that
+Bug-driven drift (a parley.db write-path bug producing a row that
 disagrees with state.db) is mitigated by:
 
-1. **Smoke tests** asserting ``COUNT(*) state.db == COUNT(*) sidekick.db``
+1. **Smoke tests** asserting ``COUNT(*) state.db == COUNT(*) parley.db``
    per session after each turn flow.
 2. **Self-heal on session_changed** — bidirectional reconciliation:
-   missing rows pulled from state.db into sidekick.db; orphan rows
-   (sidekick.db has, state.db doesn't, agent_row_id NOT NULL) removed.
+   missing rows pulled from state.db into parley.db; orphan rows
+   (parley.db has, state.db doesn't, agent_row_id NOT NULL) removed.
    Logs on every heal event so write-path bugs surface in production.
 3. **Admin audit command** (``sidekick-audit``) for deep dives.
 
 The duplicated-content design has STRICTLY BETTER bug surface than
-the alternative JOIN-based hybrid (state.db owns content, sidekick.db
+the alternative JOIN-based hybrid (state.db owns content, parley.db
 owns metadata, items endpoint JOINs): the duplication design's bugs
 are trivially countable (per-session row count check); the hybrid's
 bugs are silent NULL content in JOIN results that ship without warning.
@@ -63,24 +63,24 @@ bugs are silent NULL content in JOIN results that ship without warning.
 # Migration phasing
 
 **Phase 1 — Write-through + smoke.** ``_safe_send_envelope``
-calls into ``sidekick_state.record_envelope`` which upserts the row to
+calls into ``parley_state.record_envelope`` which upserts the row to
 ``msg_links`` (renamed to ``messages`` in Phase 2). Items endpoint
-still reads from state.db; sidekick.db rows accumulate alongside but
+still reads from state.db; parley.db rows accumulate alongside but
 aren't read yet. Smokes assert the write path is sound.
 
 **Phase 2 — Items endpoint switch.** Rewrite
-``sidekick_route_items.handle_get_items`` to read from sidekick.db
+``parley_route_items.handle_get_items`` to read from parley.db
 instead of state.db. Rename ``msg_links`` → ``messages``. Delete
 the legacy ``sidekick_msg_links`` table on state.db plus
 ``_write_msg_links_after_turn`` + ``_capture_msg_high_water_mark``.
 
-**Phase 3 — Linker.** Content-fingerprint match of sidekick.db rows
+**Phase 3 — Linker.** Content-fingerprint match of parley.db rows
 against state.db rows to populate ``agent_row_id``. Runs on each
 ``reply_final``. Best-effort; failure just leaves agent_row_id NULL.
 
 **Phase 4 — Self-heal on session_changed.** Bidirectional drift
-reconciliation. ``state.db`` rows missing from sidekick.db get pulled
-in (minted as ``legacy:<state_id>`` keys); orphan sidekick.db rows
+reconciliation. ``state.db`` rows missing from parley.db get pulled
+in (minted as ``legacy:<state_id>`` keys); orphan parley.db rows
 (``agent_row_id`` set but state.db row gone — i.e. /retry, /undo,
 /compress, delete, prune happened) get dropped.
 
@@ -90,7 +90,7 @@ defensive heal needs adding.)
 
 Each phase lands as its own commit with its own smoke. The current
 phase shipped is recorded in the ``meta`` table under
-``sidekick_db_phase``.
+``parley_db_phase``.
 """
 
 import logging
@@ -132,7 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_msg_links_agent ON msg_links(agent_row_id);
 -- column already exists (it'd raise; we catch in Python).
 
 -- Provable compaction-replay duplicate rows in state.db, detected by
--- reconcile's full pass (see sidekick_state.
+-- reconcile's full pass (see parley_state.
 -- _classify_replay_duplicate_state_ids). hermes-core's in-place
 -- compaction re-appends the whole rebuilt context into the SAME
 -- session on the next turn-end flush (field 2026-07-15/16); the v2
@@ -149,10 +149,10 @@ CREATE TABLE IF NOT EXISTS replay_dups (
 );
 
 -- ── Transcript v3 — turn-end deterministic linker tables ─────────────
--- The turn linker (sidekick_turn_linker.py) records its
+-- The turn linker (parley_turn_linker.py) records its
 -- envelope↔state.db-row decisions here. Phase 1 ran them DARK
 -- (soak-compared against the content reconcile's opinions, never
--- touching msg_links). Since Phase 4 (SIDEKICK_RECONCILE_RETIRED,
+-- touching msg_links). Since Phase 4 (PARLEY_RECONCILE_RETIRED,
 -- 2026-07-30) the linker is the real link writer for migrated chats:
 -- turn-close claims stamp msg_links.agent_row_id (and mint the
 -- orchestration legacy:<id> twins), so these tables are the durable
@@ -211,9 +211,9 @@ CREATE TABLE IF NOT EXISTS turn_observations (
 -- chat_migrations: one durable row per chat whose pre-write-through
 -- history has been imported into msg_links (every live state.db chain
 -- row linked or legacy:<id>-imported) and healed of pre-fix
--- orchestration mislinks. Phase 3's read flip (SIDEKICK_ITEMS_V3)
--- serves sidekick.db bodies ONLY for chats holding a row at the
--- current schema_version — see sidekick_chat_migration.py for the
+-- orchestration mislinks. Phase 3's read flip (PARLEY_ITEMS_V3)
+-- serves parley.db bodies ONLY for chats holding a row at the
+-- current schema_version — see parley_chat_migration.py for the
 -- mint criteria ("cleanly"). stats is the JSON audit snapshot taken
 -- at mint time (state_rows/linked/unresolved/mislinks_healed/…).
 CREATE TABLE IF NOT EXISTS chat_migrations (
@@ -321,9 +321,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
 # Field incident 2026-07: live push_prefs rows were corrupted during a
 # dev/test session running against the production instance — days of
 # silently-dropped pushes. Belt-and-braces: any process that sets
-# PARLEY_TEST_GUARD (legacy SIDEKICK_TEST_GUARD honored; the pytest
+# PARLEY_TEST_GUARD (legacy PARLEY_TEST_GUARD honored; the pytest
 # conftest sets it unconditionally)
-# refuses to open a sidekick DB inside the real state directories.
+# refuses to open a parley DB inside the real state directories.
 # Tests operate on tmp paths exclusively; a fixture or helper that
 # accidentally resolves to ~/.hermes fails LOUDLY at open, before any
 # write can land.
@@ -354,7 +354,7 @@ def _assert_not_live_db_under_test_guard(path: Path) -> None:
 # add an explicit lock so concurrent route handlers (aiohttp worker
 # pool) don't trip on the GIL race. Write throughput is low (handful
 # of ops per turn) so a single lock is fine.
-class SidekickDB:
+class ParleyDB:
     def __init__(self, path: Path):
         _assert_not_live_db_under_test_guard(path)
         self.path = path
@@ -421,9 +421,9 @@ def migrate_legacy_db_file(new_path: Path, legacy_path: Path) -> bool:
     return True
 
 
-def open_sidekick_db(state_dir: str | None = None) -> SidekickDB:
+def open_parley_db(state_dir: str | None = None) -> ParleyDB:
     """Open (or create) the parley supplemental DB (parley.db,
-    formerly sidekick.db — renamed in place on first open).
+    formerly parley.db — renamed in place on first open).
 
     `state_dir` defaults to ``$HERMES_STATE_DIR`` or ``~/.hermes``.
     """
@@ -434,4 +434,4 @@ def open_sidekick_db(state_dir: str | None = None) -> SidekickDB:
     # state dir can't move the production DB.
     _assert_not_live_db_under_test_guard(path)
     migrate_legacy_db_file(path, Path(state_dir) / "sidekick.db")
-    return SidekickDB(path)
+    return ParleyDB(path)

@@ -1,4 +1,4 @@
-"""display_doc tool — push a document into the Sidekick PWA's Docs panel.
+"""display_doc tool — push a document into the Parley PWA's Docs panel.
 
 The agent calls ``display_doc(path=...)``; the handler reads the file
 server-side and ships ``{type: "doc_show", title, content, format, path}``
@@ -6,7 +6,7 @@ through the adapter's envelope channel. The PWA renders it in the right
 drawer's Docs tab (markdown via miniMarkdown, HTML in a sandboxed iframe,
 anything else as plain text) and auto-opens the drawer.
 
-Separation contract: this module lives entirely in the sidekick plugin.
+Separation contract: this module lives entirely in the parley plugin.
 It registers against hermes' public ``tools.registry`` API when available
 and degrades to a silent no-op when it isn't (older hermes, import
 failure) — the plugin must never fail to load because of it. The PWA in
@@ -17,16 +17,16 @@ hard-depends on the other:
   * frontend without the tab  → the ``doc_show`` envelope is an unknown
     SSE event name and is dropped by the proxy/EventSource layers.
 
-Toolset: ``sidekick`` — the BARE platform name, NOT ``hermes-sidekick``.
+Toolset: ``parley`` — the BARE platform name, NOT ``hermes-parley``.
 This distinction is load-bearing. Hermes resolves a plugin platform's
 default toolset ``hermes-<platform>`` via an auto-generation branch in
 ``toolsets.resolve_toolset`` that returns ``_HERMES_CORE_TOOLS`` (file,
 terminal, web, ...) PLUS any registry tools whose ``toolset == <platform>``
 — but ONLY while no registered toolset literally named
 ``hermes-<platform>`` exists. Registering this tool under
-``hermes-sidekick`` (as v1 did, 2026-07-04..07-07) created exactly such a
+``hermes-parley`` (as v1 did, 2026-07-04..07-07) created exactly such a
 toolset, shadowing the auto-gen branch and silently stripping every core
-tool from sidekick sessions — the agent was left with only display_doc +
+tool from parley sessions — the agent was left with only display_doc +
 MCP tools (field regression: filesystem access lost in the deck-writing
 workflow). Registering under the bare platform name keeps the auto-gen
 composite intact: core tools + display_doc. ``check_fn`` additionally
@@ -57,7 +57,7 @@ _FORMAT_BY_SUFFIX = {
 DISPLAY_DOC_SCHEMA = {
     "name": "display_doc",
     "description": (
-        "Display a document in the Sidekick app's Docs side panel — use "
+        "Display a document in the Parley app's Docs side panel — use "
         "when the user asks to see/read a file you wrote (deck content, "
         "notes, a report) without opening an editor. Renders markdown "
         "(.md), sandboxed HTML (.html), or plain text; the panel opens "
@@ -116,14 +116,14 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
         if not chat_id:
             return json.dumps({
                 "error": (
-                    "no sidekick chat in session context — display_doc only "
-                    "works inside a Sidekick conversation"
+                    "no parley chat in session context — display_doc only "
+                    "works inside a Parley conversation"
                 )
             })
 
         adapter = get_adapter()
         if adapter is None:
-            return json.dumps({"error": "sidekick adapter is not running"})
+            return json.dumps({"error": "parley adapter is not running"})
 
         fmt = _FORMAT_BY_SUFFIX.get(path.suffix.lower(), "text")
         title = (args.get("title") or "").strip() or path.name
@@ -201,7 +201,7 @@ def _remember_open_doc(chat_id: str, doc_id: str, title: str) -> list:
 
 
 def _check_display_doc() -> bool:
-    """Offer the tool only inside sidekick sessions. (The registry's
+    """Offer the tool only inside parley sessions. (The registry's
     check_fn TTL cache can bleed availability across sessions for ~15s —
     same accepted trade-off as react_to_message's platform gate; a
     mis-listed call still fails gracefully on the chat-id guard.)"""
@@ -223,24 +223,24 @@ def register_display_doc_tool(get_adapter: Callable[[], Any]) -> bool:
         from tools.registry import registry
     except Exception:
         logger.info(
-            "[sidekick] tools.registry unavailable — display_doc not registered"
+            "[parley] tools.registry unavailable — display_doc not registered"
         )
         return False
     try:
         registry.register(
             name="display_doc",
-            # Bare platform name — NEVER "hermes-sidekick". See module
-            # docstring: a registered toolset named hermes-sidekick shadows
+            # Bare platform name — NEVER "hermes-parley". See module
+            # docstring: a registered toolset named hermes-parley shadows
             # the auto-generated core-tools composite and strips file/
-            # terminal/web from every sidekick session.
+            # terminal/web from every parley session.
             toolset="sidekick",
             schema=DISPLAY_DOC_SCHEMA,
             handler=_make_display_doc_handler(get_adapter),
             check_fn=_check_display_doc,
             emoji="📄",
         )
-        logger.info("[sidekick] display_doc tool registered (toolset=sidekick)")
+        logger.info("[parley] display_doc tool registered (toolset=parley)")
         return True
     except Exception:
-        logger.exception("[sidekick] display_doc registration failed")
+        logger.exception("[parley] display_doc registration failed")
         return False

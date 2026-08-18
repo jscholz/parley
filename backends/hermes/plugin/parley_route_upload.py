@@ -30,7 +30,7 @@ import secrets
 import time
 from pathlib import Path
 
-# Guarded aiohttp import — see sidekick_route_conversations for why.
+# Guarded aiohttp import — see parley_route_conversations for why.
 try:
     from aiohttp import web  # type: ignore[assignment]
 except ImportError:  # pragma: no cover
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # attachment tempfiles; the OS reclaims /tmp on its own schedule and we
 # also sweep stale entries on each upload (see _sweep_stale).
 UPLOAD_DIR = "/tmp"
-UPLOAD_PREFIX = "sidekick-upload-"
+UPLOAD_PREFIX = "parley-upload-"
 # Hard ceiling on a single staged upload. Matches the client's 100 MB
 # attachment cap (src/attachments.ts MAX_BYTES) with headroom; the
 # aiohttp app-wide client_max_size (set in __init__.py) is the outer
@@ -113,7 +113,7 @@ async def handle_upload(adapter, request: "web.Request") -> "web.Response":
                     )
                 f.write(chunk)
     except Exception as exc:  # noqa: BLE001 — surface any IO failure cleanly
-        logger.exception("[sidekick] upload staging failed for %s", upload_id)
+        logger.exception("[parley] upload staging failed for %s", upload_id)
         try:
             path.unlink()
         except OSError:
@@ -123,5 +123,5 @@ async def handle_upload(adapter, request: "web.Request") -> "web.Response":
             status=500,
         )
 
-    logger.info("[sidekick] staged upload %s (%d bytes)", upload_id, written)
+    logger.info("[parley] staged upload %s (%d bytes)", upload_id, written)
     return web.json_response({"upload_id": upload_id, "size": written})

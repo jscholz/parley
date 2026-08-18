@@ -1,12 +1,12 @@
 """One-time backfill + chat migration marker (transcript v3 Phase 2).
 
-Pins ``sidekick_chat_migration``: the legacy import (the content-
+Pins ``parley_chat_migration``: the legacy import (the content-
 fingerprint reconcile run ONCE per chat), the pre-import heal of
 pre-aa81f4f status-bubble / tr: mislinks onto orchestration state rows
 (2026-07-28 re-soak forensics: 27 bubble zips + 1 tr: mislink, all
 minted before the fix deployed 2026-07-23 19:38Z), the "cleanly" gate,
 and the durable ``chat_migrations`` marker Phase 3's read flip
-(``SIDEKICK_ITEMS_V3``) will consult.
+(``PARLEY_ITEMS_V3``) will consult.
 
 The state.db rig mirrors tests/test_turn_linker.py (live hermes 0.18
 shape). Mislink fixtures are synthesized to the forensic shape
@@ -24,10 +24,10 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_chat_migration as migration
-from .. import sidekick_state as state
-from .. import sidekick_turn_linker as linker
+from ..parley_db import ParleyDB
+from .. import parley_chat_migration as migration
+from .. import parley_state as state
+from .. import parley_turn_linker as linker
 
 
 CHAT_ID = "b3e11a02-migration-test"
@@ -37,7 +37,7 @@ SRC = "sidekick"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -423,13 +423,13 @@ def test_schema_version_2_forces_lazy_remigration(db, state_db):
 
 
 def test_kill_switch(monkeypatch, db, state_db):
-    monkeypatch.setenv("SIDEKICK_CHAT_MIGRATION", "0")
+    monkeypatch.setenv("PARLEY_CHAT_MIGRATION", "0")
     assert migration.enabled() is False
     _seed_legacy_history(state_db)
     assert migration.backfill_chat_sync(db, state_db, CHAT_ID, SRC) is None
     assert migration.get_migration(db, CHAT_ID) is None
     assert db.fetchone("SELECT 1 FROM msg_links LIMIT 1") is None
-    monkeypatch.setenv("SIDEKICK_CHAT_MIGRATION", "1")
+    monkeypatch.setenv("PARLEY_CHAT_MIGRATION", "1")
     assert migration.enabled() is True
 
 
@@ -451,10 +451,10 @@ def test_purge_chat_scrubs_migration_marker_and_compare_state(db, state_db):
 def test_background_reconcile_runs_backfill_dark(db, state_db):
     """The items route's background reconcile chain mints the marker
     (dark: serving untouched until Phase 3 consults it)."""
-    from .. import sidekick_route_items as route
+    from .. import parley_route_items as route
 
     class _Adapter:
-        _sidekick_db = db
+        _parley_db = db
         _state_db_path = state_db
 
     _seed_legacy_history(state_db)

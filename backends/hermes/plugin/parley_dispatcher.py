@@ -1,13 +1,13 @@
 """Plugin-owned web push dispatch.
 
 Mirrors the openclaw plugin's ``src/push-dispatch.js`` + the
-sidekick proxy's ``proxy/sidekick/notifications/dispatch.ts``.
+parley proxy's ``proxy/parley/notifications/dispatch.ts``.
 Engagement filter + per-kind toggle + mute filter + cron-aware body
 shaping + pywebpush send + prune 404/410.
 
-Called from ``SidekickAdapter._safe_send_envelope`` for any envelope
+Called from ``ParleyAdapter._safe_send_envelope`` for any envelope
 the plugin emits. Decoupled from the proxy's notification module —
-when ``SIDEKICK_PUSH_OWNED_BY_PLUGIN=true``, the proxy delegates to
+when ``PARLEY_PUSH_OWNED_BY_PLUGIN=true``, the proxy delegates to
 this and skips its own dispatch path.
 
 Observability: every gate decision logs at WARNING so the journal
@@ -29,7 +29,7 @@ from urllib.parse import quote
 
 from pywebpush import webpush, WebPushException  # type: ignore
 
-from .sidekick_state import (
+from .parley_state import (
     ensure_vapid_keys,
     list_subscriptions,
     is_muted,
@@ -38,7 +38,7 @@ from .sidekick_state import (
     remove_subscription,
 )
 
-logger = logging.getLogger("hermes.sidekick.push")
+logger = logging.getLogger("hermes.parley.push")
 
 # Visibility heartbeat validity window. The PWA reports while focused every
 # 8s, and immediately sends hidden/blurred on loss of engagement. The server
@@ -92,8 +92,8 @@ class EngagementState:
     Note: callers must use the SAME chat_id shape on both sides.
     The plugin's envelope path uses the source-stripped id (UUID
     only); ``handle_visibility`` normalizes the PWA-supplied
-    ``sidekick:<uuid>`` form via ``_strip_source_prefix`` before
-    recording. See sidekick_routes.py.
+    ``parley:<uuid>`` form via ``_strip_source_prefix`` before
+    recording. See parley_routes.py.
     """
 
     def __init__(self) -> None:
@@ -162,7 +162,7 @@ class ReplyBuffer:
 # read, and demote metadata to a trailing suffix that only fits when
 # there's headroom.
 #
-# Mirror of proxy/sidekick/notifications/dispatch.ts parseCronContent
+# Mirror of proxy/parley/notifications/dispatch.ts parseCronContent
 # + stripLeadingMetadata. Verbatim regex for cross-language parity.
 _CRON_HEADER_RE = re.compile(
     r"^Cronjob Response:\s*(.+?)\s*\n"
@@ -274,7 +274,7 @@ def _build_payload(env: Dict, *, body_override: Optional[str] = None,
     banner on boilerplate.
     """
     chat_id = env.get("chat_id", "") if isinstance(env.get("chat_id"), str) else ""
-    speaker = env.get("speaker") if isinstance(env.get("speaker"), str) else "Sidekick"
+    speaker = env.get("speaker") if isinstance(env.get("speaker"), str) else "Parley"
     icon = _icon_for(env)
     kind = env.get("kind") if isinstance(env.get("kind"), str) else ""
 
@@ -294,7 +294,7 @@ def _build_payload(env: Dict, *, body_override: Optional[str] = None,
         title_label = "Approval required"
     elif cron_parsed and cron_parsed["body"]:
         body = cron_parsed["body"]
-        # Title carries the task name (more useful than "Sidekick" on
+        # Title carries the task name (more useful than "Parley" on
         # a watch when there are many cron jobs).
         title_label = cron_parsed["task_name"] or speaker
     else:
@@ -382,7 +382,7 @@ def _is_kind_enabled(db, env: Dict) -> bool:
 # ── Push-health monitor ────────────────────────────────────────────────
 #
 # Field incident 2026-07: push_kind_* prefs sat at all-false in the live
-# sidekick.db for 9+ days. The dispatcher dutifully logged
+# parley.db for 9+ days. The dispatcher dutifully logged
 # `skip … reason=kind_disabled` per envelope, but nobody tails journals
 # — so pushes were silently dead the whole time. This monitor turns the
 # per-skip whisper into two aggregate shouts:
@@ -394,7 +394,7 @@ def _is_kind_enabled(db, env: Dict) -> bool:
 #      stderr line per window (not per skip).
 #
 # The stderr `print` deliberately bypasses the stdlib logger — same
-# rationale as sidekick_perf_trace._log: the gateway's default handler
+# rationale as parley_perf_trace._log: the gateway's default handler
 # config drops sub-WARNING records and journalctl always captures
 # stderr. Snapshot() feeds /v1/push/health → the proxy's diagnostics
 # endpoint → the PWA settings panel.
@@ -450,7 +450,7 @@ class PushHealthMonitor:
             f"{pref_skips} pushes suppressed by user prefs "
             f"(kind_disabled/quiet_hours) within {int(self.window_sec)}s — "
             f"check Settings → Notifications push categories "
-            f"(push_kind_* rows in sidekick.db push_prefs)"
+            f"(push_kind_* rows in parley.db push_prefs)"
         )
 
     def check_startup(self, db) -> bool:

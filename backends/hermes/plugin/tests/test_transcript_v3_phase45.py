@@ -33,12 +33,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_chat_migration as migration
-from .. import sidekick_route_items as route
-from .. import sidekick_state as state
-from .. import sidekick_transcript_monitor as monitor
-from .. import sidekick_turn_linker as linker
+from ..parley_db import ParleyDB
+from .. import parley_chat_migration as migration
+from .. import parley_route_items as route
+from .. import parley_state as state
+from .. import parley_transcript_monitor as monitor
+from .. import parley_turn_linker as linker
 
 
 CHAT_ID = "c4d22b13-phase45-test"
@@ -53,7 +53,7 @@ NOW = BASE + 100_000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -101,9 +101,9 @@ def state_db(tmp_path):
 @pytest.fixture(autouse=True)
 def _reset_shared_state(monkeypatch):
     # Flag defaults under test control; process caches must not leak.
-    monkeypatch.delenv("SIDEKICK_RECONCILE_RETIRED", raising=False)
-    monkeypatch.delenv("SIDEKICK_ITEMS_V3", raising=False)
-    monkeypatch.delenv("SIDEKICK_RECONCILE_BG_DISABLED", raising=False)
+    monkeypatch.delenv("PARLEY_RECONCILE_RETIRED", raising=False)
+    monkeypatch.delenv("PARLEY_ITEMS_V3", raising=False)
+    monkeypatch.delenv("PARLEY_RECONCILE_BG_DISABLED", raising=False)
     linker._compare_hwm.clear()
     monitor._health.clear()
     monitor._warned.clear()
@@ -243,9 +243,9 @@ def test_close_does_not_stamp_unmarked_chat(db, state_db):
 
 
 def test_close_does_not_stamp_when_flag_reverted(db, state_db, monkeypatch):
-    """SIDEKICK_RECONCILE_RETIRED=0 restores the full Phase-3 posture
+    """PARLEY_RECONCILE_RETIRED=0 restores the full Phase-3 posture
     (dark linker) without touching v3 serving."""
-    monkeypatch.setenv("SIDEKICK_RECONCILE_RETIRED", "0")
+    monkeypatch.setenv("PARLEY_RECONCILE_RETIRED", "0")
     _mint_marker(db, state_db)
     ids = _run_turn(db, state_db, 1, BASE)
     assert _link(db, "umsg_1")["agent_row_id"] is None
@@ -316,7 +316,7 @@ def test_stamp_never_overwrites_prior_linker_claim(db, state_db):
 
 class _Adapter:
     def __init__(self, db, state_db):
-        self._sidekick_db = db
+        self._parley_db = db
         self._state_db_path = state_db
 
 
@@ -331,7 +331,7 @@ def _drive_chain(db, state_db):
 def reconcile_spy(monkeypatch):
     """Wrap the real reconcile so the chain still behaves, recording
     calls. Patched on BOTH referencing modules: the chain calls
-    ``sidekick_state.reconcile_from_state_db`` while the migration
+    ``parley_state.reconcile_from_state_db`` while the migration
     backfill bound the name at import."""
     calls = []
     real = state.reconcile_from_state_db
@@ -352,7 +352,7 @@ def test_marked_chat_skips_content_reconcile_runs_monitor(
     the divergence monitor INSTEAD of reconcile → migration → compare."""
     _mint_marker(db, state_db)
     reconcile_spy.clear()  # drain the marker mint's own force_full call
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     _drive_chain(db, state_db)
     assert reconcile_spy == [], "content reconcile must be retired for marked chats"
     assert CHAT_ID in monitor._health, "monitor sweep replaces the reconcile slot"
@@ -363,7 +363,7 @@ def test_unmarked_chat_still_reconciles_and_migrates(
 ):
     """Legacy path unchanged: reconcile runs, the one-shot migration
     backfill (force_full inside) mints the marker, compare stays."""
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     _add_msg(state_db, "user", "legacy hello", BASE)
     _add_msg(state_db, "assistant", "legacy reply", BASE + 1.0)
     _drive_chain(db, state_db)
@@ -377,12 +377,12 @@ def test_unmarked_chat_still_reconciles_and_migrates(
 def test_marked_chat_reconciles_when_retirement_reverted(
     db, state_db, monkeypatch, reconcile_spy,
 ):
-    """SIDEKICK_RECONCILE_RETIRED=0 → full Phase-3 chain for everyone,
+    """PARLEY_RECONCILE_RETIRED=0 → full Phase-3 chain for everyone,
     independent of v3 serving."""
     _mint_marker(db, state_db)
     reconcile_spy.clear()
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
-    monkeypatch.setenv("SIDEKICK_RECONCILE_RETIRED", "0")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_RECONCILE_RETIRED", "0")
     _drive_chain(db, state_db)
     assert len(reconcile_spy) == 1
     assert CHAT_ID not in monitor._health
@@ -396,7 +396,7 @@ def test_marked_chat_reconciles_when_v3_serving_off(
     runs."""
     _mint_marker(db, state_db)
     reconcile_spy.clear()
-    monkeypatch.delenv("SIDEKICK_ITEMS_V3", raising=False)
+    monkeypatch.delenv("PARLEY_ITEMS_V3", raising=False)
     _drive_chain(db, state_db)
     assert len(reconcile_spy) == 1
 
@@ -662,7 +662,7 @@ def _ctx(db, state_db):
 def test_push_health_route_carries_transcript_health(db, state_db):
     """The proxy folds /v1/push/health into its diagnostics response;
     transcript_health rides the same surface (push_health pattern)."""
-    from ..sidekick_routes import handle_push_health
+    from ..parley_routes import handle_push_health
     monitor.sweep_chat_sync(db, state_db, CHAT_ID, SRC, now=NOW)  # unmarked → None
     _mint_marker(db, state_db)
     monitor.sweep_chat_sync(db, state_db, CHAT_ID, SRC, now=NOW)
@@ -677,7 +677,7 @@ def test_push_health_route_carries_transcript_health(db, state_db):
 
 
 def test_transcript_health_route(db, state_db):
-    from ..sidekick_routes import handle_transcript_health
+    from ..parley_routes import handle_transcript_health
     resp = asyncio.run(handle_transcript_health(_ctx(db, state_db),
                                                 _FakeRequest(method="GET")))
     assert resp.status == 200
@@ -685,7 +685,7 @@ def test_transcript_health_route(db, state_db):
 
 
 def test_transcript_repair_route(db, state_db):
-    from ..sidekick_routes import handle_transcript_repair
+    from ..parley_routes import handle_transcript_repair
     _add_msg(state_db, "user", "legacy hello", BASE)
     resp = asyncio.run(handle_transcript_repair(
         _ctx(db, state_db), _FakeRequest({"chat_id": f"{SRC}:{CHAT_ID}"})))
@@ -696,7 +696,7 @@ def test_transcript_repair_route(db, state_db):
 
 
 def test_transcript_adopt_route_dry_run_confirm_and_refusal(db, state_db):
-    from ..sidekick_routes import handle_transcript_adopt
+    from ..parley_routes import handle_transcript_adopt
     # Refusal first: unmarked chat → 409.
     resp = asyncio.run(handle_transcript_adopt(
         _ctx(db, state_db), _FakeRequest({"chat_id": CHAT_ID, "confirm": True})))

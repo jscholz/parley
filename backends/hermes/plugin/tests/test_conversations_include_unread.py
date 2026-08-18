@@ -16,17 +16,17 @@ import sqlite3
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from ..sidekick_route_conversations import (
+from ..parley_db import ParleyDB
+from ..parley_route_conversations import (
     _rows_with_unread_included,
     invalidate_summaries_cache,
 )
-from ..sidekick_unread import invalidate_unread_cache
+from ..parley_unread import invalidate_unread_cache
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -66,7 +66,7 @@ def state_db(tmp_path):
 
 class FakeAdapter:
     def __init__(self, db, state_db_path):
-        self._sidekick_db = db
+        self._parley_db = db
         self._state_db_path = state_db_path
 
 

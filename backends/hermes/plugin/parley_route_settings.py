@@ -22,7 +22,7 @@ And the exception classes that route _apply_setting failures to
 HTTP 400 / 404 in the handler.
 
 Wiring contract: each handler takes ``(adapter, request)`` where
-adapter is the calling ``SidekickAdapter`` instance. The helpers
+adapter is the calling ``ParleyAdapter`` instance. The helpers
 also take ``adapter`` first when they need access to the live
 state.db path / etc.
 """
@@ -36,7 +36,7 @@ import os
 from .parley_env import env_get
 from typing import Any, Dict, List, Set
 
-# Guarded aiohttp import — see sidekick_route_conversations for why.
+# Guarded aiohttp import — see parley_route_conversations for why.
 try:
     from aiohttp import web  # type: ignore[assignment]
 except ImportError:  # pragma: no cover
@@ -69,14 +69,14 @@ def read_hermes_config() -> Dict[str, Any]:
         with open(cfg_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
-        logger.warning("[sidekick] settings: read hermes config failed: %s", e)
+        logger.warning("[parley] settings: read hermes config failed: %s", e)
         return {}
 
 
 def read_preferred_models(cfg: Dict[str, Any]) -> List[str]:
     """Resolve the preferred-models glob list. Source of truth:
-    ``sidekick.preferred_models:`` in ~/.hermes/config.yaml (a yaml
-    list of glob strings). Falls back to SIDEKICK_PREFERRED_MODELS
+    ``parley.preferred_models:`` in ~/.hermes/config.yaml (a yaml
+    list of glob strings). Falls back to PARLEY_PREFERRED_MODELS
     env (comma-separated) for env-only deployments. Empty result
     = no filter (full catalog)."""
     sk = cfg.get("sidekick") if isinstance(cfg.get("sidekick"), dict) else {}
@@ -94,7 +94,7 @@ def read_preferred_models(cfg: Dict[str, Any]) -> List[str]:
 def build_settings_schema() -> List[Dict[str, Any]]:
     """Build the SettingDef[] list. Reads hermes config.yaml for
     the current model + the preferred-models glob filter (under
-    ``sidekick.preferred_models:``). Picker options merge OpenRouter
+    ``parley.preferred_models:``). Picker options merge OpenRouter
     (filtered by user's preferred-globs) with EVERY other
     authenticated provider's curated model list (e.g. openai-codex
     OAuth, copilot, anthropic). Provider is encoded into the option
@@ -148,7 +148,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
             label = f"{mid} ({tag})" if tag else mid
             catalog.append({"value": mid, "label": label, "group": "OpenRouter"})
     except Exception as e:
-        logger.warning("[sidekick] settings: openrouter catalog fetch failed: %s", e)
+        logger.warning("[parley] settings: openrouter catalog fetch failed: %s", e)
 
     # Filter catalog by preferred globs (empty = no filter).
     if preferred and catalog:
@@ -184,7 +184,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
                     seen.add(mid)
         except Exception as e:
             logger.warning(
-                "[sidekick] settings: live openrouter supplement failed: %s", e,
+                "[parley] settings: live openrouter supplement failed: %s", e,
             )
 
     # Pull EVERY other authenticated provider's curated model list
@@ -228,7 +228,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
                 })
     except Exception as e:
         logger.warning(
-            "[sidekick] settings: list_authenticated_providers failed: %s", e,
+            "[parley] settings: list_authenticated_providers failed: %s", e,
         )
 
     # Always include the current model in options[] so the picker
@@ -289,7 +289,7 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
 
 def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
     """Persist the preferred-models glob list to ~/.hermes/config.yaml
-    under ``sidekick.preferred_models:``. The next /v1/settings/schema
+    under ``parley.preferred_models:``. The next /v1/settings/schema
     response uses the new list to filter the catalog. Already-cached
     agents are unaffected — this knob is purely a UI filter, not an
     agent-runtime setting."""
@@ -327,7 +327,7 @@ def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
         from hermes_cli.config import save_config
         save_config(cfg)
     except Exception as e:
-        logger.exception("[sidekick] preferred_models persist failed")
+        logger.exception("[parley] preferred_models persist failed")
         raise SettingsValidationError(f"failed to write hermes config: {e}")
     new_schema = build_settings_schema()
     for s in new_schema:
@@ -360,7 +360,7 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
         import traceback as _tb
         frames = _tb.format_stack(limit=8)
         logger.info(
-            "[sidekick] apply_model_setting called value=%r frames=%s",
+            "[parley] apply_model_setting called value=%r frames=%s",
             value,
             " <- ".join(f.strip().splitlines()[0] for f in frames[:-1]),
         )
@@ -448,7 +448,7 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
             custom_providers=custom_provs,
         )
     except Exception as e:
-        logger.exception("[sidekick] switch_model raised")
+        logger.exception("[parley] switch_model raised")
         raise SettingsValidationError(f"switch_model failed: {e}")
     if not result.success:
         raise SettingsValidationError(
@@ -469,7 +469,7 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
             cfg["model"]["base_url"] = result.base_url
         save_config(cfg)
     except Exception as e:
-        logger.warning("[sidekick] failed to persist model to config.yaml: %s", e)
+        logger.warning("[parley] failed to persist model to config.yaml: %s", e)
 
     new_schema = build_settings_schema()
     return next((s for s in new_schema if s["id"] == "model"), schema[0])
@@ -484,7 +484,7 @@ async def handle_schema(adapter, request: "web.Request") -> "web.Response":
             None, build_settings_schema,
         )
     except Exception as e:
-        logger.exception("[sidekick] settings schema build failed")
+        logger.exception("[parley] settings schema build failed")
         return web.json_response(
             {"error": {"type": "server_error", "message": str(e)}},
             status=500,
@@ -521,7 +521,7 @@ async def handle_update(adapter, request: "web.Request") -> "web.Response":
             status=404,
         )
     except Exception as e:
-        logger.exception("[sidekick] settings apply failed: %s", sid)
+        logger.exception("[parley] settings apply failed: %s", sid)
         return web.json_response(
             {"error": {"type": "server_error", "message": str(e)}},
             status=500,
@@ -582,7 +582,7 @@ async def handle_model_capabilities(adapter, request: "web.Request") -> "web.Res
                     resolved_provider = p
                     break
     except Exception as e:
-        logger.exception("[sidekick] model-capabilities lookup failed")
+        logger.exception("[parley] model-capabilities lookup failed")
         return web.json_response(
             {"error": {"type": "server_error", "message": str(e)}},
             status=500,

@@ -1,9 +1,9 @@
-"""Unit tests for the sidekick plugin's PDF rasterization helper.
+"""Unit tests for the parley plugin's PDF rasterization helper.
 
-Covers the ``SidekickAdapter._rasterize_pdf`` static method:
+Covers the ``ParleyAdapter._rasterize_pdf`` static method:
 
   * Happy path: a small valid PDF rasterizes to N PNG pages.
-  * Page cap: ``SIDEKICK_PDF_MAX_PAGES`` is forwarded to pdftoppm via
+  * Page cap: ``PARLEY_PDF_MAX_PAGES`` is forwarded to pdftoppm via
     ``-l N`` (we assert the flag, not the runtime truncation, so we
     don't need a 60-page fixture).
   * Size cap: oversize PDF returns ``[]`` and logs a warning, never
@@ -15,7 +15,7 @@ Covers the ``SidekickAdapter._rasterize_pdf`` static method:
   * Timeout: ``subprocess.TimeoutExpired`` → ``[]``.
 
 The helper is a ``@staticmethod`` so we can call it without spinning up
-a SidekickAdapter (which would require aiohttp, the hermes patch, and
+a ParleyAdapter (which would require aiohttp, the hermes patch, and
 the gateway runtime). We import the plugin module via importlib so the
 tests are independent of the hermes plugin loader.
 """
@@ -51,7 +51,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -91,9 +91,9 @@ def _install_hermes_stubs() -> None:
 
 
 def _load_plugin():
-    """Import the sidekick plugin under its real package name so the
-    package's relative imports (`.sidekick_ids`,
-    `.sidekick_route_*`) resolve. Earlier ``spec_from_file_location``
+    """Import the parley plugin under its real package name so the
+    package's relative imports (`.parley_ids`,
+    `.parley_route_*`) resolve. Earlier ``spec_from_file_location``
     loaders minted a fake module name and broke relative imports
     after the 2026-05-17 route refactor."""
     _install_hermes_stubs()
@@ -111,7 +111,7 @@ def plugin():
 
 @pytest.fixture
 def rasterize(plugin):
-    return plugin.SidekickAdapter._rasterize_pdf
+    return plugin.ParleyAdapter._rasterize_pdf
 
 
 # ── tiny valid PDF generator (no external deps) ───────────────────────
@@ -231,7 +231,7 @@ def test_size_cap_drops_oversize_pdf(tmp_path, rasterize, plugin, caplog):
     pdf = tmp_path / "big.pdf"
     # Write a header + sparse padding to hit the size threshold without
     # wasting RAM building a real PDF.
-    over_cap = plugin.SIDEKICK_PDF_MAX_BYTES + 1
+    over_cap = plugin.PARLEY_PDF_MAX_BYTES + 1
     pdf.write_bytes(b"%PDF-1.4\n" + b"\x00" * (over_cap - len(b"%PDF-1.4\n")))
 
     with mock.patch("subprocess.run") as run:
@@ -311,7 +311,7 @@ def test_materialize_attachments_replaces_pdf_with_pages(plugin):
     # Self stub — _materialize_attachments doesn't touch any instance
     # state beyond _ext_for_mime / _kind_for_mime / _rasterize_pdf, all
     # of which are static.
-    Adapter = plugin.SidekickAdapter
+    Adapter = plugin.ParleyAdapter
     paths, mimes, dominant = Adapter._materialize_attachments(
         Adapter,  # acts as `self` — only static methods get used
         [{
@@ -349,7 +349,7 @@ def test_materialize_attachments_pdf_failure_drops_silently(plugin, tmp_path):
     bogus = base64.b64encode(b"not a real pdf").decode()
     data_url = f"data:application/pdf;base64,{bogus}"
 
-    Adapter = plugin.SidekickAdapter
+    Adapter = plugin.ParleyAdapter
     with mock.patch.object(Adapter, "_rasterize_pdf", return_value=[]):
         paths, mimes, dominant = Adapter._materialize_attachments(
             Adapter,
@@ -367,7 +367,7 @@ def test_materialize_attachments_pdf_failure_drops_silently(plugin, tmp_path):
 
 
 def test_page_cap_flag_forwarded_to_pdftoppm(tmp_path, rasterize, plugin):
-    """Verify ``-l <SIDEKICK_PDF_MAX_PAGES>`` is on the command line.
+    """Verify ``-l <PARLEY_PDF_MAX_PAGES>`` is on the command line.
 
     We can't easily build a 60-page fixture without a real PDF lib, but
     we CAN assert pdftoppm receives the correct flag — that's the whole
@@ -389,8 +389,8 @@ def test_page_cap_flag_forwarded_to_pdftoppm(tmp_path, rasterize, plugin):
 
     assert "-l" in captured["cmd"]
     idx = captured["cmd"].index("-l")
-    assert captured["cmd"][idx + 1] == str(plugin.SIDEKICK_PDF_MAX_PAGES)
+    assert captured["cmd"][idx + 1] == str(plugin.PARLEY_PDF_MAX_PAGES)
     # And -r DPI:
     assert "-r" in captured["cmd"]
     idx = captured["cmd"].index("-r")
-    assert captured["cmd"][idx + 1] == str(plugin.SIDEKICK_PDF_DPI)
+    assert captured["cmd"][idx + 1] == str(plugin.PARLEY_PDF_DPI)

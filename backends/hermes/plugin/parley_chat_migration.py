@@ -1,11 +1,11 @@
 """One-time per-chat backfill + migration marker — transcript v3 Phase 2 (DARK).
 
 Migration-plan item 2 (see ``workspace/documents/agent-development/
-sidekick-transcript-v3-deterministic-link-design-2026-07-16.md``): run
+parley-transcript-v3-deterministic-link-design-2026-07-16.md``): run
 the content-fingerprint reconcile ONCE per chat as a *legacy import*
 for history that predates write-through, heal the known pre-fix
 mislinks, and mint a durable ``chat_migrations`` marker. Phase 3
-(``SIDEKICK_ITEMS_V3``) flips the items read to sidekick.db bodies
+(``PARLEY_ITEMS_V3``) flips the items read to parley.db bodies
 ONLY for chats holding a marker at the current ``SCHEMA_VERSION`` —
 until then this module changes nothing on any serving path.
 
@@ -36,7 +36,7 @@ No tolerance threshold — the marker gates a READ flip, and a single
 unrepresented row is a message Phase 3 would silently drop. An
 unclean pass withholds the marker and WARNs; the next background
 reconcile retries, so transient causes (a turn flushing mid-pass,
-a sidekick.db hiccup) self-heal.
+a parley.db hiccup) self-heal.
 
 Idempotent: the marker short-circuits re-runs entirely (one indexed
 lookup). Rows arriving after migration belong to write-through + the
@@ -44,14 +44,14 @@ turn linker, never to a second import. Bump ``SCHEMA_VERSION`` to
 force re-migration when the criteria gain teeth — ``get_migration``
 treats older versions as unmigrated.
 
-Live-safety: every sidekick.db write goes through the autocommit
-SidekickDB handle (row-bounded implicit transactions, no long write
+Live-safety: every parley.db write goes through the autocommit
+ParleyDB handle (row-bounded implicit transactions, no long write
 locks); state.db is only ever opened ``mode=ro``. Worker thread only —
 the underlying reconcile is O(history) GIL-held Python (see the
-2026-06-23 loop-starvation notes in sidekick_state.py).
+2026-06-23 loop-starvation notes in parley_state.py).
 
-Kill switch: ``SIDEKICK_CHAT_MIGRATION=0`` (default on, dark —
-consistent with SIDEKICK_TURN_LINKER).
+Kill switch: ``PARLEY_CHAT_MIGRATION=0`` (default on, dark —
+consistent with PARLEY_TURN_LINKER).
 """
 
 from __future__ import annotations
@@ -65,13 +65,13 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from .sidekick_ids import SIDEKICK_SOURCE
-from .sidekick_state import (
+from .parley_ids import SIDEKICK_SOURCE
+from .parley_state import (
     _classify_replay_duplicate_state_ids,
     _is_compaction_seed,
     reconcile_from_state_db,
 )
-from .sidekick_turn_linker import _CHAIN_CTE, _connect_state_ro
+from .parley_turn_linker import _CHAIN_CTE, _connect_state_ro
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ SCHEMA_VERSION = 2
 
 
 def enabled() -> bool:
-    """Env kill switch. SIDEKICK_CHAT_MIGRATION, default '1'; '0'
+    """Env kill switch. PARLEY_CHAT_MIGRATION, default '1'; '0'
     disables backfill, heal, and marker minting entirely."""
     return env_get("PARLEY_CHAT_MIGRATION", "1").strip().lower() not in (
         "0", "false", "no",
@@ -284,7 +284,7 @@ def heal_tool_call_mislinks_sync(db, state_db_path, chat_id: str) -> int:
 def _find_content_mislinks(conn, db, chat_id: str) -> List[str]:
     """Non-tool, non-legacy msg_links ids (this chat) whose envelope
     content is content-INCOMPATIBLE with their linked state row."""
-    from .sidekick_state import _order_fallback_content_compatible
+    from .parley_state import _order_fallback_content_compatible
     try:
         rows = db.fetchall(
             "SELECT id, content, agent_row_id FROM msg_links "
@@ -434,7 +434,7 @@ def backfill_chat_sync(
         # WARNING so the heal is journald-visible (per-chat pre-heal
         # counts also land in the marker stats below).
         logger.warning(
-            "[sidekick] chat-migration healed %d pre-fix mislink(s) "
+            "[parley] chat-migration healed %d pre-fix mislink(s) "
             "(orchestration / wrong-call-id / content-incompatible) "
             "chat=%s", healed, chat_id,
         )
@@ -442,7 +442,7 @@ def backfill_chat_sync(
     stats = _audit_chat_sync(db, state_db_path, chat_id, source)
     if stats is None:
         logger.warning(
-            "[sidekick] chat-migration chat=%s state.db unreachable — "
+            "[parley] chat-migration chat=%s state.db unreachable — "
             "marker withheld", chat_id,
         )
         return {"migrated": False, "reason": "state_unreachable",
@@ -461,7 +461,7 @@ def backfill_chat_sync(
     stats["residual_mislinks"] = residual
     if stats["unresolved"] != 0 or residual != 0:
         logger.warning(
-            "[sidekick] chat-migration chat=%s NOT clean unresolved=%d "
+            "[parley] chat-migration chat=%s NOT clean unresolved=%d "
             "residual_mislinks=%d — marker withheld (retries on next "
             "background reconcile)",
             chat_id, stats["unresolved"], residual,
@@ -476,7 +476,7 @@ def backfill_chat_sync(
         )
     except Exception as exc:
         logger.warning(
-            "[sidekick] chat-migration marker write failed chat=%s: %s",
+            "[parley] chat-migration marker write failed chat=%s: %s",
             chat_id, exc,
         )
         return {"migrated": False, "reason": "marker_write_failed", **stats}
@@ -485,7 +485,7 @@ def backfill_chat_sync(
     # logger.info here would never reach journalctl.
     wall_ms = (time.monotonic() - t0) * 1000.0
     print(
-        f"[perf-trace INFO] [sidekick] chat-migration chat={chat_id} "
+        f"[perf-trace INFO] [parley] chat-migration chat={chat_id} "
         f"migrated schema_version={SCHEMA_VERSION} "
         f"state_rows={stats['state_rows']} linked={stats['linked']} "
         f"replay_dups={stats['replay_dups']} "
@@ -501,7 +501,7 @@ def repair_chat_sync(
 ) -> Optional[Dict[str, Any]]:
     """OFFLINE repair entry point — transcript v3 Phase 4. With the
     content reconcile retired from the serving chain
-    (``SIDEKICK_RECONCILE_RETIRED``), this is the ONE deliberate place
+    (``PARLEY_RECONCILE_RETIRED``), this is the ONE deliberate place
     it still runs: an operator-invoked (POST /v1/transcript/repair, or
     script-called) full re-migration of a single damaged chat.
 
@@ -521,20 +521,20 @@ def repair_chat_sync(
     if db is None or state_db_path is None:
         return None
     logger.warning(
-        "[sidekick] transcript-repair chat=%s starting — marker dropped, "
+        "[parley] transcript-repair chat=%s starting — marker dropped, "
         "force_full reconcile + re-audit + re-mint", chat_id,
     )
     try:
         db.exec("DELETE FROM chat_migrations WHERE chat_id = ?", (chat_id,))
     except Exception as exc:
         logger.warning(
-            "[sidekick] transcript-repair chat=%s marker drop failed: %s",
+            "[parley] transcript-repair chat=%s marker drop failed: %s",
             chat_id, exc,
         )
         return {"migrated": False, "reason": "marker_drop_failed"}
     result = backfill_chat_sync(db, state_db_path, chat_id, source)
     logger.warning(
-        "[sidekick] transcript-repair chat=%s finished migrated=%s%s",
+        "[parley] transcript-repair chat=%s finished migrated=%s%s",
         chat_id,
         bool(result and result.get("migrated")),
         "" if result and result.get("migrated")

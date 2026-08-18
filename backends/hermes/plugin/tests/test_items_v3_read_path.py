@@ -1,8 +1,8 @@
-"""Transcript v3 read path (Phase 3, ``SIDEKICK_ITEMS_V3``).
+"""Transcript v3 read path (Phase 3, ``PARLEY_ITEMS_V3``).
 
 Pins the read flip: for chats holding a current-``SCHEMA_VERSION``
-``chat_migrations`` marker, the items endpoint serves **sidekick.db
-bodies** (msg_links) in sidekick.db's own frozen per-row order,
+``chat_migrations`` marker, the items endpoint serves **parley.db
+bodies** (msg_links) in parley.db's own frozen per-row order,
 consulting state.db only THROUGH links as a liveness oracle:
 
   * linked row (agent_row_id set) → served iff the state row still
@@ -38,12 +38,12 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_chat_migration as migration
-from .. import sidekick_route_items as route
-from .. import sidekick_state as state
-from .. import sidekick_turn_linker as linker
-from ..sidekick_turn_buffer import TurnBuffer
+from ..parley_db import ParleyDB
+from .. import parley_chat_migration as migration
+from .. import parley_route_items as route
+from .. import parley_state as state
+from .. import parley_turn_linker as linker
+from ..parley_turn_buffer import TurnBuffer
 
 
 CHAT_ID = "f3a10c77-v3-read-path-test"
@@ -56,7 +56,7 @@ BASE = 1_784_500_000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -105,7 +105,7 @@ def state_db(tmp_path):
 def _reset_shared_state(monkeypatch):
     # Route tests must not spawn real background reconciles, and the
     # linker compare cache must not leak across tests.
-    monkeypatch.setenv("SIDEKICK_RECONCILE_BG_DISABLED", "1")
+    monkeypatch.setenv("PARLEY_RECONCILE_BG_DISABLED", "1")
     linker._compare_hwm.clear()
     route._last_reconcile_at.clear()
     yield
@@ -471,7 +471,7 @@ def test_healed_status_bubble_serves_once_envelope_only(db, state_db):
 
 class _Adapter:
     def __init__(self, db, state_db, turn_buffer=None):
-        self._sidekick_db = db
+        self._parley_db = db
         self._state_db_path = state_db
         self._turn_buffer = turn_buffer
 
@@ -512,7 +512,7 @@ def _seed_undo_discriminator(db, state_db):
 
 def test_route_flag_on_marked_chat_serves_v3(db, state_db, monkeypatch):
     undone = _seed_undo_discriminator(db, state_db)
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     body = _drive_items(_Adapter(db, state_db))
     assert undone not in {it["id"] for it in body["data"]}
 
@@ -521,7 +521,7 @@ def test_route_flag_off_keeps_legacy_read(db, state_db, monkeypatch):
     """Instant global revert: unsetting the flag restores the legacy
     read for every chat, markers or not."""
     undone = _seed_undo_discriminator(db, state_db)
-    monkeypatch.delenv("SIDEKICK_ITEMS_V3", raising=False)
+    monkeypatch.delenv("PARLEY_ITEMS_V3", raising=False)
     body = _drive_items(_Adapter(db, state_db))
     assert undone in {it["id"] for it in body["data"]}
 
@@ -530,7 +530,7 @@ def test_route_unmarked_chat_falls_back_to_legacy(db, state_db, monkeypatch):
     """Per-chat automatic fallback: flag on but no marker → legacy."""
     undone = _seed_undo_discriminator(db, state_db)
     db.exec("DELETE FROM chat_migrations WHERE chat_id = ?", (CHAT_ID,))
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     body = _drive_items(_Adapter(db, state_db))
     assert undone in {it["id"] for it in body["data"]}
 
@@ -541,7 +541,7 @@ def test_route_stale_schema_version_falls_back_to_legacy(db, state_db, monkeypat
     undone = _seed_undo_discriminator(db, state_db)
     db.exec("UPDATE chat_migrations SET schema_version = ? WHERE chat_id = ?",
             (migration.SCHEMA_VERSION - 1, CHAT_ID))
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     body = _drive_items(_Adapter(db, state_db))
     assert undone in {it["id"] for it in body["data"]}
 
@@ -550,7 +550,7 @@ def test_route_v3_composes_with_inflight_overlay(db, state_db, monkeypatch):
     """The TurnBuffer in-flight slice overlays the v3 read exactly as it
     does the legacy read — mid-turn reload keeps its streaming bubbles."""
     undone = _seed_undo_discriminator(db, state_db)
-    monkeypatch.setenv("SIDEKICK_ITEMS_V3", "1")
+    monkeypatch.setenv("PARLEY_ITEMS_V3", "1")
     tb = TurnBuffer()
     tb.open_turn(chat_id=CHAT_ID, user_message="live question",
                  user_message_id="umsg_inflight")

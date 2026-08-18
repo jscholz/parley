@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .sidekick_state import list_unread_state
+from .parley_state import list_unread_state
 
 
 # ── Per-process TTL cache for compute_unread results ────────────────
@@ -42,7 +42,7 @@ from .sidekick_state import list_unread_state
 # rewrite below cut compute_unread from ~9s to ~2s; the TTL must be
 # meaningfully larger than the compute time so repeat polls within a
 # burst can actually hit the cache. Tunable via
-# SIDEKICK_UNREAD_CACHE_TTL_MS for emergencies.
+# PARLEY_UNREAD_CACHE_TTL_MS for emergencies.
 _CACHE_TTL_S = float(env_get("PARLEY_UNREAD_CACHE_TTL_MS", "5000") or 5000) / 1000.0
 _cache: Dict[str, Tuple[float, Dict]] = {}  # key → (cached_at_monotonic, result)
 _cache_lock = threading.Lock()
@@ -166,31 +166,31 @@ def _compute_unread_uncached(
     This function is structurally **O(history) per chat** — it loops
     over every chat_id and runs a recursive-CTE ``COUNT(*)`` against
     state.db (which can carry thousands of rows per chat) PLUS a
-    sidekick.db scan per chat, all in synchronous Python. With ~30
+    parley.db scan per chat, all in synchronous Python. With ~30
     chats and a 5000-row chat in the mix, one call took ~8 seconds.
 
     On 2026-06-23 this function was the dominant cause of a gateway
-    "loop-lag 8s" pattern — `handle_unread` (sidekick_routes.py) was
+    "loop-lag 8s" pattern — `handle_unread` (parley_routes.py) was
     awaiting it inline, which on an async def is identical to calling
     it synchronously on the loop thread. The PWA polls /unread on
     every drawer-list refresh, so the loop blocked for 8s on every
     poll and every other handler stalled into 8-25s tail latency.
 
     Fix (commit d10f62c): `handle_unread` now routes through
-    ``sidekick_perf_trace.run_in_sidekick_worker`` (asyncio.Semaphore
+    ``parley_perf_trace.run_in_parley_worker`` (asyncio.Semaphore
     + asyncio.to_thread) so the work runs in a bounded worker thread.
     The regression test
     ``test_handle_unread_routes_compute_off_the_loop_thread`` in
-    test_sidekick_unread.py asserts this stays true.
+    test_parley_unread.py asserts this stays true.
 
     If you add a new caller, route it through ``to_thread`` (or
-    ``run_in_sidekick_worker`` to inherit the concurrency cap). Inline
+    ``run_in_parley_worker`` to inherit the concurrency cap). Inline
     invocation from a coroutine WILL re-introduce the loop block.
 
     Counts assistant rows (tool-call orchestrators excluded) with
     timestamp > last_read_at, from TWO sources:
       * state.db ``messages`` — canonical post-turn-flush body store
-      * sidekick.db ``msg_links`` unlinked entries — envelope-time
+      * parley.db ``msg_links`` unlinked entries — envelope-time
         writes that haven't been flushed to state.db yet
 
     The union is essential because hermes flushes state.db only at
@@ -206,11 +206,11 @@ def _compute_unread_uncached(
 
     # Chat universe: EXACTLY the set the conversations route serves —
     # state.db sessions with a user_id for this source (the same root
-    # resolution _summaries_by_user_id in sidekick_route_conversations
+    # resolution _summaries_by_user_id in parley_route_conversations
     # groups by; child/rotated sessions have user_id NULL and roll up
     # to these roots). The badge must be a sum over chats the drawer
     # can actually show, or an unservable chat becomes a permanent
-    # unclearable +1 (field 2026-07-20: `sidekick:upgrade-probe-…` had
+    # unclearable +1 (field 2026-07-20: `parley:upgrade-probe-…` had
     # one msg_links row, no state.db session, and badged forever).
     #
     # msg_links chat_ids are deliberately NOT added to the universe —
@@ -344,7 +344,7 @@ def _compute_unread_uncached(
             # the badge for this call. Caller still gets correct shape.
             state_counts = {}
 
-    # ── BATCH sidekick.db envelope-only query ──────────────────────
+    # ── BATCH parley.db envelope-only query ──────────────────────
     #
     # Same shape as the state.db batch: one query feeds the per-chat
     # thresholds and counts msg_links rows with NULL agent_row_id (the

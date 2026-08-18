@@ -12,10 +12,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from backends.hermes.plugin.sidekick_db import (
-    SidekickDB,
+from backends.hermes.plugin.parley_db import (
+    ParleyDB,
     migrate_legacy_db_file,
-    open_sidekick_db,
+    open_parley_db,
 )
 
 
@@ -89,9 +89,9 @@ def test_fresh_install_no_legacy_file(tmp_path):
     assert not new.exists()
 
 
-def test_open_sidekick_db_migrates_then_opens(tmp_path):
+def test_open_parley_db_migrates_then_opens(tmp_path):
     _make_legacy_db(tmp_path / "sidekick.db", "carried")
-    db = open_sidekick_db(state_dir=str(tmp_path))
+    db = open_parley_db(state_dir=str(tmp_path))
     try:
         assert Path(db.path).name == "parley.db"
         assert not (tmp_path / "sidekick.db").exists()
@@ -100,8 +100,8 @@ def test_open_sidekick_db_migrates_then_opens(tmp_path):
         db.close()
 
 
-def test_open_sidekick_db_fresh_creates_new_name(tmp_path):
-    db = open_sidekick_db(state_dir=str(tmp_path))
+def test_open_parley_db_fresh_creates_new_name(tmp_path):
+    db = open_parley_db(state_dir=str(tmp_path))
     try:
         assert Path(db.path).name == "parley.db"
     finally:
@@ -109,7 +109,7 @@ def test_open_sidekick_db_fresh_creates_new_name(tmp_path):
     assert (tmp_path / "parley.db").exists()
 
 
-def test_direct_sidekickdb_open_is_unaffected(tmp_path):
-    db = SidekickDB(tmp_path / "anything.db")
+def test_direct_parleydb_open_is_unaffected(tmp_path):
+    db = ParleyDB(tmp_path / "anything.db")
     db.close()
     assert (tmp_path / "anything.db").exists()

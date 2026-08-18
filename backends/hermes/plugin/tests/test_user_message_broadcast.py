@@ -6,7 +6,7 @@ connected PWA tabs render the user bubble immediately. Without this,
 only the agent's reply propagated to other devices and the user's own
 message was invisible until manual refresh.
 
-Covers ``SidekickAdapter._handle_responses``:
+Covers ``ParleyAdapter._handle_responses``:
 
   * Envelope is emitted with the documented shape
     (type, chat_id, message_id, text).
@@ -46,7 +46,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -85,7 +85,7 @@ def _load_plugin():
     """Import under the real package name so relative imports resolve;
     see test_user_id_queries._load_plugin for context. Eager-loads
     route submodules so tests can reference them as
-    ``plugin.sidekick_route_*``."""
+    ``plugin.parley_route_*``."""
     _install_hermes_stubs()
     plugin_pkg = Path(__file__).resolve().parents[1]
     parent_dir = str(plugin_pkg.parent)
@@ -93,9 +93,9 @@ def _load_plugin():
         sys.path.insert(0, parent_dir)
     pkg = importlib.import_module(plugin_pkg.name)
     for sub in (
-        "sidekick_ids", "sidekick_route_conversations",
-        "sidekick_route_items", "sidekick_route_events",
-        "sidekick_route_responses", "sidekick_route_settings",
+        "parley_ids", "parley_route_conversations",
+        "parley_route_items", "parley_route_events",
+        "parley_route_responses", "parley_route_settings",
     ):
         importlib.import_module(f"{plugin_pkg.name}.{sub}")
     return pkg
@@ -113,7 +113,7 @@ def _make_adapter(plugin):
     """Bypass __init__ so we don't need PlatformConfig / aiohttp wiring.
     We patch _safe_send_envelope and _check_http_auth + _dispatch_message
     on the instance to capture the call sequence."""
-    adapter = plugin.SidekickAdapter.__new__(plugin.SidekickAdapter)
+    adapter = plugin.ParleyAdapter.__new__(plugin.ParleyAdapter)
     # Minimum state _handle_responses touches before our patches kick in.
     adapter._turn_queues = {}
     adapter._response_message_ids = {}
@@ -134,16 +134,16 @@ class _FakeRequest:
 
 
 async def _drive_handle_responses(plugin, body: dict):
-    """Drive sidekick_route_responses.handle_responses with the auth +
+    """Drive parley_route_responses.handle_responses with the auth +
     dispatch + streaming-write paths neutered. Returns the captured
     envelopes (in order) and the list of dispatch calls.
 
     Post-2026-05-17 the responses handler lives as a free function on
-    sidekick_route_responses, not as an adapter method. We patch the
+    parley_route_responses, not as an adapter method. We patch the
     module-level _handle_streaming / _handle_blocking to short-circuit
     the SSE machinery while still observing the pre-dispatch envelope
     + dispatch call sequence."""
-    route_resp = plugin.sidekick_route_responses
+    route_resp = plugin.parley_route_responses
     adapter = _make_adapter(plugin)
     # _capture_msg_high_water_mark + _coerce_input are exercised before
     # dispatch — stub them out so the test doesn't need state.db.
@@ -215,11 +215,11 @@ def test_user_message_envelope_fires_before_dispatch(plugin):
     so other PWA tabs paint the bubble before any reply_delta lands.
 
     Post-2026-05-17 the responses handler lives as
-    sidekick_route_responses.handle_responses(adapter, request); the
+    parley_route_responses.handle_responses(adapter, request); the
     streaming helper as _handle_streaming. We patch the module-level
     helpers here to short-circuit the SSE path while observing the
     pre-dispatch envelope + dispatch call ordering."""
-    route_resp = plugin.sidekick_route_responses
+    route_resp = plugin.parley_route_responses
     adapter = _make_adapter(plugin)
     adapter._capture_msg_high_water_mark = lambda chat_id: 0
     adapter._turn_buffer = None
@@ -298,17 +298,17 @@ def test_user_message_envelope_uses_voice_prefixed_text(plugin):
     )
 
 
-def test_response_route_reuses_same_assistant_message_id_for_sidekick_envelopes(plugin):
-    """The OpenAI Responses item id and Sidekick envelope id must match.
+def test_response_route_reuses_same_assistant_message_id_for_parley_envelopes(plugin):
+    """The OpenAI Responses item id and Parley envelope id must match.
 
     Regression for the 2026-05-20 duplicate-bubble class: the route
-    minted ``msg_*`` for SSE frames, but ``SidekickAdapter.send()``
-    independently minted ``sk-<unix>-<seq>`` for the Sidekick envelope
-    and sidekick.db write-through row. History replay then surfaced
+    minted ``msg_*`` for SSE frames, but ``ParleyAdapter.send()``
+    independently minted ``sk-<unix>-<seq>`` for the Parley envelope
+    and parley.db write-through row. History replay then surfaced
     durable rows with the ``sk-*`` sidekick_id while the live/inflight
     bubble was keyed by ``msg_*``.
     """
-    route_resp = plugin.sidekick_route_responses
+    route_resp = plugin.parley_route_responses
     adapter = _make_adapter(plugin)
     adapter._check_http_auth = lambda req: True
     adapter._coerce_input = lambda input_field: input_field if isinstance(input_field, str) else None
@@ -497,15 +497,15 @@ def test_approval_persists_and_surfaces_without_retired_state_side_table(
     """Approval persistence must match the post-May-19 production schema."""
     import importlib
 
-    state = importlib.import_module(f"{plugin.__name__}.sidekick_state")
-    db_mod = importlib.import_module(f"{plugin.__name__}.sidekick_db")
+    state = importlib.import_module(f"{plugin.__name__}.parley_state")
+    db_mod = importlib.import_module(f"{plugin.__name__}.parley_db")
 
     chat_id = "approval-current-schema"
     adapter = _make_envelope_routing_adapter(plugin)
     adapter._state_db_path = _make_current_schema_state_db(
         tmp_path / "state.db", chat_id=chat_id,
     )
-    adapter._sidekick_db = db_mod.SidekickDB(tmp_path / "sidekick.db")
+    adapter._parley_db = db_mod.ParleyDB(tmp_path / "sidekick.db")
     subscriber = asyncio.Queue()
     adapter._event_subscribers.add(subscriber)
 
@@ -529,14 +529,14 @@ def test_approval_persists_and_surfaces_without_retired_state_side_table(
     assert role == "assistant"
     assert body == content
 
-    sidekick_row = adapter._sidekick_db.fetchone(
+    parley_row = adapter._parley_db.fetchone(
         "SELECT id, kind, status, agent_row_id FROM msg_links WHERE id = ?",
         (result.message_id,),
     )
-    assert sidekick_row is not None
-    assert sidekick_row["kind"] == "approval"
-    assert sidekick_row["status"] == "final"
-    assert sidekick_row["agent_row_id"] == str(state_row_id)
+    assert parley_row is not None
+    assert parley_row["kind"] == "approval"
+    assert parley_row["status"] == "final"
+    assert parley_row["agent_row_id"] == str(state_row_id)
 
     replayed = [env for _event_id, env in adapter._event_replay_ring]
     approval_events = [env for env in replayed if env.get("kind") == "approval"]
@@ -546,13 +546,13 @@ def test_approval_persists_and_surfaces_without_retired_state_side_table(
     assert delivered["sidekick_id"] == result.message_id
 
     history = state.list_messages_for_chat_with_state_db_source(
-        adapter._sidekick_db, adapter._state_db_path, chat_id, "sidekick",
+        adapter._parley_db, adapter._state_db_path, chat_id, "sidekick",
     )
     assert len(history["items"]) == 1
     assert history["items"][0]["sidekick_id"] == result.message_id
     assert history["items"][0]["kind"] == "approval"
 
-    adapter._sidekick_db.close()
+    adapter._parley_db.close()
 
 
 def test_failure_event_reaches_out_of_turn_replay_ring(plugin):
@@ -578,7 +578,7 @@ def test_failure_event_reaches_out_of_turn_replay_ring(plugin):
 def _make_envelope_routing_adapter(plugin):
     adapter = _make_adapter(plugin)
     adapter._turn_buffer = None
-    adapter._sidekick_db = None
+    adapter._parley_db = None
     adapter._push_dispatcher = None
     adapter._event_subscribers = set()
     adapter._event_replay_ring = []
@@ -606,15 +606,15 @@ class _FakePushDispatcher:
 
 def _make_push_activity_adapter(plugin, tmp_path, monkeypatch, *, delivered=1):
     import importlib
-    state = importlib.import_module(f"{plugin.__name__}.sidekick_state")
-    db_mod = importlib.import_module(f"{plugin.__name__}.sidekick_db")
-    SidekickDB = db_mod.SidekickDB
+    state = importlib.import_module(f"{plugin.__name__}.parley_state")
+    db_mod = importlib.import_module(f"{plugin.__name__}.parley_db")
+    ParleyDB = db_mod.ParleyDB
 
     adapter = _make_envelope_routing_adapter(plugin)
-    adapter._sidekick_db = SidekickDB(tmp_path / "sidekick.db")
+    adapter._parley_db = ParleyDB(tmp_path / "sidekick.db")
     adapter._push_dispatcher = _FakePushDispatcher(delivered=delivered)
     adapter._state_db_path = None
-    monkeypatch.setenv("SIDEKICK_PUSH_OWNED_BY_PLUGIN", "true")
+    monkeypatch.setenv("PARLEY_PUSH_OWNED_BY_PLUGIN", "true")
     return adapter, state
 
 
@@ -627,7 +627,7 @@ def test_delivered_agent_reply_push_creates_activity_item(plugin, tmp_path, monk
         "message_id": "msg_activity_1",
     }))
 
-    items = state.list_activity_items(adapter._sidekick_db)
+    items = state.list_activity_items(adapter._parley_db)
     assert len(items) == 1
     item = items[0]
     assert item["id"] == "msg_activity_1"
@@ -649,7 +649,7 @@ def test_suppressed_agent_reply_push_does_not_create_activity_item(plugin, tmp_p
         "message_id": "msg_engaged_1",
     }))
 
-    assert state.list_activity_items(adapter._sidekick_db) == []
+    assert state.list_activity_items(adapter._parley_db) == []
 
 
 def test_delivered_cron_notification_push_creates_activity_item(plugin, tmp_path, monkeypatch):
@@ -663,7 +663,7 @@ def test_delivered_cron_notification_push_creates_activity_item(plugin, tmp_path
         "content": "Cron output body",
     }))
 
-    items = state.list_activity_items(adapter._sidekick_db)
+    items = state.list_activity_items(adapter._parley_db)
     assert len(items) == 1
     item = items[0]
     assert item["id"] == "notif_cron_1"

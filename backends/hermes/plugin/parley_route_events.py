@@ -25,13 +25,13 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-# Guarded aiohttp import — see sidekick_route_conversations for why.
+# Guarded aiohttp import — see parley_route_conversations for why.
 try:
     from aiohttp import web  # type: ignore[assignment]
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .sidekick_ids import (
+from .parley_ids import (
     SIDEKICK_SOURCE,
     _GATEWAY_ID_SEP,
     _format_gateway_id,
@@ -57,13 +57,13 @@ def publish_out_of_turn(adapter, env: Dict[str, Any]) -> bool:
     which it can detect via Last-Event-ID skips on reconnect.
 
     Wire-side chat_id normalization: prefix bare chat_ids with
-    ``sidekick:`` so the field matches the format the PWA pins via
+    ``parley:`` so the field matches the format the PWA pins via
     ``getViewed()`` (drawer rows + URLs use ``_format_gateway_id``,
     which always prefixes). Without this, post-tool-result `send()`
     envelopes (sk-* message ids) carry bare chat_ids and the PWA's
     handleReplyDelta gate drops them as off-screen — symptom: agent
     reply hangs behind the activity row until session-switch+back
-    re-fetches via the prefixed `/v1/conversations/sidekick:.../items`
+    re-fetches via the prefixed `/v1/conversations/parley:.../items`
     path. Internal queue routing (in-turn path) keys on bare chat_id
     and is unaffected — only the wire field is rewritten.
     """
@@ -84,7 +84,7 @@ def publish_out_of_turn(adapter, env: Dict[str, Any]) -> bool:
             delivered = True
         except asyncio.QueueFull:
             logger.warning(
-                "[sidekick] /v1/events subscriber queue full, dropping %s",
+                "[parley] /v1/events subscriber queue full, dropping %s",
                 env.get("type"),
             )
         except Exception:
@@ -141,7 +141,7 @@ async def handle_events(adapter, request: "web.Request") -> "web.StreamResponse"
     except (asyncio.CancelledError, ConnectionResetError):
         pass
     except Exception as exc:
-        logger.warning("[sidekick] /v1/events error: %s", exc)
+        logger.warning("[parley] /v1/events error: %s", exc)
     finally:
         adapter._event_subscribers.discard(queue)
         with contextlib.suppress(Exception):

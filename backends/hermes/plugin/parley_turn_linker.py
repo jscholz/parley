@@ -9,7 +9,7 @@ mints a new duplicate/reorder shape faster than heuristics can be
 enumerated. v3 replaces inference with one deterministic capture at the
 only moment the truth is cheaply knowable: **turn end**. See
 ``workspace/documents/agent-development/
-sidekick-transcript-v3-deterministic-link-design-2026-07-16.md``.
+parley-transcript-v3-deterministic-link-design-2026-07-16.md``.
 
 Phase 1 is a dark launch:
 
@@ -26,22 +26,22 @@ Phase 1 is a dark launch:
     deliberately NOT required — hermes post-persist mutations like
     explainer footers made content matching the bug, not the fix).
   * Links land in SHADOW tables (``turn_links`` / ``turn_observations``,
-    see sidekick_db.py). For unmarked chats the content-matching
+    see parley_db.py). For unmarked chats the content-matching
     reconcile stays authoritative and ``compare_and_log`` diffs the two
     opinions after each background reconcile (ONE ``linker-soak``
     journal line per chat with anything to report).
 
-Phase 4 (2026-07-30, ``SIDEKICK_RECONCILE_RETIRED``, default ON): for
+Phase 4 (2026-07-30, ``PARLEY_RECONCILE_RETIRED``, default ON): for
 chats holding a current-version ``chat_migrations`` marker the linker
 is the REAL link writer — turn-close claims stamp
 ``msg_links.agent_row_id`` directly (``_stamp_claims_sync``: linker
 claim fills NULL, wins over a reconcile-minted value, never overwrites
 another linker claim) and mint the orchestration ``legacy:<id>`` twins.
-The background chain (sidekick_route_items) retires the content
+The background chain (parley_route_items) retires the content
 reconcile for those chats; Phase 5's divergence monitor
-(sidekick_transcript_monitor) replaces both the reconcile safety net
+(parley_transcript_monitor) replaces both the reconcile safety net
 and the linker-soak compare there. Reconcile survives untouched as the
-offline repair tool (sidekick_chat_migration.repair_chat_sync).
+offline repair tool (parley_chat_migration.repair_chat_sync).
 
 Interrupted turns are closed by the *next-turn-start barrier*
 (``flush_pending_capture``): opening a new watermark first captures any
@@ -50,14 +50,14 @@ classified with the same rules. Rows appended while the plugin was down
 (gateway restart, terminal use) become ONE ``status='unobserved'``
 observation with the gap bounds and zero claims.
 
-Kill switch: ``SIDEKICK_TURN_LINKER=0`` disables everything (default on).
+Kill switch: ``PARLEY_TURN_LINKER=0`` disables everything (default on).
 
 Threading: the ``*_sync`` internals do sqlite work and MUST NOT run on
 the asyncio loop thread — the public coroutines route them through
-``run_in_sidekick_worker`` (same discipline as reconcile, see the
-2026-06-23 loop-starvation incident notes in sidekick_state.py).
-state.db is opened ``mode=ro`` only; sidekick.db writes go through the
-lock-guarded SidekickDB handle.
+``run_in_parley_worker`` (same discipline as reconcile, see the
+2026-06-23 loop-starvation incident notes in parley_state.py).
+state.db is opened ``mode=ro`` only; parley.db writes go through the
+lock-guarded ParleyDB handle.
 """
 
 from __future__ import annotations
@@ -74,19 +74,19 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Set
 
-from .sidekick_ids import SIDEKICK_SOURCE
-from .sidekick_state import _is_compaction_seed
+from .parley_ids import SIDEKICK_SOURCE
+from .parley_state import _is_compaction_seed
 
 logger = logging.getLogger(__name__)
 
 # Fire-and-forget close tasks — held so they aren't GC'd mid-flight
-# (same pattern as sidekick_route_items._reconcile_tasks).
+# (same pattern as parley_route_items._reconcile_tasks).
 _close_tasks: Set["asyncio.Task"] = set()
 
 # Per-chat high-water mark of already-compared observations
 # (closed_at). compare_and_log only reports NEW turns / divergences so
 # the soak line doesn't spam every items poll. Process-level CACHE
-# only — the durable copy lives in sidekick.db linker_compare_state
+# only — the durable copy lives in parley.db linker_compare_state
 # (see _load_compare_hwm): in-memory-only marks reset on every gateway
 # restart, so compare re-swept full history and re-WARNed stale
 # pre-fix links forever (2026-07-28 re-soak forensics).
@@ -131,7 +131,7 @@ def _store_compare_hwm(db, chat_id: str, value: float) -> None:
 
 
 def enabled() -> bool:
-    """Env kill switch. SIDEKICK_TURN_LINKER, default '1'; '0' disables
+    """Env kill switch. PARLEY_TURN_LINKER, default '1'; '0' disables
     watermark capture, close/link, and the soak comparison entirely."""
     return env_get("PARLEY_TURN_LINKER", "1").strip().lower() not in (
         "0", "false", "no",
@@ -139,7 +139,7 @@ def enabled() -> bool:
 
 
 def reconcile_retired() -> bool:
-    """Transcript v3 Phase 4 flag: ``SIDEKICK_RECONCILE_RETIRED``,
+    """Transcript v3 Phase 4 flag: ``PARLEY_RECONCILE_RETIRED``,
     default ON (approved 2026-07-30). While set, the linker is promoted
     from dark shadow-writer to the REAL link writer: for migrated
     ("marked") chats its turn-close claims stamp
@@ -150,7 +150,7 @@ def reconcile_retired() -> bool:
 
     Independently revertible: '0' restores the full Phase-3 posture
     (reconcile maintains links, linker back to shadow tables only)
-    WITHOUT touching ``SIDEKICK_ITEMS_V3`` serving — the v3 read never
+    WITHOUT touching ``PARLEY_ITEMS_V3`` serving — the v3 read never
     cares who wrote agent_row_id."""
     return env_get("PARLEY_RECONCILE_RETIRED", "1",
     ).strip().lower() not in ("0", "false", "no")
@@ -423,7 +423,7 @@ def classify_window_rows(
 
 # ── state.db chain queries (mode=ro) ─────────────────────────────────
 #
-# Same recursive CTE as sidekick_state's reconcile / items readers:
+# Same recursive CTE as parley_state's reconcile / items readers:
 # roll compaction-rotated child sessions (user_id=NULL, matching
 # system-prompt head) up under the requested chat_id.
 
@@ -540,7 +540,7 @@ def _stamp_claims_sync(db, chat_id: str, claims, window_rows) -> Dict[str, int]:
         resulting unrepresented row.
       * orchestration claims (msg_id=None — no envelope exists by
         construction) → mint the ``legacy:<id>`` twin via the SHARED
-        legacy-import representation (sidekick_state.insert_legacy_twin,
+        legacy-import representation (parley_state.insert_legacy_twin,
         the same shape reconcile's Pass 2 / the backfill import mint).
         Exact-id, zero content inference. Without this, every fresh
         tool-using turn on a retired chat would lose its orchestration
@@ -548,7 +548,7 @@ def _stamp_claims_sync(db, chat_id: str, claims, window_rows) -> Dict[str, int]:
 
     Returns counters (filled/overrode/kept/minted/skipped) for the
     perf-trace breadcrumb. Worker thread only (sqlite writes)."""
-    from .sidekick_state import insert_legacy_twin  # noqa: WPS433
+    from .parley_state import insert_legacy_twin  # noqa: WPS433
 
     row_map = {str(_row_get(r, "id")): r for r in window_rows}
     counts = {"filled": 0, "overrode": 0, "kept": 0, "minted": 0, "skipped": 0}
@@ -600,8 +600,8 @@ def _stamp_claims_sync(db, chat_id: str, claims, window_rows) -> Dict[str, int]:
 
 def _chat_is_marked(db, chat_id: str) -> bool:
     """Current-SCHEMA_VERSION migration marker present? (Lazy import —
-    sidekick_chat_migration imports from this module at load time.)"""
-    from . import sidekick_chat_migration as _migration  # noqa: WPS433
+    parley_chat_migration imports from this module at load time.)"""
+    from . import parley_chat_migration as _migration  # noqa: WPS433
     try:
         return _migration.get_migration(db, chat_id) is not None
     except Exception:
@@ -667,7 +667,7 @@ def _capture_window_sync(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (chat_id, c["msg_id"], c["agent_row_id"], turn_id, c["method"], now),
         )
-    # Phase 4 (2026-07-30, SIDEKICK_RECONCILE_RETIRED): for marked
+    # Phase 4 (2026-07-30, PARLEY_RECONCILE_RETIRED): for marked
     # chats the claims ALSO stamp msg_links — the deterministic
     # write-time link is the real link now that the content reconcile
     # no longer maintains it for these chats. Aborted windows stamp
@@ -679,7 +679,7 @@ def _capture_window_sync(
             stamped = _stamp_claims_sync(db, chat_id, result["claims"], rows)
             if any(stamped.values()):
                 print(
-                    f"[perf-trace INFO] [sidekick] linker-stamp "
+                    f"[perf-trace INFO] [parley] linker-stamp "
                     f"chat={chat_id} turn={turn_id} "
                     f"filled={stamped['filled']} minted={stamped['minted']} "
                     f"overrode={stamped['overrode']} kept={stamped['kept']} "
@@ -688,7 +688,7 @@ def _capture_window_sync(
                 )
         except Exception as exc:
             logger.warning(
-                "[sidekick] linker-stamp failed chat=%s turn=%s: %s",
+                "[parley] linker-stamp failed chat=%s turn=%s: %s",
                 chat_id, turn_id, exc,
             )
     flags_obj = dict(prev_flags)
@@ -1082,7 +1082,7 @@ def compare_and_log(
         "gap_rows": gap_rows, "dup_call": dup_call,
     }
     line = (
-        f"[sidekick] linker-soak chat={chat_id} turns={counts['turns']} "
+        f"[parley] linker-soak chat={chat_id} turns={counts['turns']} "
         f"agree={agree} diverge={diverge} linker_only={linker_only} "
         f"reconcile_only={reconcile_only} gap_rows={gap_rows} "
         f"dup_call={dup_call}{first_detail}"
@@ -1101,7 +1101,7 @@ def compare_and_log(
     print(f"[perf-trace INFO] {line}", flush=True, file=sys.stderr)
     if diverge:
         logger.warning(
-            "[sidekick] linker-soak-diverge chat=%s diverge=%d%s",
+            "[parley] linker-soak-diverge chat=%s diverge=%d%s",
             chat_id, diverge, first_detail,
         )
     return counts
@@ -1154,7 +1154,7 @@ def _divergence_detail(state_db_path, msg_id, linker_arid, recon_arid) -> str:
 
 def purge_chat_sync(db, chat_id: str) -> int:
     """Chat-delete cascade for the linker's shadow tables. Called from
-    sidekick_route_conversations.delete_conversation_sync (worker
+    parley_route_conversations.delete_conversation_sync (worker
     thread) — without it, a deleted chat leaves orphan observations /
     claims that the compare sweep keeps judging against an empty
     session chain (v3 soak forensics: dead chats polluted the
@@ -1176,7 +1176,7 @@ def purge_chat_sync(db, chat_id: str) -> int:
     # Phase-5 monitor state dies with the chat too (a lingering entry
     # would keep a deleted chat in the transcript_health diagnostics).
     try:
-        from . import sidekick_transcript_monitor as _monitor  # noqa: WPS433
+        from . import parley_transcript_monitor as _monitor  # noqa: WPS433
         _monitor._health.pop(chat_id, None)
         _monitor._warned.pop(chat_id, None)
     except Exception:
@@ -1203,21 +1203,21 @@ async def open_turn_watermark(
     the stale entry's call-id set)."""
     if not enabled():
         return
-    db = getattr(adapter, "_sidekick_db", None)
+    db = getattr(adapter, "_parley_db", None)
     state_db_path = getattr(adapter, "_state_db_path", None)
     if db is None or state_db_path is None:
         return
     tb = getattr(adapter, "_turn_buffer", None)
     snap = _entry_snapshot(tb.active_for_chat(chat_id)) if tb is not None else None
-    from .sidekick_perf_trace import run_in_sidekick_worker  # noqa: WPS433
+    from .parley_perf_trace import run_in_parley_worker  # noqa: WPS433
     try:
-        await run_in_sidekick_worker(
+        await run_in_parley_worker(
             _open_sync, db, state_db_path, _bare_chat_id(chat_id),
             SIDEKICK_SOURCE, turn_id,
             user_text=user_text, entry_snapshot=snap,
         )
     except Exception as exc:
-        logger.warning("[sidekick] turn-linker open failed for %s: %s", chat_id, exc)
+        logger.warning("[parley] turn-linker open failed for %s: %s", chat_id, exc)
 
 
 async def flush_pending_capture(adapter, chat_id: str) -> None:
@@ -1225,20 +1225,20 @@ async def flush_pending_capture(adapter, chat_id: str) -> None:
     runs it implicitly; exposed for explicit stale-window cleanup."""
     if not enabled():
         return
-    db = getattr(adapter, "_sidekick_db", None)
+    db = getattr(adapter, "_parley_db", None)
     state_db_path = getattr(adapter, "_state_db_path", None)
     if db is None or state_db_path is None:
         return
     tb = getattr(adapter, "_turn_buffer", None)
     snap = _entry_snapshot(tb.active_for_chat(chat_id)) if tb is not None else None
-    from .sidekick_perf_trace import run_in_sidekick_worker  # noqa: WPS433
+    from .parley_perf_trace import run_in_parley_worker  # noqa: WPS433
     try:
-        await run_in_sidekick_worker(
+        await run_in_parley_worker(
             _flush_pending_sync, db, state_db_path, _bare_chat_id(chat_id),
             SIDEKICK_SOURCE, entry_snapshot=snap,
         )
     except Exception as exc:
-        logger.warning("[sidekick] turn-linker flush failed for %s: %s", chat_id, exc)
+        logger.warning("[parley] turn-linker flush failed for %s: %s", chat_id, exc)
 
 
 async def close_turn_and_link(
@@ -1250,19 +1250,19 @@ async def close_turn_and_link(
     notification triggers / when no turn was open)."""
     if not enabled():
         return
-    db = getattr(adapter, "_sidekick_db", None)
+    db = getattr(adapter, "_parley_db", None)
     state_db_path = getattr(adapter, "_state_db_path", None)
     if db is None or state_db_path is None:
         return
     snap = _entry_snapshot(turn_entry)
-    from .sidekick_perf_trace import run_in_sidekick_worker  # noqa: WPS433
+    from .parley_perf_trace import run_in_parley_worker  # noqa: WPS433
     try:
-        await run_in_sidekick_worker(
+        await run_in_parley_worker(
             _close_sync, db, state_db_path, _bare_chat_id(chat_id),
             SIDEKICK_SOURCE, dict(trigger_env), entry_snapshot=snap,
         )
     except Exception as exc:
-        logger.warning("[sidekick] turn-linker close failed for %s: %s", chat_id, exc)
+        logger.warning("[parley] turn-linker close failed for %s: %s", chat_id, exc)
 
 
 def schedule_close(adapter, chat_id: str, env: Dict[str, Any], turn_entry: Any) -> None:
@@ -1270,7 +1270,7 @@ def schedule_close(adapter, chat_id: str, env: Dict[str, Any], turn_entry: Any) 
     (loop thread). Holds task refs so they aren't GC'd mid-flight."""
     if not enabled():
         return
-    if getattr(adapter, "_sidekick_db", None) is None:
+    if getattr(adapter, "_parley_db", None) is None:
         return
     task = asyncio.ensure_future(
         close_turn_and_link(adapter, chat_id, dict(env), turn_entry=turn_entry)

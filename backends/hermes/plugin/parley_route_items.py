@@ -8,7 +8,7 @@ own module. The endpoint is read-only, hits only hermes ``state.db``
 mechanically safe.
 
 Wiring contract: ``handle_get_items(adapter, request)`` takes the
-calling ``SidekickAdapter`` instance and the aiohttp request. The
+calling ``ParleyAdapter`` instance and the aiohttp request. The
 handler reads ``adapter._state_db_path``, ``adapter._turn_buffer``,
 ``adapter._check_http_auth`` — same fields the original method
 referenced via ``self``.
@@ -26,7 +26,7 @@ import sys as _sys
 import time as _time
 from typing import Any, Dict, Optional, Tuple
 
-# aiohttp guard mirrors sidekick_route_conversations — keeps unit
+# aiohttp guard mirrors parley_route_conversations — keeps unit
 # tests loading without the aiohttp runtime. Production loads it
 # before any route handler runs.
 try:
@@ -34,11 +34,11 @@ try:
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
 
 
 # Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
-# recursive-CTE pass over state.db plus an O(N) sidekick.db scan; before
+# recursive-CTE pass over state.db plus an O(N) parley.db scan; before
 # this it ran on EVERY /items enter, and on long sessions that O(history)
 # work (GIL-bound) saturated a core and starved the event loop (30-90s
 # read/reply latency). Reads themselves come from state.db directly, so
@@ -49,7 +49,7 @@ from .sidekick_ids import SIDEKICK_SOURCE, _parse_gateway_id
 _RECONCILE_THROTTLE_S = float(env_get("PARLEY_RECONCILE_THROTTLE_S", "20") or 20)
 _last_reconcile_at: Dict[str, float] = {}
 # Background reconcile is fire-and-forget: the /items read is correct from
-# state.db alone (reconcile only maintains sidekick.db msg_links linkage +
+# state.db alone (reconcile only maintains parley.db msg_links linkage +
 # orphan drops, which tolerate a few seconds of staleness). Running its
 # O(history) recursive-CTE pass INLINE on the read path cost ~8s per cold
 # chat and — under a resume burst that touches many distinct chats — those
@@ -62,7 +62,7 @@ _reconcile_tasks: set = set()
 
 
 def _items_v3_flag() -> bool:
-    """SIDEKICK_ITEMS_V3 read-flip flag (Phase 3, B2 playbook)."""
+    """PARLEY_ITEMS_V3 read-flip flag (Phase 3, B2 playbook)."""
     return env_get("PARLEY_ITEMS_V3", "").strip().lower() in (
         "1", "true", "yes",
     )
@@ -71,7 +71,7 @@ def _items_v3_flag() -> bool:
 def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
     """Fire reconcile_from_state_db off the read path (see notes above).
     No-ops if a pass for this chat is already running."""
-    # Diagnostic kill switch — set SIDEKICK_RECONCILE_BG_DISABLED=1 to
+    # Diagnostic kill switch — set PARLEY_RECONCILE_BG_DISABLED=1 to
     # short-circuit the spawn entirely. Used during perf investigation
     # to attribute loop-lag causes. Reads are correct from state.db
     # alone (msg_links provides annotations only); skipping reconcile
@@ -81,15 +81,15 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
         return
     if chat_id in _reconcile_inflight:
         return
-    from . import sidekick_state as _sstate
+    from . import parley_state as _sstate
 
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    from . import parley_perf_trace as _perf  # noqa: WPS433
 
     async def _run() -> None:
         try:
             # Transcript v3 Phase 4 (2026-07-30): for chats v3 actually
-            # serves — SIDEKICK_ITEMS_V3 on + a current-version
-            # migration marker + SIDEKICK_RECONCILE_RETIRED (default
+            # serves — PARLEY_ITEMS_V3 on + a current-version
+            # migration marker + PARLEY_RECONCILE_RETIRED (default
             # on) — the content reconcile is RETIRED from this chain.
             # Steady state is covered by write-through bodies + the
             # turn linker's write-time links (it stamps
@@ -100,26 +100,26 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
             # legacy chain below keeps running unchanged for unmarked
             # chats — including the one-shot force_full legacy import
             # inside the migration backfill — and is the instant revert
-            # path: flip SIDEKICK_RECONCILE_RETIRED=0 (or unset
-            # SIDEKICK_ITEMS_V3) and every chat is back on the Phase-3
+            # path: flip PARLEY_RECONCILE_RETIRED=0 (or unset
+            # PARLEY_ITEMS_V3) and every chat is back on the Phase-3
             # chain without touching serving. Reconcile itself survives
             # as the offline repair tool
-            # (sidekick_chat_migration.repair_chat_sync).
-            from . import sidekick_chat_migration as _migration  # noqa: WPS433
-            from . import sidekick_turn_linker as _linker  # noqa: WPS433
+            # (parley_chat_migration.repair_chat_sync).
+            from . import parley_chat_migration as _migration  # noqa: WPS433
+            from . import parley_turn_linker as _linker  # noqa: WPS433
             if (
-                adapter._sidekick_db is not None
+                adapter._parley_db is not None
                 and _items_v3_flag()
                 and _linker.reconcile_retired()
             ):
-                _marked = await _perf.run_in_sidekick_worker(
-                    _migration.get_migration, adapter._sidekick_db, chat_id,
+                _marked = await _perf.run_in_parley_worker(
+                    _migration.get_migration, adapter._parley_db, chat_id,
                 )
                 if _marked is not None:
-                    from . import sidekick_transcript_monitor as _monitor  # noqa: WPS433
-                    await _perf.run_in_sidekick_worker(
+                    from . import parley_transcript_monitor as _monitor  # noqa: WPS433
+                    await _perf.run_in_parley_worker(
                         _monitor.sweep_chat_sync,
-                        adapter._sidekick_db, adapter._state_db_path,
+                        adapter._parley_db, adapter._state_db_path,
                         chat_id, source,
                     )
                     return
@@ -129,9 +129,9 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
             # msg_links and, once past the per-chat compare high-water
             # mark, never re-compared.
             _reconcile_started_at = _time.time()
-            await _perf.run_in_sidekick_worker(
+            await _perf.run_in_parley_worker(
                 _sstate.reconcile_from_state_db,
-                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+                adapter._parley_db, adapter._state_db_path, chat_id, source,
             )
             # Transcript v3 Phase 2 (dark): one-time legacy import +
             # migration marker for this chat. Runs BEFORE the compare
@@ -139,24 +139,24 @@ def _spawn_background_reconcile(adapter, chat_id: str, source: str) -> None:
             # status-bubble mislinks it heals were exactly the stale
             # diverge noise). One indexed marker lookup once migrated;
             # serving is untouched until Phase 3 consults the marker.
-            # No-op when SIDEKICK_CHAT_MIGRATION=0.
-            from . import sidekick_chat_migration as _migration  # noqa: WPS433
-            if _migration.enabled() and adapter._sidekick_db is not None:
-                await _perf.run_in_sidekick_worker(
+            # No-op when PARLEY_CHAT_MIGRATION=0.
+            from . import parley_chat_migration as _migration  # noqa: WPS433
+            if _migration.enabled() and adapter._parley_db is not None:
+                await _perf.run_in_parley_worker(
                     _migration.backfill_chat_sync,
-                    adapter._sidekick_db, adapter._state_db_path,
+                    adapter._parley_db, adapter._state_db_path,
                     chat_id, source,
                 )
             # Transcript v3 Phase 1 (dark launch): diff the turn
             # linker's shadow links against the reconcile pass that
             # just ran and emit one linker-soak journal line per chat
             # when there are new turns or divergences. No-op when
-            # SIDEKICK_TURN_LINKER=0.
-            from . import sidekick_turn_linker as _linker  # noqa: WPS433
-            if _linker.enabled() and adapter._sidekick_db is not None:
-                await _perf.run_in_sidekick_worker(
+            # PARLEY_TURN_LINKER=0.
+            from . import parley_turn_linker as _linker  # noqa: WPS433
+            if _linker.enabled() and adapter._parley_db is not None:
+                await _perf.run_in_parley_worker(
                     _linker.compare_and_log,
-                    adapter._sidekick_db, chat_id,
+                    adapter._parley_db, chat_id,
                     state_db_path=adapter._state_db_path,
                     closed_before=_reconcile_started_at,
                 )
@@ -175,9 +175,9 @@ def _resolve_source_for_chat_id(adapter, chat_id: str) -> Optional[str]:
     """Pick a ``sessions.source`` for this chat_id.
 
     Used by the per-chat history handler, which doesn't carry a
-    source on the URL. Prefers ``sidekick`` on a collision so the
+    source on the URL. Prefers ``parley`` on a collision so the
     composer-editable behavior in the PWA stays consistent for
-    sidekick-native chats; falls back to whatever source state.db
+    parley-native chats; falls back to whatever source state.db
     has for the user_id otherwise (telegram, slack, etc.).
 
     Returns ``None`` when no session exists for the chat_id (treated
@@ -340,7 +340,7 @@ def _items_by_user_id(
             # rather than crashing renderHistoryMessage.
             item["tool_calls"] = tool_calls
         # SSE-shape id (umsg_*/msg_*/notif_*) when this row was
-        # persisted by a sidekick turn (or cron delivery — see
+        # persisted by a parley turn (or cron delivery — see
         # _persist_notification) that recorded its link. Absent
         # for legacy messages, messages from other channels, and
         # tool/system rows.
@@ -376,20 +376,20 @@ def _items_by_user_id(
 async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     """GET /v1/conversations/{id}/items — transcript replay.
 
-    Phase 2 (2026-05-19): read source is sidekick.db.msg_links, not
+    Phase 2 (2026-05-19): read source is parley.db.msg_links, not
     state.db. Before each read, an opportunistic reconciliation pulls
-    any state.db rows that don't have a sidekick.db twin into the
+    any state.db rows that don't have a parley.db twin into the
     message store with `legacy:<state_id>` keys. The aggregation
     across compaction-rotated sessions is done INSIDE the reconciler
     via the same recursive CTE the legacy path used.
 
-    Pagination cursor: sidekick.db.msg_links's implicit rowid. PWA
+    Pagination cursor: parley.db.msg_links's implicit rowid. PWA
     treats it as an integer (same wire shape as before); the cursor's
     monotonicity is sqlite-guaranteed.
 
-    Returns 404 only when the chat has zero rows in sidekick.db AND
+    Returns 404 only when the chat has zero rows in parley.db AND
     state.db has no session for the chat AND no in-flight turn buffer
-    exists — i.e. genuinely unknown chat. A chat with sidekick.db rows
+    exists — i.e. genuinely unknown chat. A chat with parley.db rows
     (envelope-time writes from Phase 1) always responds with a list.
     """
     _trace_id = secrets.token_hex(3)
@@ -398,16 +398,16 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     # entering. Set by the perf_arrival_middleware; if absent (middleware
     # disabled / different code path) we fall back to "0ms" and lose
     # visibility into asyncio dispatch lag, which is the whole reason
-    # this trace exists. See sidekick_perf_trace.perf_arrival_middleware.
+    # this trace exists. See parley_perf_trace.perf_arrival_middleware.
     _t_arrived = request.get("t_perf_arrived")
     _dispatch_gap_ms = int((_t0 - _t_arrived) * 1000) if _t_arrived is not None else None
     # Items-trace prints to stderr (and through journald). Each print
     # with flush=True is a blocking syscall on the loop thread — under
     # a burst of parallel /items requests (drawer prefetch fan-out) the
     # cumulative back-pressure from journald is a primary suspect for
-    # event-loop stalls. Gated behind SIDEKICK_ITEMS_TRACE so we can
+    # event-loop stalls. Gated behind PARLEY_ITEMS_TRACE so we can
     # toggle without a code change; default OFF to keep the loop clear.
-    # When investigating, set SIDEKICK_ITEMS_TRACE=1 in the systemd
+    # When investigating, set PARLEY_ITEMS_TRACE=1 in the systemd
     # drop-in to re-enable the legacy verbose breadcrumbs.
     _items_trace_on = env_get("PARLEY_ITEMS_TRACE", "").lower() in ("1", "true", "yes")
     if _items_trace_on:
@@ -461,7 +461,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
             return web.Response(status=400, text="invalid after cursor")
 
     # Source resolution still hits state.db — it's the canonical
-    # mapping of chat_id → source (sidekick / telegram / slack /…).
+    # mapping of chat_id → source (parley / telegram / slack /…).
     # Track whether state.db has ANY session for this chat so the
     # final 404-vs-empty decision can incorporate it.
     parsed_source, chat_id = _parse_gateway_id(raw_id)
@@ -475,13 +475,13 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         _trace("source-resolve-end", f"source={source}")
         state_db_knows_chat = source is not None
         if source is None:
-            source = "sidekick"  # assume sidekick for the reconcile/query below
+            source = "sidekick"  # assume parley for the reconcile/query below
 
-    from . import sidekick_state as _sstate
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433 (worker semaphore)
+    from . import parley_state as _sstate
+    from . import parley_perf_trace as _perf  # noqa: WPS433 (worker semaphore)
 
     # Opportunistic reconciliation: pull any state.db rows missing from
-    # sidekick.db. The read below is correct from state.db ALONE, so this
+    # parley.db. The read below is correct from state.db ALONE, so this
     # runs DETACHED (fire-and-forget) and never blocks the response — see
     # _spawn_background_reconcile. Throttled per-chat (see
     # _RECONCILE_THROTTLE_S) so a busy poll/multi-device read pattern
@@ -496,30 +496,30 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         _trace("reconcile-bg", "spawned")
 
     # B2 / v2 read path: state.db is the canonical body store;
-    # sidekick.db.msg_links surfaces sidekick_id + kind as annotations.
+    # parley.db.msg_links surfaces sidekick_id + kind as annotations.
     # ON by default 2026-05-29 (v2 ship — paired with the deterministic
     # link shim in reconcile_from_state_db Pass 1.b). Set
-    # SIDEKICK_ITEMS_READ_FROM_STATE_DB=0 to fall back to the legacy v1
-    # path (mirrors bodies in sidekick.db; dupes on link miss).
+    # PARLEY_ITEMS_READ_FROM_STATE_DB=0 to fall back to the legacy v1
+    # path (mirrors bodies in parley.db; dupes on link miss).
     _b2_enabled = env_get("PARLEY_ITEMS_READ_FROM_STATE_DB", "1").lower() in ("1", "true", "yes")
     # Transcript v3 read flip (Phase 3, 2026-07-30): for chats holding a
-    # current-SCHEMA_VERSION chat_migrations marker, serve sidekick.db
+    # current-SCHEMA_VERSION chat_migrations marker, serve parley.db
     # bodies + identity (msg_links), consulting state.db only through
-    # links for liveness — see sidekick_state._build_v3_items. Default
+    # links for liveness — see parley_state._build_v3_items. Default
     # OFF; flag on + unmarked (or stale-version) chat falls through to
     # the legacy read untouched. Per-chat automatic fallback; global
-    # instant revert by unsetting SIDEKICK_ITEMS_V3 (B2 playbook). The
+    # instant revert by unsetting PARLEY_ITEMS_V3 (B2 playbook). The
     # background chain above runs the Phase-5 divergence monitor for
     # chats this flag serves (Phase 4 retired the content reconcile
     # there — the turn linker writes the links at turn close now) and
     # the unchanged legacy chain for everything else.
     _v3_flag = _items_v3_flag()
     _use_v3 = False
-    if _v3_flag and adapter._sidekick_db is not None:
-        from . import sidekick_chat_migration as _migration  # noqa: WPS433
+    if _v3_flag and adapter._parley_db is not None:
+        from . import parley_chat_migration as _migration  # noqa: WPS433
         _use_v3 = (
-            await _perf.run_in_sidekick_worker(
-                _migration.get_migration, adapter._sidekick_db, chat_id,
+            await _perf.run_in_parley_worker(
+                _migration.get_migration, adapter._parley_db, chat_id,
             )
         ) is not None
     _trace("query-start", f"limit={limit} before={before_id} after={after_id} around={around or ''} b2={_b2_enabled} v3={_use_v3}")
@@ -533,15 +533,15 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         # serial load-earlier drill when target_found is False / the field
         # is absent).
         if _use_v3:
-            result = await _perf.run_in_sidekick_worker(
+            result = await _perf.run_in_parley_worker(
                 _sstate.list_messages_around_for_chat_v3,
-                adapter._sidekick_db, adapter._state_db_path, chat_id,
+                adapter._parley_db, adapter._state_db_path, chat_id,
                 target=around, limit=limit,
             )
         else:
-            result = await _perf.run_in_sidekick_worker(
+            result = await _perf.run_in_parley_worker(
                 _sstate.list_messages_around_for_chat_with_state_db_source,
-                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+                adapter._parley_db, adapter._state_db_path, chat_id, source,
                 target=around, limit=limit,
             )
         target_found = bool(result.get("target_found"))
@@ -550,35 +550,35 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     elif after_id is not None and (_b2_enabled or _use_v3):
         # Load-newer page (symmetric counterpart of before paging).
         if _use_v3:
-            result = await _perf.run_in_sidekick_worker(
+            result = await _perf.run_in_parley_worker(
                 _sstate.list_messages_after_for_chat_v3,
-                adapter._sidekick_db, adapter._state_db_path, chat_id,
+                adapter._parley_db, adapter._state_db_path, chat_id,
                 after_id=after_id, limit=limit,
             )
         else:
-            result = await _perf.run_in_sidekick_worker(
+            result = await _perf.run_in_parley_worker(
                 _sstate.list_messages_after_for_chat_with_state_db_source,
-                adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+                adapter._parley_db, adapter._state_db_path, chat_id, source,
                 after_id=after_id, limit=limit,
             )
         last_id = result.get("last_id")
         has_more_newer = bool(result.get("has_more_newer"))
     elif _use_v3:
-        result = await _perf.run_in_sidekick_worker(
+        result = await _perf.run_in_parley_worker(
             _sstate.list_messages_for_chat_v3,
-            adapter._sidekick_db, adapter._state_db_path, chat_id,
+            adapter._parley_db, adapter._state_db_path, chat_id,
             limit=limit, before_id=before_id,
         )
     elif _b2_enabled:
-        result = await _perf.run_in_sidekick_worker(
+        result = await _perf.run_in_parley_worker(
             _sstate.list_messages_for_chat_with_state_db_source,
-            adapter._sidekick_db, adapter._state_db_path, chat_id, source,
+            adapter._parley_db, adapter._state_db_path, chat_id, source,
             limit=limit, before_id=before_id,
         )
     else:
-        result = await _perf.run_in_sidekick_worker(
+        result = await _perf.run_in_parley_worker(
             _sstate.list_messages_for_chat,
-            adapter._sidekick_db, chat_id,
+            adapter._parley_db, chat_id,
             limit=limit, before_rowid=before_id,
         )
     items = result["items"]
@@ -597,7 +597,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         if inflight_entry is not None:
             inflight_envelopes = adapter._turn_buffer.render_envelopes(inflight_entry)
 
-    # 404 only when truly unknown chat: no sidekick.db rows + no
+    # 404 only when truly unknown chat: no parley.db rows + no
     # state.db session + no in-flight turn. Preserves the original
     # cmdk drill-to-message fall-through behavior.
     if not items and not inflight_envelopes and not state_db_knows_chat:

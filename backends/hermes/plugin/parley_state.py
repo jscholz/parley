@@ -3,7 +3,7 @@ the supplemental sqlite. Python parity of the openclaw plugin's
 ``src/push-storage.js`` + ``src/pins-storage.js`` + ``src/unread-storage.js``.
 
 Keep this module pure: storage operations only. Dispatch logic
-(engagement filter, web-push call) lives in ``sidekick_dispatcher.py``.
+(engagement filter, web-push call) lives in ``parley_dispatcher.py``.
 """
 
 from __future__ import annotations
@@ -200,7 +200,7 @@ def list_prefs(db) -> Dict[str, Any]:
 # Two pref shapes historically coexisted in push_prefs:
 #   canonical: one row per kind — key `push_kind_<kind>`, value bool.
 #              This is the ONLY shape the dispatcher reads
-#              (sidekick_dispatcher._kind_pref_enabled).
+#              (parley_dispatcher._kind_pref_enabled).
 #   legacy:    one row keyed `kinds` holding a JSON object (the proxy's
 #              PushKinds blob, pre-2026-05-20 delegate which forwarded
 #              the nested object unflattened). Dead on every read path —
@@ -260,8 +260,8 @@ def migrate_legacy_push_prefs(db) -> bool:
             set_pref(db, per_key, enabled)
             migrated.append(f"{per_key}={enabled}")
     db.exec("DELETE FROM push_prefs WHERE key = ?", (LEGACY_KINDS_PREF_KEY,))
-    logging.getLogger("hermes.sidekick.push").info(
-        "[sidekick] migrated legacy push_prefs `kinds` row → canonical shape "
+    logging.getLogger("hermes.parley.push").info(
+        "[parley] migrated legacy push_prefs `kinds` row → canonical shape "
         "(wrote: %s; existing per-key rows preserved)",
         ", ".join(migrated) or "nothing — all per-key rows already present",
     )
@@ -623,11 +623,11 @@ def list_msg_links_for_chat(db, chat_id: str, *, limit: int = 500) -> List[Dict[
 # `list_messages_for_chat` returns rows in the wire shape the items
 # endpoint hands to the PWA. `reconcile_from_state_db` is the
 # opportunistic backfill: any state.db rows for this chat that don't
-# have a sidekick.db twin get inserted with `legacy:<state_id>` keys.
+# have a parley.db twin get inserted with `legacy:<state_id>` keys.
 # Runs at items-endpoint enter time, before the read, so the response
 # always reflects the union.
 #
-# Pagination cursor: sidekick.db.msg_links's implicit `rowid`. SQLite
+# Pagination cursor: parley.db.msg_links's implicit `rowid`. SQLite
 # guarantees monotonicity ("ROWID of any new row will be one larger
 # than the largest ROWID that has ever before existed in that same
 # table"). PWA passes `before` cursor as an integer rowid; we filter
@@ -943,7 +943,7 @@ def _resolve_cursor_sort_key(state_db_path, cursor_id):
 
 
 def list_messages_for_chat_with_state_db_source(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     source: str,
@@ -952,18 +952,18 @@ def list_messages_for_chat_with_state_db_source(
     before_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """B2 read path: state.db is the canonical message body store;
-    sidekick.db.msg_links surfaces sidekick_id + kind as annotations.
+    parley.db.msg_links surfaces sidekick_id + kind as annotations.
 
     Replaces the dual-body model that v1 (``list_messages_for_chat``)
-    implements. With v1, sidekick.db.msg_links stored a full copy of
+    implements. With v1, parley.db.msg_links stored a full copy of
     every message body, and reconcile failures could leave the same
     logical message stored twice — once via envelope write-through,
     once via state.db backfill — surfaced to the PWA as duplicate
     bubbles.
 
     With v2, the items endpoint reads state.db.messages (the canonical
-    server-side store) and joins sidekick.db.msg_links *as a side
-    table* keyed by ``agent_row_id``. Sidekick-id linkage + push/pin
+    server-side store) and joins parley.db.msg_links *as a side
+    table* keyed by ``agent_row_id``. Parley-id linkage + push/pin
     metadata still surfaces; message bodies are never duplicated.
 
     Returns ``{items, first_id, has_more}`` with the same wire shape
@@ -982,7 +982,7 @@ def list_messages_for_chat_with_state_db_source(
     # pagination semantics.
     cursor_key = _resolve_cursor_sort_key(state_db_path, before_id)
     items = _build_chronological_items(
-        sidekick_db, state_db_path, chat_id, source,
+        parley_db, state_db_path, chat_id, source,
         direction="older", cursor_id=before_id,
         cursor_ts=(cursor_key[0] if cursor_key else None),
         fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
@@ -1018,7 +1018,7 @@ def list_messages_for_chat_with_state_db_source(
 
 
 def list_messages_around_for_chat_with_state_db_source(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     source: str,
@@ -1054,7 +1054,7 @@ def list_messages_around_for_chat_with_state_db_source(
     the caller can fall back to its standard pagination drill.
     """
     items = _build_chronological_items(
-        sidekick_db, state_db_path, chat_id, source
+        parley_db, state_db_path, chat_id, source
     )
     empty = {
         "items": [], "first_id": None, "has_more": False,
@@ -1093,7 +1093,7 @@ def list_messages_around_for_chat_with_state_db_source(
 
 
 def list_messages_after_for_chat_with_state_db_source(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     source: str,
@@ -1119,7 +1119,7 @@ def list_messages_after_for_chat_with_state_db_source(
     """
     cursor_key = _resolve_cursor_sort_key(state_db_path, after_id)
     items = _build_chronological_items(
-        sidekick_db, state_db_path, chat_id, source,
+        parley_db, state_db_path, chat_id, source,
         direction="newer", cursor_id=after_id,
         cursor_ts=(cursor_key[0] if cursor_key else None),
         fetch_limit=limit + ITEMS_FETCH_ELISION_MARGIN + 1,
@@ -1147,7 +1147,7 @@ def list_messages_after_for_chat_with_state_db_source(
 
 
 def _build_chronological_items(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     source: str,
@@ -1158,7 +1158,7 @@ def _build_chronological_items(
     fetch_limit: Optional[int] = None,
 ) -> list:
     """Build a chronological item list for a chat from state.db (canonical
-    bodies) merged with sidekick.db.msg_links (sidekick_id + kind
+    bodies) merged with parley.db.msg_links (sidekick_id + kind
     annotations + envelope-only rows).
 
     When ``fetch_limit`` is None (the around-target reader) the WHOLE
@@ -1277,7 +1277,7 @@ def _build_chronological_items(
         return []
 
     # Drop compaction-injected seed rows (same logic as v1, see
-    # ``_items_by_user_id`` in sidekick_route_items.py for the full
+    # ``_items_by_user_id`` in parley_route_items.py for the full
     # explanation of the [CONTEXT COMPACTION] marker + per-session
     # head-block elision).
     if fetch_limit is None:
@@ -1308,7 +1308,7 @@ def _build_chronological_items(
     #      ORIGINAL row often falls OUTSIDE the bounded window fetched
     #      here (re-deriving it would mean re-fetching the session's
     #      full content on every read: ~680ms on the largest live
-    #      chat, vs one indexed sidekick.db lookup).
+    #      chat, vs one indexed parley.db lookup).
     #   2. An in-window classification pass over the rows already in
     #      hand (~0.3ms at window size) — closes the freshness gap for
     #      damage newer than the last reconcile when both copies (and
@@ -1319,13 +1319,13 @@ def _build_chronological_items(
     # identical messages keep serving.
     replay_drop_ids: set = set()
     try:
-        dup_rows = sidekick_db.fetchall(
+        dup_rows = parley_db.fetchall(
             "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
             (chat_id,),
         )
         replay_drop_ids = {str(r["agent_row_id"]) for r in dup_rows}
     except Exception:
-        pass  # sidekick.db unavailable — in-window pass still applies.
+        pass  # parley.db unavailable — in-window pass still applies.
     replay_drop_ids |= _classify_replay_duplicate_state_ids(
         sorted(rows, key=lambda r: r["id"])
     )[1]
@@ -1334,7 +1334,7 @@ def _build_chronological_items(
             r for r in surviving if str(r["id"]) not in replay_drop_ids
         ]
 
-    # Fetch sidekick.db.msg_links rows for these state.db ids in one
+    # Fetch parley.db.msg_links rows for these state.db ids in one
     # query, then merge in Python. This is the "JOIN" that gives the
     # PWA its sidekick_id / kind annotations without the dual-body
     # consistency problem v1 had.
@@ -1343,7 +1343,7 @@ def _build_chronological_items(
     if state_ids:
         placeholders = ",".join("?" * len(state_ids))
         try:
-            link_rows = sidekick_db.fetchall(
+            link_rows = parley_db.fetchall(
                 f"SELECT id AS sidekick_id, agent_row_id, kind "
                 f"FROM msg_links "
                 f"WHERE chat_id = ? AND agent_row_id IN ({placeholders})",
@@ -1354,7 +1354,7 @@ def _build_chronological_items(
                 if agent_row_id:
                     link_by_state_id[str(agent_row_id)] = dict(lr)
         except Exception:
-            # sidekick.db unavailable — fall through with empty
+            # parley.db unavailable — fall through with empty
             # link map. State.db rows still surface; they just won't
             # carry sidekick_id annotations.
             pass
@@ -1385,7 +1385,7 @@ def _build_chronological_items(
     # ── Envelope-only rows: surface unlinked msg_links entries.
     #
     # State.db is hermes' POST-TURN flush; the envelope path (Phase-1
-    # write-through) lands rows on sidekick.db at SSE-emit time, often
+    # write-through) lands rows on parley.db at SSE-emit time, often
     # seconds-to-minutes ahead of state.db. Without this union, a brand-
     # new chat (state.db has no session yet) or a streaming mid-turn
     # chat (state.db row not yet flushed) would surface as ZERO messages
@@ -1400,7 +1400,7 @@ def _build_chronological_items(
     # sidekick_id (msg_xxx/umsg_xxx/notif_xxx/tc:*/tr:*) drives the PWA
     # bubble's data-key.
     try:
-        unlinked = sidekick_db.fetchall(
+        unlinked = parley_db.fetchall(
             "SELECT id, role, content, kind, tool_name, tool_call_id, "
             "       tool_calls, created_at "
             "FROM msg_links "
@@ -1438,9 +1438,9 @@ def _build_chronological_items(
     return items
 
 
-# ── Transcript v3 read path (Phase 3, SIDEKICK_ITEMS_V3) ──────────────
+# ── Transcript v3 read path (Phase 3, PARLEY_ITEMS_V3) ──────────────
 #
-# sidekick.db owns bodies + identity; state.db is consulted ONLY through
+# parley.db owns bodies + identity; state.db is consulted ONLY through
 # msg_links.agent_row_id, as a liveness oracle (v3 design core moves
 # 2/3/6). Serving rule, per msg_links row of the chat:
 #
@@ -1469,7 +1469,7 @@ def _build_chronological_items(
 #     Failure direction is invisibility + alert, never invention
 #     (decision memo 2026-07-28, decision 3).
 #
-# Ordering: sidekick.db's own FROZEN per-row key (created_at, rowid) —
+# Ordering: parley.db's own FROZEN per-row key (created_at, rowid) —
 # both columns are write-once in msg_links (upsert never touches
 # created_at), so nothing hermes-core does after import can reorder
 # served items; the 07-16 class (state.db re-stamps reordering the
@@ -1578,7 +1578,7 @@ def _fetch_v3_liveness(state_db_path, linked_ids):
     return live, head_end
 
 
-def _build_v3_items(sidekick_db, state_db_path, chat_id: str) -> tuple:
+def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
     """Serve-list build for one chat on the v3 rule (see the block
     comment above). Returns ``(items, cursor_index)``:
 
@@ -1592,7 +1592,7 @@ def _build_v3_items(sidekick_db, state_db_path, chat_id: str) -> tuple:
         vanishing-reply bug otherwise returns in v3 dress).
     """
     try:
-        rows = sidekick_db.fetchall(
+        rows = parley_db.fetchall(
             "SELECT id AS sidekick_id, role, content, kind, "
             "       tool_name, tool_call_id, tool_calls, created_at, "
             "       status, agent_row_id "
@@ -1616,7 +1616,7 @@ def _build_v3_items(sidekick_db, state_db_path, chat_id: str) -> tuple:
 
     replay_drop: set = set()
     try:
-        dup_rows = sidekick_db.fetchall(
+        dup_rows = parley_db.fetchall(
             "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
             (chat_id,),
         )
@@ -1683,7 +1683,7 @@ def _v3_cursor_pos(cursor_index: Dict[int, int], cursor) -> Optional[int]:
 
 
 def list_messages_for_chat_v3(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     *,
@@ -1693,7 +1693,7 @@ def list_messages_for_chat_v3(
     """v3 tail / before-cursor read. Same wire contract as the v2
     reader (``{items, first_id, has_more}``, tail-side slicing so a
     before-page returns the ``limit`` items nearest the cursor)."""
-    items, index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    items, index = _build_v3_items(parley_db, state_db_path, chat_id)
     if before_id is not None:
         pos = _v3_cursor_pos(index, before_id)
         if pos is not None:
@@ -1717,7 +1717,7 @@ def list_messages_for_chat_v3(
 
 
 def list_messages_around_for_chat_v3(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     *,
@@ -1728,7 +1728,7 @@ def list_messages_around_for_chat_v3(
 ) -> Dict[str, Any]:
     """v3 deep-target drill — same bounded-window semantics and budget
     split as ``list_messages_around_for_chat_with_state_db_source``."""
-    items, _index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    items, _index = _build_v3_items(parley_db, state_db_path, chat_id)
     empty = {
         "items": [], "first_id": None, "has_more": False,
         "last_id": None, "has_more_newer": False, "target_found": False,
@@ -1759,7 +1759,7 @@ def list_messages_around_for_chat_v3(
 
 
 def list_messages_after_for_chat_v3(
-    sidekick_db,
+    parley_db,
     state_db_path,
     chat_id: str,
     *,
@@ -1769,7 +1769,7 @@ def list_messages_after_for_chat_v3(
     """v3 load-newer read — same contract as the v2 after-cursor reader
     (``has_more`` always present and False; oldest ``limit`` items above
     the cursor so the prepend side stays contiguous)."""
-    items, index = _build_v3_items(sidekick_db, state_db_path, chat_id)
+    items, index = _build_v3_items(parley_db, state_db_path, chat_id)
     pos = _v3_cursor_pos(index, after_id)
     if pos is not None:
         items = items[pos + 1:]
@@ -1837,22 +1837,22 @@ def reconcile_from_state_db(
     db, state_db_path, chat_id: str, source: str = "sidekick",
     *, force_full: bool = False,
 ) -> int:
-    """Bidirectional reconciliation between state.db and sidekick.db
+    """Bidirectional reconciliation between state.db and parley.db
     for one chat. Runs at items-endpoint enter and on session_changed.
 
     ⚠️  WARNING — DO NOT CALL FROM THE ASYNCIO LOOP THREAD.  ⚠️
 
     The full path is **O(state_rows + linked_rows)** per call: a full
     recursive-CTE walk of state.db.messages for the chat plus a Python
-    set build over sidekick.db.msg_links plus multi-pass scans. For a
+    set build over parley.db.msg_links plus multi-pass scans. For a
     5000-row chat the full pass takes ~700ms of GIL-held Python work.
 
-    History: this function is one of TWO sidekick O(history)-per-chat
-    callers (the other is sidekick_unread.compute_unread). Both used to
+    History: this function is one of TWO parley O(history)-per-chat
+    callers (the other is parley_unread.compute_unread). Both used to
     leak onto the loop thread under load. The 2026-06-23 incident
     report:
       - compute_unread blocked the loop directly via handle_unread
-        (fix: commit d10f62c — routed through run_in_sidekick_worker)
+        (fix: commit d10f62c — routed through run_in_parley_worker)
       - reconcile_from_state_db piled up via _spawn_background_reconcile
         firing N concurrent to_threads under the PWA drawer fan-out
         (fix: commits bbfd784 worker-pool cap + b62bd3d no-drift
@@ -1862,17 +1862,17 @@ def reconcile_from_state_db(
     The fast-path (see "Fast-path: skip the O(history) full-sync..."
     block below) keeps no-drift calls cheap. The full path remains
     O(history) — callers MUST wrap it in ``asyncio.to_thread`` /
-    ``run_in_sidekick_worker`` if they're calling from a coroutine.
+    ``run_in_parley_worker`` if they're calling from a coroutine.
     Inline-await from an async def re-introduces the loop block.
 
     Three-pass operation:
-      1. **Link pass (Phase 3)**: each unlinked sidekick.db row
+      1. **Link pass (Phase 3)**: each unlinked parley.db row
          (agent_row_id IS NULL) finds a state.db row with matching
          role + content that hasn't been claimed yet. Earliest match
          wins; duplicates resolved in chronological order.
-      2. **Insert pass**: state.db rows still without a sidekick.db
+      2. **Insert pass**: state.db rows still without a parley.db
          twin get inserted as ``legacy:<state_id>`` (INSERT OR IGNORE).
-      3. **Orphan-drop pass (Phase 4)**: sidekick.db rows with
+      3. **Orphan-drop pass (Phase 4)**: parley.db rows with
          ``agent_row_id`` pointing at a state.db row that no longer
          exists (i.e. ``/retry``, ``/undo``, ``/compress`` rewrote
          the session; explicit delete dropped it; 90-day prune ran)
@@ -1881,14 +1881,14 @@ def reconcile_from_state_db(
 
     Pass 3 (self-heal): state.db is authoritative for whole-session
     mutations, so any
-    sidekick.db row linked to a vanished state.db row is provably
+    parley.db row linked to a vanished state.db row is provably
     stale. The orphan check runs every reconcile (cheap O(N) set
     ops on already-fetched data) which means /retry-style mutations
     self-heal on the next PWA poll without a separate trigger.
 
     Returns count of (linked + inserted + dropped) rows changed.
     Best-effort: sqlite errors return 0 without raising; the items
-    endpoint still returns whatever's in sidekick.db.
+    endpoint still returns whatever's in parley.db.
 
     SAFETY: if state.db is unreachable (file missing, locked), the
     function returns 0 *without dropping anything* — the early
@@ -1899,7 +1899,7 @@ def reconcile_from_state_db(
     """
     import contextlib
     import sqlite3
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433
+    from . import parley_perf_trace as _perf  # noqa: WPS433
     _t_recon_start = time.monotonic()
     if state_db_path is None:
         return 0
@@ -1908,12 +1908,12 @@ def reconcile_from_state_db(
     #
     # Reconcile is structurally O(state_rows + linked_rows) on EVERY
     # call (full recursive-CTE walk of state.db messages + Python set
-    # build over sidekick.db msg_links + multi-pass scans). For
+    # build over parley.db msg_links + multi-pass scans). For
     # [pitch deck] with 5389 messages and zero drift, each call burned
     # ~700ms of GIL-held Python work producing zero updates. Under a
     # PWA drawer-prefetch burst (N chats fan-out) the cumulative
     # GIL pressure starved the asyncio loop (caught via
-    # SIDEKICK_PERF_TRACE loop-lag watcher 2026-06-23).
+    # PARLEY_PERF_TRACE loop-lag watcher 2026-06-23).
     #
     # Fast-path: three cheap indexed checks. If state.db has no rows
     # newer than the highest agent_row_id we've already linked AND no
@@ -2013,7 +2013,7 @@ def reconcile_from_state_db(
                         )
                     return 0
         except Exception:
-            # Any sidekick.db error → fall through to the full reconcile.
+            # Any parley.db error → fall through to the full reconcile.
             # Conservative: better to do the work than skip and lose linking.
             pass
     # Reachability gate: only proceed with pass 3 (orphan drops) when
@@ -2080,7 +2080,7 @@ def reconcile_from_state_db(
     # walks the whole session chain). Full sync per chat: stale
     # entries (rows a cleanup deleted / rows no longer classified
     # provable) are removed so the set never outlives its evidence.
-    # Best-effort — a sidekick.db hiccup must not fail the heal.
+    # Best-effort — a parley.db hiccup must not fail the heal.
     try:
         existing_dup_rows = db.fetchall(
             "SELECT agent_row_id FROM replay_dups WHERE chat_id = ?",
@@ -2104,14 +2104,14 @@ def reconcile_from_state_db(
     except Exception:
         pass
 
-    # Linked agent_row_ids already in sidekick.db.
+    # Linked agent_row_ids already in parley.db.
     linked_rows = db.fetchall(
         "SELECT agent_row_id FROM msg_links WHERE chat_id = ? AND agent_row_id IS NOT NULL",
         (chat_id,),
     )
     claimed_state_ids = {str(r["agent_row_id"]) for r in linked_rows}
 
-    # ── Pass 1: link unlinked sidekick.db rows.
+    # ── Pass 1: link unlinked parley.db rows.
     #
     # Two-pronged: (1.a) exact (role, content) fingerprint claims the
     # easy cases — same string both sides means same logical message.
@@ -2120,7 +2120,7 @@ def reconcile_from_state_db(
     # state.db rows in append-only order and pair 1:1.
     #
     # Why order-fallback is the right primitive: hermes' state.db
-    # writes for a session are append-only in turn order; sidekick's
+    # writes for a session are append-only in turn order; parley's
     # envelope writes are append-only in stream order. The two
     # sequences correspond. Content fingerprint fails on whitespace
     # drift / hermes-side post-edit / empty-final-reply paths even
@@ -2270,9 +2270,9 @@ def reconcile_from_state_db(
                 except Exception:
                     continue
 
-    # ── Pass 2: insert state.db rows that still have no sidekick.db
+    # ── Pass 2: insert state.db rows that still have no parley.db
     # twin. These are legacy chats from before Phase 1's write-through,
-    # OR rows that drifted (sidekick.db write-path bug missed them).
+    # OR rows that drifted (parley.db write-path bug missed them).
     # Compaction-replay duplicates are skipped: their logical message
     # already exists (linked or about-to-be-inserted via its first
     # occurrence), so a legacy: twin here would double every replayed
@@ -2319,7 +2319,7 @@ def reconcile_from_state_db(
             continue
 
     # ── Pass 3: orphan drop (Phase 4 self-heal).
-    # sidekick.db rows with agent_row_id set but the state.db row gone
+    # parley.db rows with agent_row_id set but the state.db row gone
     # are provable orphans: hermes did a whole-session DELETE (/retry,
     # /undo, /compress rewrote the transcript; explicit delete; 90-day
     # prune). Drop them so the next read doesn't show stale bubbles.
@@ -2353,7 +2353,7 @@ def reconcile_from_state_db(
         # behavior the heal now tolerates instead of amplifying).
         import logging as _logging
         _logging.getLogger(__name__).warning(
-            "[sidekick] heal chat=%s links=%d inserted=%d dropped=%d "
+            "[parley] heal chat=%s links=%d inserted=%d dropped=%d "
             "tc_healed=%d dup_skipped=%d",
             chat_id, links, inserted, dropped, healed_tc, dup_skipped,
         )
@@ -2375,11 +2375,11 @@ def reconcile_from_state_db(
 
 # ── Envelope → row upsert ────────────────────────────────────────────
 #
-# Phase 1 of the sidekick.db-as-message-store migration. Every outbound
+# Phase 1 of the parley.db-as-message-store migration. Every outbound
 # envelope routed through ``_safe_send_envelope`` is recorded here at
 # emit time. Items endpoint still reads from state.db in Phase 1;
 # Phase 2 switches the read path. See top-of-file design block in
-# ``sidekick_db.py``.
+# ``parley_db.py``.
 #
 # Envelope → row mapping:
 #
@@ -2418,7 +2418,7 @@ _PERSISTED_ENVELOPE_TYPES = frozenset({
 
 
 def record_envelope(db, env: Dict[str, Any]) -> Optional[str]:
-    """Upsert sidekick.db row for one outbound envelope.
+    """Upsert parley.db row for one outbound envelope.
 
     Returns the row id written (for tests/diagnostics), or None when
     the envelope type isn't a persisted one (typing, etc.).

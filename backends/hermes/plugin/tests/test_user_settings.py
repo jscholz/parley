@@ -1,4 +1,4 @@
-"""Synced user settings (sidekick.db ``user_settings``).
+"""Synced user settings (parley.db ``user_settings``).
 
 Covers the storage helpers (``get_user_setting`` / ``set_user_setting`` /
 ``list_user_settings``) and the ``/v1/user-settings`` route handler that
@@ -31,14 +31,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
-from ..sidekick_routes import handle_user_settings
+from ..parley_db import ParleyDB
+from .. import parley_state as state
+from ..parley_routes import handle_user_settings
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -62,8 +62,8 @@ def test_get_missing_returns_fallback(db):
 
 
 def test_set_then_get_roundtrips_list(db):
-    state.set_user_setting(db, "stt_keyterms", ["Deepgram", "Sidekick"])
-    assert state.get_user_setting(db, "stt_keyterms") == ["Deepgram", "Sidekick"]
+    state.set_user_setting(db, "stt_keyterms", ["Deepgram", "Parley"])
+    assert state.get_user_setting(db, "stt_keyterms") == ["Deepgram", "Parley"]
 
 
 def test_set_upserts_and_stamps_updated_at(db):

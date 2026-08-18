@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
-from ..sidekick_unread import compute_unread
+from ..parley_db import ParleyDB
+from .. import parley_state as state
+from ..parley_unread import compute_unread
 
 
 CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
@@ -16,7 +16,7 @@ CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -149,8 +149,8 @@ def test_unread_counts_final_replies_not_tool_call_activity(db, state_db):
 #
 # `compute_unread` is structurally O(history) per chat — recursive-CTE
 # state.db COUNT(*) per chat in a Python for-loop. It MUST NOT run on
-# the asyncio loop thread. handle_unread (sidekick_routes.py) routes
-# through ``run_in_sidekick_worker`` so the work lands in a bounded
+# the asyncio loop thread. handle_unread (parley_routes.py) routes
+# through ``run_in_parley_worker`` so the work lands in a bounded
 # worker thread.
 #
 # History: 2026-06-23 — py-spy on the live gateway caught the main
@@ -172,7 +172,7 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
     Patch compute_unread to record threading.current_thread() and call
     handle_unread via the route handler. Assert the spy saw a worker
     thread (not MainThread). The semaphore wrapper in
-    sidekick_perf_trace.run_in_sidekick_worker is the seam that
+    parley_perf_trace.run_in_parley_worker is the seam that
     guarantees this — the test fails if a future refactor inlines the
     call or otherwise bypasses the to_thread hop.
     """
@@ -180,14 +180,14 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
     import threading
     from unittest.mock import MagicMock
 
-    from .. import sidekick_unread
-    from .. import sidekick_routes
+    from .. import parley_unread
+    from .. import parley_routes
 
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "assistant", "hello", ts=1000.0)
 
     captured_threads: list = []
-    real_compute = sidekick_unread.compute_unread
+    real_compute = parley_unread.compute_unread
 
     def spy(*args, **kwargs):
         captured_threads.append(threading.current_thread())
@@ -195,7 +195,7 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
 
     # The route imports compute_unread by name; patch the binding the
     # route actually resolves at call time.
-    monkeypatch.setattr(sidekick_routes, "compute_unread", spy)
+    monkeypatch.setattr(parley_routes, "compute_unread", spy)
 
     # Minimal ctx + request stubs — handle_unread reads ctx.db +
     # ctx.state_db_path, ignores the request body, returns json.
@@ -204,7 +204,7 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
     ctx.state_db_path = state_db
     request = MagicMock()
 
-    asyncio.run(sidekick_routes.handle_unread(ctx, request))
+    asyncio.run(parley_routes.handle_unread(ctx, request))
 
     assert len(captured_threads) == 1, (
         f"expected exactly one compute_unread call, got {len(captured_threads)}"
@@ -213,7 +213,7 @@ def test_handle_unread_routes_compute_off_the_loop_thread(db, state_db, monkeypa
     assert t.name != "MainThread", (
         "compute_unread ran on the asyncio loop's MainThread — this is "
         "the 2026-06-23 loop-block bug. handle_unread must route the "
-        "call through run_in_sidekick_worker (or asyncio.to_thread) "
+        "call through run_in_parley_worker (or asyncio.to_thread) "
         f"so it lands in a worker thread. Got thread={t.name!r}."
     )
 
@@ -303,7 +303,7 @@ def test_compute_unread_cache_invalidation_after_mark_seen(db, state_db):
     counts for up to the TTL — visible to the user as a sidebar badge
     that doesn't clear when they click into a chat.
     """
-    from ..sidekick_unread import invalidate_unread_cache
+    from ..parley_unread import invalidate_unread_cache
     chat_id_prefixed = f"sidekick:{CHAT_ID}"
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "assistant", "unread reply", ts=1000.0)

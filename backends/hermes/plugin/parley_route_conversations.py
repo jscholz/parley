@@ -12,11 +12,11 @@ Extracted from ``__init__.py`` 2026-05-17. Covers:
   - ``_purge_hindsight_for_session_uuids``  memory-store cleanup
 
 Wiring contract: every public coroutine takes the calling
-``SidekickAdapter`` instance + the aiohttp request. The mutation
+``ParleyAdapter`` instance + the aiohttp request. The mutation
 handlers reach into ``adapter._state_db_path``,
 ``adapter._session_state_cache``, ``adapter._sid_to_chat_id_cache``,
 and the envelope publishers (``_safe_send_envelope`` on the
-adapter, and ``sidekick_route_events.publish_out_of_turn`` for the
+adapter, and ``parley_route_events.publish_out_of_turn`` for the
 out-of-turn channel).
 """
 
@@ -44,7 +44,7 @@ try:
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .sidekick_ids import (
+from .parley_ids import (
     GATEWAY_DRAWER_SOURCES,
     SIDEKICK_SOURCE,
     _format_gateway_id,
@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 # can't bloat the sessions row. PWA UI already truncates at 80.
 SESSION_TITLE_MAX_LEN = 200
 
-# Sidekick-namespaced sessions.json key prefix. Matches
-# ``build_session_key(SessionSource(platform=SIDEKICK, chat_id=X,
+# Parley-namespaced sessions.json key prefix. Matches
+# ``build_session_key(SessionSource(platform=PARLEY, chat_id=X,
 # chat_type='dm'))`` — ``agent:main:sidekick:dm:<chat_id>``.
 SESSION_KEY_PREFIX = "agent:main:sidekick:dm:"
 
@@ -121,7 +121,7 @@ def _summaries_by_user_id(
     ``sources`` is the platform allow-list — any non-empty
     ``sessions.source`` is included if its value is in this tuple.
     Pass ``("sidekick",)`` for the channel-only drawer; pass the
-    full set (sidekick, telegram, slack, whatsapp, …) for the
+    full set (parley, telegram, slack, whatsapp, …) for the
     cross-platform gateway drawer.
 
     Results are TTL-cached (``_SUMMARIES_CACHE_TTL_S``); mutation
@@ -178,7 +178,7 @@ def _summaries_by_user_id(
     #     across all sessions that resolve to this user_id+source)
     # The system_prompt match in the recursive step distinguishes
     # compaction continuations (which INHERIT the parent's
-    # sidekick-specific system_prompt) from delegate sub-task
+    # parley-specific system_prompt) from delegate sub-task
     # sessions (which use hermes-agent's DEFAULT system_prompt
     # and just happen to share parent_session_id). Without this
     # gate the CTE over-includes delegate sub-task sessions that
@@ -296,20 +296,20 @@ def _rows_with_unread_included(adapter, sources, limit: int) -> list:
     window.
 
     Sync + O(heavy) (compute_unread + a possible wide re-query) — call
-    ONLY through run_in_sidekick_worker, same rule as
+    ONLY through run_in_parley_worker, same rule as
     _summaries_by_user_id. Both underlying calls are TTL-cached, so
     the common no-missing-unread case costs one cache lookup extra.
     """
     rows = _summaries_by_user_id(adapter, sources, limit)
     try:
-        from .sidekick_unread import compute_unread  # noqa: WPS433 (late import, cycle-safe)
+        from .parley_unread import compute_unread  # noqa: WPS433 (late import, cycle-safe)
         unread = compute_unread(
-            db=adapter._sidekick_db,
+            db=adapter._parley_db,
             state_db_path=adapter._state_db_path,
             source=SIDEKICK_SOURCE,
         )
         # compute_unread emits the PWA-facing prefixed form
-        # (`sidekick:<chat>`) while summary rows carry the bare
+        # (`parley:<chat>`) while summary rows carry the bare
         # state.db user_id — normalize to bare before intersecting or
         # nothing ever matches (the exact trap this helper's first
         # draft fell into).
@@ -324,7 +324,7 @@ def _rows_with_unread_included(adapter, sources, limit: int) -> list:
             if cid:
                 wanted.add(cid)
     except Exception as exc:
-        logger.debug("[sidekick] unread force-include skipped: %s", exc)
+        logger.debug("[parley] unread force-include skipped: %s", exc)
         return rows
     have = {r[0] for r in rows}
     missing = {w for w in wanted if w and w not in have}
@@ -342,7 +342,7 @@ def _rows_with_unread_included(adapter, sources, limit: int) -> list:
 
 
 async def handle_list(adapter, request: "web.Request") -> "web.Response":
-    """GET /v1/conversations — return the sidekick-only drawer list.
+    """GET /v1/conversations — return the parley-only drawer list.
 
     Channel-only counterpart to the cross-platform
     ``/v1/gateway/conversations``. Single-channel agents (stub,
@@ -356,8 +356,8 @@ async def handle_list(adapter, request: "web.Request") -> "web.Response":
     except ValueError:
         return web.Response(status=400, text="invalid limit")
 
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433
-    rows = await _perf.run_in_sidekick_worker(
+    from . import parley_perf_trace as _perf  # noqa: WPS433
+    rows = await _perf.run_in_parley_worker(
         _rows_with_unread_included, adapter, (SIDEKICK_SOURCE,), limit,
     )
     data = [
@@ -388,10 +388,10 @@ async def handle_list_gateway(adapter, request: "web.Request") -> "web.Response"
 
     Same OAI-compat row shape as ``/v1/conversations`` (``{id, object,
     created_at, metadata}``), but enumerates every platform in
-    state.db (telegram / slack / whatsapp / sidekick / …) and adds
+    state.db (telegram / slack / whatsapp / parley / …) and adds
     ``source`` + ``chat_type`` to ``metadata`` so the proxy can render
-    per-row badges. Sidekick's drawer relies on this for cross-
-    platform visibility; non-sidekick rows are read-only.
+    per-row badges. Parley's drawer relies on this for cross-
+    platform visibility; non-parley rows are read-only.
 
     Backed by ``_summaries_by_user_id`` which groups state.db rows by
     ``(user_id, source)`` — chat_id IS user_id at the gateway. This
@@ -401,7 +401,7 @@ async def handle_list_gateway(adapter, request: "web.Request") -> "web.Response"
     rest after rotation.
 
     Implementing this endpoint is what makes a plugin a "gateway" in
-    sidekick's eyes. Single-channel agents (stub, openai-compat
+    parley's eyes. Single-channel agents (stub, openai-compat
     third-parties) leave it unimplemented and the proxy falls back
     to ``/v1/conversations``."""
     if not adapter._check_http_auth(request):
@@ -411,17 +411,17 @@ async def handle_list_gateway(adapter, request: "web.Request") -> "web.Response"
     except ValueError:
         return web.Response(status=400, text="invalid limit")
 
-    from . import sidekick_perf_trace as _perf  # noqa: WPS433
-    rows = await _perf.run_in_sidekick_worker(
+    from . import parley_perf_trace as _perf  # noqa: WPS433
+    rows = await _perf.run_in_parley_worker(
         # Same unread force-include as handle_list: unread state only
-        # exists for sidekick-source chats, so the union is a no-op for
+        # exists for parley-source chats, so the union is a no-op for
         # the other platforms' rows.
         _rows_with_unread_included, adapter, GATEWAY_DRAWER_SOURCES, limit,
     )
     data = [
         {
             # Prefixed `${source}:${chat_id}` — see _format_gateway_id
-            # rationale in sidekick_ids.py. Clients treat as opaque;
+            # rationale in parley_ids.py. Clients treat as opaque;
             # per-chat handlers decode source-side via _parse_gateway_id.
             "id": _format_gateway_id(source, chat_id),
             "object": "conversation",
@@ -481,13 +481,13 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
         # tighten this fallback (eventually 400) once all callers
         # migrate. The 2026-05-03 data-loss regression flowed through
         # this exact path: a stale frontend cleanup hit bare-id
-        # DELETE, this fallback defaulted to sidekick, and a real
+        # DELETE, this fallback defaulted to parley, and a real
         # session was wiped silently. The frontend cleanup is now
         # local-IDB-only (src/main.ts cleanupAbandonedChat) — any
         # bare-id DELETE arriving here is unexpected and worth a log.
         logger.warning(
-            "[sidekick] bare-id DELETE %s — defaulting source=sidekick. "
-            "Caller should use prefixed id `sidekick:%s` to be explicit.",
+            "[parley] bare-id DELETE %s — defaulting source=parley. "
+            "Caller should use prefixed id `parley:%s` to be explicit.",
             raw_id, chat_id,
         )
     # TERMINATE any active agent turn for this chat BEFORE removing its
@@ -504,11 +504,11 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
             if chat_id in session_key:
                 await adapter.interrupt_session_activity(session_key, chat_id)
                 logger.info(
-                    "[sidekick] DELETE %s — interrupted active agent session %s",
+                    "[parley] DELETE %s — interrupted active agent session %s",
                     chat_id, session_key,
                 )
     except Exception as e:  # noqa: BLE001 — delete must proceed regardless
-        logger.warning("[sidekick] DELETE %s — agent interrupt failed: %s", chat_id, e)
+        logger.warning("[parley] DELETE %s — agent interrupt failed: %s", chat_id, e)
     mark_chat_deleted(adapter, chat_id)
     result = await asyncio.to_thread(
         delete_conversation_sync, adapter, chat_id, source,
@@ -534,14 +534,14 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
     # (which is on a long cadence, hence the straggler).
     prefixed_chat_id = _format_gateway_id(source, chat_id)
     try:
-        from . import sidekick_route_events as _route_events
+        from . import parley_route_events as _route_events
         _route_events.publish_out_of_turn(adapter, {
             "type": "conversation_deleted",
             "chat_id": prefixed_chat_id,
             "source": source,
         })
     except Exception as exc:
-        logger.debug("[sidekick] conversation_deleted publish failed: %s", exc)
+        logger.debug("[parley] conversation_deleted publish failed: %s", exc)
     return web.json_response({"ok": True})
 
 
@@ -555,8 +555,8 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
     title via ``_summaries_by_user_id`` (which picks the latest
     session's title).
 
-    Sidekick-source-only today — telegram / slack / whatsapp don't
-    expose a "rename" surface, and a sidekick-tab rename of a
+    Parley-source-only today — telegram / slack / whatsapp don't
+    expose a "rename" surface, and a parley-tab rename of a
     cross-source row would silently mutate state.db rows owned by
     a different platform. Rejected with 400 to make the boundary
     explicit.
@@ -574,9 +574,9 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
     source = parsed_source if parsed_source is not None else SIDEKICK_SOURCE
     if source != SIDEKICK_SOURCE:
         # Cross-source rename has no defined semantics yet — refuse
-        # rather than silently mutate a non-sidekick session row.
+        # rather than silently mutate a non-parley session row.
         return web.json_response(
-            {"error": "rename only supported for sidekick sessions"},
+            {"error": "rename only supported for parley sessions"},
             status=400,
         )
     try:
@@ -679,7 +679,7 @@ def delete_conversation_sync(
     ``WHERE user_id = chat_id AND source = ?`` — picks up every
     session that ever belonged to this `(source, chat_id)` pair
     (compression forks AND auto-reset rotations), no recursive
-    parent-chain walk needed. ``source`` defaults to ``sidekick``
+    parent-chain walk needed. ``source`` defaults to ``parley``
     for backward compat with un-prefixed delete callers."""
     if adapter._state_db_path is None or not adapter._state_db_path.exists():
         return "error"
@@ -723,26 +723,26 @@ def delete_conversation_sync(
                     fork_sids,
                 )
     except Exception as exc:
-        logger.warning("[sidekick] state.db delete failed for chat_id=%s: %s", chat_id, exc)
+        logger.warning("[parley] state.db delete failed for chat_id=%s: %s", chat_id, exc)
         return "error"
     # Turn-linker shadow tables (transcript v3 Phase 1): scrub this
     # chat's observations + claims alongside the state.db cascade so
     # the dark-launch compare sweep stops judging windows whose
     # session chain no longer exists. Best-effort — the linker's data
     # is droppable at any time by design.
-    sk_db = getattr(adapter, "_sidekick_db", None)
+    sk_db = getattr(adapter, "_parley_db", None)
     if sk_db is not None:
         try:
-            from .sidekick_turn_linker import purge_chat_sync  # noqa: WPS433
+            from .parley_turn_linker import purge_chat_sync  # noqa: WPS433
             purge_chat_sync(sk_db, chat_id)
         except Exception as exc:
             logger.warning(
-                "[sidekick] turn-linker purge failed for chat_id=%s: %s",
+                "[parley] turn-linker purge failed for chat_id=%s: %s",
                 chat_id, exc,
             )
         # Body store + per-chat UX rows (2026-08-06 disk audit): msg_links
         # is the v3 transcript body store — without this leg a deleted
-        # chat's bodies (tool results are the bulk) lived in sidekick.db
+        # chat's bodies (tool results are the bulk) lived in parley.db
         # forever AND rode every daily snapshot. Pins / unread / activity
         # / title rows die with the chat too so no per-chat row outlives
         # it. Best-effort per table, same posture as purge_chat_sync.
@@ -761,19 +761,19 @@ def delete_conversation_sync(
                     continue
             if purged:
                 logger.info(
-                    "[sidekick] chat-delete purged %d sidekick.db rows for %s",
+                    "[parley] chat-delete purged %d parley.db rows for %s",
                     purged, chat_id,
                 )
         except Exception as exc:
             logger.warning(
-                "[sidekick] sidekick.db row purge failed for chat_id=%s: %s",
+                "[parley] parley.db row purge failed for chat_id=%s: %s",
                 chat_id, exc,
             )
-    # sessions.json: scrub the sidekick key. SESSION_KEY_PREFIX is
-    # the sidekick-namespaced prefix; for non-sidekick deletes the
+    # sessions.json: scrub the parley key. SESSION_KEY_PREFIX is
+    # the parley-namespaced prefix; for non-parley deletes the
     # sessions.json entry (if any) belongs to a different platform
     # adapter and isn't ours to scrub here. Skip when source isn't
-    # sidekick — hermes-agent's other adapters own their own keys.
+    # parley — hermes-agent's other adapters own their own keys.
     # jsonl + hindsight cascades below still run for any source.
     if source == SIDEKICK_SOURCE:
         sessions_index = adapter._state_db_path.parent / "sessions" / "sessions.json"
@@ -789,7 +789,7 @@ def delete_conversation_sync(
                         json.dump(idx, f, indent=2)
                     os.replace(tmp, sessions_index)
         except Exception as exc:
-            logger.warning("[sidekick] sessions.json scrub failed: %s", exc)
+            logger.warning("[parley] sessions.json scrub failed: %s", exc)
     # jsonl transcripts.
     for sid in fork_sids:
         jsonl = adapter._state_db_path.parent / "sessions" / f"{sid}.jsonl"
@@ -797,14 +797,14 @@ def delete_conversation_sync(
             if jsonl.exists():
                 jsonl.unlink()
         except Exception as exc:
-            logger.warning("[sidekick] jsonl unlink failed for sid=%s: %s", sid, exc)
+            logger.warning("[parley] jsonl unlink failed for sid=%s: %s", sid, exc)
     # Hindsight cascade (privacy-critical — closes the regression
     # introduced in the platform-adapter migration where the new
     # delete path skipped the hindsight scrub the legacy path had).
     try:
         _purge_hindsight_for_session_uuids(fork_sids)
     except Exception as exc:
-        logger.warning("[sidekick] hindsight purge failed: %s", exc)
+        logger.warning("[parley] hindsight purge failed: %s", exc)
     return "ok"
 
 
@@ -908,7 +908,7 @@ def rename_conversation_sync(
                 )
     except Exception as exc:
         logger.warning(
-            "[sidekick] state.db rename failed for chat_id=%s: %s",
+            "[parley] state.db rename failed for chat_id=%s: %s",
             chat_id, exc,
         )
         return "error"
@@ -917,7 +917,7 @@ def rename_conversation_sync(
 
 
 def _get_conversation_title_override(adapter, source: str, chat_id: str) -> str | None:
-    db = getattr(adapter, "_sidekick_db", None)
+    db = getattr(adapter, "_parley_db", None)
     if db is None:
         return None
     try:
@@ -930,12 +930,12 @@ def _get_conversation_title_override(adapter, source: str, chat_id: str) -> str 
         title = str(row["title"] if hasattr(row, "keys") else row[0]).strip()
         return title or None
     except Exception as exc:
-        logger.debug("[sidekick] title override read failed for %s:%s: %s", source, chat_id, exc)
+        logger.debug("[parley] title override read failed for %s:%s: %s", source, chat_id, exc)
         return None
 
 
 def _set_conversation_title_override(adapter, source: str, chat_id: str, title: str) -> None:
-    db = getattr(adapter, "_sidekick_db", None)
+    db = getattr(adapter, "_parley_db", None)
     if db is None:
         return
     try:
@@ -947,7 +947,7 @@ def _set_conversation_title_override(adapter, source: str, chat_id: str, title: 
             (source, chat_id, title, time.time()),
         )
     except Exception as exc:
-        logger.warning("[sidekick] title override write failed for %s:%s: %s", source, chat_id, exc)
+        logger.warning("[parley] title override write failed for %s:%s: %s", source, chat_id, exc)
 
 
 def _session_belongs_to_chat(
@@ -998,11 +998,11 @@ def _purge_hindsight_for_session_uuids(session_uuids: list) -> None:
             try:
                 with urllib.request.urlopen(req, timeout=5.0) as resp:
                     if resp.status not in (200, 204, 404):
-                        logger.warning("[sidekick] hindsight DELETE returned %s for sid=%s", resp.status, sid)
+                        logger.warning("[parley] hindsight DELETE returned %s for sid=%s", resp.status, sid)
             except urllib.error.HTTPError as e:
                 if e.code != 404:
-                    logger.warning("[sidekick] hindsight DELETE returned %s for sid=%s", e.code, sid)
+                    logger.warning("[parley] hindsight DELETE returned %s for sid=%s", e.code, sid)
             except Exception as exc:
-                logger.warning("[sidekick] hindsight DELETE failed for sid=%s: %s", sid, exc)
+                logger.warning("[parley] hindsight DELETE failed for sid=%s: %s", sid, exc)
     except Exception as exc:
-        logger.warning("[sidekick] hindsight purge setup failed: %s", exc)
+        logger.warning("[parley] hindsight purge setup failed: %s", exc)

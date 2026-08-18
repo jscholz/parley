@@ -3,7 +3,7 @@
 Field report (2026-06-17): a sent message containing images showed up in
 the conversation as a long plaintext image extraction, even though
 ``agent.image_input_mode: native`` was configured and the active model
-(GPT-5.5) takes images natively. Root cause: the sidekick plugin's
+(GPT-5.5) takes images natively. Root cause: the parley plugin's
 ``_parallel_image_enrich`` ran UNCONDITIONALLY — it pre-analyzed each
 image via ``vision_analyze`` into a ``[The user sent an image~ …]`` text
 blob and stripped the image entries out of ``media_urls`` before the
@@ -42,7 +42,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -146,7 +146,7 @@ def test_native_mode_leaves_images_untouched(plugin, monkeypatch):
     the text is NOT replaced with a pre-analysis blob — so the gateway's
     native-image path can attach the pixels to the primary model."""
     fake_vision = _stub_runtime(monkeypatch, mode="native")
-    Adapter = plugin.SidekickAdapter
+    Adapter = plugin.ParleyAdapter
 
     text, urls, types_out, mtype = asyncio.run(
         Adapter._parallel_image_enrich(
@@ -176,7 +176,7 @@ def test_text_mode_still_enriches_and_strips(plugin, monkeypatch):
     each image is pre-analyzed and stripped from media_urls (so the
     gateway's serial vision loop doesn't re-process a multi-page PDF)."""
     fake_vision = _stub_runtime(monkeypatch, mode="text", vision_analysis="a tabby cat")
-    Adapter = plugin.SidekickAdapter
+    Adapter = plugin.ParleyAdapter
 
     text, urls, types_out, mtype = asyncio.run(
         Adapter._parallel_image_enrich(

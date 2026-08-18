@@ -1,8 +1,8 @@
-"""Envelope write-through to the sidekick.db message store.
+"""Envelope write-through to the parley.db message store.
 
 Asserts every persisted envelope type (`user_message`, `reply_delta`,
 `reply_final`, `tool_call`, `tool_result`, `notification`) lands as a
-row in sidekick.db's message store at envelope-emit time, with the
+row in parley.db's message store at envelope-emit time, with the
 right id / role / content / status. Non-persisted types (`typing`,
 `session_changed`, etc.) must NOT produce a row.
 
@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -227,7 +227,7 @@ def test_missing_chat_id_skipped(db):
 
 
 def test_chat_id_source_prefix_stripped(db):
-    """PWA-supplied `sidekick:<uuid>` ids and bare UUIDs land in the
+    """PWA-supplied `parley:<uuid>` ids and bare UUIDs land in the
     same chat. The dispatcher path strips the prefix; record_envelope
     mirrors that so a turn that came in prefixed doesn't fork into a
     second chat row."""

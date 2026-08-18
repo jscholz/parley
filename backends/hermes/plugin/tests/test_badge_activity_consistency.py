@@ -1,5 +1,5 @@
 """Badge ↔ notifications-pane unread consistency (field diagnosis
-2026-07-20 against the live sidekick.db).
+2026-07-20 against the live parley.db).
 
 The dock badge derives from ``unread_state`` via ``compute_unread``
 (chat-level truth); the notifications pane derives from
@@ -7,7 +7,7 @@ The dock badge derives from ``unread_state`` via ``compute_unread``
 two disagree permanently:
 
 BUG A — ghost chat: a chat with a ``msg_links`` row but no state.db
-session (``sidekick:upgrade-probe-1783926444`` in the field) is counted
+session (``parley:upgrade-probe-1783926444`` in the field) is counted
 by ``compute_unread`` but never served by ``/v1/conversations`` — a
 permanent, unclearable +1 on the dock badge.
 
@@ -38,9 +38,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
-from ..sidekick_unread import _compute_unread_uncached
+from ..parley_db import ParleyDB
+from .. import parley_state as state
+from ..parley_unread import _compute_unread_uncached
 
 
 CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
@@ -54,7 +54,7 @@ MINT_S = MINT_MS / 1000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -184,12 +184,12 @@ def test_replay_upsert_preserves_created_at(db):
 
 
 def _bare_adapter(db):
-    """SidekickAdapter with just enough state for
+    """ParleyAdapter with just enough state for
     ``_persist_activity_for_push`` (bypasses the real __init__, which
     wires the gateway/threads/servers)."""
-    from .. import SidekickAdapter
-    adapter = SidekickAdapter.__new__(SidekickAdapter)
-    adapter._sidekick_db = db
+    from .. import ParleyAdapter
+    adapter = ParleyAdapter.__new__(ParleyAdapter)
+    adapter._parley_db = db
     # publish_out_of_turn plumbing (best-effort inside the persist path).
     adapter._event_id_counter = 0
     adapter._event_replay_ring = []
@@ -278,12 +278,12 @@ def test_envelope_open_approval_never_born_read(db):
 
 
 def _run_unread_seen(db, chat_id):
-    from .. import sidekick_routes
+    from .. import parley_routes
     ctx = MagicMock()
     ctx.db = db
     request = MagicMock()
     request.json = AsyncMock(return_value={"chat_id": chat_id})
-    asyncio.run(sidekick_routes.handle_unread_seen(ctx, request))
+    asyncio.run(parley_routes.handle_unread_seen(ctx, request))
     return ctx
 
 
@@ -312,7 +312,7 @@ def test_unread_seen_marks_chat_pane_items_read(db):
 
 
 def test_unread_seen_accepts_bare_chat_id_form(db):
-    """Routes accept both the prefixed (`sidekick:<id>`) and bare id
+    """Routes accept both the prefixed (`parley:<id>`) and bare id
     forms; activity rows store the prefixed form. The coupling must
     clear items regardless of which form the client sent."""
     state.upsert_activity_item(
@@ -346,7 +346,7 @@ def test_unread_seen_never_reads_open_approvals(db):
 
 
 def test_ghost_chat_absent_from_conversations_universe_contributes_zero(db, state_db):
-    """Field shape: chat ``sidekick:upgrade-probe-1783926444`` has one
+    """Field shape: chat ``parley:upgrade-probe-1783926444`` has one
     msg_links row, no state.db session, and is not served by
     /v1/conversations — yet compute_unread counted it: a permanent
     unclearable +1 on the dock badge. The chat universe must be scoped
