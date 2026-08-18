@@ -4,6 +4,7 @@
  */
 
 import { loadConfig, getConfig, gwWsUrl, getAppName, applySkinning, onConfigUnreachable } from './config.ts';
+import { runRenameMigrations } from './renameMigration.ts';
 import { log, diag, setDebugElement } from './util/log.ts';
 import { apiUrl, isLocalShell } from './apiBase.ts';
 import { showReconnectModal } from './reconnectModal.ts';
@@ -475,6 +476,12 @@ async function boot() {
   };
   bootMark('start');
 
+  // One-time Sidekick → Parley persisted-state migration (localStorage
+  // + IndexedDB). MUST complete before any module opens its new-name
+  // stores — an empty new-name DB would block the copy forever.
+  await runRenameMigrations();
+  bootMark('rename migrations done');
+
   // Platform gating runs FIRST so settings.load() and downstream
   // wiring see the post-gate DOM. Otherwise settings.ts's
   // `document.getElementById('set-reset-server')` returns the
@@ -715,13 +722,13 @@ async function boot() {
     id: 'sidebar',
     side: 'left',
     bodyClass: 'sidebar-expanded',
-    prefKey: 'sidekick.sidebar.expanded',
+    prefKey: 'parley.sidebar.expanded', // migrated from sidekick.sidebar.expanded
     toggleIds: ['sb-toggle', 'sb-toggle-mobile'],
     excludeSwipeWhenTargetIn: ['#pin-drawer'],
     resizer: {
       handleId: 'sidebar-resizer',
       cssVar: '--sidebar-width',
-      widthPrefKey: 'sidekick.sidebarWidth.v3',
+      widthPrefKey: 'parley.sidebarWidth.v3', // migrated from sidekick.sidebarWidth.v3
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
       maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
@@ -734,6 +741,7 @@ async function boot() {
   // observation, but it installs timers/listeners, so keep it strictly
   // behind explicit diagnostics instead of taxing phone PWAs in normal use.
   if (new URLSearchParams(location.search).get('click_diag') === '1'
+      // legacy name, predates Parley rename — dev toggle, not worth migrating
       || localStorage.getItem('sidekick_click_diag') === '1') {
     clickFreezeDiag.init();
   }

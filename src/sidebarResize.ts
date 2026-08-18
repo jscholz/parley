@@ -18,7 +18,7 @@
  * can't reach them.
  */
 
-const STORAGE_KEY = 'sidekick.sidebarWidth';
+const STORAGE_KEY = 'parley.sidebarWidth'; // migrated from sidekick.sidebarWidth
 const DEFAULT_WIDTH = 300;
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 600;

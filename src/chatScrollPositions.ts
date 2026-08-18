@@ -19,7 +19,7 @@
 
 import { diag } from './util/log.ts';
 
-const DB_NAME = 'sidekick-scroll';
+const DB_NAME = 'parley-scroll'; // UX cache — renamed w/o migration
 const STORE = 'positions';
 const PERSIST_DEBOUNCE_MS = 200;
 

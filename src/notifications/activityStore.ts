@@ -19,7 +19,7 @@ export interface ActivityItem {
   resolved?: ActivityResolution;
 }
 
-const STORAGE_KEY = 'sidekick.activity.items.v1';
+const STORAGE_KEY = 'parley.activity.items.v1'; // server-owned mirror — renamed w/o migration, rebuilds
 
 function normalizeItem(x: any): ActivityItem | null {
   if (!x || typeof x.id !== 'string' || !x.id) return null;

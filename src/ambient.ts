@@ -68,7 +68,7 @@ let onClickRef: (() => void) | null = null;
 /** Expanded state persisted to localStorage — used only when no
  *  external isExpandedRef is supplied (legacy floating-widget mode).
  *  Same pattern the sidebar uses for its own collapsed-pref. */
-const AMBIENT_PREF_KEY = 'sidekick.ambient.expanded';
+const AMBIENT_PREF_KEY = 'parley.ambient.expanded'; // migrated from sidekick.ambient.expanded
 let localExpanded = (() => {
   try { return localStorage.getItem(AMBIENT_PREF_KEY) === '1'; } catch { return false; }
 })();

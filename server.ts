@@ -1197,7 +1197,13 @@ const requestHandler: http.RequestListener = async (req, res) => {
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-store',
     });
-    res.end(JSON.stringify({ ok: true, app: 'sidekick' }));
+    // `app` keeps the legacy 'sidekick' sentinel — every INSTALLED CAP
+    // bootstrap on a phone hard-checks body.app === 'sidekick' and
+    // treats anything else as "not our host" (white-screen guard).
+    // New bootstraps accept either value; flip this to 'parley' only
+    // once no installed shell predates the rename. `product` carries
+    // the real name.
+    res.end(JSON.stringify({ ok: true, app: 'sidekick', product: 'parley' }));
     return;
   }
   // WebRTC voice signaling proxy → /v1/rtc/* on hermes upstream.

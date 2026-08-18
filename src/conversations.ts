@@ -20,7 +20,7 @@
  * timestamps used for sorting before the enrichment fetch resolves.
  */
 
-const DB_NAME = 'sidekick-conversations';
+const DB_NAME = 'parley-conversations'; // server-derived cache — renamed w/o migration, rebuilds
 const STORE_CONV = 'conversations';
 const STORE_META = 'meta';
 const META_ACTIVE = 'active_chat_id';

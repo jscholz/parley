@@ -144,7 +144,7 @@ export async function forceReload(opts: { clearIdb?: boolean; clearVadCache?: bo
  *  log readers (humans + AI) can grep them as run boundaries. */
 export function emitMark(label: string): void {
   try {
-    const sid = sessionStorage.getItem('sidekick_debug_relay_sid') || 'unknown';
+    const sid = sessionStorage.getItem('parley_debug_relay_sid') || 'unknown';
     const line = `[${new Date().toTimeString().slice(0, 8)}] [test-matrix] ===== ${label} =====\n`;
     fetch(apiUrl('/api/debug/logs'), {
       method: 'POST',

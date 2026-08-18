@@ -16,12 +16,12 @@ import { clearAllUnread, totalUnreadCount } from './notifications/badge.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { apiUrl } from './apiBase.ts';
 
-const STORAGE_KEY = 'sidekick.settings.v2';
+const STORAGE_KEY = 'parley.settings.v2'; // migrated from sidekick.settings.v2
 // Last-good snapshot of the SYNCED settings (sidekick.db-backed). Written
 // after every successful /prefs read so the next boot can hydrate synced
 // values synchronously from localStorage instead of awaiting the network —
 // see load() / revalidate().
-const SYNCED_CACHE_KEY = 'sidekick.synced.cache.v1';
+const SYNCED_CACHE_KEY = 'parley.synced.cache.v1'; // migrated from sidekick.synced.cache.v1
 
 // Model state — tracked separately from user settings (lives in openclaw
 // config on the gateway, not in localStorage). Re-fetched on panel open

@@ -31,7 +31,7 @@
 
 import { diag } from './util/log.ts';
 
-const DB_NAME = 'sidekick-drafts';
+const DB_NAME = 'parley-drafts'; // migrated from sidekick-drafts (renameMigration.ts)
 const STORE = 'drafts';
 const PERSIST_DEBOUNCE_MS = 300;
 

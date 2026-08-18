@@ -18,12 +18,12 @@
 import { diag } from './util/log.ts';
 import { isPinned } from './pins/store.ts';
 
-const DB_NAME = 'sidekick-windows';
+const DB_NAME = 'parley-windows'; // server-derived cache — renamed w/o migration, rebuilds
 const STORE = 'windows';
 const MAX_WINDOWS = 30;
 
 const SCHEMA_VERSION = '2026-06-12-keyed-drill-windows';
-const SCHEMA_VERSION_KEY = 'sidekick.windows-schema-version';
+const SCHEMA_VERSION_KEY = 'parley.windows-schema-version'; // fresh with the renamed DB
 
 export interface WindowPagination {
   firstId: number | null;

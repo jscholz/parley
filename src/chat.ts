@@ -53,7 +53,7 @@ let viewedSessionIdRef: string | null = null;
  *  synchronously on every switch so ANY reload lands on the chat the
  *  user was actually viewing instead of falling through to the
  *  most-recent/pinned chat. */
-const VIEWED_SESSION_LS_KEY = 'sidekick.viewed-session-id';
+const VIEWED_SESSION_LS_KEY = 'parley.viewed-session-id'; // migrated from sidekick.viewed-session-id
 
 /** Per-msgId fold state. The "Show more / Show less" toggle on long
  *  bubbles needs to survive virt unmount/remount: a bubble scrolled

@@ -21,7 +21,7 @@ let cfg = null;
  *  from cache when the backend is unreachable (CAP local-asset shell), so
  *  the user can still interact locally while deciding whether to reconnect
  *  or re-point at a new host. */
-const CONFIG_CACHE_KEY = 'sidekick_config_cache';
+const CONFIG_CACHE_KEY = 'parley_config_cache'; // migrated from sidekick_config_cache
 
 /** Optional hook fired when the live /config fetch fails. Lets the shell
  *  surface a reconnect affordance without config.ts importing UI code. */

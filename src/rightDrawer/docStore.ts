@@ -48,7 +48,7 @@ export interface DocState extends DocPayload {
   updatedAt: number;
 }
 
-const LS_KEY = 'sidekick.docs.v2';
+const LS_KEY = 'parley.docs.v2'; // migrated from sidekick.docs.v2
 const LEGACY_LS_KEY = 'sidekick.doc.current';
 const MAX_DOCS = 7;
 // The SHELF budget that matters for localStorage (shared quota with

@@ -144,7 +144,8 @@
 (() => {
   'use strict';
 
-  const STORAGE_KEY = 'sidekick_server_url';
+  const STORAGE_KEY = 'parley_server_url';
+  const LEGACY_STORAGE_KEY = 'sidekick_server_url'; // predates Parley rename
   const QS = new URLSearchParams(location.search);
   const FORCE_CONFIG = QS.get('config') === '1';
 
@@ -204,7 +205,11 @@
       if (!r.ok) return { ok: false, err: 'health ' + r.status };
       let body = null;
       try { body = await r.json(); } catch (_) { /* not JSON */ }
-      if (!body || body.app !== 'sidekick') return { ok: false, err: 'not a sidekick host' };
+      // Accept both sentinels: old proxies say app:'sidekick', post-
+      // rename proxies keep that legacy value and add product:'parley'.
+      if (!body || (body.app !== 'sidekick' && body.app !== 'parley' && body.product !== 'parley')) {
+        return { ok: false, err: 'not a parley host' };
+      }
       return { ok: true };
     } catch (e) {
       clearTimeout(t);
@@ -265,7 +270,12 @@
   });
 
   const saved = (() => {
-    try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
+    // New key first; fall back to the pre-rename key so an upgraded
+    // shell keeps its saved host (renameMigration.ts copies it forward
+    // once the app boots).
+    try {
+      return localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+    } catch (_) { return null; }
   })();
 
   if (saved && !FORCE_CONFIG) {

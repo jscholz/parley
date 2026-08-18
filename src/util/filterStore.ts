@@ -9,7 +9,7 @@
  * write here can never corrupt the chat transcript.
  */
 
-const DB_NAME = 'sidekick.cmdk';
+const DB_NAME = 'parley.cmdk'; // UX cache — renamed w/o migration
 const STORE = 'kv';
 const FILTER_KEY = 'filter';
 

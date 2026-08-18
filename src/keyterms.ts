@@ -25,7 +25,7 @@
 
 import { apiUrl } from './apiBase.ts';
 
-const DB_NAME = 'sidekick-keyterms';
+const DB_NAME = 'parley-keyterms'; // migrated from sidekick-keyterms (renameMigration.ts)
 const STORE = 'keyterms';
 const DB_VERSION = 1;
 const RECORD_ID = 'list';

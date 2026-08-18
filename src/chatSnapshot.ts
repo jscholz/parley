@@ -23,7 +23,7 @@
 
 import { diag } from './util/log.ts';
 
-const DB_NAME = 'sidekick-chat';
+const DB_NAME = 'parley-chat'; // server-derived cache — renamed w/o migration, rebuilds
 const STORE = 'transcripts';
 const SNAPSHOT_KEY = 'current';
 
@@ -53,7 +53,7 @@ const SNAPSHOT_KEY = 'current';
 //                upsert would graft the tail onto it with a silently
 //                missing middle. No shape change; the bump is the purge.
 const SCHEMA_VERSION = '2026-06-12-tail-anchored-snapshot';
-const SCHEMA_VERSION_KEY = 'sidekick.idb-schema-version';
+const SCHEMA_VERSION_KEY = 'parley.idb-schema-version'; // fresh with the renamed cache DB
 
 /** Snapshot record persisted to IDB.
  *

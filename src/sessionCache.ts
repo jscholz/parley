@@ -25,7 +25,7 @@
  * will see one slow-path load while the cache refills from the server.
  */
 
-const DB_NAME = 'sidekick-sessions';
+const DB_NAME = 'parley-sessions'; // server-derived cache — renamed w/o migration, rebuilds
 const LIST_STORE = 'list';
 const MESSAGES_STORE = 'messages';
 const DB_VERSION = 1;

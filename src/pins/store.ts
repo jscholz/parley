@@ -37,7 +37,7 @@ export interface PinnedItem {
   pinnedAt: number;   // when the user pinned it (for sort order)
 }
 
-const STORAGE_KEY = 'sidekick.pins.items.v1';
+const STORAGE_KEY = 'parley.pins.items.v1'; // server-owned mirror — renamed w/o migration, rebuilds
 
 const key = (chatId: string, msgId: string) => `${chatId}|${msgId}`;
 

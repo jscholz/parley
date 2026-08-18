@@ -111,7 +111,7 @@ test('migrates the v1 single-slot key once', async () => {
   assert.equal(s.currentDoc()?.title, 'Legacy');
   assert.equal(s.currentDoc()?.receivedAt, 123);
   assert.equal(backing.has('sidekick.doc.current'), false, 'legacy key removed');
-  assert.ok(backing.has('sidekick.docs.v2'), 'migrated to v2 key');
+  assert.ok(backing.has('parley.docs.v2'), 'migrated to v2 key');
 });
 
 test('char budget evicts oldest non-active from PERSISTENCE', async () => {

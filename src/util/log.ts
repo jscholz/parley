@@ -45,6 +45,7 @@ const debugOn = (() => {
   try {
     const qs = new URLSearchParams(location.search);
     if (qs.get('debug') === '1') return true;
+    // legacy name, predates Parley rename — dev toggle, not worth migrating
     return localStorage.getItem('sidekick_debug') === '1';
   } catch { return false; }
 })();
@@ -63,7 +64,7 @@ const relayOn = (() => {
 const relaySessionId: string = (() => {
   if (!relayOn) return '';
   try {
-    const KEY = 'sidekick_debug_relay_sid';
+    const KEY = 'parley_debug_relay_sid'; // per-tab, regenerated — no migration needed
     let sid = sessionStorage.getItem(KEY);
     if (!sid) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
