@@ -41,9 +41,14 @@ export default async function run({ page, log, mock }) {
   log(`active session at boot: ${activeId}`);
 
   // 1. Hotkey → capture starts in the CURRENT session, pill visible.
+  //    The pill appears during the honest 'starting' phase; wait for it
+  //    to leave that phase (activation confirmed) before asserting.
   await page.keyboard.press('Control+Shift+M');
   await page.waitForFunction(
-    () => !document.getElementById('capture-pill')?.hidden,
+    () => {
+      const pill = document.getElementById('capture-pill');
+      return pill && !pill.hidden && !pill.classList.contains('starting');
+    },
     null, { timeout: 15000, polling: 50 },
   );
   const caps = mock.getCaptures();

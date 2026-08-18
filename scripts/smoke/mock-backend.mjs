@@ -446,11 +446,34 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 
+  // ── Setup wizard status: always "configured" ──
+  // Without this, running the suite against an UNCONFIGURED server
+  // (fresh worktree, no .env → stub echo agent) pops the first-run
+  // wizard overlay, which intercepts pointer events over the whole
+  // page and breaks every click-based smoke. Mocked smokes must not
+  // depend on the host's .env; no smoke exercises the wizard itself.
+  await page.route('**/api/sidekick/setup/status', async (route) => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        needsSetup: false,
+        upstream: { ok: true, kind: 'custom', llm: null },
+        ollama: { available: false, models: [] },
+        voice: { configured: true },
+      }),
+    });
+  });
+
   // ── Meeting capture (proxy capture.ts contract, minimal mock) ──
   // In-memory manifests + segment acks; `setCaptureOutage(true)` makes
   // segment POSTs 503 so smokes can exercise the durable-uploader
-  // retry path.
+  // retry path. Mirrors the two-phase lifecycle (2026-08-18 postmortem):
+  // create → 'pending'; POST /activate (or a first segment) →
+  // 'recording'; /abort-start fails in place; /discard tombstones;
+  // DELETE is guarded exactly like the real server. Every lifecycle
+  // call is logged so smokes can assert "DELETE was never called".
   const captures = new Map();
+  const captureLifecycle = [];   // { action, id, body? } in arrival order
   let captureOutage = false;
   await page.route('**/api/sidekick/captures', async (route) => {
     // GET = the capture list meetingsIndex fetches at boot (and on
@@ -475,7 +498,7 @@ export async function installMockBackend(page) {
         ? `sidekick:mock-capture-${Math.random().toString(16).slice(2, 8)}`
         : (body.linked_chat || null),
       diarize: body.diarize !== false,
-      status: 'recording',
+      status: 'pending',
       started_at: Date.now(),
       ended_at: null,
       marks: [],
@@ -483,7 +506,62 @@ export async function installMockBackend(page) {
       segments: [],
     };
     captures.set(id, capture);
+    captureLifecycle.push({ action: 'create', id });
     await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ capture }) });
+  });
+  // Two-phase lifecycle verbs (postmortem 2026-08-18): activate,
+  // abort-start, discard, restore, purge. One route, dispatch on tail.
+  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/(activate|abort-start|discard|restore|purge)$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    const m = new URL(route.request().url()).pathname
+      .match(/\/captures\/([^/]+)\/(activate|abort-start|discard|restore|purge)$/);
+    const cap = captures.get(m ? m[1] : '');
+    const verb = m ? m[2] : '';
+    let body;
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch { body = {}; }
+    captureLifecycle.push({ action: verb, id: m ? m[1] : '', body });
+    const reply = (status, payload) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(payload),
+    });
+    if (!cap) return reply(404, { error: 'unknown capture' });
+    if (verb === 'activate') {
+      if (cap.status === 'recording') return reply(200, { capture: cap });
+      if (cap.status !== 'pending') return reply(409, { error: `capture is ${cap.status}; cannot activate` });
+      cap.status = 'recording';
+      cap.activated_at = Date.now();
+      return reply(200, { capture: cap });
+    }
+    if (verb === 'abort-start') {
+      if (cap.status === 'failed') return reply(200, { capture: cap });
+      if (cap.status !== 'pending') return reply(409, { error: `capture is ${cap.status}; abort-start only applies to a pending capture` });
+      if (cap.segments.length) return reply(409, { error: 'capture has segments; use /discard' });
+      cap.status = 'failed';
+      cap.failed_reason = body.reason || 'startup aborted';
+      cap.ended_at = Date.now();
+      return reply(200, { capture: cap });
+    }
+    if (verb === 'discard') {
+      if (cap.status !== 'discarded') {
+        cap.pre_discard_status = cap.status;
+        cap.status = 'discarded';
+        cap.discarded_at = Date.now();
+        if (!cap.ended_at) cap.ended_at = Date.now();
+      }
+      return reply(200, { capture: cap });
+    }
+    if (verb === 'restore') {
+      if (cap.status !== 'discarded') return reply(409, { error: `capture is ${cap.status}; only discarded captures can be restored` });
+      cap.status = (cap.pre_discard_status === 'complete' || cap.pre_discard_status === 'failed')
+        ? cap.pre_discard_status
+        : (cap.segments.length ? 'complete' : 'failed');
+      delete cap.discarded_at;
+      delete cap.pre_discard_status;
+      return reply(200, { capture: cap });
+    }
+    // purge — discarded-only, irreversible.
+    if (cap.status !== 'discarded') return reply(409, { error: `capture is ${cap.status}; purge requires Recently Deleted` });
+    captures.delete(cap.id);
+    return reply(200, { ok: true, purged: cap.id });
   });
   await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/segments\/\d+$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
@@ -493,6 +571,21 @@ export async function installMockBackend(page) {
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/segments\/(\d+)$/);
     const cap = captures.get(m ? m[1] : '');
     if (!cap) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"unknown capture"}' });
+    // Terminal/discarded captures freeze segments ('frozen' is
+    // load-bearing — the uploader parks and keeps its durable copy).
+    if (cap.status === 'complete' || cap.status === 'failed' || cap.status === 'discarded') {
+      return route.fulfill({
+        status: 409, contentType: 'application/json',
+        body: JSON.stringify({ error: `capture is ${cap.status}; segments are frozen` }),
+      });
+    }
+    // Legacy-compat gate: a first segment on a pending capture implies
+    // activation (matches proxy/sidekick/capture.ts).
+    if (cap.status === 'pending') {
+      cap.status = 'recording';
+      cap.activated_at = Date.now();
+      captureLifecycle.push({ action: 'activate-implied', id: cap.id });
+    }
     const seq = Number(m[2]);
     const duplicate = cap.segments.some((s) => s.seq === seq);
     if (!duplicate) {
@@ -504,18 +597,31 @@ export async function installMockBackend(page) {
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/stop$/);
     const cap = captures.get(m ? m[1] : '');
-    if (cap) { cap.status = 'complete'; cap.ended_at = Date.now(); }
+    captureLifecycle.push({ action: 'stop', id: m ? m[1] : '' });
+    // Idempotent; a still-pending capture stays pending (server sweep
+    // fails it in place later) — matches proxy/sidekick/capture.ts.
+    if (cap && cap.status === 'recording') { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
   await page.route(/.*\/api\/sidekick\/captures\/[^/]+$/, async (route) => {
     if (route.request().method() !== 'DELETE') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
-    const existed = captures.delete(m ? m[1] : '');
-    await route.fulfill({
-      status: existed ? 200 : 404,
-      contentType: 'application/json',
-      body: JSON.stringify(existed ? { ok: true } : { error: 'unknown capture' }),
-    });
+    const cap = captures.get(m ? m[1] : '');
+    captureLifecycle.push({ action: 'delete', id: m ? m[1] : '' });
+    if (!cap) {
+      return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"unknown capture"}' });
+    }
+    // Guarded like the real server (postmortem P0 #2): live, discarded,
+    // or segment-bearing captures cannot be hard-deleted.
+    if (cap.status === 'pending' || cap.status === 'recording' || cap.status === 'transcribing'
+        || cap.status === 'discarded' || cap.segments.length) {
+      return route.fulfill({
+        status: 409, contentType: 'application/json',
+        body: JSON.stringify({ error: `capture is ${cap.status} / has segments; use /discard then /purge` }),
+      });
+    }
+    captures.delete(cap.id);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: cap.id }) });
   });
   await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/marks$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
@@ -1260,6 +1366,10 @@ export async function installMockBackend(page) {
      *  assertions (segment acks, marks, stop state). */
     setCaptureOutage(on) { captureOutage = !!on; },
     getCaptures() { return Array.from(captures.values()); },
+    /** Lifecycle calls in arrival order ({action, id, body?}) — lets
+     *  smokes assert e.g. "DELETE was never called" (postmortem
+     *  regression: startup failure must abort-start, not delete). */
+    getCaptureLifecycle() { return captureLifecycle.slice(); },
     /** Pre-seed a (finished) capture linked to a chat — feeds the
      *  drawer's has-recording filter + row badges via the GET list
      *  above. Call from MOCK_SETUP so the boot-time meetingsIndex
