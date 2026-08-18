@@ -39,7 +39,7 @@ test('wireTapToSeek: seeks in both states, plays ONLY when already playing', () 
     addEventListener(type, fn) { if (type === 'click') handler = fn; },
     closest() { return container; },          // md.closest(...) → player container
   };
-  wireTapToSeek(md);
+  wireTapToSeek(md as unknown as HTMLElement);
   assert.ok(handler, 'click handler must be registered');
 
   const ev = { target: clickedNode };
