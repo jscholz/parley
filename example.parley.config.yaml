@@ -36,9 +36,12 @@ backend:
   # Claude Code install via the Agent SDK, in-process (configure the
   # claude_code block below). Env override: PARLEY_BACKEND.
   name: http
-  sidekick_platform:
+  # (Legacy key `sidekick_platform:` from pre-rename configs is still
+  # honored; new configs should use `parley_platform:`.)
+  parley_platform:
     url: http://127.0.0.1:8645
-    # token: read from $SIDEKICK_PLATFORM_TOKEN; never in this file.
+    # token: read from $PARLEY_PLATFORM_TOKEN (legacy
+    # $SIDEKICK_PLATFORM_TOKEN honored); never in this file.
 
 # Claude Code backend (backend.name: claude-code). See
 # backends/claude-code/README.md for the full contract. Approvals
@@ -53,7 +56,7 @@ claude_code:
   # model: claude-sonnet-5  # omit = account default
   approvals: remote         # remote | auto
   # permission_mode: acceptEdits   # used when approvals: auto
-  # persist_path: ~/.sidekick/claude-code-sessions.json
+  # persist_path: ~/.parley/claude-code-sessions.json
   # max_turns: 80
 
 # HTTP server.
