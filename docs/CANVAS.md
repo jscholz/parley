@@ -1,6 +1,6 @@
 # Canvas Protocol v1
 
-The SideKick canvas is a visual pane alongside the chat. When the agent emits
+The Parley canvas is a visual pane alongside the chat. When the agent emits
 a `canvas.show` payload, the client validates it and renders a card.
 
 ## Protocol shape

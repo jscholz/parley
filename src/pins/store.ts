@@ -1,14 +1,14 @@
 // Pinned-messages store — server-driven, cross-device coherent.
 //
 // SSOT for pins lives in the backend plugin's `pins` table (see
-// project_hermes_sidekick_parity.md). This module is a read-through
+// project_hermes_parley_parity.md). This module is a read-through
 // cache + thin client over those routes:
-//   GET    /api/sidekick/pins              → snapshot
-//   POST   /api/sidekick/pins              ← {chat_id, msg_id, role, text, timestamp}
-//   DELETE /api/sidekick/pins/{chat}/{msg}
+//   GET    /api/parley/pins              → snapshot
+//   POST   /api/parley/pins              ← {chat_id, msg_id, role, text, timestamp}
+//   DELETE /api/parley/pins/{chat}/{msg}
 //
 // Cross-device sync rides the `pins_changed` envelope that proxyClient
-// observes on /api/sidekick/stream — when it arrives, the base store's
+// observes on /api/parley/stream — when it arrives, the base store's
 // serverChangeEvent listener fires a debounced refresh.
 //
 // Why server-driven (mirror of badge.ts's history): IDB-side pins were
@@ -26,7 +26,7 @@ import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
 import { ServerBackedStore } from '../util/serverBackedStore.ts';
 
-const PINS_ENDPOINT = '/api/sidekick/pins';
+const PINS_ENDPOINT = '/api/parley/pins';
 
 export interface PinnedItem {
   chatId: string;
@@ -37,7 +37,7 @@ export interface PinnedItem {
   pinnedAt: number;   // when the user pinned it (for sort order)
 }
 
-const STORAGE_KEY = 'sidekick.pins.items.v1';
+const STORAGE_KEY = 'parley.pins.items.v1'; // server-owned mirror — renamed w/o migration, rebuilds
 
 const key = (chatId: string, msgId: string) => `${chatId}|${msgId}`;
 
@@ -64,7 +64,7 @@ function parsePin(p: any): PinnedItem | null {
 function notifyPinError(message: string): void {
   try {
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new CustomEvent('sidekick:pin-error', { detail: { message } }));
+      window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message } }));
     }
   } catch { /* non-DOM hosts (test runner) */ }
 }
@@ -75,8 +75,8 @@ const store = new ServerBackedStore<PinnedItem>({
   extract: (data) => (data?.pins ?? []),
   parse: parsePin,
   idOf: (item) => key(item.chatId, item.msgId),
-  changeEvent: 'sidekick:pins-changed',
-  serverChangeEvent: 'sidekick:server-pins-changed',
+  changeEvent: 'parley:pins-changed',
+  serverChangeEvent: 'parley:server-pins-changed',
   // Foreground refresh — iOS PWA can come back after long background.
   refreshOnVisible: true,
   // Pin mutations are typically user-initiated singletons, not

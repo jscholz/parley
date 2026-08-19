@@ -1,5 +1,5 @@
 /**
- * Server-side pin storage. Sidekick PWA used to keep pins in IDB
+ * Server-side pin storage. Parley PWA used to keep pins in IDB
  * only (per-device); this is the server-of-truth replacement so a
  * pin set on desktop shows up on iOS and vice versa.
  *

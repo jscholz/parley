@@ -1,21 +1,21 @@
 // Envelope types for the claude-code backend.
 //
 // The base union is imported type-only from the proxy's upstream contract
-// (proxy/sidekick/upstream.ts) so this backend can never drift from the
+// (proxy/parley/upstream.ts) so this backend can never drift from the
 // shapes the proxy multiplexer consumes. Two envelope types the runtime
 // protocol already carries (stream.ts ALLOWED_TYPES includes both) are not
 // yet in that TS union — agent_question (unified elicitation, 2026-07-13)
 // and doc_show (Docs panel push) — so they're defined here and unioned in.
-// The wiring step should add them to SidekickEnvelope in upstream.ts and
+// The wiring step should add them to ParleyEnvelope in upstream.ts and
 // delete the local copies (see README "Wiring plan").
 
-import type { SidekickEnvelope } from '../../proxy/sidekick/upstream.ts';
+import type { ParleyEnvelope } from '../../proxy/parley/upstream.ts';
 
-export type { SidekickEnvelope };
+export type { ParleyEnvelope };
 
 /** Unified elicitation protocol (2026-07-13). Rendered by the PWA as a
  *  pop-up with choice buttons (+ free text); answered via
- *  POST /api/sidekick/questions/{question_id}. Mirrors the hermes
+ *  POST /api/parley/questions/{question_id}. Mirrors the hermes
  *  plugin's send_clarify emission (backends/hermes/plugin/__init__.py). */
 export interface AgentQuestionEnvelope {
   type: 'agent_question';
@@ -32,7 +32,7 @@ export interface AgentQuestionEnvelope {
 }
 
 /** Docs-panel push. Mirrors the hermes display_doc tool's emission
- *  (backends/hermes/plugin/sidekick_doc_tool.py). */
+ *  (backends/hermes/plugin/parley_doc_tool.py). */
 export interface DocShowEnvelope {
   type: 'doc_show';
   chat_id: string;
@@ -45,7 +45,7 @@ export interface DocShowEnvelope {
   displayed_at: number; // epoch ms, server clock
 }
 
-export type ClaudeCodeEnvelope = SidekickEnvelope | AgentQuestionEnvelope | DocShowEnvelope;
+export type ClaudeCodeEnvelope = ParleyEnvelope | AgentQuestionEnvelope | DocShowEnvelope;
 
 /** djb2 hex hash, mirroring the PWA's docStore.docIdFor and the hermes
  *  plugin's _doc_id_for — keeps doc_show dedup keys identical across

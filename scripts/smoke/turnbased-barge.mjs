@@ -42,7 +42,7 @@ export default async function run({ page, log }) {
     (window).__TEST_VAD_DESTROYS__ = 0;
   });
 
-  await page.route('**/api/sidekick/config/*', async (route) => {
+  await page.route('**/api/parley/config/*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
 

@@ -92,7 +92,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-trayopen\n\n' +
+      'printf parley-trayopen\n\n' +
       'Reason: tray open must not dismiss\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: approvalId,
@@ -116,7 +116,7 @@ export default async function run({ page, log, mock }) {
   log('pending approval landed (badge urgent + server row) ✓');
 
   // 2. Plugin-persisted heartbeat row, NEWER than the approval. This is
-  //    verbatim the field shape (sidekick.db activity_items, 2026-07-07):
+  //    verbatim the field shape (parley.db activity_items, 2026-07-07):
   //    push-delivered "⏳ Still working…" beats written as agent_reply
   //    rows while the approval sat pending in the same chat.
   mock.seedActivity({

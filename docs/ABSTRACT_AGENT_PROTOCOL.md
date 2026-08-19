@@ -1,7 +1,7 @@
 # Abstract Agent Protocol
 
 This document defines the contract that any agent backend must satisfy
-to plug into sidekick. Sidekick (the PWA + proxy + audio bridge) is
+to plug into parley. Parley (the PWA + proxy + audio bridge) is
 agent-agnostic; it talks to a single endpoint:
 
     POST /v1/responses
@@ -15,7 +15,7 @@ Implementers include:
 
 The protocol is OpenAI-compatible (a strict subset of the OpenAI
 Responses API) so existing tooling slots in without translation. There
-is **no mention** of WebRTC, Deepgram, sidekick UX behavior, or
+is **no mention** of WebRTC, Deepgram, parley UX behavior, or
 microphone audio in this contract. Agents are pure text-in / text-out.
 
 ---
@@ -32,12 +32,12 @@ Authorization: Bearer <token>     (optional)
 
 | Field                    | Type             | Required | Description |
 | ------------------------ | ---------------- | -------- | ----------- |
-| `input`                  | `string \| array` | yes     | The user message. String for one-shot; array of `{role, content}` objects for explicit prompting. Sidekick sends a string. |
-| `conversation`           | `string`         | no       | Stable session key. The backend MUST honor this as a chaining identifier — repeated calls with the same `conversation` continue the same logical thread, with prior turns visible to the agent. Sidekick uses `sidekick-<slug>` names (e.g. `sidekick-example-2026-04-26`). |
-| `stream`                 | `boolean`        | no       | Default `false`. When `true`, the response is an SSE stream (see below). When `false`, the response is a single JSON object. Sidekick sends `true` for live conversation. |
+| `input`                  | `string \| array` | yes     | The user message. String for one-shot; array of `{role, content}` objects for explicit prompting. Parley sends a string. |
+| `conversation`           | `string`         | no       | Stable session key. The backend MUST honor this as a chaining identifier — repeated calls with the same `conversation` continue the same logical thread, with prior turns visible to the agent. Parley uses `parley-<slug>` names (e.g. `parley-example-2026-04-26`). |
+| `stream`                 | `boolean`        | no       | Default `false`. When `true`, the response is an SSE stream (see below). When `false`, the response is a single JSON object. Parley sends `true` for live conversation. |
 | `previous_response_id`   | `string`         | no       | Alternative chaining mechanism — pass the `id` of the previous response. **Mutually exclusive with `conversation`.** |
-| `instructions`           | `string`         | no       | System-prompt override for this turn. Sidekick does not currently send this. |
-| `attachments`            | `array`          | no       | Optional inline attachments. **Backends that don't support attachments MUST return a 400 with a clear error message rather than silently dropping them.** Sidekick sends image / file attachments here when present. |
+| `instructions`           | `string`         | no       | System-prompt override for this turn. Parley does not currently send this. |
+| `attachments`            | `array`          | no       | Optional inline attachments. **Backends that don't support attachments MUST return a 400 with a clear error message rather than silently dropping them.** Parley sends image / file attachments here when present. |
 | `store`                  | `boolean`        | no       | Default `true`. When `true`, the backend persists the response for later GET / chaining. Backends that don't persist responses can ignore this. |
 
 ### Response — non-streaming (`stream: false`)
@@ -68,7 +68,7 @@ Authorization: Bearer <token>     (optional)
 
 The shape is OpenAI Responses API compatible. Tool-call items
 (`{type: "function_call", ...}`) MAY appear in `output` for backends
-that support tool use; sidekick renders them but does not require them.
+that support tool use; parley renders them but does not require them.
 
 ### Response — streaming (`stream: true`)
 
@@ -86,22 +86,22 @@ data: <single-line JSON>
 
 | Event                        | When                        | Notes |
 | ---------------------------- | --------------------------- | ----- |
-| `response.output_text.delta` | Each text chunk             | `{type, item_id, output_index, content_index, delta, logprobs?}` — sidekick concatenates `delta`s into the visible reply. |
-| `response.completed`         | Terminal event              | `{type, response: <full envelope as in non-streaming response>}`. **Backends MUST emit this exactly once at end-of-stream.** Sidekick / the audio bridge use it to end the assistant streaming bubble; absence yields a permanent thinking-cursor. |
+| `response.output_text.delta` | Each text chunk             | `{type, item_id, output_index, content_index, delta, logprobs?}` — parley concatenates `delta`s into the visible reply. |
+| `response.completed`         | Terminal event              | `{type, response: <full envelope as in non-streaming response>}`. **Backends MUST emit this exactly once at end-of-stream.** Parley / the audio bridge use it to end the assistant streaming bubble; absence yields a permanent thinking-cursor. |
 
 #### Optional events
 
 OpenAI-compatible backends may also emit `response.created`,
 `response.in_progress`, `response.output_item.added`,
 `response.output_text.done`, `response.output_item.done`, and the
-function-call equivalents. Sidekick is tolerant of additional event
+function-call equivalents. Parley is tolerant of additional event
 types and ignores any it doesn't render.
 
 ---
 
 ## Conversation chaining
 
-A `conversation` name (e.g. `sidekick-example-2026-04-26`) is a stable
+A `conversation` name (e.g. `parley-example-2026-04-26`) is a stable
 identifier for a multi-turn thread. The backend SHOULD:
 
 1. On the first POST with a given `conversation`, treat it as a fresh
@@ -119,7 +119,7 @@ mutually exclusive — backends MUST return a 400 if both are supplied.
 ## Auth
 
 A `Bearer <token>` header is optional; backends MAY require it.
-Sidekick injects the configured token from its proxy when one is set.
+Parley injects the configured token from its proxy when one is set.
 The bridge does not authenticate to the agent directly — it goes
 through the proxy and the proxy adds the token.
 
@@ -128,16 +128,16 @@ through the proxy and the proxy adds the token.
 ## Conversation lifecycle endpoints
 
 The following endpoints exist alongside `POST /v1/responses` so a
-sidekick deployment can populate its drawer (chat list), replay
+parley deployment can populate its drawer (chat list), replay
 transcripts on resume, and delete chats. Backends that don't
-implement them MUST return `404` consistently — sidekick degrades
+implement them MUST return `404` consistently — parley degrades
 gracefully (drawer becomes IDB-cached only, deletes become local-
 only). Backends that implement them MUST cascade through any
 ancillary stores they own (hindsight memory, transcript jsonl,
 search index) so a delete is durable across the whole agent.
 
 The shape mirrors a subset of the OpenAI Conversations API. Field
-names are normative; sidekick parses them by name.
+names are normative; parley parses them by name.
 
 ### `GET /v1/conversations`
 
@@ -172,21 +172,21 @@ Returns the agent's list of conversations sorted most-recent-first.
 
 **Field semantics in `metadata`:**
 
-- `title` — human-readable label. Empty string is allowed; sidekick
+- `title` — human-readable label. Empty string is allowed; parley
   falls back to `first_user_message` for display.
 - `message_count` — visible message count (excluding internal context-
   compaction rows). Zero for empty conversations.
 - `last_active_at` — UNIX seconds of the most recent message. Drives
   the drawer sort order.
 - `first_user_message` — first user-role message text, truncated to
-  ≤ 80 chars. Optional. Sidekick uses this when `title` is empty.
+  ≤ 80 chars. Optional. Parley uses this when `title` is empty.
 
-`id` is opaque to sidekick; the backend MAY use the same value as the
+`id` is opaque to parley; the backend MAY use the same value as the
 `conversation` parameter passed to `POST /v1/responses`, or it MAY
-mint distinct ids. Sidekick stores this verbatim for use on
+mint distinct ids. Parley stores this verbatim for use on
 subsequent `/v1/conversations/{id}/items` and `DELETE` calls.
 
-`object: "conversation"` is informational; sidekick doesn't validate
+`object: "conversation"` is informational; parley doesn't validate
 the field but it SHOULD be present for OpenAI compatibility.
 
 ### `GET /v1/conversations/{id}/items`
@@ -228,14 +228,14 @@ on resume to repaint the chat surface from server state.
 `?before=` cursor). `has_more` is true when older items exist.
 
 `content` is plain string for the simple case. The OpenAI Responses
-API also supports a structured `content: [{type, text}]` shape; sidekick
+API also supports a structured `content: [{type, text}]` shape; parley
 accepts both — backends MAY emit either. For tool-call items the
 content shape follows the same structure as the `output` array in
 `response.completed` (see `POST /v1/responses` above).
 
 Backends that compress or fork conversations (e.g. context-window
 rotation) MUST traverse the fork chain server-side and return the
-flattened, replayable transcript here. Sidekick does not walk forks.
+flattened, replayable transcript here. Parley does not walk forks.
 
 **404** — unknown conversation id.
 
@@ -251,7 +251,7 @@ Hard-delete a conversation and all data the agent stores against it.
 3. Any filesystem artifacts (jsonl transcripts, etc.) keyed by this
    conversation id.
 
-This is non-negotiable for privacy: sidekick exposes "Delete chat"
+This is non-negotiable for privacy: parley exposes "Delete chat"
 as a user-facing affordance and the user reasonably expects the
 agent to forget. A delete that leaves memory traces is a privacy bug.
 
@@ -266,7 +266,7 @@ agent to forget. A delete that leaves memory traces is a privacy bug.
 - `404` — unknown conversation id.
 - `500` — partial failure (some cascade steps succeeded, some didn't).
   The response body SHOULD include an `error.message` describing
-  which steps failed. Sidekick treats 500 as "do not remove the
+  which steps failed. Parley treats 500 as "do not remove the
   drawer entry" so the user can retry.
 
 ---
@@ -275,11 +275,11 @@ agent to forget. A delete that leaves memory traces is a privacy bug.
 
 A second contract layered on top of the channel contract above.
 Implementing it makes an agent a "gateway" — its state spans
-multiple platforms and sidekick should surface them in a single
+multiple platforms and parley should surface them in a single
 drawer with per-row source badges.
 
 The extension is **strictly optional**. Single-channel agents leave
-it unimplemented; sidekick probes, gets 404, and falls back to
+it unimplemented; parley probes, gets 404, and falls back to
 `GET /v1/conversations` with `source: "sidekick"` stamped on each
 row. Other failure codes propagate (transient outages must not
 silently degrade the drawer to channel-only).
@@ -287,7 +287,7 @@ silently degrade the drawer to channel-only).
 The namespace prefix `/v1/gateway/*` is reserved for this contract
 so future gateway-shaped capabilities (e.g. `GET /v1/gateway/sources`,
 cross-source delete) have a documented home and don't scatter as
-optional flags on the channel endpoints. Sidekick squats on the
+optional flags on the channel endpoints. Parley squats on the
 prefix; OAI doesn't use it.
 
 ### `GET /v1/gateway/conversations`
@@ -326,7 +326,7 @@ Cross-platform drawer list. Same OAI row shape as
 **Query params:** `limit` (1..200, default 50). Most-recent-first
 ordering required.
 
-**Cross-platform send is NOT part of this extension.** Sidekick's
+**Cross-platform send is NOT part of this extension.** Parley's
 composer goes read-only when `source !== 'sidekick'`. Agents that
 want bidirectional cross-platform messaging would extend further
 (future: `POST /v1/gateway/responses?source=...`).
@@ -334,7 +334,7 @@ want bidirectional cross-platform messaging would extend further
 #### Multi-identity rule for `id` (CRITICAL for plugin authors)
 
 `ConversationSummary.id` is **globally unique** — that's the contract
-sidekick consumes. The drawer keys per-row state on it, click
+parley consumes. The drawer keys per-row state on it, click
 handling assumes one LI per `id`, and resume/delete URLs route by it.
 
 When a backend natively keys sessions on a compound `(source,
@@ -354,7 +354,7 @@ URL handlers (`/v1/conversations/{id}/items`, DELETE, send dispatch)
 decode the prefix server-side to disambiguate source.
 
 **Why this matters:** when the same `native_chat_id` appears under
-two sources (e.g. a sidekick test session whose chat_id happens to
+two sources (e.g. a parley test session whose chat_id happens to
 collide with a WhatsApp `@lid`), exposing `id := native_chat_id`
 silently violates uniqueness. The drawer renders two LIs sharing
 `data-chat-id`, click activates both, and history fetch — having
@@ -372,7 +372,7 @@ later (e.g. introduce a separator escape) without a frontend change.
 
 ## Optional settings extension — `/v1/settings/*`
 
-Lets the agent declare its own user-facing knobs and have sidekick
+Lets the agent declare its own user-facing knobs and have parley
 render them generically in the Settings panel. Replaces the
 pre-refactor pattern of hardcoding agent-owned options (e.g. the
 model picker) into the PWA — which made every cross-agent setting
@@ -439,7 +439,7 @@ by other clients changing the same agent state).
 - `placeholder` (text/string-list only, optional) — hint text in
   the input box.
 
-**Response (404):** Agent doesn't implement the extension. Sidekick
+**Response (404):** Agent doesn't implement the extension. Parley
 hides the "Agent" settings group entirely.
 
 ### `POST /v1/settings/{id}`

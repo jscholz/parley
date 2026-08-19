@@ -14,7 +14,7 @@
 //
 // This test makes the drill slow (setMessageDelay on the owning chat's
 // history fetch), taps Approve, and immediately switches to another chat.
-// The recorded POST /api/sidekick/messages body must carry the OWNING
+// The recorded POST /api/parley/messages body must carry the OWNING
 // chat id.
 
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
@@ -57,7 +57,7 @@ export default async function run({ page, log, mock }) {
 
   // Record slash-command POSTs, then defer to the mock's handler.
   const sent = [];
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.route('**/api/parley/messages', async (route) => {
     if (route.request().method() === 'POST') {
       try {
         const body = JSON.parse(route.request().postData() || '{}');
@@ -74,7 +74,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-approve-routing\n\n' +
+      'printf parley-approve-routing\n\n' +
       'Reason: approve routing smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: 'notif_route_approval_1',

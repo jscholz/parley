@@ -1,9 +1,10 @@
 /**
- * @fileoverview SideKick — main entry point. Wires all modules together.
+ * @fileoverview Parley — main entry point. Wires all modules together.
  * No logic lives here — just imports + initialization + cross-module callbacks.
  */
 
 import { loadConfig, getConfig, gwWsUrl, getAppName, applySkinning, onConfigUnreachable } from './config.ts';
+import { runRenameMigrations } from './renameMigration.ts';
 import { log, diag, setDebugElement } from './util/log.ts';
 import { apiUrl, isLocalShell } from './apiBase.ts';
 import { showReconnectModal } from './reconnectModal.ts';
@@ -262,10 +263,10 @@ function updateSendButtonState() {
 }
 
 /** Whether the composer is currently in read-only mode — set true
- *  when the user is viewing a non-sidekick chat (telegram/slack/etc).
- *  Cross-platform send isn't supported (the gateway's sidekick adapter
- *  always builds SessionSource(platform=SIDEKICK), so a send to a
- *  telegram chat_id would create a duplicate sidekick session rather
+ *  when the user is viewing a non-parley chat (telegram/slack/etc).
+ *  Cross-platform send isn't supported (the gateway's parley adapter
+ *  always builds SessionSource(platform=PARLEY), so a send to a
+ *  telegram chat_id would create a duplicate parley session rather
  *  than reaching telegram). Disabling input + send button is the
  *  honest affordance. */
 let readOnlyComposer = false;
@@ -280,7 +281,7 @@ function setComposerReadOnly(readOnly: boolean, source: string = 'sidekick') {
       input.classList.add('readonly');
     } else {
       // Must match the index.html placeholder. setComposerReadOnly(false)
-      // is called whenever switching to a sidekick chat, so this is the
+      // is called whenever switching to a parley chat, so this is the
       // source of truth at runtime (not the HTML attribute, which gets
       // overwritten on first call). Stay in sync if you change one.
       input.placeholder = 'Type / for commands';
@@ -321,7 +322,7 @@ async function populateMicPicker() {
 // failure (fetch network error — the gateway never answered) keeps the
 // optimistic bubble `.pending` and parks the send here until the stream
 // channel reconnects (onStatus(true) → flushQueuedSends). An ANSWERED
-// rejection (`Sidekick HTTP <status>` from the proxy) is a real refusal
+// rejection (`Parley HTTP <status>` from the proxy) is a real refusal
 // → the existing `.failed` Retry affordance, exactly as before.
 // In-memory by design: it rides the same lifetime as the pendingSends
 // store the bubbles live in — a reload drops both together, so a queued
@@ -381,10 +382,10 @@ function failSendBubble(chatId: string | null, messageId: string, msg: string): 
 
 /** Connectivity-class = the request never got an answer (fetch network
  *  error/abort). proxyClient prefixes ANSWERED rejections with
- *  "Sidekick HTTP <status>" — those mean the gateway is reachable and
+ *  "Parley HTTP <status>" — those mean the gateway is reachable and
  *  refused the send; retrying on reconnect can't fix them. */
 function isConnectivitySendError(e: unknown): boolean {
-  return !/^Sidekick HTTP \d/.test(String((e as Error)?.message ?? e ?? ''));
+  return !/^Parley HTTP \d/.test(String((e as Error)?.message ?? e ?? ''));
 }
 
 /** Has the server's user_message echo for this send already landed?
@@ -465,7 +466,7 @@ async function flushQueuedSends(): Promise<void> {
 async function boot() {
   // ── Boot-phase timing (temporary instrumentation, #171 follow-up) ──
   // Pinpoints which boot phase eats wall-clock on a cold CAP relaunch.
-  // Surfaces via log() → disk relay (/tmp/sidekick-debug/latest.log) when
+  // Surfaces via log() → disk relay (/tmp/parley-debug/latest.log) when
   // dev mode / ?debug-relay=1 is on. perfNow() is relative to navigation
   // start, so the first mark also shows pre-boot bundle parse/eval time.
   const perfNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -474,6 +475,12 @@ async function boot() {
     log(`[boot-timing] ${label} +${Math.round(perfNow() - __bootT0)}ms (since-nav ${Math.round(perfNow())}ms)`);
   };
   bootMark('start');
+
+  // One-time Parley → Parley persisted-state migration (localStorage
+  // + IndexedDB). MUST complete before any module opens its new-name
+  // stores — an empty new-name DB would block the copy forever.
+  await runRenameMigrations();
+  bootMark('rename migrations done');
 
   // Platform gating runs FIRST so settings.load() and downstream
   // wiring see the post-gate DOM. Otherwise settings.ts's
@@ -489,7 +496,7 @@ async function boot() {
   // value — the toggle would flip in storage but the highlight wouldn't
   // reflect it. Generally: any boot code that calls settings.get() before
   // this line was reading uninitialised defaults.
-  // Async now: yaml-backed settings come from /api/sidekick/config; the
+  // Async now: yaml-backed settings come from /api/parley/config; the
   // remaining per-device keys are read from localStorage in the same
   // call. Built-in DEFAULTS are the offline / proxy-down fallback.
   await settings.load();
@@ -585,10 +592,10 @@ async function boot() {
     getKeepaliveEl: () => audioSession.getKeepaliveEl(),
   });
   // Expose dump() globally when tracing is enabled so the bench-test
-  // protocol can grab the buffer from devtools with `sidekickBgTrace()`
+  // protocol can grab the buffer from devtools with `parleyBgTrace()`
   // and paste it into a bug report.
   if (bgTrace.isEnabled()) {
-    (window as any).sidekickBgTrace = () => bgTrace.dump();
+    (window as any).parleyBgTrace = () => bgTrace.dump();
   }
 
   // Background audio session — Media Session (lock-screen + BT headset tap)
@@ -715,13 +722,13 @@ async function boot() {
     id: 'sidebar',
     side: 'left',
     bodyClass: 'sidebar-expanded',
-    prefKey: 'sidekick.sidebar.expanded',
+    prefKey: 'parley.sidebar.expanded', // migrated from sidekick.sidebar.expanded
     toggleIds: ['sb-toggle', 'sb-toggle-mobile'],
     excludeSwipeWhenTargetIn: ['#pin-drawer'],
     resizer: {
       handleId: 'sidebar-resizer',
       cssVar: '--sidebar-width',
-      widthPrefKey: 'sidekick.sidebarWidth.v3',
+      widthPrefKey: 'parley.sidebarWidth.v3', // migrated from sidekick.sidebarWidth.v3
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
       maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
@@ -734,6 +741,7 @@ async function boot() {
   // observation, but it installs timers/listeners, so keep it strictly
   // behind explicit diagnostics instead of taxing phone PWAs in normal use.
   if (new URLSearchParams(location.search).get('click_diag') === '1'
+      // legacy name, predates Parley rename — dev toggle, not worth migrating
       || localStorage.getItem('sidekick_click_diag') === '1') {
     clickFreezeDiag.init();
   }
@@ -878,7 +886,7 @@ async function boot() {
   // order, per-session nicknames) from a slightly stale snapshot. When the
   // background settings revalidation lands, re-hydrate those stores and
   // repaint so a change made on another device catches up without a reload.
-  window.addEventListener('sidekick:settings-changed', () => {
+  window.addEventListener('parley:settings-changed', () => {
     sessionPins.hydrate();
     sessionIdentity.hydrate();
     sessionDrawer.scheduleRefresh();
@@ -1089,19 +1097,19 @@ async function boot() {
   // #243 — warm each pinned message's deep around-window into
   // drillWindowCache in the background so the FIRST click on a pin is a
   // cache hit instead of paying the cold ?around= round trip (the
-  // "ages"-long spinner on a slow link). `sidekick:pins-changed` fires on
+  // "ages"-long spinner on a slow link). `parley:pins-changed` fires on
   // boot hydrate, pin-add, and cross-device sync, so one listener covers
   // every trigger; prewarmPinnedWindows dedups already-warm windows so the
   // repeat fires are cheap. initPinDrawer's synchronous localStorage
   // hydrate already dispatched the boot event before this listener
   // attached, so kick once directly to cover pins restored from cache.
-  window.addEventListener('sidekick:pins-changed', () => { void prewarmPinnedWindows(); });
+  window.addEventListener('parley:pins-changed', () => { void prewarmPinnedWindows(); });
   // Cold CAP boot: localStorage is empty, so the boot kick below sees
   // listAllPins()==[] and warms nothing; pins then arrive FROM THE SERVER.
   // On a fresh install the server snapshot lands via either the boot
-  // refreshFromServer (fires `sidekick:pins-changed` only when the diff
+  // refreshFromServer (fires `parley:pins-changed` only when the diff
   // actually applies) or the cross-device `pins_changed` stream envelope
-  // (proxyClient → `sidekick:server-pins-changed`, which the store turns
+  // (proxyClient → `parley:server-pins-changed`, which the store turns
   // into a DEBOUNCED refresh). Listening on the raw server event too gives
   // prewarm an independent, earlier trigger that doesn't depend on the
   // store's diff/debounce timing landing a `pins-changed` we don't miss —
@@ -1110,7 +1118,7 @@ async function boot() {
   // on the first click). Redundant fires are cheap: prewarmedPinKeys skips
   // already-warm windows and prewarmRunning/prewarmDirty single-flights the
   // run, so an extra kick that sees no new pins is a no-op.
-  window.addEventListener('sidekick:server-pins-changed', () => { void prewarmPinnedWindows(); });
+  window.addEventListener('parley:server-pins-changed', () => { void prewarmPinnedWindows(); });
   void prewarmPinnedWindows();
   // Same fix for the activity tray: a cron/agent_reply row click drills via
   // the bounded ?around= window centered on the item's (often DEEP)
@@ -1118,13 +1126,13 @@ async function boot() {
   // appears ~20s late (field report, CAP 2026-06-15). Warm each activity
   // item's around-window in the background so the click is a cache hit. The
   // (chatId, messageId) is known at ingest, well before the click.
-  // `sidekick:activity-changed` fires on boot hydrate + every local mutation;
-  // `sidekick:server-activity-changed` is the cross-device reconcile (mirror
+  // `parley:activity-changed` fires on boot hydrate + every local mutation;
+  // `parley:server-activity-changed` is the cross-device reconcile (mirror
   // of the pins pattern). prewarmActivityWindows shares fetchAroundWindowOnce
   // + drillWindowCache with the pin prewarm and the live drill, so redundant
   // fires + pin/activity overlap are deduped and never double-fetch.
-  window.addEventListener('sidekick:activity-changed', () => { void prewarmActivityWindows(); });
-  window.addEventListener('sidekick:server-activity-changed', () => { void prewarmActivityWindows(); });
+  window.addEventListener('parley:activity-changed', () => { void prewarmActivityWindows(); });
+  window.addEventListener('parley:server-activity-changed', () => { void prewarmActivityWindows(); });
   void prewarmActivityWindows();
   inAppBanner.init({
     onOpen: (chatId, msgId) => { void drillToChatMessage(chatId, msgId); },
@@ -1198,7 +1206,7 @@ async function boot() {
       // to migrate here, just the UI. The applyMicModeUi function is
       // declared inside setupComposerActions further below; defer the
       // call to the rebroadcast event so wiring order doesn't matter.
-      window.dispatchEvent(new CustomEvent('sidekick:engine-changed'));
+      window.dispatchEvent(new CustomEvent('parley:engine-changed'));
     },
     onWakeLockChange: () => {
       // Wake-lock is scoped to active calls — see evaluateWakeLock()
@@ -1239,10 +1247,10 @@ async function boot() {
   chat.onLoadLater(loadLaterHistory);
   chat.onJumpToLatest(jumpToLatest);
   // Inline gap placeholder (#227): the reconciler renders a tappable `…`
-  // row at a spliced-window discontinuity and dispatches sidekick:load-gap
+  // row at a spliced-window discontinuity and dispatches parley:load-gap
   // with the numeric fill cursor (afterId). Fetch the page after it and
   // hand it to fillGap, which closes the gap once the runs connect.
-  document.addEventListener('sidekick:load-gap', (ev) => {
+  document.addEventListener('parley:load-gap', (ev) => {
     const detail = (ev as CustomEvent).detail || {};
     const afterId = typeof detail.afterId === 'number' ? detail.afterId : null;
     if (afterId == null) return;
@@ -1533,7 +1541,7 @@ async function boot() {
           // window to `/?chat=X&msg=Y` and we hydrate that chat + scroll
           // to that message. Previously, the notification content could
           // be unreachable after navigating to a chat from a banner. The companion fix is the hermes
-          // plugin persisting notifications to a sidekick-owned sibling
+          // plugin persisting notifications to a parley-owned sibling
           // table so the msg is in the transcript by the time we land.
           let urlChatId: string | null = null;
           let urlMsgId: string | null = null;
@@ -1548,7 +1556,7 @@ async function boot() {
           // Prefer the session id persisted alongside the restored chat
           // snapshot — that's the session whose transcript is ACTUALLY on
           // screen after reload. Falls back to the adapter's
-          // conversationName ('sidekick-main' default) for the fresh
+          // conversationName ('parley-main' default) for the fresh
           // install path where no snapshot existed.
           const restoredSid = chat.getRestoredViewedSessionId();
           // Landing priority (no deep-link target):
@@ -1557,7 +1565,7 @@ async function boot() {
           //                 plain reload keeps your place (continuity wins)
           //   pinnedTop  — the top pinned session as the "home base" on a
           //                truly fresh open (no snapshot to restore)
-          //   getCurrentSessionId() — adapter default ('sidekick-main')
+          //   getCurrentSessionId() — adapter default ('parley-main')
           // The user controls the home-base landing purely by which pin
           // sits at index 0 (drag-reorder); there's no separate default-
           // session state.
@@ -2230,8 +2238,8 @@ async function boot() {
       // still runs releaseCaptureIfActive(), so the mic never stays hot.
       // Typed session-boundary commands. These are hidden from the slash
       // catalog (server-side), and gateway vocabulary collides with
-      // Sidekick's: gateway /new is an IN-PLACE session reset (same thread,
-      // fresh agent), not a new thread. So we map on the Sidekick side:
+      // Parley's: gateway /new is an IN-PLACE session reset (same thread,
+      // fresh agent), not a new thread. So we map on the Parley side:
       //   /new   → New Chat button codepath (mint a fresh thread — matches
       //            the word + the button the user already knows).
       //   /clear → no gateway behavior (cli_only terminal screen wipe);
@@ -2398,7 +2406,7 @@ async function boot() {
     },
   });
   // Retry-send wire-up (Crack A): reconciler renders a Retry button
-  // on a `.failed` user bubble and dispatches `sidekick:retry-send`
+  // on a `.failed` user bubble and dispatches `parley:retry-send`
   // on click. Restore the composer with the original text + drop
   // the failed pendingSend so the user can re-send. Mirrors the old
   // chat.markBubbleFailed onRetry callback the reconciler replaces.
@@ -2409,7 +2417,7 @@ async function boot() {
   // pendingSend, so rebuild Files from them and re-queue. Large
   // (blob:) previews were revoked by attachments.clear() at send time
   // and can't be restored — tell the user to re-attach those.
-  document.addEventListener('sidekick:retry-send', async (ev) => {
+  document.addEventListener('parley:retry-send', async (ev) => {
     const detail = (ev as CustomEvent).detail || {};
     const text = typeof detail.text === 'string' ? detail.text : '';
     const messageId = typeof detail.messageId === 'string' ? detail.messageId : '';
@@ -2859,8 +2867,8 @@ async function boot() {
       // downstream; field nit 2026-07-13).
       chat.setPaginationState(null, false, null, false);
       chat.addSystemLine('New chat started');
-      // New chat is always sidekick-source; ensure composer is enabled
-      // (in case user just rotated away from a non-sidekick chat).
+      // New chat is always parley-source; ensure composer is enabled
+      // (in case user just rotated away from a non-parley chat).
       setComposerReadOnly(false);
       // Typeable immediately, no second tap (walking-test spec 2026-07-10;
       // the meeting-capture landing already does this — plain new-chat
@@ -2871,13 +2879,13 @@ async function boot() {
       // the optimistic placeholder row covers it).
       sessionDrawer.refresh();
       // No auto-cleanup of empty drawer rows. Removed 2026-05-05 after
-      // confirmed data loss: at least 2 sidekick sessions
+      // confirmed data loss: at least 2 parley sessions
       // (20260430_092241_ff0bada3 "Series A pitch deck init",
       // 20260501_062917_89254e19 "YouTube investment memo") were wiped
       // by this sweep when their messageCount transiently read 0 during
       // hermes session-rotation/compression. Reaches into server state
       // for "tidiness" — a backend-destructive optimization with no
-      // user signal. Hard rule: sidekick never auto-deletes
+      // user signal. Hard rule: parley never auto-deletes
       // server-side data. Stale empty rows live in the drawer until the
       // user removes them via the row menu (which has a confirm dialog).
       // On mobile, collapse the sidebar so the user sees the fresh chat —
@@ -4051,10 +4059,10 @@ async function boot() {
   // Hotkey rebinds in the settings panel should refresh tooltips. Fire
   // applyMicModeUi via a custom event from settings.ts (close handler
   // dispatches it so any saved hotkey changes propagate).
-  window.addEventListener('sidekick:hotkeys-changed', () => applyMicModeUi());
+  window.addEventListener('parley:hotkeys-changed', () => applyMicModeUi());
   // Engine flip (set-streaming-engine select in the Settings panel)
   // → re-render mic/call UI so btn-call hide/show keeps up live.
-  window.addEventListener('sidekick:engine-changed', () => applyMicModeUi());
+  window.addEventListener('parley:engine-changed', () => applyMicModeUi());
 
   // ── Barge slider (call-mode menu) ──────────────────────────────────
   // Single slider 0..100 that folds the bargeIn boolean into its
@@ -4103,7 +4111,7 @@ async function boot() {
       row.hidden = !available;
     }
     headphones.onChange(() => applyBargeRowVisibility());
-    window.addEventListener('sidekick:settings-changed', () => {
+    window.addEventListener('parley:settings-changed', () => {
       readSettingsToSlider();
       applyBargeRowVisibility();
     });
@@ -4655,6 +4663,6 @@ async function backfillHistory() {
 // ─── Go ─────────────────────────────────────────────────────────────────────
 
 boot().catch(err => {
-  console.error('SideKick boot failed:', err);
+  console.error('Parley boot failed:', err);
   document.body.textContent = `Boot error: ${err.message}`;
 });

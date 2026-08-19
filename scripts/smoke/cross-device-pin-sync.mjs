@@ -15,13 +15,13 @@
 //      envelope via `mock.pushEnvelope` to simulate another device.
 //   2. Pre-seed a pin via mock.seedPin (simulates "another device
 //      already pinned a message").
-//   3. PWA boots → hydrate() fetches /api/sidekick/pins → in-memory
+//   3. PWA boots → hydrate() fetches /api/parley/pins → in-memory
 //      cache populated → drawer toggle banner shows count >= 1.
 //   4. Push a `pins_changed` envelope (simulates a remote pin from
 //      another device after this PWA was already booted).
 //   5. Add a second pin server-side BEFORE pushing the envelope.
 //   6. After the envelope's 800ms debounce, the PWA's
-//      `sidekick:server-pins-changed` listener should trigger a
+//      `parley:server-pins-changed` listener should trigger a
 //      re-fetch and the count banner should reflect both pins.
 
 import { waitForReady, assert } from './lib.mjs';
@@ -59,9 +59,9 @@ export default async function run({ page, log, mock }) {
   await page.addInitScript(() => {
     /** @ts-ignore */
     window.__pinSyncDiag = { serverPinsChanged: 0, localPinsChanged: 0 };
-    window.addEventListener('sidekick:server-pins-changed',
+    window.addEventListener('parley:server-pins-changed',
       () => { window.__pinSyncDiag.serverPinsChanged++; });
-    window.addEventListener('sidekick:pins-changed',
+    window.addEventListener('parley:pins-changed',
       () => { window.__pinSyncDiag.localPinsChanged++; });
   });
   await waitForReady(page);
@@ -89,7 +89,7 @@ export default async function run({ page, log, mock }) {
   // Diagnostic: verify the server-side state has 2 pins before the
   // envelope flows. If this fails the bug is in the mock, not the PWA.
   const serverPins = await page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/pins');
+    const r = await fetch('/api/parley/pins');
     return (await r.json()).pins?.length || 0;
   });
   assert(serverPins === 2, `mock server should have 2 pins; got ${serverPins}`);
@@ -127,7 +127,7 @@ export default async function run({ page, log, mock }) {
   mock.getPinState().delete(`${CHAT_A}|msg-1`);  // direct mutation
   // Re-seed without msg-1 by clearing + re-adding. Simpler: just
   // mutate the map directly via the helper-exposed surface.
-  await page.evaluate(() => fetch(`/api/sidekick/pins/${encodeURIComponent('sidekick:cross-device-pin-A')}/msg-1`, { method: 'DELETE' }));
+  await page.evaluate(() => fetch(`/api/parley/pins/${encodeURIComponent('sidekick:cross-device-pin-A')}/msg-1`, { method: 'DELETE' }));
   mock.pushEnvelope({
     type: 'pins_changed',
     chat_id: CHAT_A,

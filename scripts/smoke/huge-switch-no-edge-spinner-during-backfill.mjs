@@ -107,7 +107,7 @@ export default async function run({ page, log }) {
   const beforeFetches = [];
   page.on('request', (req) => {
     const u = req.url();
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages\?/.test(u) && /[?&]before=/.test(u)) {
+    if (/\/api\/parley\/sessions\/[^/]+\/messages\?/.test(u) && /[?&]before=/.test(u)) {
       beforeFetches.push(Date.now());
     }
   });

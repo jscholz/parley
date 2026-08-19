@@ -66,7 +66,7 @@ function setSessionType(type: string) {
 
 // ── Native AVAudioSession category bridge (Capacitor/iOS only) ──────────
 // On the native CAP build the app launches its AVAudioSession in `.playback`
-// (output-only, A2DP-friendly) so merely OPENING Sidekick while a podcast
+// (output-only, A2DP-friendly) so merely OPENING Parley while a podcast
 // streams over Bluetooth A2DP does NOT drag the BT route onto the low-sample
 // HFP/SCO call codec. The native AudioSessionPlugin
 // (mobile/ios/App/App/AudioSessionPlugin.swift) flips the category to

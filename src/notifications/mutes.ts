@@ -1,7 +1,7 @@
 // Per-chat mute state — client side.
 //
 // Mirror of the proxy's mutes.ts cache. Loaded once at boot from
-// /api/sidekick/notifications/mutes, kept in sync on every toggle.
+// /api/parley/notifications/mutes, kept in sync on every toggle.
 // Used by sessionDrawer.openMenu to label the menu entry ("Mute
 // notifications" vs "Unmute notifications") per chat, and by future
 // drawer-row decorations (small bell icon, etc).
@@ -26,7 +26,7 @@ export function loadMutes(): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
     try {
-      const r = await fetch(apiUrl('/api/sidekick/notifications/mutes'));
+      const r = await fetch(apiUrl('/api/parley/notifications/mutes'));
       if (r.ok) {
         const body = await r.json();
         const arr: string[] = Array.isArray(body?.muted_chats) ? body.muted_chats : [];
@@ -65,7 +65,7 @@ export async function setMuted(chatId: string, nextMuted: boolean): Promise<void
   // Optimistic local update.
   if (nextMuted) muted.add(chatId); else muted.delete(chatId);
   try {
-    const r = await fetch(apiUrl('/api/sidekick/notifications/mute'), {
+    const r = await fetch(apiUrl('/api/parley/notifications/mute'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, muted: nextMuted }),

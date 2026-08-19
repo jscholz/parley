@@ -17,12 +17,12 @@ export const DESCRIPTION = 'Live-attached media card + historical re-derive on t
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const MEDIA_PATH = '/api/sidekick/media/00c0ffee00c0ffee.mp4';
+const MEDIA_PATH = '/api/parley/media/00c0ffee00c0ffee.mp4';
 
 export default async function run({ page, log }) {
   await waitForReady(page);
 
-  await page.route(/\/api\/sidekick\/media\/[a-f0-9]+\.mp4$/, (route) =>
+  await page.route(/\/api\/parley\/media\/[a-f0-9]+\.mp4$/, (route) =>
     route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(64) }));
 
   // Live path: send a media markdown link; the mock echoes it into
@@ -51,7 +51,7 @@ export default async function run({ page, log }) {
     return {
       ok: true,
       replyId,
-      hasMarkdown: /\/api\/sidekick\/media\//.test(text),
+      hasMarkdown: /\/api\/parley\/media\//.test(text),
       count: document.querySelectorAll('.card-video video').length,
     };
   });

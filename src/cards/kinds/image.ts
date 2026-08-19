@@ -26,7 +26,7 @@ export default {
     const div = document.createElement('div');
     div.className = 'card-image';
     const img = document.createElement('img');
-    // Site-relative urls (the /api/sidekick/media/<id> lane) resolve
+    // Site-relative urls (the /api/parley/media/<id> lane) resolve
     // against the API origin — under CAP the page origin is
     // capacitor://localhost and a relative src 404s into the bundle.
     img.src = p.url.startsWith('/') ? apiUrl(p.url) : p.url;

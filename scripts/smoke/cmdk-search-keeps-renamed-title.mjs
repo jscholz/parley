@@ -2,7 +2,7 @@
 // user has RENAMED must keep showing that name — not flash the real name
 // and then, ~300ms later, get replaced with the raw `sidekick:<uuid>` id.
 //
-// Why it regressed: the renamed title lives in sidekick.db
+// Why it regressed: the renamed title lives in parley.db
 // (conversation_titles, client-cached via the drawer). The hermes FTS
 // search index does NOT carry it, so the server search result for that
 // session has an empty/auto title. cmdkPalette paints the cached title
@@ -56,7 +56,7 @@ export default async function run({ page, log }) {
   // the hermes FTS index hands back for a client-renamed chat. Registered
   // after the mock harness's routes so this one wins for /search.
   let searchHits = 0;
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     searchHits++;
     await route.fulfill({
       status: 200,

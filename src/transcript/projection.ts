@@ -810,7 +810,7 @@ const DEDUP_CLUSTER_WINDOW_MS = 30_000;
 // can never swallow a fresh identical send.
 const ENVELOPE_SHADOW_WINDOW_MS = 30 * 60_000;
 // Envelope-only rows are keyed by created_at epoch-millis; state.db rowids
-// stay far below. (Mirrors _ENVELOPE_CURSOR_THRESHOLD in sidekick_state.py.)
+// stay far below. (Mirrors _ENVELOPE_CURSOR_THRESHOLD in parley_state.py.)
 const ENVELOPE_ID_MIN = 1e11;
 
 function isEnvelopeOnlyCopy(it: ConversationItem, envelopeIdPrefix: string): boolean {

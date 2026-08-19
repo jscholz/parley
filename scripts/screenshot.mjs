@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 
 const URL = 'http://localhost:3020';
-const OUT = '/tmp/sidekick-shots';
+const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
@@ -12,7 +12,7 @@ const SETTINGS_KEY = 'sidekick.settings.v2';
 const SIDEBAR_KEY = 'sidekick.sidebar.expanded';
 
 /**
- * Prep a context: pre-set sidekick localStorage so the first paint has
+ * Prep a context: pre-set parley localStorage so the first paint has
  * the right theme + sidebar state — no flash, no post-load click. Then
  * navigate to the empty-new-chat URL.
  */

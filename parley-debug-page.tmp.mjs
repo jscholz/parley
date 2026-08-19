@@ -1,0 +1,10 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ args: ['--no-sandbox'] });
+const ctx = await b.newContext();
+const page = await ctx.newPage();
+page.on('console', (m) => console.log('[console]', m.text().slice(0, 200)));
+page.on('pageerror', (e) => console.log('[pageerror]', e.message));
+await page.goto('http://127.0.0.1:3101/?debug=1', { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(6000);
+console.log('body classes:', await page.evaluate(() => document.body.className));
+await b.close();

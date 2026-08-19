@@ -47,7 +47,7 @@ async function rowMenuAction(page, chatId, label) {
 /** The persisted sessionIdentities setting, parsed to an id→identity map. */
 const persistedIdentities = (page) =>
   page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/prefs/sessionIdentities', { cache: 'no-store' });
+    const r = await fetch('/api/parley/prefs/sessionIdentities', { cache: 'no-store' });
     if (!r.ok) return null;
     const b = await r.json();
     const raw = b?.value;
@@ -86,7 +86,7 @@ export default async function run({ page, log }) {
 
   // ── 2. PERSIST — written to sessionIdentities + survives reload ─────
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/sessionIdentities')
+    () => fetch('/api/parley/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => typeof b?.value === 'string' && b.value.includes('Acme client')),
     null, { timeout: 3_000, polling: 100, label: 'nickname never persisted to sessionIdentities' },

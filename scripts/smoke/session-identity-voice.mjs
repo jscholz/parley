@@ -51,7 +51,7 @@ export default async function run({ page, log, url }) {
   await page.click('.session-identity-dialog .ident-save');
 
   await pollUntil(page,
-    (v) => fetch('/api/sidekick/prefs/sessionIdentities')
+    (v) => fetch('/api/parley/prefs/sessionIdentities')
       .then((r) => r.json())
       .then((b) => typeof b?.value === 'string' && b.value.includes(v)),
     SESSION_VOICE, { timeout: 3_000, polling: 100, label: 'session voice never written to sessionIdentities' },

@@ -27,7 +27,7 @@ const PRIMARY_VISION = 'anthropic/claude-sonnet-4';
 export default async function run({ page, log }) {
   // Auxiliary-models endpoint advertises a vision fallback. Same shape
   // the live plugin uses (see _handle_auxiliary_models).
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -41,7 +41,7 @@ export default async function run({ page, log }) {
     [PRIMARY_TEXT_ONLY]: { supports_vision: false, model_family: 'mistral' },
     [PRIMARY_VISION]:    { supports_vision: true,  model_family: 'claude' },
   };
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     const u = new URL(route.request().url());
     const model = u.searchParams.get('model') || '';
     const caps = CAPS[model];
@@ -71,7 +71,7 @@ export default async function run({ page, log }) {
   // Schema mock: declare the model setting with PRIMARY_TEXT_ONLY as
   // the current value. updateAttachButtonsState reads agentSettings's
   // 'model' value at every change, so this is the gate-driving signal.
-  await page.route('**/api/sidekick/settings/schema', async (route) => {
+  await page.route('**/api/parley/settings/schema', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({

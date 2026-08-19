@@ -2,7 +2,7 @@
  * Self-signed cert provisioning for the auto-HTTPS trial path.
  *
  * WHY: browsers gate getUserMedia (mic), push, and PWA install behind a
- * secure context — localhost is exempt, but the "open Sidekick on your
+ * secure context — localhost is exempt, but the "open Parley on your
  * phone" moment dies on plain HTTP. The FTUE research (2026-07-07)
  * found this is THE documented voice-breaking failure mode for
  * self-hosted chat UIs; none solve it out of the box. We do: generate a
@@ -45,9 +45,9 @@ export function opensslAvailable() {
 export function ensureSelfSignedCert(dir) {
   if (!opensslAvailable()) return null;
   fs.mkdirSync(dir, { recursive: true });
-  const certFile = path.join(dir, 'sidekick.crt');
-  const keyFile = path.join(dir, 'sidekick.key');
-  const metaFile = path.join(dir, 'sidekick.cert-meta.json');
+  const certFile = path.join(dir, 'parley.crt');
+  const keyFile = path.join(dir, 'parley.key');
+  const metaFile = path.join(dir, 'parley.cert-meta.json');
 
   const ips = ['127.0.0.1', ...lanAddresses()];
   const sans = ['DNS:localhost', ...ips.map(ip => `IP:${ip}`)];
@@ -69,7 +69,7 @@ export function ensureSelfSignedCert(dir) {
       'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes',
       '-keyout', keyFile, '-out', certFile,
       '-days', '825',
-      '-subj', '/CN=sidekick.local',
+      '-subj', '/CN=parley.local',
       '-addext', `subjectAltName=${sans.join(',')}`,
     ], { stdio: 'ignore' });
     fs.chmodSync(keyFile, 0o600);

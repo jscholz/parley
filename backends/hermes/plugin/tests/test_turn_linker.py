@@ -1,6 +1,6 @@
 """Turn-end deterministic linker (transcript v3 Phase 1, dark launch).
 
-Pins ``sidekick_turn_linker``'s pure classification core plus the
+Pins ``parley_turn_linker``'s pure classification core plus the
 watermark open/close/barrier machinery against the field shapes that
 killed v1/v2's content heuristics:
 
@@ -28,9 +28,9 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
-from .. import sidekick_turn_linker as linker
+from ..parley_db import ParleyDB
+from .. import parley_state as state
+from .. import parley_turn_linker as linker
 
 
 CHAT_ID = "b3e11a02-linker-test"
@@ -40,7 +40,7 @@ SRC = "sidekick"
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -165,18 +165,18 @@ def _row(rid, role, content="", tool_call_id="", tool_calls="", active=1):
 
 
 def test_kill_switch(monkeypatch, db, state_db):
-    monkeypatch.setenv("SIDEKICK_TURN_LINKER", "0")
+    monkeypatch.setenv("PARLEY_TURN_LINKER", "0")
     assert linker.enabled() is False
 
     class _Adapter:
-        _sidekick_db = db
+        _parley_db = db
         _state_db_path = state_db
         _turn_buffer = None
 
     asyncio.run(linker.open_turn_watermark(_Adapter(), CHAT_ID, "umsg_x"))
     assert db.fetchone("SELECT 1 FROM turn_observations LIMIT 1") is None
     assert linker.compare_and_log(db, CHAT_ID) is None
-    monkeypatch.setenv("SIDEKICK_TURN_LINKER", "1")
+    monkeypatch.setenv("PARLEY_TURN_LINKER", "1")
     assert linker.enabled() is True
 
 
@@ -898,7 +898,7 @@ def test_compare_hwm_persists_across_restart(db, state_db, capsys):
     process, so every gateway restart re-swept full history and
     re-WARNed already-judged stale links forever — the standing
     diverge=0 alert bar was unusable. The per-chat compared-through
-    mark must be durable in sidekick.db."""
+    mark must be durable in parley.db."""
     _seed_compared_turn(db, state_db, reconcile_agrees=True)
     assert linker.compare_and_log(db, CHAT_ID, state_db_path=state_db) is not None
     capsys.readouterr()
@@ -952,10 +952,10 @@ def test_delete_conversation_purges_turn_tables(db, state_db, monkeypatch):
     """Chat delete must cascade to the linker's shadow tables — without
     it, deleted chats leave orphan observations/claims that the compare
     sweep keeps judging against an empty session chain."""
-    from ..sidekick_route_conversations import delete_conversation_sync
+    from ..parley_route_conversations import delete_conversation_sync
 
     monkeypatch.delenv("HINDSIGHT_URL", raising=False)
-    monkeypatch.delenv("SIDEKICK_HINDSIGHT_URL", raising=False)
+    monkeypatch.delenv("PARLEY_HINDSIGHT_URL", raising=False)
     linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_d1", user_text="hi")
     _add_msg(state_db, "user", "hi", 100.0)
     _add_msg(state_db, "assistant", "bye", 101.0)
@@ -969,7 +969,7 @@ def test_delete_conversation_purges_turn_tables(db, state_db, monkeypatch):
     linker._compare_hwm[CHAT_ID] = 123.0
 
     class _Adapter:
-        _sidekick_db = db
+        _parley_db = db
         _state_db_path = state_db
 
     assert delete_conversation_sync(_Adapter(), CHAT_ID, SRC) == "ok"
@@ -985,9 +985,9 @@ def test_delete_conversation_purges_turn_tables(db, state_db, monkeypatch):
 
 class _FakeAdapter:
     def __init__(self, db, state_db):
-        self._sidekick_db = db
+        self._parley_db = db
         self._state_db_path = state_db
-        from ..sidekick_turn_buffer import TurnBuffer
+        from ..parley_turn_buffer import TurnBuffer
         self._turn_buffer = TurnBuffer()
 
 

@@ -80,7 +80,7 @@ async function uiDeleteChat(page, chatId) {
 /** The persisted pinnedSessions setting, parsed to an id array. */
 const persistedPins = (page) =>
   page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/prefs/pinnedSessions', { cache: 'no-store' });
+    const r = await fetch('/api/parley/prefs/pinnedSessions', { cache: 'no-store' });
     if (!r.ok) return null;
     const b = await r.json();
     const raw = b?.value;
@@ -120,7 +120,7 @@ export default async function run({ page, log }) {
 
   // ── 2. PERSIST — pinnedSessions written + survives reload ───────────
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/pinnedSessions')
+    () => fetch('/api/parley/prefs/pinnedSessions')
       .then((r) => r.json()).then((b) => typeof b?.value === 'string' && b.value.includes('gamma')),
     null, { timeout: 3_000, polling: 100, label: 'gamma pin never persisted to pinnedSessions' },
   );
@@ -170,7 +170,7 @@ export default async function run({ page, log }) {
 
   await uiDeleteChat(page, ID('beta'));
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/pinnedSessions')
+    () => fetch('/api/parley/prefs/pinnedSessions')
       .then((r) => r.json()).then((b) => !String(b?.value || '').includes('beta')),
     null, { timeout: 5_000, polling: 100, label: 'deleted beta never auto-unpinned from pinnedSessions' },
   );

@@ -11,7 +11,7 @@
 //      prefixed sibling.
 //   3. cleanupAbandonedChat saw the 0-msg ghost on navigate-away,
 //      called backend.deleteSession(bare_id).
-//   4. Plugin's bare-id DELETE fallback defaulted source=sidekick,
+//   4. Plugin's bare-id DELETE fallback defaulted source=parley,
 //      found the real session, deleted it. 9 chats wiped silently.
 //
 // Post-v0.383 unification (current shape):
@@ -27,7 +27,7 @@
 // prior hydrate) and locks in BOTH halves of the post-fix invariant:
 //   A. Merge dedup: same prefixed key on both sides → ONE drawer row.
 //   B. Cleanup contract: navigate-away from any populated chat fires
-//      ZERO `DELETE /api/sidekick/sessions/*` requests.
+//      ZERO `DELETE /api/parley/sessions/*` requests.
 //
 // Companion to `empty-chat-navigate-away-cleanup.mjs` — that one tests
 // the LEGITIMATE orphan-cleanup feature (which is preserved). This one
@@ -79,7 +79,7 @@ export function MOCK_SETUP(mock) {
  *  proxyClient.listSessions must collapse them into ONE drawer entry. */
 async function seedPrefixedIdbRow(page, chatId) {
   await page.evaluate(async (id) => {
-    const DB_NAME = 'sidekick-conversations';
+    const DB_NAME = 'parley-conversations';
     const STORE = 'conversations';
     const META = 'meta';
     // v2 schema (matches src/conversations.ts post-v0.383). Test must
@@ -118,7 +118,7 @@ export default async function run({ page, ctx, log }) {
   // Intercept ALL backend DELETE requests so we can assert the negative.
   // We don't care about other methods — fall through.
   const deleteCalls = [];
-  await ctx.route('**/api/sidekick/sessions/*', async (route) => {
+  await ctx.route('**/api/parley/sessions/*', async (route) => {
     if (route.request().method() === 'DELETE') {
       const url = new URL(route.request().url());
       deleteCalls.push(decodeURIComponent(url.pathname));

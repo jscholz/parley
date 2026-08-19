@@ -59,13 +59,13 @@ async function attachAndFill(page, text) {
 }
 
 export default async function run({ page, log }) {
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ vision: null }),
     });
   });
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -81,7 +81,7 @@ export default async function run({ page, log }) {
   // class), 'http503' → answered refusal, null → pass through.
   let failNextPost = null;
   const postBodies = [];
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.route('**/api/parley/messages', async (route) => {
     if (route.request().method() !== 'POST') { await route.fallback(); return; }
     const mode = failNextPost;
     failNextPost = null;

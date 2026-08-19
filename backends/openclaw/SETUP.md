@@ -26,7 +26,7 @@ openclaw --profile sk-integ models status
 # Gateway should be running via systemctl --user.
 systemctl --user is-active openclaw-integ.service          # → active
 curl -s https://cortex-lon1.taile0c895.ts.net:8646/v1/health
-# → {"ok":true,"status":"ok","via":"sidekick-plugin"}
+# → {"ok":true,"status":"ok","via":"parley-plugin"}
 ```
 
 ## 3. Open the Control UI
@@ -48,11 +48,11 @@ openclaw --profile sk-integ config set gateway.controlUi.allowedOrigins \
 systemctl --user restart openclaw-integ.service
 ```
 
-## 4. Sidekick PWAs (already set up)
+## 4. Parley PWAs (already set up)
 
 - `https://cortex-lon1.taile0c895.ts.net:3001` — pointed at hermes
 - `https://cortex-lon1.taile0c895.ts.net:3002` — pointed at openclaw
 
-Both PWAs are the same build; differ only in `SIDEKICK_PLATFORM_URL`
-env var (see `sidekick-openclaw.service` unit). Use them to A/B
+Both PWAs are the same build; differ only in `PARLEY_PLATFORM_URL`
+env var (see `parley-openclaw.service` unit). Use them to A/B
 between backends.

@@ -11,7 +11,7 @@
 //
 // Fix: prewarmPinnedWindows() warms each pinned message's around-window
 // into drillWindowCache in the background — on boot (after pins hydrate)
-// and whenever a pin is added (the `sidekick:pins-changed` listener).
+// and whenever a pin is added (the `parley:pins-changed` listener).
 //
 // Discriminator (no drill anywhere in this test): after the app boots
 // with a server-seeded pin, AND after a second pin is added at runtime,
@@ -74,7 +74,7 @@ export default async function run({ page, log }) {
   await waitForReady(page);
 
   // 1. Boot trigger: the server-seeded pin hydrates, fires
-  //    `sidekick:pins-changed`, and the prewarm warms its around-window —
+  //    `parley:pins-changed`, and the prewarm warms its around-window —
   //    with no drill. Poll the cache until it lands.
   await pollUntil(page,
     async (m) => {
@@ -95,7 +95,7 @@ export default async function run({ page, log }) {
     `precondition: ${runtimePinMsg} must be cold before it is pinned, got len ${beforeRuntime}`);
 
   // 2. On-pin trigger: pin a SECOND message at runtime (fires
-  //    `sidekick:pins-changed`). The prewarm should warm its window —
+  //    `parley:pins-changed`). The prewarm should warm its window —
   //    again with no drill.
   await page.evaluate(({ chatId, msgId, idx }) =>
     import('/build/pins/store.mjs').then((mod) => mod.pinMessage({
@@ -112,7 +112,7 @@ export default async function run({ page, log }) {
   const runtimeLen = await cachedWindowLen(page, CHAT_ID, runtimePinMsg);
   assert(runtimeLen > 0,
     `BUG: pin added at runtime did not prewarm its around-window (getWindow → ${runtimeLen}). ` +
-    `the sidekick:pins-changed listener should kick prewarmPinnedWindows.`);
+    `the parley:pins-changed listener should kick prewarmPinnedWindows.`);
   log(`on-pin prewarmed: ${runtimePinMsg} window n=${runtimeLen} (no drill) ✓`);
 
   // 3. The boot pin's window must still be present (prewarm dedups, doesn't churn).

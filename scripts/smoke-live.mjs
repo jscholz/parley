@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Read-only LIVE smoke against a *deployed* sidekick instance.
+ * Read-only LIVE smoke against a *deployed* parley instance.
  *
  * The mock-backend smoke suite (`npm run smoke`) proves the frontend
- * logic against a stubbed API; it intercepts `/api/sidekick/*` with
+ * logic against a stubbed API; it intercepts `/api/parley/*` with
  * `page.route()` so it never touches a real proxy or backend. That
  * leaves a gap exactly where pushes break: contract drift between the
  * deployed bundle, the proxy, and the live agent. This smoke fills it —
@@ -56,8 +56,8 @@ const check = (name, fn) => checks.push({ name, fn });
 
 // ── Phase 1: HTTP contract (read-only) ────────────────────────────────
 
-check('GET /api/sidekick/sessions → non-empty {sessions:[...]}', async () => {
-  const r = await fetch(`${URL}/api/sidekick/sessions?limit=5`, { headers: authHeaders });
+check('GET /api/parley/sessions → non-empty {sessions:[...]}', async () => {
+  const r = await fetch(`${URL}/api/parley/sessions?limit=5`, { headers: authHeaders });
   assert(r.ok, `HTTP ${r.status}`);
   const j = await r.json();
   assert(Array.isArray(j.sessions), 'sessions is not an array');
@@ -72,7 +72,7 @@ check('GET /api/sidekick/sessions → non-empty {sessions:[...]}', async () => {
 check('GET /sessions/{id}/messages → {messages:[...]} with id/role/content', async () => {
   assert(firstChatId, 'no chat_id from the sessions check');
   const r = await fetch(
-    `${URL}/api/sidekick/sessions/${encodeURIComponent(firstChatId)}/messages?limit=5`,
+    `${URL}/api/parley/sessions/${encodeURIComponent(firstChatId)}/messages?limit=5`,
     { headers: authHeaders },
   );
   assert(r.ok, `HTTP ${r.status}`);
@@ -84,25 +84,25 @@ check('GET /sessions/{id}/messages → {messages:[...]} with id/role/content', a
   }
 });
 
-check('GET /api/sidekick/config → {settings:{...}}', async () => {
-  const r = await fetch(`${URL}/api/sidekick/config`, { headers: authHeaders });
+check('GET /api/parley/config → {settings:{...}}', async () => {
+  const r = await fetch(`${URL}/api/parley/config`, { headers: authHeaders });
   assert(r.ok, `HTTP ${r.status}`);
   const j = await r.json();
   assert(j.settings && typeof j.settings === 'object', 'no settings object');
 });
 
-check('GET /api/sidekick/prefs → {settings:{...}}', async () => {
-  const r = await fetch(`${URL}/api/sidekick/prefs`, { headers: authHeaders });
+check('GET /api/parley/prefs → {settings:{...}}', async () => {
+  const r = await fetch(`${URL}/api/parley/prefs`, { headers: authHeaders });
   assert(r.ok, `HTTP ${r.status}`);
   const j = await r.json();
   assert(j.settings && typeof j.settings === 'object', 'no settings object');
 });
 
-check('GET /api/sidekick/stream → SSE channel connects', async () => {
+check('GET /api/parley/stream → SSE channel connects', async () => {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 10_000);
   try {
-    const r = await fetch(`${URL}/api/sidekick/stream`, {
+    const r = await fetch(`${URL}/api/parley/stream`, {
       headers: { ...authHeaders, accept: 'text/event-stream' },
       signal: ac.signal,
     });

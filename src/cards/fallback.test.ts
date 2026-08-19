@@ -22,7 +22,7 @@ import { cardHash } from './attach.ts';
 describe('classifyMediaUrl', () => {
   it('classifies video extensions', () => {
     for (const u of [
-      '/api/sidekick/media/abcd.mp4',
+      '/api/parley/media/abcd.mp4',
       'https://x/y.m4v',
       '/a/b.mov',
       '/a/b.webm',
@@ -33,7 +33,7 @@ describe('classifyMediaUrl', () => {
 
   it('classifies audio extensions', () => {
     for (const u of [
-      '/api/sidekick/media/abcd.m4a',
+      '/api/parley/media/abcd.m4a',
       'https://x/y.mp3',
       '/a/b.wav',
       '/a/b.ogg',
@@ -43,8 +43,8 @@ describe('classifyMediaUrl', () => {
   });
 
   it('tolerates a trailing query string', () => {
-    assert.equal(classifyMediaUrl('/api/sidekick/media/x.mp3?t=12'), 'audio');
-    assert.equal(classifyMediaUrl('/api/sidekick/media/x.mp4?v=2'), 'video');
+    assert.equal(classifyMediaUrl('/api/parley/media/x.mp3?t=12'), 'audio');
+    assert.equal(classifyMediaUrl('/api/parley/media/x.mp4?v=2'), 'video');
   });
 
   it('falls back to image for anything else', () => {
@@ -62,11 +62,11 @@ describe('classifyMediaUrl', () => {
 describe('parseCardsFromText — audio markdown link', () => {
   it('renders an audio card from a markdown audio link', () => {
     const cards = parseCardsFromText(
-      'here is the mix ![Final master](/api/sidekick/media/deadbeefdeadbeef.m4a)',
+      'here is the mix ![Final master](/api/parley/media/deadbeefdeadbeef.m4a)',
     );
     assert.equal(cards.length, 1);
     assert.equal(cards[0].kind, 'audio');
-    assert.equal(cards[0].payload.url, '/api/sidekick/media/deadbeefdeadbeef.m4a');
+    assert.equal(cards[0].payload.url, '/api/parley/media/deadbeefdeadbeef.m4a');
     assert.equal(cards[0].payload.caption, 'Final master');
   });
 

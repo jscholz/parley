@@ -15,7 +15,7 @@
 //   2. Server-side: bump chat B's unread count + push
 //      `unread_changed` envelope (mirrors plugin's behavior on a new
 //      reply for chat B while user is on chat A).
-//   3. PWA's badge.ts debounces 1500ms, fetches /api/sidekick/
+//   3. PWA's badge.ts debounces 1500ms, fetches /api/parley/
 //      notifications/unread, sees chat B has unread=1, fires
 //      setAppBadge(1).
 

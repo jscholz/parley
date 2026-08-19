@@ -101,7 +101,7 @@ export default async function run({ page, log, mock }) {
   // Watch the before-cursor fetch loadEarlier fires.
   const beforeRequests = [];
   page.on('request', (req) => {
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
+    if (/\/api\/parley\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
       beforeRequests.push(req.url());
     }
   });

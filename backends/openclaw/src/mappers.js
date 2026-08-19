@@ -1,8 +1,8 @@
 /**
- * Openclaw native shapes → sidekick UpstreamAgent shapes.
+ * Openclaw native shapes → parley UpstreamAgent shapes.
  *
  * Reference for target shapes:
- *   proxy/sidekick/upstream.ts
+ *   proxy/parley/upstream.ts
  *     - ConversationSummary (line 38)
  *     - ConversationItem    (line 126)
  *
@@ -38,7 +38,7 @@ export function prefixChatId(chatId, agentId = 'dev') {
 }
 
 /** Convert a single openclaw sessions.json entry + its messages into
- *  the sidekick ConversationSummary shape.
+ *  the parley ConversationSummary shape.
  *
  *  We compute message_count + first_user_message by reading the full
  *  message log. That's O(n) per chat at drawer-load time — acceptable
@@ -50,7 +50,7 @@ export function toConversationSummary({ sessionKey, entry, messages, agentId = '
   // Openclaw has no native title field. Prefer a snippet of the first
   // user message (mirrors what hermes does for whatsapp/telegram drawer
   // rows when no explicit chat title is set) — strips the leading
-  // sidekick timestamp wrapper so the snippet doesn't waste row real
+  // parley timestamp wrapper so the snippet doesn't waste row real
   // estate. Falls back to the stripped chat id only when no user
   // message has landed yet.
   const titleSnippet = firstUser ? extractTitleSnippet(firstUser) : '';
@@ -58,7 +58,7 @@ export function toConversationSummary({ sessionKey, entry, messages, agentId = '
   return {
     id: strippedId,
     object: 'conversation',
-    // sessions.json carries ms timestamps; sidekick expects seconds.
+    // sessions.json carries ms timestamps; parley expects seconds.
     created_at: Math.floor((entry.sessionStartedAt ?? entry.updatedAt) / 1000),
     metadata: {
       title: titleSnippet || strippedId,
@@ -70,7 +70,7 @@ export function toConversationSummary({ sessionKey, entry, messages, agentId = '
 }
 
 /** Strip the leading `[Sat 2026-05-16 09:35 GMT+1] ` timestamp wrapper
- *  the sidekick PWA prepends to every user message, then truncate. The
+ *  the parley PWA prepends to every user message, then truncate. The
  *  resulting snippet reads like a natural chat title. */
 function extractTitleSnippet(userText, maxLen = 60) {
   let s = userText.replace(/^\[[^\]]+\]\s*/, '').trim();
@@ -78,7 +78,7 @@ function extractTitleSnippet(userText, maxLen = 60) {
   return s;
 }
 
-/** Convert one openclaw message row to a sidekick ConversationItem.
+/** Convert one openclaw message row to a parley ConversationItem.
  *  `seq` is the row index (0-based within the filtered list) — used as
  *  the integer `id` the PWA dedups against. Openclaw doesn't expose a
  *  globally-monotonic id, but per-chat seq is stable across reads (the
@@ -146,7 +146,7 @@ function extractMessageToolReply(msg) {
   return texts.length > 0 ? texts.join('\n\n') : null;
 }
 
-/** Map openclaw role → sidekick role. Sidekick uses 'tool' for both
+/** Map openclaw role → parley role. Parley uses 'tool' for both
  *  tool calls and tool results; openclaw separates assistant(toolCall)
  *  from a top-level toolResult row. We surface assistant(toolCall) as
  *  role='tool' because that's how the PWA renders tool activity. */

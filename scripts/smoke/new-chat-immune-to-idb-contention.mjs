@@ -8,7 +8,7 @@
 // it reproduced on his machine and not in the lab.
 //
 // This smoke MANUFACTURES the contention: an in-page transaction hog
-// keeps a readwrite transaction alive on sidekick-conversations by
+// keeps a readwrite transaction alive on parley-conversations by
 // chaining puts, then clicks New chat. The shell must paint + become
 // typeable without waiting for the hog (the mint's IDB persistence is
 // durability-only — the chat id itself is set synchronously).
@@ -48,7 +48,7 @@ export default async function run({ page, log, mock }) {
   // behind it.
   await page.evaluate(() => {
     window.__hogDone = false;
-    const open = indexedDB.open('sidekick-conversations');
+    const open = indexedDB.open('parley-conversations');
     open.onsuccess = () => {
       const db = open.result;
       const stop = performance.now() + 4000;
@@ -67,7 +67,7 @@ export default async function run({ page, log, mock }) {
     };
   });
   await new Promise((r) => setTimeout(r, 150));   // hog armed
-  log('IDB transaction hog running on sidekick-conversations');
+  log('IDB transaction hog running on parley-conversations');
 
   // New chat during the hog: must be typeable WELL before the hog ends.
   const ms = await page.evaluate(async () => {

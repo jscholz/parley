@@ -70,7 +70,7 @@ export default async function run({ page, log }) {
     (id) => document.querySelector('#sessions-list li.active')?.getAttribute('data-chat-id') === id,
     RESTORED_CHAT, { timeout: 8_000, polling: 100 });
   await page.waitForTimeout(500); // let the synchronous LS write + snapshot settle
-  const lsBefore = await page.evaluate(() => localStorage.getItem('sidekick.viewed-session-id'));
+  const lsBefore = await page.evaluate(() => localStorage.getItem('parley.viewed-session-id'));
   assert(lsBefore === RESTORED_CHAT,
     `precondition: viewed-session localStorage should be the restored chat, got ${JSON.stringify(lsBefore)}`);
   log('viewing the (empty) restored chat; its id is persisted ✓');

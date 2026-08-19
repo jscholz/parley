@@ -10,7 +10,7 @@
 //   * /?capture=start URL param (manifest shortcut → pocket start;
 //     whether iOS grants mic without an in-page tap is the Phase-0(e)
 //     open question — failure lands on a toast, never a broken state)
-//   * capture_control envelopes (POST /api/sidekick/captures/control →
+//   * capture_control envelopes (POST /api/parley/captures/control →
 //     external triggers: Shortcuts, hardware buttons)
 
 import {
@@ -102,7 +102,7 @@ function render(state: CaptureUiState): void {
 function toast(message: string): void {
   // Reuse the pin drawer's status line if present; else log only.
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:pin-error', { detail: { message } }));
+    window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message } }));
   } catch { /* non-browser */ }
   log(`[capture] ${message}`);
 }
@@ -129,7 +129,7 @@ async function startFromUi(linkedChat?: string): Promise<void> {
     // and disclosure to participants is the human's obligation. Say it
     // once, ever.
     try {
-      const KEY = 'sidekick.capture.consentHintShown';
+      const KEY = 'parley.capture.consentHintShown'; // migrated from sidekick.capture.consentHintShown
       if (!localStorage.getItem(KEY)) {
         localStorage.setItem(KEY, '1');
         toast('Recording started. Heads up: letting participants know is on you.');
@@ -161,7 +161,7 @@ export function hotkeyToggleMeetingCapture(): void {
 
 export function initCapturePill(opts: { openChat?: (chatId: string) => void } = {}): void {
   openChatCb = opts.openChat ?? null;
-  window.addEventListener('sidekick:capture-state', (ev) => {
+  window.addEventListener('parley:capture-state', (ev) => {
     render((ev as CustomEvent<CaptureUiState>).detail);
   });
 
@@ -220,10 +220,10 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   });
 
   // External control plane: capture_control envelopes broadcast by
-  // POST /api/sidekick/captures/control. Only a foregrounded page
+  // POST /api/parley/captures/control. Only a foregrounded page
   // should grab the mic — a background tab starting a recorder would
   // race the visible one.
-  window.addEventListener('sidekick:capture-control', (ev) => {
+  window.addEventListener('parley:capture-control', (ev) => {
     const action = (ev as CustomEvent<{ action?: string }>).detail?.action;
     if (document.visibilityState !== 'visible') return;
     if (action === 'start' && !getCaptureState().active) void startFromUi();

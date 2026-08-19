@@ -59,7 +59,7 @@ export default async function run({ page, log, mock }) {
   // server truth converges to the new title (the client's PATCH goes
   // through the proxy to the mock's /v1 surface, which has no rename
   // route — fulfill it here and update the mock's in-memory title).
-  await page.route('**/api/sidekick/sessions/**', async (route) => {
+  await page.route('**/api/parley/sessions/**', async (route) => {
     if (route.request().method() !== 'PATCH') { await route.fallback(); return; }
     await route.fulfill({
       status: 200, contentType: 'application/json',

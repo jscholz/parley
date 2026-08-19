@@ -1,7 +1,7 @@
 {
   "id": "sidekick",
-  "name": "Sidekick",
-  "description": "Sidekick PWA backend — exposes the /v1/* OpenAI-Responses contract sidekick's proxy expects against any openclaw runtime.",
+  "name": "Parley",
+  "description": "Parley (formerly Sidekick) PWA backend \u2014 exposes the /v1/* OpenAI-Responses contract the parley proxy expects against any openclaw runtime. Plugin id stays 'sidekick' (legacy registration key referenced by installed openclaw configs).",
   "activation": {
     "onStartup": true
   },
@@ -12,7 +12,7 @@
     "properties": {
       "authToken": {
         "type": "string",
-        "description": "Shared bearer token sidekick proxy uses for HTTP auth. Optional; sidekick proxy works without auth in dev."
+        "description": "Shared bearer token the parley proxy uses for HTTP auth. Optional; the proxy works without auth in dev."
       }
     }
   }

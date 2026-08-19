@@ -1,13 +1,13 @@
-# Sidekick hermes plugin
+# Parley hermes plugin
 
-Hermes platform adapter that turns sidekick (PWA + Node proxy) into a
+Hermes platform adapter that turns parley (PWA + Node proxy) into a
 peer of telegram / slack / signal — a gateway-managed chat surface where
 hermes owns the `chat_id → session_id` mapping natively.
 
 The adapter exposes the abstract agent contract over HTTP+SSE
 (`/v1/responses`, `/v1/conversations*`, `/v1/events`, plus the
-sidekick gateway extension `/v1/gateway/conversations`,
-`/v1/settings/*`, `/v1/commands`). See the sidekick repo's
+parley gateway extension `/v1/gateway/conversations`,
+`/v1/settings/*`, `/v1/commands`). See the parley repo's
 [`docs/ABSTRACT_AGENT_PROTOCOL.md`](../../../docs/ABSTRACT_AGENT_PROTOCOL.md)
 for the canonical reference.
 
@@ -33,7 +33,7 @@ modifying the plugin.
   registry; categories `cli_only` are filtered out (PWA can't
   exercise terminal affordances).
 - Cross-platform drawer (`/v1/gateway/conversations`) — telegram /
-  slack / whatsapp sessions surface alongside sidekick's own with a
+  slack / whatsapp sessions surface alongside parley's own with a
   source badge.
 
 ## Files
@@ -41,19 +41,19 @@ modifying the plugin.
 | File | Purpose |
 |------|---------|
 | `__init__.py` | The adapter — `BasePlatformAdapter` subclass + aiohttp HTTP server speaking the agent contract. The plugin loader walks `<plugin-dir>/__init__.py`. |
-| `sidekick_db.py` | Supplemental sqlite (`~/.hermes/sidekick.db`). **Read the top-of-file design block** for the message-store architecture. |
-| `sidekick_state.py` | All CRUD against `sidekick.db` — push subs, mutes, prefs, VAPID, pins, unread, msg_links. Plus `record_envelope()` (write-through) + `reconcile_from_state_db()` (linker + self-heal). |
-| `sidekick_route_items.py` | `GET /v1/conversations/{id}/items` — reads from sidekick.db, opportunistically reconciles from state.db on enter. |
-| `sidekick_route_*.py` | Other route handlers (responses, events, conversations, settings, push). |
-| `sidekick_dispatcher.py` | Plugin-owned web-push dispatch (engagement gate, kind toggles, body shaping). |
-| `sidekick_turn_buffer.py` | In-memory mid-turn buffer for mid-flight reload (transient). |
+| `parley_db.py` | Supplemental sqlite (`~/.hermes/parley.db`). **Read the top-of-file design block** for the message-store architecture. |
+| `parley_state.py` | All CRUD against `parley.db` — push subs, mutes, prefs, VAPID, pins, unread, msg_links. Plus `record_envelope()` (write-through) + `reconcile_from_state_db()` (linker + self-heal). |
+| `parley_route_items.py` | `GET /v1/conversations/{id}/items` — reads from parley.db, opportunistically reconciles from state.db on enter. |
+| `parley_route_*.py` | Other route handlers (responses, events, conversations, settings, push). |
+| `parley_dispatcher.py` | Plugin-owned web-push dispatch (engagement gate, kind toggles, body shaping). |
+| `parley_turn_buffer.py` | In-memory mid-turn buffer for mid-flight reload (transient). |
 | `plugin.yaml` | Hermes plugin manifest. |
-| `0001-add-sidekick-platform.patch` | Required `hermes-agent` patch (see below). |
+| `0001-add-parley-platform.patch` | Required `hermes-agent` patch (see below). |
 
-## Message store (`~/.hermes/sidekick.db`)
+## Message store (`~/.hermes/parley.db`)
 
-The PWA's transcript is rendered from sidekick.db, not state.db.
-State.db is hermes' LLM-context substrate; sidekick.db is the UI-facing
+The PWA's transcript is rendered from parley.db, not state.db.
+State.db is hermes' LLM-context substrate; parley.db is the UI-facing
 view. They're kept in sync by:
 
 1. **Write-through** on every persisted envelope (`user_message`,
@@ -64,14 +64,14 @@ view. They're kept in sync by:
 2. **Opportunistic reconciliation** every items-endpoint request
    (`reconcile_from_state_db`):
    - Link pass: content-fingerprint match populates `agent_row_id`
-   - Insert pass: state.db rows missing from sidekick.db get added
+   - Insert pass: state.db rows missing from parley.db get added
      as `legacy:<state_id>` (chats predating the migration)
-   - Orphan-drop pass: sidekick.db rows linked to vanished state.db
+   - Orphan-drop pass: parley.db rows linked to vanished state.db
      rows (i.e. `/retry`, `/undo`, `/compress`, delete, prune
      happened) get removed
 3. **Self-healing**: orphan + insert passes run on every items read,
    so whole-session mutations recover on the next PWA poll. The heal
-   logs `[sidekick] heal chat=… links=N inserted=N dropped=N` —
+   logs `[parley] heal chat=… links=N inserted=N dropped=N` —
    non-zero in the journal means a write-path bug or a hermes-side
    session mutation just happened.
 
@@ -84,8 +84,8 @@ view. They're kept in sync by:
   up + content match succeeds.
 - **Bug in the write path**: smoke tests catch it (see
   `tests/test_envelope_writethrough.py` and
-  `tests/test_items_endpoint_sidekick_db.py`). Production drift
-  surfaces as `legacy:<id>` rows in sidekick.db that should have
+  `tests/test_items_endpoint_parley_db.py`). Production drift
+  surfaces as `legacy:<id>` rows in parley.db that should have
   been envelope-written.
 
 ### Schema migration log
@@ -93,7 +93,7 @@ view. They're kept in sync by:
 | Phase | When | What |
 |-------|------|------|
 | 1 | 2026-05-19 | Write-through hook added in `_safe_send_envelope` |
-| 2 | 2026-05-19 | Items endpoint switched to sidekick.db reads |
+| 2 | 2026-05-19 | Items endpoint switched to parley.db reads |
 | 3 | 2026-05-19 | Content-fingerprint linker (replaces `_write_msg_links_after_turn`) |
 | 4 | 2026-05-19 | Bidirectional self-heal on every reconcile |
 | Cleanup | 2026-05-19 | Legacy `_write_msg_links_after_turn`, `_capture_msg_high_water_mark` callers removed |
@@ -114,26 +114,26 @@ patch.
 ```bash
 # 1. Patch hermes-agent.
 cd <your hermes-agent install>
-patch -p1 < <path-to-this-dir>/0001-add-sidekick-platform.patch
+patch -p1 < <path-to-this-dir>/0001-add-parley-platform.patch
 
-# 2. Install the plugin (symlink so edits in the sidekick repo land
+# 2. Install the plugin (symlink so edits in the parley repo land
 #    immediately in ~/.hermes/plugins/ without a re-copy).
-rm -rf ~/.hermes/plugins/sidekick
-ln -s <path-to-this-dir> ~/.hermes/plugins/sidekick
+rm -rf ~/.hermes/plugins/parley
+ln -s <path-to-this-dir> ~/.hermes/plugins/parley
 
 # 3. Enable in ~/.hermes/config.yaml:
 #    plugins:
 #      enabled:
-#        - sidekick
+#        - parley
 
 # 4. Auth token + (optional) port in ~/.hermes/.env:
 echo "SIDEKICK_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
-# echo 'SIDEKICK_PLATFORM_PORT=8645' >> ~/.hermes/.env  # default
+# echo 'PARLEY_PLATFORM_PORT=8645' >> ~/.hermes/.env  # default
 
 # 5. Restart the gateway.
 ```
 
-The same `SIDEKICK_PLATFORM_TOKEN` value goes into the sidekick proxy
+The same `SIDEKICK_PLATFORM_TOKEN` value goes into the parley proxy
 config so the proxy's WebSocket client can authenticate.
 
 ## Smoke test
@@ -152,16 +152,16 @@ then `reply_final`.
 ## Wire protocol
 
 HTTP+SSE on `:8645` (default; configurable via
-`SIDEKICK_PLATFORM_PORT`). Endpoints listed in the top-level
+`PARLEY_PLATFORM_PORT`). Endpoints listed in the top-level
 [`README.md`](../../../README.md) endpoint inventory; full details
 in the module docstring at the top of `__init__.py`.
 
 Auth: `Authorization: Bearer <SIDEKICK_PLATFORM_TOKEN>` on every
-request. Same token goes into the sidekick proxy's
+request. Same token goes into the parley proxy's
 `SIDEKICK_PLATFORM_TOKEN` env so the proxy can authenticate as a
 client.
 
 ## Known limitations
 
-* `reply_to` threading is ignored on outbound — sidekick has no thread
+* `reply_to` threading is ignored on outbound — parley has no thread
   primitive in the PWA today.

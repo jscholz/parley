@@ -93,7 +93,7 @@ function syncHeartbeat(): void {
 
 async function postVisibility(state: VisibilityState, chatId: string): Promise<void> {
   try {
-    await fetch(apiUrl('/api/sidekick/notifications/visibility'), {
+    await fetch(apiUrl('/api/parley/notifications/visibility'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ state, chat_id: chatId || undefined }),

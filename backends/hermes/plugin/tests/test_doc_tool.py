@@ -1,5 +1,5 @@
 """display_doc tool — reads a file server-side and ships a doc_show
-envelope to the PWA's Docs panel (sidekick_doc_tool.py).
+envelope to the PWA's Docs panel (parley_doc_tool.py).
 
 The handler is a plain sync tool callable; these tests exercise it with a
 fake adapter capturing envelopes. Registration against hermes'
@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from .. import sidekick_doc_tool as doc_tool
+from .. import parley_doc_tool as doc_tool
 
 
 class FakeAdapter:
@@ -102,7 +102,7 @@ def test_display_doc_caps_size_without_emitting(tmp_path, monkeypatch, adapter, 
     assert adapter.envelopes == []
 
 
-def test_display_doc_requires_sidekick_chat_context(tmp_path, monkeypatch, adapter, handler):
+def test_display_doc_requires_parley_chat_context(tmp_path, monkeypatch, adapter, handler):
     f = tmp_path / "doc.md"
     f.write_text("hi", encoding="utf-8")
     monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
@@ -123,11 +123,11 @@ def test_display_doc_missing_file_errors_cleanly(monkeypatch, adapter, handler):
 def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
     """Regression: toolset MUST be the bare platform name "sidekick".
 
-    Registering under "hermes-sidekick" (v1, 2026-07-04) created a real
+    Registering under "hermes-parley" (v1, 2026-07-04) created a real
     registry toolset with that name, which SHADOWS hermes' auto-generated
     ``hermes-<platform>`` composite (``_HERMES_CORE_TOOLS`` + platform
     tools) in ``toolsets.resolve_toolset`` — silently stripping file/
-    terminal/web/every core tool from ALL sidekick sessions. Field
+    terminal/web/every core tool from ALL parley sessions. Field
     regression 2026-07-07: agent lost filesystem access mid-workflow.
     """
     import sys
@@ -149,9 +149,9 @@ def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
     assert doc_tool.register_display_doc_tool(lambda: None) is True
     assert calls["name"] == "display_doc"
     assert calls["toolset"] == "sidekick", (
-        "toolset must be the bare platform name; a literal 'hermes-sidekick' "
+        "toolset must be the bare platform name; a literal 'hermes-parley' "
         "registry toolset shadows the core-tools composite and strips "
-        "filesystem/terminal tools from every sidekick session"
+        "filesystem/terminal tools from every parley session"
     )
 
 

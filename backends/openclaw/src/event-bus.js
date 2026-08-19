@@ -56,7 +56,7 @@ export class AgentEventBus {
     if (target.queue.length >= QUEUE_HIGH_WATER) {
       target.queue.shift();  // drop oldest; back-pressure is on us
       this.logger.warn?.(
-        `[sidekick] run queue high water for ${event.runId}, dropped oldest`,
+        `[parley] run queue high water for ${event.runId}, dropped oldest`,
       );
     }
     target.queue.push(event);
@@ -93,7 +93,7 @@ export class AgentEventBus {
     };
   }
 
-  /** Push a pre-translated sidekick envelope into the global stream.
+  /** Push a pre-translated parley envelope into the global stream.
    *  Used by /v1/responses (POST receipt → user_message) for cross-
    *  device sync. Wrapped in a sentinel so the iterator can tell
    *  envelopes apart from raw agent events. */

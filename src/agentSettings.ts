@@ -5,11 +5,11 @@
  *
  * The agent declares a SettingDef[] (model, persona, temperature, ...);
  * we render each to a settings-panel row by `type`. Updates POST back
- * to /api/sidekick/settings/{id} via the backend adapter; the response
+ * to /api/parley/settings/{id} via the backend adapter; the response
  * (the updated def) replaces the local copy. On error, we revert the
  * input to the previous value so a rejection is visible.
  *
- * Sidekick-owned settings (theme, hotkeys, mic, TTS) stay in their
+ * Parley-owned settings (theme, hotkeys, mic, TTS) stay in their
  * original groups; this module only renders rows the agent declares.
  *
  * Refresh policy: load() on settings-panel open AND close — the panel

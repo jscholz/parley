@@ -22,7 +22,7 @@ phone at a time, swapping branches / reconnecting / phone-killing-pwa
 all leave a stale peer hanging while a fresh one comes in.  Keying
 sessions lets us garbage-collect old peers explicitly when their
 keep-alive expires or when a new offer arrives with the same
-``X-Sidekick-Replace-Peer`` header.
+``X-Parley-Replace-Peer`` header.
 """
 
 from __future__ import annotations
@@ -76,13 +76,13 @@ class PeerSession:
     # circular import — peer.py doesn't import stt_bridge / tts_bridge).
     stt_task: Optional[asyncio.Task] = None
     tts_task: Optional[asyncio.Task] = None
-    # Long-lived subscriber to the proxy's /api/sidekick/stream channel
+    # Long-lived subscriber to the proxy's /api/parley/stream channel
     # — drains assistant reply envelopes into peer.extra['tts_text_queue']
     # for the lifetime of the peer (talk-mode only, chat_id route only).
     # Replaces the legacy per-utterance SSE consumer in
     # stt_bridge._dispatch_to_agent which broke after the first
     # reply_final and missed post-tool-call reply bubbles.
-    sidekick_stream_task: Optional[asyncio.Task] = None
+    parley_stream_task: Optional[asyncio.Task] = None
     # Registry hooks for the bridges to push events through.
     on_transcript: Optional[Callable[[str, bool], Awaitable[None]]] = None
     # Client-initiated data channel ('events') for transcript + reply
@@ -102,7 +102,7 @@ class PeerSession:
         if self.closed:
             return
         self.closed = True
-        for task_attr in ("stt_task", "tts_task", "sidekick_stream_task"):
+        for task_attr in ("stt_task", "tts_task", "parley_stream_task"):
             t: Optional[asyncio.Task] = getattr(self, task_attr)
             if t and not t.done():
                 t.cancel()

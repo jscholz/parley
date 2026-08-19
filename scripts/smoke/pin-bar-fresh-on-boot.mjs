@@ -57,8 +57,8 @@ export default async function run({ page, log }) {
   // Seed the perf cache identical to the server, and restore the
   // drawer open so the host renders the pins panel at boot.
   await page.evaluate((pins) => {
-    localStorage.setItem('sidekick.pins.items.v1', JSON.stringify(pins));
-    localStorage.setItem('sidekick.pin-drawer.expanded', '1');
+    localStorage.setItem('parley.pins.items.v1', JSON.stringify(pins));
+    localStorage.setItem('parley.pin-drawer.expanded', '1');
   }, PINS);
 
   log('reloading with seeded cache + expanded drawer pref…');

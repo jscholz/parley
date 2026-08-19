@@ -1,10 +1,11 @@
-# Publish sidekick-portal to npm on version tags — via npm Trusted
+# Publish parleyvoo (formerly sidekick-portal) to npm on version tags
+# — via npm Trusted
 # Publishing (GitHub OIDC), so there are no tokens to store or rotate
 # and no 2FA prompt: npm trusts this exact repo+workflow identity.
 #
 # One-time setup (after the package exists on npm):
-#   npmjs.com → sidekick-portal → Settings → Trusted Publisher →
-#   GitHub Actions, repository jscholz/sidekick, workflow release.yml.
+#   npmjs.com → parleyvoo → Settings → Trusted Publisher →
+#   GitHub Actions, repository jscholz/parley, workflow release.yml.
 #
 # Releasing:
 #   npm version minor        # bumps package.json + creates the v* tag

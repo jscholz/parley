@@ -1,14 +1,14 @@
 // App-icon badge + per-chat unread state, server-driven.
 //
 // SSOT for sidebar badges + app badge + push dispatch is the backend
-// plugin's `unread_state` table (see project_hermes_sidekick_parity.md).
+// plugin's `unread_state` table (see project_hermes_parley_parity.md).
 // This module is a read-through cache + thin client over those routes:
-//   GET  /api/sidekick/notifications/unread     → snapshot
-//   POST /api/sidekick/notifications/seen       ← {chat_id}
-//   POST /api/sidekick/notifications/mark       ← {chat_id, marked}
+//   GET  /api/parley/notifications/unread     → snapshot
+//   POST /api/parley/notifications/seen       ← {chat_id}
+//   POST /api/parley/notifications/mark       ← {chat_id, marked}
 //
 // Cross-device sync rides the `unread_changed` envelope that
-// backendEvents observes on /api/sidekick/stream — when it arrives,
+// backendEvents observes on /api/parley/stream — when it arrives,
 // the listener calls `requestRefresh()` to pull the new state.
 //
 // Why server-driven: the old IDB-side counter drifted when push
@@ -135,7 +135,7 @@ async function refreshFromServer(): Promise<void> {
   const epochAtFetch = mutationEpoch;
   const settledAtFetch = writesSettled;
   try {
-    const r = await (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/unread'));
+    const r = await (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/unread'));
     if (!r.ok) return;
     const data: any = await r.json();
     if (mutationEpoch !== epochAtFetch || pendingWrites > 0 || writesSettled !== settledAtFetch) {
@@ -249,7 +249,7 @@ export async function clearUnread(chatId: string): Promise<void> {
     });
   }
   try {
-    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/seen'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/seen'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId }),
@@ -262,7 +262,7 @@ export async function markUnread(chatId: string): Promise<void> {
   if (!chatId || markedUnread.has(chatId)) return;
   applyLocal(chatId, () => { markedUnread.add(chatId); });
   try {
-    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/mark'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: true }),
@@ -278,7 +278,7 @@ export async function unmarkUnread(chatId: string): Promise<void> {
     applyLocal(chatId, () => { markedUnread.delete(chatId); });
   }
   try {
-    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/mark'), {
+    await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, marked: false }),
@@ -297,7 +297,7 @@ export async function clearAllUnread(): Promise<void> {
   const markedList = Array.from(markedUnread);
   const all = new Set([...seenList, ...markedList]);
   await Promise.all(Array.from(all).map((chatId) =>
-    trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/sidekick/notifications/seen'), {
+    trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/seen'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId }),
@@ -321,15 +321,15 @@ export function totalUnreadCount(): number { return totalUnread(); }
 
 function notifyChange() {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:unread-changed'));
+    window.dispatchEvent(new CustomEvent('parley:unread-changed'));
   } catch { /* SSR / non-window environments */ }
 }
 
 // Server-pushed change notifications fan in here. backendEvents emits
-// `sidekick:server-unread-changed` when it sees an `unread_changed`
-// envelope on /api/sidekick/stream — re-fetch immediately.
+// `parley:server-unread-changed` when it sees an `unread_changed`
+// envelope on /api/parley/stream — re-fetch immediately.
 if (typeof window !== 'undefined') {
-  window.addEventListener('sidekick:server-unread-changed', () => requestRefresh());
+  window.addEventListener('parley:server-unread-changed', () => requestRefresh());
   // NOTE for the stale-snapshot guard: both foreground triggers below
   // funnel through requestRefresh → refreshFromServer, so an iOS
   // foregrounding that fires visibilitychange AND focus while a seen/

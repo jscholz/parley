@@ -6,7 +6,7 @@
 // art for the idiom (IDB blob store + outbox drain).
 //
 // The storage backend is injectable: production uses IndexedDB
-// (db `sidekick-capture`, store `segments`, keyPath `key`); tests use
+// (db `parley-capture`, store `segments`, keyPath `key`); tests use
 // the in-memory implementation — same interface, no fake-IDB plumbing
 // (docStore.test.ts's localStorage-shim philosophy applied to IDB).
 
@@ -31,7 +31,7 @@ export interface SegmentBackend {
 
 // ── IndexedDB backend (production) ─────────────────────────────────────
 
-const DB_NAME = 'sidekick-capture';
+const DB_NAME = 'parley-capture'; // migrated from sidekick-capture (renameMigration.ts)
 const STORE = 'segments';
 
 function reqP<T>(req: IDBRequest<T>): Promise<T> {

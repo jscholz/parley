@@ -43,7 +43,7 @@ export default async function run({ page, log }) {
 
   // Server search returns two hits: one with a real timestamp, one without.
   // Registered after the harness routes so this one wins for /search.
-  await page.route('**/api/sidekick/search*', async (route) => {
+  await page.route('**/api/parley/search*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

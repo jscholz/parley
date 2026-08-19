@@ -97,7 +97,7 @@ export default async function run({ N = DEFAULT_RUNS, log = console.log } = {}) 
           page,
           (req) => {
             const url = req.url();
-            if (!url.includes('/api/sidekick/sessions/')) return false;
+            if (!url.includes('/api/parley/sessions/')) return false;
             if (!url.includes('/messages')) return false;
             try {
               return decodeURIComponent(url).includes(seedId);

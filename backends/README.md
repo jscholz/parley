@@ -1,7 +1,7 @@
 # Backends
 
-Each subdirectory is one backend that sidekick can talk to. The
-sidekick proxy speaks the abstract agent contract
+Each subdirectory is one backend that parley can talk to. The
+parley proxy speaks the abstract agent contract
 (`docs/ABSTRACT_AGENT_PROTOCOL.md` — OpenAI-Responses-shaped
 HTTP+SSE), and that's the only requirement for being a backend.
 
@@ -12,14 +12,14 @@ What lives in each subdirectory:
 - A `README.md` describing install, the contract pieces it
   implements, and any backend-specific quirks.
 - A `config.example.yaml` (where applicable) showing which
-  backend-side config keys sidekick reads or writes (e.g. for
+  backend-side config keys parley reads or writes (e.g. for
   the model picker that round-trips through `/v1/settings/*`).
 
-The proxy itself is **agent-agnostic** — `proxy/sidekick/` doesn't
-contain any per-backend code. It just forwards `/api/sidekick/*`
-to whatever HTTP server is at `SIDEKICK_PLATFORM_URL`. So adding
+The proxy itself is **agent-agnostic** — `proxy/parley/` doesn't
+contain any per-backend code. It just forwards `/api/parley/*`
+to whatever HTTP server is at `PARLEY_PLATFORM_URL`. So adding
 a new backend doesn't require proxy changes; you implement the
-`/v1/*` contract on your end and point sidekick at it.
+`/v1/*` contract on your end and point parley at it.
 
 ## Bundled backends
 
@@ -39,5 +39,5 @@ a new backend doesn't require proxy changes; you implement the
    etc.
 4. Write a `backends/<name>/README.md` covering install + which
    contract pieces you support.
-5. Set `SIDEKICK_PLATFORM_URL=http://your-host:port` in sidekick's
+5. Set `PARLEY_PLATFORM_URL=http://your-host:port` in parley's
    `.env`. No proxy code changes required.

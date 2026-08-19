@@ -21,7 +21,7 @@ import type {
   ConversationItem,
   Decoration,
   PendingSend,
-  SidekickEnvelope,
+  ParleyEnvelope,
 } from './types.ts';
 
 const states = new Map<string, ChatState>();
@@ -110,7 +110,7 @@ export function setDurable(
  *  "Completed" = reply_final has fired; "present in durable" = the
  *  server-side mirror caught up and the projection can dedup off
  *  durable. When the mirror hasn't caught up (e.g. background-chat
- *  reply arrived via SSE but state.db/sidekick.db write-through
+ *  reply arrived via SSE but state.db/parley.db write-through
  *  hasn't landed yet), the inflight envelope is the ONLY copy of
  *  the content and we must NOT drop it (e.g.
  *  background-reply-first-switch-shows-content.mjs).
@@ -125,13 +125,13 @@ export function setDurable(
  *  key) handles it.
  */
 function dropCompletedTurnEnvelopes(
-  envs: SidekickEnvelope[],
+  envs: ParleyEnvelope[],
   durable: ConversationItem[],
-): SidekickEnvelope[] {
+): ParleyEnvelope[] {
   if (envs.length === 0) return envs;
-  const durableSidekickIds = new Set<string>();
+  const durableParleyIds = new Set<string>();
   for (const d of durable) {
-    if (d.sidekick_id) durableSidekickIds.add(d.sidekick_id);
+    if (d.sidekick_id) durableParleyIds.add(d.sidekick_id);
   }
   // Walk from end; find the most recent reply_final whose message_id
   // IS present in durable. Only completed turns whose mirror has
@@ -142,7 +142,7 @@ function dropCompletedTurnEnvelopes(
     const e = envs[i];
     if (e.type !== 'reply_final') continue;
     const mid = (e as { message_id?: string }).message_id;
-    if (mid && durableSidekickIds.has(mid)) {
+    if (mid && durableParleyIds.has(mid)) {
       lastSafeIdx = i;
       break;
     }
@@ -454,7 +454,7 @@ function pickByNormTs(items: ConversationItem[], which: 'min' | 'max'): Conversa
  *    (switch-back wiped the in-flight turn we'd accumulated locally).
  *
  *  Callers that want unconditional drain use clearInflight(). */
-export function setInflight(chatId: string, envelopes: SidekickEnvelope[]): void {
+export function setInflight(chatId: string, envelopes: ParleyEnvelope[]): void {
   const s = getState(chatId);
   if (!envelopes.length) {
     // Nothing to merge in; preserve what live SSE captured.
@@ -467,7 +467,7 @@ export function setInflight(chatId: string, envelopes: SidekickEnvelope[]): void
 /** Append a single envelope (live SSE). The projection orders by
  *  array index; envelopes for unfrozen turns should arrive in
  *  user_message → tool_call/result → reply_delta → reply_final order. */
-export function appendInflight(chatId: string, env: SidekickEnvelope): void {
+export function appendInflight(chatId: string, env: ParleyEnvelope): void {
   const s = getState(chatId);
   s.inflight.push(env);
   notify(chatId);

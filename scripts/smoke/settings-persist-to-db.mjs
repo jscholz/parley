@@ -1,10 +1,10 @@
-// Regression gate for Phase 2/3 of the settings→sidekick.db migration:
+// Regression gate for Phase 2/3 of the settings→parley.db migration:
 // synced (non-device) settings now live in the `user_settings` table
-// (GET /api/sidekick/prefs), with the YAML (sidekick.config.yaml,
-// GET /api/sidekick/config) demoted to a one-time read-only SEED.
+// (GET /api/parley/prefs), with the YAML (parley.config.yaml,
+// GET /api/parley/config) demoted to a one-time read-only SEED.
 //
 // What this proves, end-to-end through the real fetch paths the PWA
-// uses (the mock backend owns /api/sidekick/prefs; /api/sidekick/config
+// uses (the mock backend owns /api/parley/prefs; /api/parley/config
 // falls through to the real worktree server's YAML):
 //
 //   1. SEED-FORWARD — boot with an empty DB. settings.load() finds the
@@ -12,8 +12,8 @@
 //      AND writes it into the DB (PUT /prefs) so the next boot is
 //      DB-only.
 //   2. WRITE = PUT, never POST — changing the setting in the UI sends
-//      PUT /api/sidekick/prefs/<key> and does NOT POST the legacy
-//      /api/sidekick/config/<key> (YAML is no longer a runtime store).
+//      PUT /api/parley/prefs/<key> and does NOT POST the legacy
+//      /api/parley/config/<key> (YAML is no longer a runtime store).
 //   3. DB WINS — after a reload the DB value (set in step 2) takes
 //      precedence; seed-forward is skipped because the key is present.
 //
@@ -24,7 +24,7 @@
 import { waitForReady, openSettingsSection, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'settings-persist-to-db';
-export const DESCRIPTION = 'synced settings seed-forward from YAML into sidekick.db, UI edits PUT to /prefs (not POST /config), and the DB wins on reload';
+export const DESCRIPTION = 'synced settings seed-forward from YAML into parley.db, UI edits PUT to /prefs (not POST /config), and the DB wins on reload';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -38,7 +38,7 @@ export default async function run({ page, log, mock }) {
   // disjoint from this pattern (/config with no trailing /<key>) and
   // falls through to the real server untouched.
   let configPosts = 0;
-  await page.route('**/api/sidekick/config/**', async (route) => {
+  await page.route('**/api/parley/config/**', async (route) => {
     if (route.request().method() === 'POST') {
       configPosts += 1;
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
@@ -51,7 +51,7 @@ export default async function run({ page, log, mock }) {
   // Map, so the synced key should have been backfilled from the YAML
   // and written into the DB. Poll the DB store until the PUT lands.
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/agentActivity')
+    () => fetch('/api/parley/prefs/agentActivity')
       .then((r) => r.json())
       .then((b) => b && b.value != null),
     null,
@@ -59,7 +59,7 @@ export default async function run({ page, log, mock }) {
   );
   const seeded = mock.getUserSetting(KEY);
   const yamlValue = await page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/config', { cache: 'no-store' });
+    const r = await fetch('/api/parley/config', { cache: 'no-store' });
     const j = await r.json();
     return j?.settings?.agentActivity;
   });
@@ -78,7 +78,7 @@ export default async function run({ page, log, mock }) {
 
   // set() fires PUT fire-and-forget; poll the DB store for the new value.
   await pollUntil(page,
-    (want) => fetch('/api/sidekick/prefs/agentActivity')
+    (want) => fetch('/api/parley/prefs/agentActivity')
       .then((r) => r.json())
       .then((b) => b && b.value === want),
     next,

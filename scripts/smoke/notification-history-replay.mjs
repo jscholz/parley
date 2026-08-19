@@ -9,7 +9,7 @@
 // History-replay path: src/sessionResume.ts renderHistoryMessage has a
 // mirrored branch (lines ~551-580) that recognizes a state.db row as a
 // notification via EITHER `m.kind` (server-tagged via
-// sidekick_msg_links.kind, surfaced by the hermes plugin /items endpoint)
+// parley_msg_links.kind, surfaced by the hermes plugin /items endpoint)
 // OR a content-shape regex (`^Cronjob Response:\s*(.+?)\s*\n(job_id: ...) ...`).
 // Both produce the same `.line.system.notification` + emoji-speaker +
 // body-without-header shape. This smoke is the regression gate for that
@@ -75,7 +75,7 @@ export function MOCK_SETUP(mock) {
       // Cron-style notification row persisted as role='assistant' with
       // kind='cron' (the canonical shape after the SSOT
       // refactor — see backends/hermes/plugin _write_msg_links_after_turn
-      // and proxy/sidekick/notifications/dispatch). The `kind` field is
+      // and proxy/parley/notifications/dispatch). The `kind` field is
       // set for forward-compat with the mock-backend `kind` passthrough
       // gap noted at the top of this file; today the content-shape regex
       // is what actually triggers the notification branch.

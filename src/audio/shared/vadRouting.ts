@@ -37,7 +37,7 @@ export type VadStrategySetting = 'auto' | VadStrategy;
  *  Auto / Client / Bridge row). Persistent so iOS-installed PWAs survive
  *  reloads — the URL ?vad= override is unreachable inside an installed
  *  PWA because the browser caches the entry URL. */
-const VAD_OVERRIDE_STORAGE_KEY = 'sidekick_vad_override';
+const VAD_OVERRIDE_STORAGE_KEY = 'parley_vad_override'; // migrated from sidekick_vad_override
 
 /** Returns the URL-param override if present and valid, else null. */
 export function getVadStrategyOverride(): VadStrategy | null {

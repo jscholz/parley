@@ -1,12 +1,21 @@
+# NOTE (Parley rename, 2026-08): `name` stays "sidekick" — it is the
+# registration key the deployed hermes.config.yaml references AND the
+# Platform value embedded in live state.db session keys
+# (agent:main:sidekick:dm:<chat_id>). Renaming it orphans every existing
+# session. Display metadata below carries the new product name.
 name: sidekick
-label: Sidekick
+label: Parley
 kind: platform
-version: 0.2.0
+version: 0.3.0
 description: |
-  Sidekick PWA platform adapter. Runs an aiohttp WebSocket server
-  bound to localhost so the sidekick proxy (Node.js) can dispatch
-  user messages and receive streaming agent responses + push
+  Parley (formerly Sidekick) PWA platform adapter. Runs an aiohttp
+  WebSocket server bound to localhost so the parley proxy (Node.js) can
+  dispatch user messages and receive streaming agent responses + push
   notifications. Peer of telegram/slack/signal adapters.
+
+  v0.3.0 — product renamed Sidekick → Parley. Registration name and
+  platform id deliberately stay "sidekick" (persisted in live session
+  keys); env vars are PARLEY_* with SIDEKICK_* honored as fallback.
 
   v0.2.0 — migrated to upstream's plugin-driven platform registration
   (gateway/platform_registry.py). No longer requires a hermes-agent
@@ -18,15 +27,15 @@ provides_hooks:
 provides_tools: []
 requires_env:
   - name: SIDEKICK_PLATFORM_TOKEN
-    description: "Bearer token the sidekick proxy uses on every WS message + HTTP call to this plugin"
-    prompt: "Sidekick platform token (will also be set on the proxy side)"
+    description: "Bearer token the parley proxy uses on every WS message + HTTP call to this plugin (PARLEY_PLATFORM_TOKEN is the primary spelling; this legacy name is what deployed env files still set)"
+    prompt: "Parley platform token (will also be set on the proxy side)"
     password: true
 optional_env:
   - name: SIDEKICK_PLATFORM_ALLOWED_USERS
-    description: "Comma-separated user ids allowed to talk to the agent through sidekick"
+    description: "Comma-separated user ids allowed to talk to the agent through parley (legacy spelling; PARLEY_PLATFORM_ALLOWED_USERS also honored)"
     prompt: "Allowed user ids (comma-separated)"
     password: false
   - name: SIDEKICK_PLATFORM_ALLOW_ALL_USERS
-    description: "Allow any sidekick client through (single-user PWA installs only)"
+    description: "Allow any parley client through (single-user PWA installs only; legacy spelling)"
     prompt: "Allow all users? (true/false)"
     password: false

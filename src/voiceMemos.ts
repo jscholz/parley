@@ -6,7 +6,7 @@
 
 import { decodeAudioBlob } from './audio/shared/platform.ts';
 
-const DB_NAME = 'sidekick-voice-memos';
+const DB_NAME = 'parley-voice-memos'; // migrated from sidekick-voice-memos (renameMigration.ts)
 const STORE = 'memos';
 const DB_VERSION = 1;
 

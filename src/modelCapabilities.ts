@@ -4,13 +4,13 @@
 // Two responsibilities, both keyed on "the current model id":
 //
 //   1. Cache per-model capability lookups from the plugin's
-//      `/v1/sidekick/model-capabilities` (proxy: `/api/sidekick/model-
+//      `/v1/parley/model-capabilities` (proxy: `/api/parley/model-
 //      capabilities?model=<id>`). Models.dev is the ground-truth
 //      source. Each lookup is cached in-process so repeat hover /
 //      setting-change cycles don't re-fetch.
 //   2. Drive the +button and camera button states based on those
 //      capabilities AND the auxiliary vision-fallback advertisement
-//      from `/api/sidekick/auxiliary-models`. Three states:
+//      from `/api/parley/auxiliary-models`. Three states:
 //        - Primary supports vision: enabled, plain "Attach image".
 //        - Primary text-only + aux fallback: enabled, tooltip says
 //          "will route through <fallback>".
@@ -69,14 +69,14 @@ export function getVisionFallbackModel(): string | null {
 
 /** Auxiliary vision advertisement — separate from per-model caps
  *  because it's config-driven on the hermes side, not model-driven.
- *  Thin pass-through to the plugin's `/v1/sidekick/auxiliary-models`
+ *  Thin pass-through to the plugin's `/v1/parley/auxiliary-models`
  *  via the proxy. Idempotent: if a fetch is in flight or has already
  *  resolved, returns the existing promise. */
 function ensureAuxiliaryFetched(): Promise<void> {
   if (auxiliaryReady && visionFallbackModel !== null) return auxiliaryReady;
   auxiliaryReady = (async () => {
     try {
-      const res = await fetch(apiUrl('/api/sidekick/auxiliary-models'), { cache: 'no-store' });
+      const res = await fetch(apiUrl('/api/parley/auxiliary-models'), { cache: 'no-store' });
       if (!res.ok) return;
       const body = await res.json() as { vision?: string | null };
       if (typeof body?.vision === 'string' || body?.vision === null) {
@@ -108,7 +108,7 @@ export async function fetchModelCaps(modelId: string): Promise<ModelCaps | null>
   const p = (async () => {
     try {
       const res = await fetch(
-        apiUrl(`/api/sidekick/model-capabilities?model=${encodeURIComponent(modelId)}`),
+        apiUrl(`/api/parley/model-capabilities?model=${encodeURIComponent(modelId)}`),
         { cache: 'no-store' },
       );
       if (!res.ok) return cacheNegative(modelId);

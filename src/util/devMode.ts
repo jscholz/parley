@@ -4,7 +4,7 @@
  *
  * When ON, behaves as if `?debug=1&debug-relay=1&dictate-debug=1` were
  * present in the URL: high-frequency log()/diag() emit, dictate.ts
- * dlog phase logs fire, log lines stream to /tmp/sidekick-debug/<sid>.log
+ * dlog phase logs fire, log lines stream to /tmp/parley-debug/<sid>.log
  * via the relay endpoint.
  *
  * Why a single flag (not three): in mobile/PWA usage you typically
@@ -144,7 +144,7 @@ export async function forceReload(opts: { clearIdb?: boolean; clearVadCache?: bo
  *  log readers (humans + AI) can grep them as run boundaries. */
 export function emitMark(label: string): void {
   try {
-    const sid = sessionStorage.getItem('sidekick_debug_relay_sid') || 'unknown';
+    const sid = sessionStorage.getItem('parley_debug_relay_sid') || 'unknown';
     const line = `[${new Date().toTimeString().slice(0, 8)}] [test-matrix] ===== ${label} =====\n`;
     fetch(apiUrl('/api/debug/logs'), {
       method: 'POST',

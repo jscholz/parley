@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Sidekick — one-command install for Mac / Linux.
+# Parley — one-command install for Mac / Linux.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jscholz/sidekick/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jscholz/parley/master/install.sh | bash
 #
 #   ...or, if you've already cloned the repo, just run it in place:
-#       cd sidekick && ./install.sh
+#       cd parley && ./install.sh
 #
-# When piped through curl, clones to ./sidekick in your CURRENT
+# When piped through curl, clones to ./parley in your CURRENT
 # directory (cd into where you want it first). When run as a file from
 # inside an existing checkout, uses that checkout in place. Override
-# the target either way with SIDEKICK_INSTALL_DIR=/abs/path.
+# the target either way with PARLEY_INSTALL_DIR=/abs/path.
 #
 # What it does:
-#   1. Verifies node >= 22 (sidekick uses node 22's
+#   1. Verifies node >= 22 (parley uses node 22's
 #      --experimental-strip-types flag at runtime).
-#   2. Clones the repo to ./sidekick (or, if run from inside an existing
+#   2. Clones the repo to ./parley (or, if run from inside an existing
 #      checkout, uses it in place — no pull, no branch surprises).
 #   3. Runs `npm install` at root + under `backends/stub/`.
 #   4. Copies `.env.example` to `.env` (idempotent).
@@ -24,30 +24,31 @@
 #   6. Starts the proxy + the in-tree stub agent (echo LLM) — no API
 #      keys required. Open the printed URL.
 #
-# After it boots, point at a real backend by editing `./sidekick/.env`
-# (uncomment SIDEKICK_PLATFORM_URL) and restarting `npm start`.
+# After it boots, point at a real backend by editing `./parley/.env`
+# (uncomment PARLEY_PLATFORM_URL) and restarting `npm start`.
 
 set -euo pipefail
 
-INSTALL_DIR="${SIDEKICK_INSTALL_DIR:-$(pwd)/sidekick}"
-REPO_URL="https://github.com/jscholz/sidekick.git"
+# PARLEY_INSTALL_DIR primary; legacy SIDEKICK_INSTALL_DIR honored.
+INSTALL_DIR="${PARLEY_INSTALL_DIR:-${SIDEKICK_INSTALL_DIR:-$(pwd)/parley}}"
+REPO_URL="https://github.com/jscholz/parley.git"
 USE_EXISTING_CHECKOUT=0
 
-# If invoked from inside an existing sidekick checkout (./install.sh
+# If invoked from inside an existing parley checkout (./install.sh
 # rather than `curl | bash`), use that checkout as the target instead
 # of cloning a sibling. The user is presumably driving their own
 # branch, so we skip the auto-pull too. Env override still wins.
-if [ -z "${SIDEKICK_INSTALL_DIR:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+if [ -z "${PARLEY_INSTALL_DIR:-}" ] && [ -z "${SIDEKICK_INSTALL_DIR:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [ -d "$SCRIPT_DIR/.git" ] \
      && [ -f "$SCRIPT_DIR/package.json" ] \
-     && grep -q '"name": *"sidekick"' "$SCRIPT_DIR/package.json"; then
+     && grep -qE '"name": *"(parleyvoo|sidekick-portal)"' "$SCRIPT_DIR/package.json"; then
     INSTALL_DIR="$SCRIPT_DIR"
     USE_EXISTING_CHECKOUT=1
   fi
 fi
 
-echo "==> sidekick install — target: $INSTALL_DIR"
+echo "==> parley install — target: $INSTALL_DIR"
 
 # 1. Node version check
 if ! command -v node >/dev/null 2>&1; then
@@ -58,7 +59,7 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 NODE_MAJOR=$(node -e 'console.log(process.versions.node.split(".")[0])')
 if [ "$NODE_MAJOR" -lt 22 ]; then
-  echo "Error: node $(node -v) is too old. Sidekick requires Node 22+."
+  echo "Error: node $(node -v) is too old. Parley requires Node 22+."
   echo "  Update via brew (\`brew upgrade node\`) or nvm."
   exit 1
 fi
@@ -125,7 +126,7 @@ fi
 # 6. Start
 echo ""
 echo "================================================================"
-echo "  Sidekick is starting up."
+echo "  Parley is starting up."
 echo ""
 echo "  Defaults: proxy on :3001, in-tree stub agent on :4001 (echo"
 echo "  LLM, no API keys required). Both ports auto-shift if busy"

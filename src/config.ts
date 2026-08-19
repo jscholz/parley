@@ -21,7 +21,7 @@ let cfg = null;
  *  from cache when the backend is unreachable (CAP local-asset shell), so
  *  the user can still interact locally while deciding whether to reconnect
  *  or re-point at a new host. */
-const CONFIG_CACHE_KEY = 'sidekick_config_cache';
+const CONFIG_CACHE_KEY = 'parley_config_cache'; // migrated from parley_config_cache
 
 /** Optional hook fired when the live /config fetch fails. Lets the shell
  *  surface a reconnect affordance without config.ts importing UI code. */
@@ -87,7 +87,7 @@ export function getAgentLabel() {
 
 /** App name (title bar, MediaSession app name, browser tab title). */
 export function getAppName() {
-  return cfg?.appName || 'SideKick';
+  return cfg?.appName || 'Parley';
 }
 
 /** Header tagline shown beneath the app name. */
@@ -104,7 +104,7 @@ export function getThemePrimary() {
  *  panel heading, and the --primary CSS variable. Called once on boot
  *  after loadConfig() resolves. Everything user-visible that embeds the
  *  app name should flow through here so deployments with a different
- *  SIDEKICK_APP_NAME rebrand end-to-end. */
+ *  PARLEY_APP_NAME rebrand end-to-end. */
 export function applySkinning() {
   const name = getAppName();
   const subtitle = getAppSubtitle();
@@ -112,17 +112,17 @@ export function applySkinning() {
   document.title = name;
 
   // Wordmark layout: header has a logo-as-S + "idekick" split, specifically
-  // tuned for the "SideKick" wordmark. If the deployment sets a different
-  // SIDEKICK_APP_NAME, render the full name as plain text and shrink the
+  // tuned for the "Parley" wordmark. If the deployment sets a different
+  // PARLEY_APP_NAME, render the full name as plain text and shrink the
   // logo to a leading icon so the split isn't lexically wrong (e.g.
   // "[S]idekick" becoming "[S]randdesk" for a Brandesk fork).
   const wmRest = document.querySelector('.header .wm-rest');
   const wmS = document.querySelector('.header .wm-s');
   if (wmRest && wmS) {
-    const defaultName = 'SideKick';
+    const defaultName = 'Parley';
     if (name.toLowerCase() === defaultName.toLowerCase()) {
       // Default branding — keep the [S]idekick split. Preserve case
-      // from the config (e.g. "Sidekick" lowercases "idekick").
+      // from the config (e.g. "Parley" lowercases "idekick").
       wmRest.textContent = name.slice(1);
     } else {
       // Custom branding — show full name and present the logo as a

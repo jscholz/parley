@@ -374,7 +374,7 @@ function createGap(spec: GapBubbleSpec): HTMLElement {
     // rather than the create-time closure, so a re-rendered gap dispatches
     // its latest fill cursor.
     const afterRaw = row.dataset.afterId;
-    row.dispatchEvent(new CustomEvent('sidekick:load-gap', {
+    row.dispatchEvent(new CustomEvent('parley:load-gap', {
       bubbles: true,
       detail: {
         key: row.dataset.key || spec.key,
@@ -435,7 +435,7 @@ function ensureRetryRow(el: HTMLElement, spec: UserBubbleSpec): void {
   retry.textContent = 'Retry';
   retry.onclick = (e) => {
     e.preventDefault();
-    el.dispatchEvent(new CustomEvent('sidekick:retry-send', {
+    el.dispatchEvent(new CustomEvent('parley:retry-send', {
       bubbles: true,
       detail: { messageId: spec.key, text: spec.text },
     }));

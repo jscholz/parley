@@ -11,7 +11,7 @@ contract.
 |---|---|
 | `main.ts` | Boot sequence, cross-module wiring, sendTypedMessage, optimistic-bubble lifecycle, all `onX` event handlers (delta / final / tool / notification / **user_message**). |
 | `backend.ts` | Adapter dispatcher — currently always loads `proxyClient.ts`. |
-| `proxyClient.ts` | The only `BackendAdapter`. Calls `/api/sidekick/*` and translates SSE envelopes into shell events. |
+| `proxyClient.ts` | The only `BackendAdapter`. Calls `/api/parley/*` and translates SSE envelopes into shell events. |
 | `proxyClientTypes.ts` | The `BackendAdapter` contract — types only. |
 | `chat.ts` | Transcript rendering + sessionStorage persistence. `addLine`, `markBubbleFinalized`, `markBubbleFailed` — the bubble-mutation primitives. |
 | `renderedMessages.ts` | Single source-of-truth bubble map keyed on `messageId`. Idempotent upsert is what powers cross-device user-message dedup. |

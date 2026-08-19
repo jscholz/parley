@@ -172,7 +172,7 @@ export function replaySessionMessages(
   if ('gen' in tok) sessionDrawer.commitView(tok);
   else sessionDrawer.setViewed(id);
 
-  // Composer read-only when viewing a non-sidekick chat.
+  // Composer read-only when viewing a non-parley chat.
   const source = sessionDrawer.getSourceForChat(id);
   setComposerReadOnlyRef(source !== 'sidekick', source);
 
@@ -799,7 +799,7 @@ function fetchAroundWindowOnce(chatId: string, targetMessageId: string): Promise
 // prewarm never steals bandwidth from a user-initiated one.
 //
 // prewarmedPinKeys remembers keys fetched (or being fetched) this
-// app-session so the repeated `sidekick:pins-changed` events (boot
+// app-session so the repeated `parley:pins-changed` events (boot
 // hydrate, server reconcile, cross-device sync) don't re-issue work for
 // windows already warm. A transient fetch failure deletes its key so a
 // later trigger retries.
@@ -864,8 +864,8 @@ export async function prewarmPinnedWindows(): Promise<void> {
 //
 // Fix: warm each activity item's around-window in the background — on boot
 // (after activity hydrates) and whenever the activity store changes
-// (`sidekick:activity-changed` + the server-reconcile
-// `sidekick:server-activity-changed`). The target (chatId, messageId) pair
+// (`parley:activity-changed` + the server-reconcile
+// `parley:server-activity-changed`). The target (chatId, messageId) pair
 // is known at INGEST time, well before the click, so we can warm it ahead.
 //
 // Shares fetchAroundWindowOnce + drillWindowCache with the pin prewarm and
@@ -1258,7 +1258,7 @@ export async function loadLaterHistory(afterId: number): Promise<void> {
 }
 
 /** Shrink/close a spliced-window gap from its OLDER edge. Wired to the
- *  reconciler's inline `…` placeholder (sidekick:load-gap). Fetches the
+ *  reconciler's inline `…` placeholder (parley:load-gap). Fetches the
  *  page after the gap's fill cursor and hands it to fillGap, which either
  *  connects the two runs (gap removed) or advances the gap cursor. Scroll
  *  position is preserved via prependHistory's DOM-anchor because the gap

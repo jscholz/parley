@@ -90,6 +90,7 @@ export function install(g: Getters) {
     try {
       const qs = new URLSearchParams(location.search);
       if (qs.get('bg_trace') === '1') return true;
+      // legacy name, predates Parley rename — dev toggle, not worth migrating
       return localStorage.getItem('sidekick_bg_trace') === '1';
     } catch { return false; }
   })();

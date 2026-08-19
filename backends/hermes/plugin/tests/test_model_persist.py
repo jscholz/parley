@@ -1,4 +1,4 @@
-"""Unit tests for the sidekick plugin's ``_apply_model_setting``.
+"""Unit tests for the parley plugin's ``_apply_model_setting``.
 
 Pins the persistence-after-switch_model behaviour we fixed in commit
 abb608a (fix(plugin): persist model switch to config.yaml).
@@ -39,7 +39,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -81,7 +81,7 @@ def _load_plugin():
     """Import under the real package name so relative imports resolve;
     see test_user_id_queries._load_plugin for context. Eager-loads
     route submodules so tests can reference them as
-    ``plugin.sidekick_route_*``."""
+    ``plugin.parley_route_*``."""
     _install_hermes_stubs()
     plugin_pkg = Path(__file__).resolve().parents[1]
     parent_dir = str(plugin_pkg.parent)
@@ -89,9 +89,9 @@ def _load_plugin():
         sys.path.insert(0, parent_dir)
     pkg = importlib.import_module(plugin_pkg.name)
     for sub in (
-        "sidekick_ids", "sidekick_route_conversations",
-        "sidekick_route_items", "sidekick_route_events",
-        "sidekick_route_responses", "sidekick_route_settings",
+        "parley_ids", "parley_route_conversations",
+        "parley_route_items", "parley_route_events",
+        "parley_route_responses", "parley_route_settings",
     ):
         importlib.import_module(f"{plugin_pkg.name}.{sub}")
     return pkg
@@ -104,15 +104,15 @@ def plugin():
 
 @pytest.fixture
 def adapter(plugin, tmp_path):
-    """Bare instance of SidekickAdapter with just enough state for
+    """Bare instance of ParleyAdapter with just enough state for
     ``_apply_model_setting`` to run. We bypass ``__init__`` because the
     real one wires up the gateway, threading, db connections, etc."""
-    adapter = plugin.SidekickAdapter.__new__(plugin.SidekickAdapter)
+    adapter = plugin.ParleyAdapter.__new__(plugin.ParleyAdapter)
     return adapter
 
 
 def _make_schema_stub(plugin, options, current_value):
-    """Patch ``sidekick_route_settings.build_settings_schema`` (free
+    """Patch ``parley_route_settings.build_settings_schema`` (free
     function, post-2026-05-17 refactor) to return a single 'model'
     enum with the given options[] and current value."""
     schema = [
@@ -124,7 +124,7 @@ def _make_schema_stub(plugin, options, current_value):
         },
     ]
     return mock.patch.object(
-        plugin.sidekick_route_settings, "build_settings_schema",
+        plugin.parley_route_settings, "build_settings_schema",
         return_value=schema,
     )
 
@@ -176,7 +176,7 @@ def test_persists_model_to_config_yaml(plugin, adapter):
             switch_model=mock.Mock(return_value=fake_switch_result),
         ),
     }):
-        result = plugin.sidekick_route_settings.apply_model_setting("anthropic/claude-haiku-4.5")
+        result = plugin.parley_route_settings.apply_model_setting("anthropic/claude-haiku-4.5")
 
     assert len(save_calls) == 1, "save_config should be invoked exactly once"
     persisted = save_calls[0]
@@ -223,7 +223,7 @@ def test_skips_persist_when_switch_model_fails(plugin, adapter):
         ),
     }):
         with pytest.raises(Exception):  # _SettingsValidationError
-            plugin.sidekick_route_settings.apply_model_setting("y")
+            plugin.parley_route_settings.apply_model_setting("y")
 
     assert save_calls == [], "save_config must NOT run when switch_model fails"
 
@@ -248,6 +248,6 @@ def test_rejects_value_not_in_options(plugin, adapter):
         ),
     }):
         with pytest.raises(Exception):  # _SettingsValidationError
-            plugin.sidekick_route_settings.apply_model_setting("not-in-options")
+            plugin.parley_route_settings.apply_model_setting("not-in-options")
 
     assert switch_calls == []

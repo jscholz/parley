@@ -1,4 +1,4 @@
-// Shared helpers for sidekick PWA perf measurement scripts.
+// Shared helpers for parley PWA perf measurement scripts.
 //
 // Distinct from scripts/smoke/: smoke verifies behavior (binary pass/fail),
 // perf measures latency (numbers). Each scenario captures one or more
@@ -153,7 +153,7 @@ export async function waitMs(page, predEvalFn, { timeoutMs = 60_000, pollMs = 50
 // deleteChat but doesn't require a `page` (uses fetch from node).
 export async function deleteChatByApi(baseUrl, chatId) {
   try {
-    await fetch(`${baseUrl}/api/sidekick/sessions/${encodeURIComponent(chatId)}`, {
+    await fetch(`${baseUrl}/api/parley/sessions/${encodeURIComponent(chatId)}`, {
       method: 'DELETE',
     });
   } catch { /* ignore */ }

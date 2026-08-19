@@ -1,5 +1,5 @@
 // Agent-pushed media lane round 2 — audio: an agent registers a produced
-// audio file (POST /api/sidekick/media/register) and references it in its
+// audio file (POST /api/parley/media/register) and references it in its
 // reply as a markdown image; an audio extension (m4a/mp3/wav/ogg — the
 // set the media route serves with Range) must render an inline AUDIO card
 // (native controls, src resolved via apiUrl so the CAP capacitor:// origin
@@ -9,7 +9,7 @@
 // its reply_final, and handleReplyFinal's parseCardsFromText fallback
 // classifies the markdown link by extension. The media GET is
 // page.route-stubbed — this proves the client lane; the server route has
-// its own unit coverage (proxy/sidekick/__tests__/media.test.ts).
+// its own unit coverage (proxy/parley/__tests__/media.test.ts).
 
 import { waitForReady, assert } from './lib.mjs';
 
@@ -18,13 +18,13 @@ export const DESCRIPTION = 'Markdown audio link in an agent reply renders an inl
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const MEDIA_PATH = '/api/sidekick/media/00c0ffee00c0ffee.mp3';
+const MEDIA_PATH = '/api/parley/media/00c0ffee00c0ffee.mp3';
 
 export default async function run({ page, log }) {
   await waitForReady(page);
 
   // Stub the media bytes — the <audio> element will probe the src.
-  await page.route(/\/api\/sidekick\/media\/[a-f0-9]+\.mp3$/, (route) =>
+  await page.route(/\/api\/parley\/media\/[a-f0-9]+\.mp3$/, (route) =>
     route.fulfill({ status: 200, contentType: 'audio/mpeg', body: Buffer.alloc(64) }));
 
   await page.evaluate((path) => {

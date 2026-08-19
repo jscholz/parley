@@ -1,7 +1,7 @@
 # Pushing media to the chat client (agent-side how-to)
 
-Any agent running on the Sidekick host — a Hermes plugin session, the
-claude-code backend, openclaw, or anything that can `curl` the Sidekick
+Any agent running on the Parley host — a Hermes plugin session, the
+claude-code backend, openclaw, or anything that can `curl` the Parley
 server — can push a produced media file (video, audio, image) into the
 chat UI. The lane is deliberately backend-agnostic: the media
 *reference* rides plain reply text, so no per-backend envelope support
@@ -12,10 +12,10 @@ is needed.
 1. **Register the file** (returns a servable URL):
 
 ```bash
-curl -s -X POST http://127.0.0.1:3001/api/sidekick/media/register \
+curl -s -X POST http://127.0.0.1:3001/api/parley/media/register \
   -H 'content-type: application/json' \
   -d '{"path": "/tmp/render/my-cut-v1.mp4"}'
-# → {"id":"3fa9c2…","url":"/api/sidekick/media/3fa9c2….mp4",
+# → {"id":"3fa9c2…","url":"/api/parley/media/3fa9c2….mp4",
 #    "mime":"video/mp4","size":26337133,"filename":"my-cut-v1.mp4"}
 ```
 
@@ -23,7 +23,7 @@ curl -s -X POST http://127.0.0.1:3001/api/sidekick/media/register \
    image syntax for video too — the client classifies by extension):
 
 ```
-Rough cut is ready: ![The proposed X edit](/api/sidekick/media/3fa9c2….mp4)
+Rough cut is ready: ![The proposed X edit](/api/parley/media/3fa9c2….mp4)
 ```
 
 The client renders an inline card: `<video controls playsInline>` for
@@ -33,10 +33,10 @@ browser PWA and the Capacitor iOS shell.
 
 ## Rules and limits
 
-- **Registered ids only are served.** `GET /api/sidekick/media/<id>`
+- **Registered ids only are served.** `GET /api/parley/media/<id>`
   never takes a path; registration is the only mint.
 - **Allowed roots**: `$HOME` and `/tmp` by default
-  (`SIDEKICK_MEDIA_ROOTS=path:path` to override). Symlinks are resolved
+  (`PARLEY_MEDIA_ROOTS=path:path` to override). Symlinks are resolved
   *before* the check, and any dotfile path component is rejected —
   `~/.ssh`, `~/.hermes` and friends are never servable.
 - **Known media extensions only**: mp4 m4v mov webm m4a mp3 wav ogg
@@ -54,6 +54,6 @@ browser PWA and the Capacitor iOS shell.
   the transcript and can be re-opened from there (known limitation,
   shared with image/YouTube cards).
 
-Server implementation: `proxy/sidekick/media.ts` (registry + Range
+Server implementation: `proxy/parley/media.ts` (registry + Range
 streamer). Client classification: `src/cards/fallback.ts` (markdown
 image → video/image card by extension), `src/cards/kinds/video.ts`.

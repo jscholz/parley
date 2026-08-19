@@ -6,7 +6,7 @@
 // re-type, re-send, transcript ends up with duplicates.
 //
 // Test plan (mocked, FAILURE PATH ONLY):
-//   1. Pre-populate one sidekick chat (so drawer has something).
+//   1. Pre-populate one parley chat (so drawer has something).
 //   2. Override the mock POST to return 503 from the start.
 //   3. Click into the chat. Send "test-fail-marker".
 //   4. Bubble should appear (briefly pending) then flip to .failed
@@ -50,8 +50,8 @@ export default async function run({ page, log }) {
   // 503's. Page-level routes take precedence over context-level, so
   // unroute the existing handler first (mock-backend installs its
   // own page.route for the same pattern).
-  await page.unroute('**/api/sidekick/messages');
-  await page.route('**/api/sidekick/messages', async (route) => {
+  await page.unroute('**/api/parley/messages');
+  await page.route('**/api/parley/messages', async (route) => {
     await route.fulfill({
       status: 503,
       contentType: 'application/json',

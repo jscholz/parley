@@ -56,7 +56,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-heartbeat-survives\n\n' +
+      'printf parley-heartbeat-survives\n\n' +
       'Reason: heartbeat regression guard\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: 'notif_hb_approval_1',
@@ -88,7 +88,7 @@ export default async function run({ page, log, mock }) {
 
   // 3. Push several heartbeat reply_finals for the SAME chat. These are
   //    the canonical shape the agent emits during a long autonomous turn
-  //    and match `isProgressHeartbeat` in proxy/sidekick/notifications/
+  //    and match `isProgressHeartbeat` in proxy/parley/notifications/
   //    dispatch.ts:271. Pre-fix, each one calls dismissApprovalsForChat
   //    → the approval row is deleted within ~50ms of the first heartbeat.
   for (let i = 1; i <= 4; i++) {

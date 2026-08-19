@@ -4,7 +4,7 @@
 // Flow: canUseTool fires mid-turn → ask() mints an agent_question
 // envelope (kind:'approval', expires_at:null — sticks until answered)
 // and parks a resolver → the envelope rides the turn stream to the PWA
-// → the user taps a choice → POST /api/sidekick/questions/{id} lands on
+// → the user taps a choice → POST /api/parley/questions/{id} lands on
 // ClaudeCodeUpstream.answerQuestion() → answer() resolves the parked
 // promise → canUseTool returns allow/deny to the SDK and the run
 // continues.

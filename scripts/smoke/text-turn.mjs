@@ -2,9 +2,9 @@
 // bubble with real text (not a placeholder). Captures the basic
 // send→render round-trip.
 //
-// On a fresh sidekick install (no SIDEKICK_HOME_CHANNEL in config),
+// On a fresh parley install (no PARLEY_HOME_CHANNEL in config),
 // hermes also fires a home-channel onboarding nudge as a SECOND bubble
-// before the agent's reply. With SIDEKICK_HOME_CHANNEL set (typical
+// before the agent's reply. With PARLEY_HOME_CHANNEL set (typical
 // post-/sethome) the nudge is skipped and there's just the one reply.
 // Test accepts either shape.
 //

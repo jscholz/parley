@@ -23,7 +23,7 @@ import { toast } from './toast.ts';
 const pending = [];
 // Task #158: 100 MB ceiling. Large files no longer ride the base64-in-
 // JSON message body — anything over UPLOAD_THRESHOLD streams as raw
-// bytes to /api/sidekick/upload (no ~33% base64 inflation, no full
+// bytes to /api/parley/upload (no ~33% base64 inflation, no full
 // in-memory buffer) and is referenced by upload_id. The server caps the
 // staged file + rasterized PDF at 100 MB to match.
 const MAX_BYTES = 100_000_000;
@@ -102,7 +102,7 @@ async function maybeDownscaleImage(file: File): Promise<File> {
  *  File is sent as the raw request body (browsers stream File bodies off
  *  disk, so a 57 MB PDF never inflates in JS memory). */
 async function uploadLarge(file: File): Promise<string> {
-  const res = await fetch(apiUrl('/api/sidekick/upload'), {
+  const res = await fetch(apiUrl('/api/parley/upload'), {
     method: 'POST',
     headers: { 'content-type': file.type || 'application/octet-stream' },
     body: file,
@@ -142,7 +142,7 @@ export function hasPending() { return pending.length > 0; }
  *  still pass the bytes through with the mimeType intact. Probing
  *  strategy — if this breaks for a specific model, we'll iterate. */
 /** Build the gateway-ready attachment payload. Async because large
- *  files (over UPLOAD_THRESHOLD) are streamed to /api/sidekick/upload
+ *  files (over UPLOAD_THRESHOLD) are streamed to /api/parley/upload
  *  first and referenced by `uploadId`; small files keep the inline
  *  base64 `content`. Snapshots `pending` synchronously up front so a
  *  caller that clears the composer right after this call can't mutate
@@ -190,7 +190,7 @@ export async function add(file) {
   if (!file) return;
   // Accept images + videos + PDFs. The gateway currently bundles
   // images and videos as `{ type: 'image', ... }`; PDFs are rasterized
-  // server-side by the hermes sidekick plugin (per-page PNGs), so by
+  // server-side by the hermes parley plugin (per-page PNGs), so by
   // the time the agent sees them they're back to image content blocks.
   // Some multimodal models (Gemini, some Gemma variants) decode video
   // frames; others reject. We keep the client permissive — if the

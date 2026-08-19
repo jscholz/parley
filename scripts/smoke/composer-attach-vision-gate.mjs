@@ -63,7 +63,7 @@ export default async function run({ page, log }) {
   // capability (the fallback routes images through an auxiliary vision
   // model). We need vision=null so the gate reflects the primary
   // model's own caps.
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -76,7 +76,7 @@ export default async function run({ page, log }) {
     'anthropic/claude-sonnet-4': { supports_vision: true, model_family: 'claude' },
     'mistralai/mistral-7b-instruct': { supports_vision: false, model_family: 'mistral' },
   };
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     const u = new URL(route.request().url());
     const model = u.searchParams.get('model') || '';
     const caps = CAPS[model];

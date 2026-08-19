@@ -1,7 +1,7 @@
 -- Sidekick supplemental store schema.
 --
 -- Implements the design signed off 2026-05-15 in
--- ../docs/sidekick-supplemental-store-schema.md.
+-- ../docs/parley-supplemental-store-schema.md.
 -- Read that doc for rationale on each table + column.
 --
 -- This file is loaded at plugin startup; CREATE IF NOT EXISTS makes
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT
 );
 
--- Messages — sidekick-owned augmentation of state.db.messages.
+-- Messages — parley-owned augmentation of state.db.messages.
 -- Written at envelope-emit time (sync, before SSE fan-out) so the
 -- supplemental store is the source of truth from the moment a bubble
 -- exists, NOT after the agent runtime's post-turn flush.

@@ -99,7 +99,7 @@ export default async function run({ page, log, ctx, mock }) {
   // overlap — that's the race window where clicks go missing or bounce
   // back. Localhost without throttling completes both in <10ms; the
   // race never manifests.
-  await ctx.route('**/api/sidekick/sessions/*/messages*', async (route) => {
+  await ctx.route('**/api/parley/sessions/*/messages*', async (route) => {
     await new Promise(r => setTimeout(r, 250));
     await route.continue();
   });

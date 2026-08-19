@@ -111,7 +111,7 @@ test('migrates the v1 single-slot key once', async () => {
   assert.equal(s.currentDoc()?.title, 'Legacy');
   assert.equal(s.currentDoc()?.receivedAt, 123);
   assert.equal(backing.has('sidekick.doc.current'), false, 'legacy key removed');
-  assert.ok(backing.has('sidekick.docs.v2'), 'migrated to v2 key');
+  assert.ok(backing.has('parley.docs.v2'), 'migrated to v2 key');
 });
 
 test('char budget evicts oldest non-active from PERSISTENCE', async () => {
@@ -132,7 +132,7 @@ test('char budget evicts oldest non-active from PERSISTENCE', async () => {
 
 test('docIdFor matches the plugin-side djb2 mirror', async () => {
   const s = await freshStore();
-  // Pinned expectation — if this changes, sidekick_doc_tool._doc_id_for
+  // Pinned expectation — if this changes, parley_doc_tool._doc_id_for
   // must change in lockstep (the tool result's doc_id keys the shelf).
   assert.equal(s.docIdFor('/w/deck.md', 'Deck'), s.docIdFor('/w/deck.md', 'other title'));
   assert.notEqual(s.docIdFor('/w/a.md', 'T'), s.docIdFor('/w/b.md', 'T'));

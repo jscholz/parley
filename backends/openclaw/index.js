@@ -1,9 +1,9 @@
 /**
- * Sidekick OpenClaw Plugin — entry point.
+ * Parley OpenClaw Plugin — entry point.
  *
  * Exposes the `/v1/*` OpenAI-Responses-style HTTP+SSE contract that the
- * sidekick proxy expects from any backend it talks to (see
- * `proxy/sidekick/upstream.ts:145-223` for the canonical
+ * parley proxy expects from any backend it talks to (see
+ * `proxy/parley/upstream.ts:145-223` for the canonical
  * `UpstreamAgent` interface).
  *
  * Routes currently implemented:
@@ -41,7 +41,7 @@ import { GatewayClient } from './src/gateway-client.js';
 import { AgentEventBus } from './src/event-bus.js';
 import { makeResponsesHandler } from './src/responses-handler.js';
 import { makeEventsHandler } from './src/events-handler.js';
-import { openDb } from './src/db.js';
+import { openDb, migrateLegacyDbFile } from './src/db.js';
 import { upsertMessage, listMessagesForChat } from './src/messages.js';
 import { PushDispatcher } from './src/push-dispatch.js';
 import { registerPushRoutes } from './src/push-routes.js';
@@ -65,18 +65,23 @@ function parseQuery(req) {
 }
 
 export default definePluginEntry({
+  // id stays 'sidekick' — legacy name, predates the Parley rename;
+  // installed openclaw configs reference this plugin key.
   id: 'sidekick',
-  name: 'Sidekick',
-  description: 'Sidekick PWA backend — exposes /v1/* OpenAI-Responses contract.',
+  name: 'Parley',
+  description: 'Parley PWA backend — exposes /v1/* OpenAI-Responses contract.',
   register(api) {
-    // ── Supplemental store (sidekick.db) ────────────────────────────
+    // ── Supplemental store (parley.db) ────────────────────────────
     // Maps our plugin-minted SSE-shape ids (msg_*) to openclaw's
     // native __openclaw.id values so /v1/conversations/{id}/items can
     // surface sidekick_id — which the PWA uses to dedup the inflight
     // cache against the history replay (without it, every reply
     // duplicates on reload). Schema is created lazily on first open.
     const stateDir = resolveStateDir({ profile: PROFILE });
-    const dbPath = join(stateDir, 'sidekick.db');
+    // parley.db (formerly sidekick.db) — legacy file renamed in place
+    // on first open (see migrateLegacyDbFile).
+    const dbPath = join(stateDir, 'parley.db');
+    migrateLegacyDbFile(dbPath, join(stateDir, 'sidekick.db'));
     const db = openDb({ path: dbPath });
 
     // ── Gateway WS client + event bus (shared across handlers) ─────
@@ -88,7 +93,7 @@ export default definePluginEntry({
     const pushDispatcher = new PushDispatcher({ db, eventBus });
     const turnBuffer = new TurnBuffer();
     api.agent.events.registerAgentEventSubscription({
-      id: 'sidekick.responses.fanout',
+      id: 'parley.responses.fanout',
       description: 'Routes agent events into per-runId queues for /v1/responses + /v1/events.',
       handle: (event) => eventBus.onEvent(event),
     });
@@ -97,12 +102,12 @@ export default definePluginEntry({
     // per-run queue. Otherwise an in-flight /v1/responses (which
     // claims the run) would starve push + the items-merge buffer.
     api.agent.events.registerAgentEventSubscription({
-      id: 'sidekick.push.dispatch',
+      id: 'parley.push.dispatch',
       description: 'Plugin-owned push dispatch: fires web-push on lifecycle:end.',
       handle: (event) => pushDispatcher.onAgentEvent(event),
     });
     api.agent.events.registerAgentEventSubscription({
-      id: 'sidekick.turn-buffer',
+      id: 'parley.turn-buffer',
       description: 'In-flight turn mirror — populates /items mid-turn until jsonl flushes.',
       handle: (event) => turnBuffer.observeAgentEvent(event),
     });
@@ -110,9 +115,9 @@ export default definePluginEntry({
     // ── /v1/health (and bare /health shadow) ───────────────────────
     // The `via` field distinguishes plugin-served responses from
     // openclaw's built-in /health (which returns status='live'). The
-    // sidekick proxy's healthcheck() looks for status==='ok'.
+    // parley proxy's healthcheck() looks for status==='ok'.
     const healthHandler = async (_req, res) => {
-      sendJson(res, 200, { ok: true, status: 'ok', via: 'sidekick-plugin' });
+      sendJson(res, 200, { ok: true, status: 'ok', via: 'parley-plugin' });
       return true;
     };
     api.registerHttpRoute({ path: '/v1/health', auth: 'plugin', match: 'exact', handler: healthHandler });
@@ -124,7 +129,7 @@ export default definePluginEntry({
     registerUnreadPinsRoutes(api, { db, eventBus, agentId: AGENT_ID, profile: PROFILE });
 
     // ── 404 stubs for unimplemented optional routes ────────────────
-    // The sidekick proxy probes these and falls back to defaults on
+    // The parley proxy probes these and falls back to defaults on
     // 404. Without explicit handlers, openclaw's catch-all serves the
     // dashboard HTML at 200, which breaks the proxy's JSON parser.
     // Replace with real handlers when implemented.
@@ -153,7 +158,7 @@ export default definePluginEntry({
 
     // ── POST /v1/responses ─────────────────────────────────────────
     // Turn dispatch + SSE response. Translates openclaw AgentEventPayload
-    // → OAI Responses-API SSE shape the sidekick proxy expects.
+    // → OAI Responses-API SSE shape the parley proxy expects.
     // After lifecycle:end the handler writes a (chat_id, msg_id,
     // openclaw_row_id) mapping into the supplemental DB so the
     // /v1/conversations/{id}/items handler can surface sidekick_id
@@ -186,7 +191,7 @@ export default definePluginEntry({
               const messages = readSessionMessages({ stateDir, agentId: AGENT_ID, sessionId: entry.sessionId });
               return toConversationSummary({ sessionKey, entry, messages });
             })
-            // Sort newest-first by last_active_at (sidekick drawer contract).
+            // Sort newest-first by last_active_at (parley drawer contract).
             .sort((a, b) => b.metadata.last_active_at - a.metadata.last_active_at)
             .slice(0, limit);
           sendJson(res, 200, { data: rows });
@@ -211,7 +216,7 @@ export default definePluginEntry({
     // Supports `limit` (default 200, cap 500) and `before` (created_at
     // cursor in unix seconds — over-fetches by 1 to compute has_more).
     //
-    // Items are oldest-first (sidekick contract); delivery-mirror rows
+    // Items are oldest-first (parley contract); delivery-mirror rows
     // filtered out; each row gets a seq-based integer id stable across
     // reads (jsonl is append-only).
     api.registerHttpRoute({
@@ -363,7 +368,7 @@ export default definePluginEntry({
           }
 
           // Over-fetch detection: client asked for `limit` newest-first
-          // tail (with `before` cursor). Sidekick's getMessages always
+          // tail (with `before` cursor). Parley's getMessages always
           // returns oldest-first within the page; cursor logic above
           // already drops anything ≥ `before`. We just slice the tail.
           const has_more = all.length > limit;

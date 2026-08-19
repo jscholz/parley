@@ -40,7 +40,7 @@ const pinnedIds = (page) =>
 
 const persistedPins = (page) =>
   page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/prefs/pinnedSessions', { cache: 'no-store' });
+    const r = await fetch('/api/parley/prefs/pinnedSessions', { cache: 'no-store' });
     const b = await r.json();
     const raw = b?.value;
     if (typeof raw !== 'string' || raw === '') return [];
@@ -109,7 +109,7 @@ export default async function run({ page, log }) {
 
   // Committed to the synced setting.
   await pollUntil(page,
-    () => fetch('/api/sidekick/prefs/pinnedSessions')
+    () => fetch('/api/parley/prefs/pinnedSessions')
       .then((r) => r.json())
       .then((b) => {
         try { return JSON.stringify(JSON.parse(b.value)) === JSON.stringify(['mock-chat-alpha', 'mock-chat-beta']); }

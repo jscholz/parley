@@ -2,11 +2,11 @@
 // recordings attached, so the sidebar can badge them (◉, with a count
 // when a session hosts several meetings) and filter to meetings-only.
 //
-// Data source is GET /api/sidekick/captures — the capture list is
+// Data source is GET /api/parley/captures — the capture list is
 // proxy-owned truth; sessions know nothing about captures (by design:
 // capture is an entity linked BY REFERENCE, §3.6). Refreshes on boot
 // and on capture_changed envelopes; consumers listen for
-// `sidekick:meetings-changed`.
+// `parley:meetings-changed`.
 
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
@@ -23,13 +23,13 @@ let loaded = false;
 
 function notify(): void {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:meetings-changed'));
+    window.dispatchEvent(new CustomEvent('parley:meetings-changed'));
   } catch { /* non-browser */ }
 }
 
 export async function refreshMeetingsIndex(): Promise<void> {
   try {
-    const res = await fetch(apiUrl('/api/sidekick/captures'));
+    const res = await fetch(apiUrl('/api/parley/captures'));
     if (!res.ok) return;   // backend without capture support — index stays empty
     const data = await res.json();
     const next = new Map<string, MeetingRef[]>();
@@ -62,9 +62,9 @@ export function meetingChatIds(): Set<string> {
 export function meetingsLoaded(): boolean { return loaded; }
 
 /** Boot + envelope wiring. capture_changed envelopes arrive via
- *  backendEventHandlers → `sidekick:capture-changed-remote`. */
+ *  backendEventHandlers → `parley:capture-changed-remote`. */
 export function initMeetingsIndex(): void {
-  window.addEventListener('sidekick:capture-changed-remote', () => {
+  window.addEventListener('parley:capture-changed-remote', () => {
     void refreshMeetingsIndex();
   });
   void refreshMeetingsIndex();

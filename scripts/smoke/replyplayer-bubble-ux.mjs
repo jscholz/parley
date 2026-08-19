@@ -41,7 +41,7 @@ export default async function run({ page, log, fail, url, mock }) {
   });
 
   // Intercept /tts. Match the exact pathname so the agent-settings
-  // POST (/api/sidekick/settings/tts) doesn't accidentally fire this.
+  // POST (/api/parley/settings/tts) doesn't accidentally fire this.
   const ttsCalls = [];
   await page.route('**/tts', async (route) => {
     if (new URL(route.request().url()).pathname !== '/tts') return route.fallback();

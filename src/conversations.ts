@@ -14,13 +14,13 @@
  * would couple their schema migrations.
  *
  * Schema is intentionally minimal — the gateway side enriches with
- * title / message_count / last_active_at via /api/sidekick/sessions,
+ * title / message_count / last_active_at via /api/parley/sessions,
  * so this store only needs the fields that uniquely belong to the
  * PWA: the chat_id (UUID) + a locally-editable title cache + boot-time
  * timestamps used for sorting before the enrichment fetch resolves.
  */
 
-const DB_NAME = 'sidekick-conversations';
+const DB_NAME = 'parley-conversations'; // server-derived cache — renamed w/o migration, rebuilds
 const STORE_CONV = 'conversations';
 const STORE_META = 'meta';
 const META_ACTIVE = 'active_chat_id';
@@ -38,9 +38,9 @@ const DB_VERSION = 2;
 
 export interface Conversation {
   /** Prefixed chat_id (`${source}:${native_id}`) — the SAME contract-
-   *  unique gateway id the server uses. Sidekick is the only platform
+   *  unique gateway id the server uses. Parley is the only platform
    *  that mints client-side; `mintChatId()` produces `sidekick:<uuid>`.
-   *  Cross-device chats hydrated from /api/sidekick/sessions arrive
+   *  Cross-device chats hydrated from /api/parley/sessions arrive
    *  already-prefixed (any source). v2 schema invariant: never store
    *  a bare uuid here. */
   chat_id: string;
@@ -50,7 +50,7 @@ export interface Conversation {
   /** Unix epoch ms — set on create, never updated. */
   created_at: number;
   /** Unix epoch ms of the most recent send/receive on this chat_id.
-   *  Used for drawer sort order before /api/sidekick/sessions lands. */
+   *  Used for drawer sort order before /api/parley/sessions lands. */
   last_message_at: number;
 }
 
@@ -69,7 +69,7 @@ function openDB(): Promise<IDBDatabase> {
       }
       // v1 → v2: clear bare-chat_id rows (incompatible with the new
       // prefixed-id contract). Future loads rehydrate from the server's
-      // /api/sidekick/sessions response — the gateway returns prefixed
+      // /api/parley/sessions response — the gateway returns prefixed
       // ids natively, so the listSessions merge will repopulate IDB
       // for any chat the user touches. Active pointer cleared too →
       // boot picks the most-recent server row instead of dangling at
@@ -95,7 +95,7 @@ function reqP<T = any>(r: IDBRequest<T>): Promise<T> {
   });
 }
 
-/** Mint a fresh prefixed chat_id. Sidekick is the only platform that
+/** Mint a fresh prefixed chat_id. Parley is the only platform that
  *  client-mints; we stamp `sidekick:` so the id matches the gateway's
  *  prefix-encoded contract from the moment it exists. Lets the adapter
  *  lazy-allocate without writing the IDB conversation row (Option B —

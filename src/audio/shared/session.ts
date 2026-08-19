@@ -14,7 +14,7 @@
  *
  * Mechanisms:
  *
- * 1. Media Session API — declares SideKick as an active audio app so iOS
+ * 1. Media Session API — declares Parley as an active audio app so iOS
  *    shows it on the lock screen and defers tab suspension. Also routes
  *    BT headset button presses (play/pause) into our handlers, which is
  *    how a Pixel Buds tap interacts with the app in-pocket.
@@ -83,7 +83,7 @@ async function initMediaSession() {
 
   try {
     // Pulled from /config so the community build + personal rebrands
-    // (R2 "Sidekick", etc.) each get their own lockscreen/BT label.
+    // (R2 "Parley", etc.) each get their own lockscreen/BT label.
     const { getAgentLabel, getAppName } = await import('../../config.ts');
     /** @type {any} */ (navigator).mediaSession.metadata = new MediaMetadata({
       title: getAgentLabel(),

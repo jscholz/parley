@@ -12,7 +12,7 @@
 // same isolation principle: a malformed write here can't corrupt
 // transcript data.
 
-const DB_NAME = 'sidekick.unread';
+const DB_NAME = 'parley.unread'; // server-owned mirror — renamed w/o migration, rebuilds (SSOT is the plugin)
 const STORE = 'kv';
 const MARKED_KEY = 'marked-set';
 

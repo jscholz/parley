@@ -8,7 +8,7 @@ through the mic. The bridge's STT machinery still runs; it just sees
 zero transcripts the entire call.
 
 Selected via ``provider: noop`` in the audio-bridge config (or the
-SIDEKICK_AUDIO_STT_PROVIDER=noop env var the smoke harness sets).
+PARLEY_AUDIO_STT_PROVIDER=noop env var the smoke harness sets).
 Provider name: ``noop``.
 """
 

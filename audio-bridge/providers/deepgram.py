@@ -1,7 +1,7 @@
 """
 Deepgram nova-3 streaming STT adapter.
 
-Mirrors the parameters used by the sidekick node proxy
+Mirrors the parameters used by the parley node proxy
 (``server.ts`` /ws/deepgram path) so behaviour is identical between the
 classic-pipeline path and the WebRTC path: same model, same smart_format,
 diarize, endpointing, utterance_end, interim_results.

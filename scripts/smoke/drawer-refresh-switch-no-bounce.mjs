@@ -84,7 +84,7 @@ export default async function run({ page, log, mock }) {
   // after the mock) so it runs first, delays, then falls through to the
   // mock. The RegExp pins the literal `/sessions?` (list) and never
   // matches `/sessions/<id>/messages` (which has `/` after "sessions").
-  await page.route(/\/api\/sidekick\/sessions\?/, async (route) => {
+  await page.route(/\/api\/parley\/sessions\?/, async (route) => {
     await new Promise(r => setTimeout(r, 300));
     await route.fallback();
   });

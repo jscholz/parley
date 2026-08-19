@@ -1,6 +1,6 @@
 // Echo LLM — replies "You said: <user message>". The default if no
 // other adapter is configured. Useful as a first-clone smoke test
-// (sidekick boots, you type "hi", you see a reply) and as the
+// (parley boots, you type "hi", you see a reply) and as the
 // fast/deterministic backend for tests that don't care about LLM
 // content.
 

@@ -1,4 +1,4 @@
-// One-off UX render harness (not a smoke). Boots sidekick against the
+// One-off UX render harness (not a smoke). Boots parley against the
 // mock backend, seeds a realistic transcript (prose + markdown + code +
 // list), and screenshots desktop+mobile × dark+light into a label dir.
 //   node scripts/ux-render.mjs <label>

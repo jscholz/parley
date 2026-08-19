@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 

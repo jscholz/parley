@@ -1,6 +1,6 @@
 """Reconcile idempotency under hermes-core compaction-replay double-persist.
 
-Field incident 2026-07-15 (chat sidekick:a7d55680, hermes session
+Field incident 2026-07-15 (chat parley:a7d55680, hermes session
 20260715_190037_60a6a385): after an interrupted turn, hermes-core's
 context compressor rebuilt the in-memory transcript, stripped the
 ``_db_persisted`` markers, and the next turn-end flush re-appended the
@@ -37,8 +37,8 @@ import time
 
 import pytest
 
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 CHAT_ID = "a7d55680-c4b4-4c1f-a817-a4a3fd9bccd4"
@@ -59,7 +59,7 @@ TOOL_CALLS_JSON = (
 
 @pytest.fixture
 def db(tmp_path):
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -123,7 +123,7 @@ def _links_by_id(db):
 
 
 def _seed_field_shape(db, state_db):
-    """Originals in state.db + envelopes in sidekick.db, matching the
+    """Originals in state.db + envelopes in parley.db, matching the
     field incident's shape. Returns dict of original state row ids."""
     # Slash commands: envelope-only user rows that NEVER get a state.db
     # twin (hermes handles them without persisting a message row).
@@ -262,8 +262,8 @@ def test_replay_flush_does_not_mint_duplicate_or_crosslinked_rows(db, state_db):
         db, state_db, CHAT_ID, "sidekick", force_full=True) or True
 
 
-def test_replay_flush_on_fresh_sidekick_db_backfills_once(db, state_db):
-    """Legacy-chat shape: NO envelopes at all (fresh sidekick.db), state
+def test_replay_flush_on_fresh_parley_db_backfills_once(db, state_db):
+    """Legacy-chat shape: NO envelopes at all (fresh parley.db), state
     already contains originals + the replay flush. Pass 2 backfill must
     insert exactly one legacy: row per LOGICAL message — never a second
     one for the replay copy."""

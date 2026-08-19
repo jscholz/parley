@@ -180,14 +180,14 @@ describe('vadRouting', () => {
     it('"auto" clears the key', () => {
       const { store } = installLocalStorage();
       setVadStrategyOverrideSetting('client');
-      assert.ok('sidekick_vad_override' in store);
+      assert.ok('parley_vad_override' in store);
       setVadStrategyOverrideSetting('auto');
-      assert.ok(!('sidekick_vad_override' in store));
+      assert.ok(!('parley_vad_override' in store));
     });
 
     it('ignores corrupt values', () => {
       installLocalStorage();
-      localStorage.setItem('sidekick_vad_override', 'banana');
+      localStorage.setItem('parley_vad_override', 'banana');
       assert.equal(getVadStrategyOverrideSetting(), 'auto');
     });
   });

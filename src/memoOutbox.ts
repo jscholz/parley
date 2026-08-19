@@ -398,7 +398,7 @@ export function startBackgroundPollers(): void {
   // truth; re-upsert its decorations for whichever chat just committed
   // (addDecoration is upsert-by-key, so this is idempotent and free
   // when nothing was lost).
-  window.addEventListener('sidekick:view-committed', (ev) => {
+  window.addEventListener('parley:view-committed', (ev) => {
     const chatId = (ev as CustomEvent).detail?.chatId;
     if (!chatId) return;
     for (const rec of memoCard.registeredForChat(chatId)) {
@@ -435,7 +435,7 @@ export function startBackgroundPollers(): void {
     try {
       const gwConnected = backend.isConnected();
       const summary = await queue.summary();
-      // Idle cursor — wall-clock ms since /api/sidekick/stream last
+      // Idle cursor — wall-clock ms since /api/parley/stream last
       // delivered ANY envelope. EventSource can stay "connected" while
       // the underlying TCP connection is dead (cellular handoff,
       // suspended radio). Combined with queued outbound, a long idle

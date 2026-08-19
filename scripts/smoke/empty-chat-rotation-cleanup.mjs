@@ -4,7 +4,7 @@
 // cleaned up stale 0-msg chats. That auto-cleanup behavior was removed
 // (main.ts:1751 comment) after confirmed data loss — sessions were wiped
 // because their messageCount transiently read 0 during
-// session-rotation/compression. Hard rule: sidekick never auto-deletes
+// session-rotation/compression. Hard rule: parley never auto-deletes
 // server-side data; stale empty rows stay until the user removes them
 // via the row menu.
 //

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Sidekick barge smoke runner.
+ * Parley barge smoke runner.
  *
  * Boots the orchestrated smoke rig (stub agent, audio-bridge with
- * fixture TTS, sidekick proxy on smoke ports) and runs the barge
+ * fixture TTS, parley proxy on smoke ports) and runs the barge
  * scenarios against it. Each scenario gets a fresh chromium context
  * but shares the booted services within a single run.
  *

@@ -30,7 +30,7 @@ Both transports are **handsfree call-mode** — mic open, no tap-to-talk, the ag
 
 The user picks the call's transport with `settings.realtime` (call-menu chevron → "Realtime"). Default OFF (turn-based). The mic button has its own picker (`settings.streaming`) for memo vs. dictation but doesn't open a call — that's the call button's job.
 
-**Both modes ride the same agent contract**: `POST /api/sidekick/messages` for the user turn, `GET /api/sidekick/stream` for the agent's reply. Realtime mode just has the bridge make those calls instead of the PWA. The text/agent path is identical; only audio in/out differ. (See "What changes for a duplex model" below — this stops being true the day a duplex-native backend lands.)
+**Both modes ride the same agent contract**: `POST /api/parley/messages` for the user turn, `GET /api/parley/stream` for the agent's reply. Realtime mode just has the bridge make those calls instead of the PWA. The text/agent path is identical; only audio in/out differ. (See "What changes for a duplex model" below — this stops being true the day a duplex-native backend lands.)
 
 For the wire-protocol view (which proxy + agent endpoints each mode hits), see the top-level `README.md` "Two voice modes" section.
 
@@ -97,7 +97,7 @@ export type AudioModeStartOpts = {
 };
 ```
 
-This contract is **richer than the bare-lifecycle interface I drafted earlier** because both modes really do share more than just start/stop. Today they ride the same agent-contract endpoints (`/api/sidekick/messages` + `/api/sidekick/stream`), so "user committed" and "agent reply playing" are meaningful in both. They share the same handsfree mechanisms (silence + sendword) and the same barge algorithm. Forcing those into a thin lifecycle interface would mean main.ts re-branches on the mode anyway, which defeats the point.
+This contract is **richer than the bare-lifecycle interface I drafted earlier** because both modes really do share more than just start/stop. Today they ride the same agent-contract endpoints (`/api/parley/messages` + `/api/parley/stream`), so "user committed" and "agent reply playing" are meaningful in both. They share the same handsfree mechanisms (silence + sendword) and the same barge algorithm. Forcing those into a thin lifecycle interface would mean main.ts re-branches on the mode anyway, which defeats the point.
 
 **Mode-specific surface stays on the implementation**, not in the interface:
 
@@ -106,7 +106,7 @@ This contract is **richer than the bare-lifecycle interface I drafted earlier** 
 
 ## What changes for a duplex model
 
-The richer interface above is honest **as long as both modes drive the same agent-contract endpoints**. The day we wire a duplex-native backend (OpenAI Realtime, Gemini Live), realtime mode stops POSTing user transcripts to `/api/sidekick/messages` and stops subscribing to `/api/sidekick/stream` — the model server takes over both directions over its own WebRTC/WebSocket channel.
+The richer interface above is honest **as long as both modes drive the same agent-contract endpoints**. The day we wire a duplex-native backend (OpenAI Realtime, Gemini Live), realtime mode stops POSTing user transcripts to `/api/parley/messages` and stops subscribing to `/api/parley/stream` — the model server takes over both directions over its own WebRTC/WebSocket channel.
 
 In that future:
 
@@ -185,5 +185,5 @@ Until then, `mode.ts` is the documented contract and `main.ts` runs parallel pat
 ## Pointers
 
 - Top-level `README.md` "Two voice modes" — wire-level / endpoint view.
-- `docs/SIDEKICK_AUDIO_PROTOCOL.md` — bridge ↔ proxy ↔ PWA contract details.
+- `docs/PARLEY_AUDIO_PROTOCOL.md` — bridge ↔ proxy ↔ PWA contract details.
 - `audio-bridge/README.md` — Python-side architecture.

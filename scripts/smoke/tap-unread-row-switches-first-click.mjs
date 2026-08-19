@@ -1,7 +1,7 @@
 // Field bug (2026-07): session-row taps in the sidebar often MISS on
 // the first click — Jonathan habitually double-taps. Mechanism (probed
 // empirically, scripts/smoke history): the drawer's unread-first
-// ordering re-sorts on every `sidekick:unread-changed`, and
+// ordering re-sorts on every `parley:unread-changed`, and
 // renderList's full rebuild does innerHTML='' — replacing every <li>.
 // If that rebuild lands INSIDE a tap gesture (between pointerdown and
 // pointerup), Chromium cancels the click entirely: the mousedown
@@ -115,7 +115,7 @@ export default async function run({ page, log, mock }) {
   // Mid-gesture: chat C goes unread (push from another device arriving
   // while the finger is down) and the badge module applies it — its own
   // refresh path: refreshFromServer → notifyChange →
-  // 'sidekick:unread-changed' → repaint + unread-first resort.
+  // 'parley:unread-changed' → repaint + unread-first resort.
   mock.setUnread(CHAT_C, 3);
   await page.evaluate(() => window.__badge._refreshForTests());
 

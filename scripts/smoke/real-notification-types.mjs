@@ -96,7 +96,7 @@ async function openActivityAndWaitFor(page, needle, timeout = 30_000) {
 
 async function fetchMessages(page, chatId) {
   return page.evaluate(async (id) => {
-    const r = await fetch(`/api/sidekick/sessions/${encodeURIComponent(id)}/messages?limit=240`);
+    const r = await fetch(`/api/parley/sessions/${encodeURIComponent(id)}/messages?limit=240`);
     return r.ok ? await r.json() : { error: r.status };
   }, chatId);
 }
@@ -165,7 +165,7 @@ export default async function run({ page, log }) {
   created.push(cronChat);
   const cronPrompt =
     `Notification smoke. Use the cronjob tool to create a one-time job that runs about one minute from now. ` +
-    `Name it sidekick-smoke-${RUN}. The job prompt must instruct the cron agent to reply with exactly this single token and no other text: ${CRON_MARKER}. ` +
+    `Name it parley-smoke-${RUN}. The job prompt must instruct the cron agent to reply with exactly this single token and no other text: ${CRON_MARKER}. ` +
     `After scheduling it, reply only with SCHEDULED_${RUN}.`;
   await send(page, cronPrompt);
   await waitForAgentBubble(page, `SCHEDULED_${RUN}`, 90_000);

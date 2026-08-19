@@ -1,6 +1,6 @@
 // Stub-agent HTTP server.
 //
-// Implements the sidekick Abstract Agent Protocol (a strict subset of
+// Implements the parley Abstract Agent Protocol (a strict subset of
 // the OpenAI Responses API). One endpoint:
 //
 //   POST /v1/responses
@@ -13,14 +13,14 @@
 //   - response.completed once at end-of-stream with the full envelope
 //
 // Non-streaming requests return a single JSON object with the same
-// `output` shape. Sidekick's openclaw backend client always sends
+// `output` shape. Parley's openclaw backend client always sends
 // `stream: true`, so that's the primary path.
 //
 // What we DO NOT implement (intentional simplicity):
 //   - tool / function calls
 //   - attachments (we 400 if any are sent)
 //   - response.created / in_progress / output_text.done events
-//     (the spec marks them optional; sidekick handles their absence)
+//     (the spec marks them optional; parley handles their absence)
 //   - response listing / retrieval by id
 //   - multi-tenant auth (single-token Bearer is supported, no user db)
 
@@ -74,7 +74,7 @@ export function createServer({ conversations, llm, bearerToken, reconfigure }) {
   const server = http.createServer(async (req, res) => {
     try {
       // Health: /health + /healthz are common conventions, and the
-      // sidekick proxy actually probes the plugin-served `/v1/health`
+      // parley proxy actually probes the plugin-served `/v1/health`
       // (upstream.ts healthcheck — it deliberately avoids the bare
       // /health which on openclaw is the gateway's own route). Serve
       // all three from the same handler so the stub passes the proxy's
@@ -159,7 +159,7 @@ export function createServer({ conversations, llm, bearerToken, reconfigure }) {
         catch { return json(res, 400, errorBody('invalid_request_error', 'body is not valid JSON')); }
         return handleSettingsUpdate(res, llm, id, body?.value);
       }
-      // Live LLM reconfigure — powers the sidekick first-run wizard.
+      // Live LLM reconfigure — powers the parley first-run wizard.
       // LOOPBACK-ONLY on top of the bearer check: this endpoint takes
       // env-shaped input (API keys, base URLs), so even in open mode
       // (no bearer) it must never be reachable from another machine.
@@ -504,7 +504,7 @@ function coerceInput(input) {
   if (typeof input === 'string') return input;
   if (Array.isArray(input)) {
     // Concatenate all content fields from user-role messages — the
-    // sidekick PWA only sends string input today, so this is a
+    // parley PWA only sends string input today, so this is a
     // best-effort branch for direct-API callers.
     const parts = [];
     for (const m of input) {

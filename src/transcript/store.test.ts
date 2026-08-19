@@ -18,7 +18,7 @@
  * `sidekick_id` set. The v1 assumption broke for background-chat
  * replies: SSE delivered reply_final to the inflight store, but
  * a subsequent switch-in fired setDurable BEFORE the plugin had
- * mirrored the assistant row into state.db / sidekick.db. With
+ * mirrored the assistant row into state.db / parley.db. With
  * v1 the inflight envelope (the only source of truth) got nuked
  * and the user saw a blank session until a second switch-away-
  * and-back (by which time the mirror caught up).
@@ -38,7 +38,7 @@ import {
   getState, setDurable, appendInflight, clearInflightThroughReplyFinal,
   spliceWindow, fillGap, prependDurable, appendDurable,
 } from './store.ts';
-import type { ConversationItem, SidekickEnvelope } from './types.ts';
+import type { ConversationItem, ParleyEnvelope } from './types.ts';
 
 const CHAT = 'orphan-test';
 
@@ -50,16 +50,16 @@ function reset(): void {
   s.pendingSends.length = 0;
 }
 
-function userMsg(message_id: string, text: string): SidekickEnvelope {
+function userMsg(message_id: string, text: string): ParleyEnvelope {
   return { type: 'user_message', chat_id: CHAT, message_id, text };
 }
-function replyDelta(message_id: string, text: string): SidekickEnvelope {
+function replyDelta(message_id: string, text: string): ParleyEnvelope {
   return { type: 'reply_delta', chat_id: CHAT, message_id, text };
 }
-function replyFinal(message_id: string, text?: string): SidekickEnvelope {
+function replyFinal(message_id: string, text?: string): ParleyEnvelope {
   return { type: 'reply_final', chat_id: CHAT, message_id, text };
 }
-function typing(): SidekickEnvelope {
+function typing(): ParleyEnvelope {
   return { type: 'typing', chat_id: CHAT };
 }
 function durableUserRow(id: number, content: string, sidekick_id?: string): ConversationItem {
@@ -137,7 +137,7 @@ describe('store: setDurable conditionally drains completed-turn inflight envelop
     // while user is on chat B. User switches to A; replaySessionMessages
     // calls setDurable(A, server_messages_for_A, ...) and the server's
     // /messages response doesn't include the new reply yet (state.db
-    // / sidekick.db write-through hasn't landed). Without this fix,
+    // / parley.db write-through hasn't landed). Without this fix,
     // the inflight reply_final got nuked under the v1 assumption that
     // durable was authoritative — and the user saw a blank session
     // until they switched away and back.

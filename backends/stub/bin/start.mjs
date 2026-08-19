@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CLI entry for the sidekick stub agent.
+// CLI entry for the parley stub agent.
 //
 // Run via `node agent/bin/start.mjs` or `npm start` from the agent
 // folder. Reads config from environment variables:
@@ -32,7 +32,7 @@ const conversations = new Conversations(`${DATA_DIR}/conversations.json`);
 await conversations.load();
 
 // Swappable adapter: the first-run setup wizard reconfigures the LLM
-// live (POST /v1/admin/llm, proxied by sidekick) without a process
+// live (POST /v1/admin/llm, proxied by parley) without a process
 // restart. The delegate keeps createServer's `llm` reference stable
 // while the active adapter underneath changes.
 let active = pickAdapter();

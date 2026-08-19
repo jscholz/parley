@@ -1,7 +1,7 @@
 /**
  * @fileoverview Video card kind — agent-pushed video files rendered
  * inline on the reply bubble (2026-08-04 multimedia lane; the serving
- * side is proxy/sidekick/media.ts). Mirrors image.ts; the <video>
+ * side is proxy/parley/media.ts). Mirrors image.ts; the <video>
  * attribute set matches the transcript's user-attachment echo player
  * (chat.ts): controls + playsInline (iOS must not force fullscreen) +
  * preload=metadata (first frame + duration, not the whole file — the
@@ -10,7 +10,7 @@
 
 import { apiUrl } from '../../apiBase.ts';
 
-/** Site-relative urls (the /api/sidekick/media/<id> lane) must resolve
+/** Site-relative urls (the /api/parley/media/<id> lane) must resolve
  *  against the API origin, not the page origin — under CAP the page
  *  origin is capacitor://localhost and a relative src would 404 into
  *  the local bundle. Absolute urls pass through untouched. */

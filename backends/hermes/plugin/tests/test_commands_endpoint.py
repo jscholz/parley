@@ -1,17 +1,17 @@
-"""Unit tests for the sidekick plugin's slash-command registry serializer.
+"""Unit tests for the parley plugin's slash-command registry serializer.
 
 Covers ``_serialize_command_registry``:
 
   * Returns a list of dicts with the documented field names.
   * Drops ``cli_only`` entries (mirrors the gateway-surface filter).
   * Includes ``gateway_only`` entries (those are the platform-only ones
-    that the CLI shouldn't see — telegram/slack/sidekick should).
+    that the CLI shouldn't see — telegram/slack/parley should).
   * Aliases survive on the canonical row (no separate row per alias).
   * Plugin-registered commands are appended with category="Plugins".
   * Empty list when ``hermes_cli`` isn't importable (defensive — keeps
     non-hermes test contexts from blowing up).
 
-The helper is module-level so we don't need a SidekickAdapter instance.
+The helper is module-level so we don't need a ParleyAdapter instance.
 We import the plugin module via importlib (same pattern as
 ``test_pdf_rasterize.py``) so the tests are independent of the hermes
 plugin loader.
@@ -36,7 +36,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -72,7 +72,7 @@ def _load_plugin():
     """Import under the real package name so relative imports resolve;
     see test_user_id_queries._load_plugin for context. Eager-loads
     route submodules so tests can reference them as
-    ``plugin.sidekick_route_*``."""
+    ``plugin.parley_route_*``."""
     _install_hermes_stubs()
     plugin_pkg = Path(__file__).resolve().parents[1]
     parent_dir = str(plugin_pkg.parent)
@@ -80,9 +80,9 @@ def _load_plugin():
         sys.path.insert(0, parent_dir)
     pkg = importlib.import_module(plugin_pkg.name)
     for sub in (
-        "sidekick_ids", "sidekick_route_conversations",
-        "sidekick_route_items", "sidekick_route_events",
-        "sidekick_route_responses", "sidekick_route_settings",
+        "parley_ids", "parley_route_conversations",
+        "parley_route_items", "parley_route_events",
+        "parley_route_responses", "parley_route_settings",
     ):
         importlib.import_module(f"{plugin_pkg.name}.{sub}")
     return pkg
@@ -116,21 +116,21 @@ def test_returns_list_of_dicts_with_documented_fields(plugin):
 
 
 def test_excludes_hidden_terminal_commands(plugin):
-    """Sidekick is a chat surface, not a TUI. The plugin's
-    ``_SIDEKICK_HIDDEN_COMMANDS`` set drops genuinely terminal-coupled
+    """Parley is a chat surface, not a TUI. The plugin's
+    ``_PARLEY_HIDDEN_COMMANDS`` set drops genuinely terminal-coupled
     entries (screen wipe, redraw, OSC52 clipboard, etc.). Most
     ``cli_only=True`` commands in hermes-cli still appear — they
     route fine through chat (busy, tools, snapshot, config, ...).
 
     This test gates the explicit drop list: anything in
-    ``_SIDEKICK_HIDDEN_COMMANDS`` must NOT surface in /v1/commands."""
+    ``_PARLEY_HIDDEN_COMMANDS`` must NOT surface in /v1/commands."""
     rows = plugin._serialize_command_registry()
     if not rows:
         pytest.skip("hermes_cli not importable in this test env")
     names = {r["name"] for r in rows}
-    for name in plugin._SIDEKICK_HIDDEN_COMMANDS:
+    for name in plugin._PARLEY_HIDDEN_COMMANDS:
         assert name not in names, (
-            f"{name!r} is in _SIDEKICK_HIDDEN_COMMANDS but appeared in /v1/commands"
+            f"{name!r} is in _PARLEY_HIDDEN_COMMANDS but appeared in /v1/commands"
         )
 
 
@@ -152,7 +152,7 @@ def test_aliases_carried_on_canonical_row(plugin):
     it under ``aliases``, NOT as a second top-level row.
 
     (Previously asserted against ``/new``+``reset``, but /new is now
-    hidden in _SIDEKICK_HIDDEN_COMMANDS — see the 2026-05-17 slash-
+    hidden in _PARLEY_HIDDEN_COMMANDS — see the 2026-05-17 slash-
     command catalog change: /new triggers the destructive_slash confirm
     flow, and the canonical "New chat" button covers it.)"""
     rows = plugin._serialize_command_registry()

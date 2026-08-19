@@ -2,7 +2,7 @@ import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 
 const URL = 'http://localhost:3020';
-const OUT = '/tmp/sidekick-shots';
+const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';

@@ -8,7 +8,7 @@
 // (last-viewed) BUT drawer renders the local-only stub at top.
 //
 // Test plan (mocked):
-//   1. Pre-populate sidekick chat A (no content) so drawer has at
+//   1. Pre-populate parley chat A (no content) so drawer has at
 //      least one server row at boot. WhatsApp chat W (with content).
 //   2. Open PWA → click W to render its content (this writes the
 //      chat snapshot via chat.persist + chat.trackViewedSession).
@@ -33,10 +33,10 @@ const WA_CHAT = 'mock-wa-bootactive';
 const WA_MARKER = 'whatsapp-content-marker-bootactive';
 
 export function MOCK_SETUP(mock) {
-  // A sidekick chat so the drawer has more than just one row.
+  // A parley chat so the drawer has more than just one row.
   mock.addChat(SK_CHAT, {
     source: 'sidekick',
-    title: 'Sidekick chat',
+    title: 'Parley chat',
     messages: [
       { role: 'user', content: 'sk-msg', timestamp: Date.now() / 1000 - 120 },
       { role: 'assistant', content: 'sk-reply', timestamp: Date.now() / 1000 - 119 },

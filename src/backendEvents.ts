@@ -28,7 +28,7 @@ import * as chat from './chat.ts';
 
 /** Push notification handler — cron output, /background results,
  *  scheduled reminders. Backends that support out-of-band push (today:
- *  hermes-gateway via /api/sidekick/notifications) call this; others
+ *  hermes-gateway via /api/parley/notifications) call this; others
  *  never fire it. For the currently-viewed chat: append a styled
  *  notification row matching the persisted transcript shape (so
  *  reload finds the same data-message-id and dedups). For off-screen
@@ -76,7 +76,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // there's a new event waiting in another chat. clearUnread fires
   // from sessionDrawer.setViewed when they switch in. The system
   // notification (OS-level) is dispatched separately by the proxy
-  // (proxy/sidekick/notifications/dispatch.ts); this is the in-app
+  // (proxy/parley/notifications/dispatch.ts); this is the in-app
   // counterpart for badge state.
   if (chatId && chatId !== switchCtl.focusedId()) {
     if (replay) {

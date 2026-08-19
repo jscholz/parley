@@ -16,7 +16,7 @@ Reads the ``voice:`` block from ``~/.hermes/config.yaml``::
         voice: aura-2-thalia-en
 
 If the section is absent we default to Deepgram nova-3 + Aura — the same
-defaults used by the classic sidekick pipeline today, so the WebRTC mode
+defaults used by the classic parley pipeline today, so the WebRTC mode
 behaves identically out of the box.
 """
 

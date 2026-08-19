@@ -7,7 +7,7 @@
 // by the time it appeared it was already resolved. Root cause is a
 // clobber race in activityStore.refreshFromServer: a pending approval is
 // added to the local store SYNCHRONOUSLY by upsertNotification, but its
-// POST to /api/sidekick/activity is fire-and-forget. The server ALSO
+// POST to /api/parley/activity is fire-and-forget. The server ALSO
 // emits an `activity_changed` cross-device sync the moment it records the
 // approval, which fires refreshFromServer. If that GET races ahead of our
 // own POST (or the server's own write), the snapshot lacks the approval —
@@ -60,7 +60,7 @@ export default async function run({ page, log, mock }) {
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      'printf sidekick-refresh-race\n\n' +
+      'printf parley-refresh-race\n\n' +
       'Reason: refresh-race smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
     sidekick_id: approvalId,
@@ -87,7 +87,7 @@ export default async function run({ page, log, mock }) {
   //    the assertion is deterministic (no reliance on debounce/render
   //    timing). Playwright routes are LIFO, so this override (added after
   //    the mock's route) wins.
-  await page.route(/.*\/api\/sidekick\/activity(\?.*)?$/, async (route) => {
+  await page.route(/.*\/api\/parley\/activity(\?.*)?$/, async (route) => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' });
       return;

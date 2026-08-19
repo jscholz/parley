@@ -143,7 +143,7 @@ export class TurnBuffer {
    *  once live SSE deltas resumed. Envelope shape carries the
    *  message_id end-to-end.
    *
-   *  Wire shape mirrors `proxy/sidekick/upstream.ts` SidekickEnvelope. */
+   *  Wire shape mirrors `proxy/parley/upstream.ts` ParleyEnvelope. */
   renderEnvelopes(turn) {
     const out = [];
     out.push({

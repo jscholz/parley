@@ -11,7 +11,7 @@
 // `s.title || s.snippet || s.id` chain picks it up when title is
 // empty.
 //
-// Mocked path — no hermes / LLM. The mock's /api/sidekick/sessions
+// Mocked path — no hermes / LLM. The mock's /api/parley/sessions
 // derives first_user_message from each chat's first role='user'
 // message exactly like the proxy does.
 //

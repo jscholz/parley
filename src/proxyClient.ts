@@ -1,14 +1,14 @@
 /**
- * @fileoverview Proxy-client BackendAdapter — wraps the local sidekick
- * proxy's /api/sidekick/* HTTP+SSE surface (served by
- * proxy/sidekick/) into the BackendAdapter contract. Fully
- * agent-agnostic: the proxy translates /api/sidekick/* to the agent
+ * @fileoverview Proxy-client BackendAdapter — wraps the local parley
+ * proxy's /api/parley/* HTTP+SSE surface (served by
+ * proxy/parley/) into the BackendAdapter contract. Fully
+ * agent-agnostic: the proxy translates /api/parley/* to the agent
  * contract (/v1/*) on its own. Filename was historically
  * `hermes-gateway.ts`; renamed during the post-refactor cleanup
- * after the proxy module rename to proxy/sidekick/.
+ * after the proxy module rename to proxy/parley/.
  *
  * Wire path:
- *   PWA → POST /api/sidekick/messages {chat_id, text}    (fire-and-forget)
+ *   PWA → POST /api/parley/messages {chat_id, text}    (fire-and-forget)
  *           ↓ (proxy WS client)
  *   hermes platform adapter (in-process, ws://127.0.0.1:8645)
  *           ↓
@@ -17,7 +17,7 @@
  *   adapter → reply_delta / reply_final / image / typing /
  *             session_changed / notification envelopes back over WS
  *           ↓
- *   proxy fans every envelope onto /api/sidekick/stream (one
+ *   proxy fans every envelope onto /api/parley/stream (one
  *   persistent SSE channel for the lifetime of the PWA tab).
  *           ↓
  *   we parse here; emit normalized BackendAdapter events. Each
@@ -55,7 +55,7 @@ let connected = false;
  *  paths all funnel through this so lookups don't hit IDB on the
  *  hot path. */
 let activeChatId: string | null = null;
-/** Health-poll handle. We use GET /api/sidekick/sessions as a cheap
+/** Health-poll handle. We use GET /api/parley/sessions as a cheap
  *  liveness probe — its handler is the same one the drawer calls, so
  *  there's no separate health route to mount. */
 let healthTimer: ReturnType<typeof setTimeout> | null = null;
@@ -135,7 +135,7 @@ function replyIdFor(env: any, chatId: string): string {
 }
 
 function apiBase(): string {
-  return `${apiOrigin()}/api/sidekick`;
+  return `${apiOrigin()}/api/parley`;
 }
 
 async function fetchSessionMessages(id: string, logPrefix = 'proxy-client.fetchSessionMessages', limit?: number) {
@@ -276,7 +276,7 @@ interface SessionsResponse {
 }
 
 /** Probe the proxy. `unconfigured: true` from the server means the
- *  proxy is running but `SIDEKICK_PLATFORM_TOKEN` is unset — surface
+ *  proxy is running but `PARLEY_PLATFORM_TOKEN` is unset — surface
  *  that as "connected, but degraded" so the UI can show a hint
  *  rather than a generic disconnected state. The /messages endpoint
  *  will 503 on send in that case; we don't pretend otherwise. */
@@ -384,7 +384,7 @@ function startStreamChannel(): void {
                    'tool_call', 'tool_result', 'user_message',
                    // Cross-device SSOT sync envelopes. The proxy
                    // forwards these (see FANOUT_TYPES in
-                   // proxy/sidekick/stream.ts) but EventSource only
+                   // proxy/parley/stream.ts) but EventSource only
                    // delivers events whose name we explicitly subscribe
                    // to. Without these listeners, the handlers in
                    // handleEnvelope() are unreachable — caught only
@@ -629,7 +629,7 @@ function bindLifecycleHandlers(): void {
 
 /** Cross-device SSOT sync — the plugin emits these envelopes when
  *  another device (or a local seen/mark/pin/delete op) mutated state
- *  the PWA tracks via /api/sidekick/{notifications,pins,...}. The
+ *  the PWA tracks via /api/parley/{notifications,pins,...}. The
  *  PWA's local listeners (badge.ts, pins/store.ts, sessionDrawer.ts)
  *  re-fetch the affected surface; some types also have a local side
  *  effect (e.g. delete the IDB row).
@@ -649,11 +649,11 @@ const CROSS_DEVICE_SYNC: Record<CrossDeviceSyncType, {
   eventName: string;
   sideEffect?: (chatId: string) => void;
 }> = {
-  unread_changed:        { eventName: 'sidekick:server-unread-changed' },
-  pins_changed:          { eventName: 'sidekick:server-pins-changed' },
-  activity_changed:      { eventName: 'sidekick:server-activity-changed' },
+  unread_changed:        { eventName: 'parley:server-unread-changed' },
+  pins_changed:          { eventName: 'parley:server-pins-changed' },
+  activity_changed:      { eventName: 'parley:server-activity-changed' },
   conversation_deleted:  {
-    eventName: 'sidekick:server-conversation-deleted',
+    eventName: 'parley:server-conversation-deleted',
     sideEffect: (chatId) => {
       conversations.remove(chatId).catch(() => {});
       // Close shelf docs owned by the deleted chat (meeting transcripts
@@ -720,7 +720,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       subs?.onActivity?.({ working: false, conversation: chatId });
       subs?.onFinal?.({ replyId, text: finalText, conversation: chatId, messageId: msgId, isReplay });
       // Bump last_message_at so the drawer sort surfaces this row even
-      // before /api/sidekick/sessions enrichment refreshes.
+      // before /api/parley/sessions enrichment refreshes.
       // NOT on replay: server replays past envelopes on stream
       // reconnect; bumping then triggers a drawer-reorder cascade
       // (multiple resumes per page-load). The IDB row's lastMessageAt
@@ -868,7 +868,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       // data-message-id on the rendered transcript row so:
       //   (a) reload dedups against the same row fetched from
       //       /v1/conversations/{id}/items (server adds it from
-      //       sidekick_notifications)
+      //       parley_notifications)
       //   (b) `?msg=Y` URL param on push-click scrolls to the same
       //       row via existing pin-drawer-jump machinery.
       const sidekickId = typeof env.sidekick_id === 'string' ? env.sidekick_id : '';
@@ -972,12 +972,12 @@ export const proxyClientAdapter = {
     streaming: true,
     sessions: true,           // chat_id provides multi-session semantics
     models: false,            // legacy hardcoded picker — superseded by `agentSettings`
-    agentSettings: true,      // /api/sidekick/settings/* schema-driven panel (model picker etc.)
+    agentSettings: true,      // /api/parley/settings/* schema-driven panel (model picker etc.)
     toolEvents: true,         // tool_call / tool_result envelopes (Phase 3); image is also tool-like
 
-    history: true,            // /api/sidekick/sessions/<chat_id>/messages
+    history: true,            // /api/parley/sessions/<chat_id>/messages
     attachments: false,       // wire shape allows it, no PWA composer support yet
-    sessionBrowsing: true,    // /api/sidekick/sessions
+    sessionBrowsing: true,    // /api/parley/sessions
     slashCommands: true,      // gateway parses /new, /compress, /resume, /undo, /background
     persona: false,           // RESERVED (inert): per-session persona prompt not wired yet
   },
@@ -1010,7 +1010,7 @@ export const proxyClientAdapter = {
     // without firing onerror. Bound once per page lifetime.
     bindLifecycleHandlers();
     // Non-blocking probe — purely a health/degraded check now, never the
-    // boot-gating path. Surfaces the SIDEKICK_PLATFORM_TOKEN-unset
+    // boot-gating path. Surfaces the PARLEY_PLATFORM_TOKEN-unset
     // "connected-but-degraded" hint, and gives an EARLY disconnected
     // signal if the gateway is outright unreachable (the stream would
     // otherwise sit silently in CONNECTING retry). Never sets
@@ -1021,7 +1021,7 @@ export const proxyClientAdapter = {
         opts.onStatus?.(false);
         log('proxy-client: initial probe failed — is the proxy running?');
       } else if (ok && unconfigured) {
-        log('proxy-client: connected (proxy reports SIDEKICK_PLATFORM_TOKEN unset — sends will 503)');
+        log('proxy-client: connected (proxy reports PARLEY_PLATFORM_TOKEN unset — sends will 503)');
       }
     });
   },
@@ -1063,7 +1063,7 @@ export const proxyClientAdapter = {
     // genuinely down the fetch below rejects with a network error and
     // the shell's queued-send machinery (main.ts sendOrQueueMessage)
     // holds it for the next reconnect. An answered HTTP rejection
-    // still throws `Sidekick HTTP <status>` — the shell treats that
+    // still throws `Parley HTTP <status>` — the shell treats that
     // as a real refusal, not connectivity.
     if (!connected) {
       diag('proxy-client.sendMessage: POSTing while stream channel is down (offline-first)');
@@ -1141,7 +1141,7 @@ export const proxyClientAdapter = {
           const parsed = JSON.parse(errText);
           if (parsed?.detail) detail = parsed.detail;
         } catch {}
-        throw new Error(`Sidekick HTTP ${res.status}: ${detail}`);
+        throw new Error(`Parley HTTP ${res.status}: ${detail}`);
       }
       // Optimistic activity flip — flips back to working=true on the
       // first reply_delta / typing envelope. Pre-confirm "we sent it"
@@ -1298,10 +1298,10 @@ export const proxyClientAdapter = {
       }
       return {
         id: e.chat_id,
-        // source = platform that owns this chat (sidekick / telegram /
-        // slack / …). Empty/missing means sidekick by convention (the
+        // source = platform that owns this chat (parley / telegram /
+        // slack / …). Empty/missing means parley by convention (the
         // legacy single-platform default). Drawer uses this to render
-        // a source badge on non-sidekick rows + go composer-read-only.
+        // a source badge on non-parley rows + go composer-read-only.
         source: e.source || 'sidekick',
         title: resolvedTitle,
         snippet,
@@ -1332,7 +1332,7 @@ export const proxyClientAdapter = {
       if (serverIds.has(conv.chat_id)) continue;
       merged.push({
         id: conv.chat_id,
-        // Source is encoded in the chat_id prefix; default to sidekick
+        // Source is encoded in the chat_id prefix; default to parley
         // for any unprefixed legacy row (v1 IDB blasted on upgrade, so
         // this should never happen — defensive only).
         source: conv.chat_id.includes(':') ? conv.chat_id.split(':')[0] : 'sidekick',
@@ -1362,7 +1362,7 @@ export const proxyClientAdapter = {
     const dupes = [...idCounts.entries()].filter(([, n]) => n > 1);
     if (dupes.length > 0) {
       const enrichSummary = enrich.map(e => ({ id: e.chat_id, source: e.source || 'sidekick', msgs: e.message_count || 0 }));
-      const localOnlyAppended = local.filter(c => !new Set(enrich.map(e => e.chat_id)).has(c.chat_id)).map(c => ({ id: c.chat_id, source: 'sidekick (local-only)' }));
+      const localOnlyAppended = local.filter(c => !new Set(enrich.map(e => e.chat_id)).has(c.chat_id)).map(c => ({ id: c.chat_id, source: 'parley (local-only)' }));
       const dupeSummary = dupes.map(([id, n]) => `${id}×${n}`).join(', ');
       log(`[listSessions] DUPLICATE IDs: ${dupeSummary}`);
       log(`[listSessions] enrich=${JSON.stringify(enrichSummary)}`);
@@ -1373,9 +1373,9 @@ export const proxyClientAdapter = {
     // drawer renders a clear hint without needing a new chrome path.
     if (unconfigured && merged.length === 0) {
       merged.unshift({
-        id: '__sidekick:hint:unconfigured',
+        id: '__parley:hint:unconfigured',
         source: 'sidekick',
-        title: 'Sidekick proxy missing SIDEKICK_PLATFORM_TOKEN — sends will 503',
+        title: 'Parley proxy missing PARLEY_PLATFORM_TOKEN — sends will 503',
         snippet: '',
         lastMessageAt: Math.floor(Date.now() / 1000),
         messageCount: 0,
@@ -1389,7 +1389,7 @@ export const proxyClientAdapter = {
 
   async resumeSession(id: string) {
     // Synthetic-hint row: silently ignore.
-    if (id.startsWith('__sidekick:hint:')) {
+    if (id.startsWith('__parley:hint:')) {
       return { messages: [], firstId: null, hasMore: false };
     }
     // Phantom-resume guard: if `id` was deleted from this tab in the
@@ -1404,7 +1404,7 @@ export const proxyClientAdapter = {
     }
     // Flip the active pointer FIRST. The next sendMessage uses this
     // chat_id even if the history fetch below errors — the gateway
-    // resolves (Platform.SIDEKICK, chat_id) → session_id internally
+    // resolves (Platform.PARLEY, chat_id) → session_id internally
     // so the conversation continues server-side regardless. We don't
     // need a token-monotonic guard like hermes.ts because the active
     // chat_id is the single source of truth and IDB write is atomic.
@@ -1486,7 +1486,7 @@ export const proxyClientAdapter = {
   },
 
   async loadEarlier(id: string, beforeId: number) {
-    if (id.startsWith('__sidekick:hint:')) {
+    if (id.startsWith('__parley:hint:')) {
       return { messages: [], firstId: null, hasMore: false };
     }
     const q = new URLSearchParams({ before: String(beforeId), limit: String(PAGE_LIMIT) });
@@ -1505,7 +1505,7 @@ export const proxyClientAdapter = {
    *  Used to connect a floating deep `around` window back to the live
    *  tail. `hasMoreNewer===false` means this page reached the tail. */
   async loadLater(id: string, afterId: number) {
-    if (id.startsWith('__sidekick:hint:')) {
+    if (id.startsWith('__parley:hint:')) {
       return { messages: [], lastId: null, hasMoreNewer: false };
     }
     const q = new URLSearchParams({ after: String(afterId), limit: String(PAGE_LIMIT) });
@@ -1526,7 +1526,7 @@ export const proxyClientAdapter = {
    *  back to its serial drill. `hasMore`/`hasMoreNewer` + `firstId`/`lastId`
    *  describe the bidirectional pagination cursors for the loaded window. */
   async fetchMessagesAround(id: string, target: string, limit?: number) {
-    if (id.startsWith('__sidekick:hint:')) {
+    if (id.startsWith('__parley:hint:')) {
       return { messages: [], firstId: null, hasMore: false, lastId: null, hasMoreNewer: false, targetFound: false };
     }
     const q = new URLSearchParams({ around: String(target) });
@@ -1545,7 +1545,7 @@ export const proxyClientAdapter = {
     };
   },
 
-  /** GET /api/sidekick/settings/schema → agent-declared settings list,
+  /** GET /api/parley/settings/schema → agent-declared settings list,
    *  or `null` if the agent doesn't implement the optional extension
    *  (404). Caller (settings panel) hides the "Agent" group on null. */
   async getSettingsSchema(): Promise<any[] | null> {
@@ -1564,7 +1564,7 @@ export const proxyClientAdapter = {
     }
   },
 
-  /** POST /api/sidekick/settings/{id} {value} → updated SettingDef.
+  /** POST /api/parley/settings/{id} {value} → updated SettingDef.
    *  Throws on 4xx/5xx with the upstream's error.message extracted so
    *  the panel can revert + surface the message inline. */
   async updateSetting(id: string, value: unknown): Promise<any> {
@@ -1597,7 +1597,7 @@ export const proxyClientAdapter = {
     // PATCH is best-effort. We log a failure but never throw, because
     // a network blip on the propagation step shouldn't undo the local
     // rename the user just confirmed.
-    if (id.startsWith('__sidekick:hint:')) return;
+    if (id.startsWith('__parley:hint:')) return;
     const trimmed = title.trim();
     await conversations.setUserTitle(id, trimmed);
     log(`proxy-client: renamed session ${id} to "${trimmed.slice(0, 40)}"`);
@@ -1623,7 +1623,7 @@ export const proxyClientAdapter = {
   },
 
   async deleteSession(id: string) {
-    if (id.startsWith('__sidekick:hint:')) return;
+    if (id.startsWith('__parley:hint:')) return;
     // Mark BEFORE the network round-trip so any concurrent resumeSession
     // for the same id sees the flag and short-circuits before its own
     // setActive(id) re-pins activeChatId. Without this, click-then-

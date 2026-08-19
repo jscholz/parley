@@ -12,7 +12,7 @@ prompt at the top (real, from parent) AND again near the end
 (injection dupe in child) — plus replayed assistant/tool rows in
 between. Incoherent transcript.
 
-Fix lives in ``sidekick_route_items._items_by_user_id``: per child
+Fix lives in ``parley_route_items._items_by_user_id``: per child
 session, find the LAST row with content starting with `[CONTEXT
 COMPACTION`, drop that row AND every row in the same session with
 ``id <= marker_id`` (the seed block always sits at the head of the
@@ -45,7 +45,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -79,7 +79,7 @@ def _install_hermes_stubs() -> None:
 
 def _load_plugin():
     """Real-name package import + eager-load route submodules so the
-    items helper is accessible as plugin.sidekick_route_items."""
+    items helper is accessible as plugin.parley_route_items."""
     _install_hermes_stubs()
     plugin_pkg = Path(__file__).resolve().parents[1]
     parent_dir = str(plugin_pkg.parent)
@@ -87,9 +87,9 @@ def _load_plugin():
         sys.path.insert(0, parent_dir)
     pkg = importlib.import_module(plugin_pkg.name)
     for sub in (
-        "sidekick_ids", "sidekick_route_conversations",
-        "sidekick_route_items", "sidekick_route_events",
-        "sidekick_route_responses", "sidekick_route_settings",
+        "parley_ids", "parley_route_conversations",
+        "parley_route_items", "parley_route_events",
+        "parley_route_responses", "parley_route_settings",
     ):
         importlib.import_module(f"{plugin_pkg.name}.{sub}")
     return pkg
@@ -132,11 +132,11 @@ CREATE TABLE sidekick_msg_links (
 );
 """
 
-# Sidekick prompt must exceed the recursive CTE's 200-char prefix-match
+# Parley prompt must exceed the recursive CTE's 200-char prefix-match
 # floor so the child session is recognised as a compaction continuation
-# (vs delegate sub-task). Mirrors hermes' actual sidekick system
+# (vs delegate sub-task). Mirrors hermes' actual parley system
 # prompt scale.
-SIDEKICK_PROMPT = "S" * 500
+PARLEY_PROMPT = "S" * 500
 
 
 @pytest.fixture
@@ -150,7 +150,7 @@ def state_db(tmp_path):
 
 
 def _ins_session(db, sid, source, user_id, started_at, *,
-                 parent=None, title=None, system_prompt=SIDEKICK_PROMPT):
+                 parent=None, title=None, system_prompt=PARLEY_PROMPT):
     conn = sqlite3.connect(db)
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, parent_session_id, "
@@ -176,7 +176,7 @@ def _ins_msg(db, session_id, role, content, ts):
 
 def _make_adapter(plugin, state_db_path):
     """Bare instance — items helper only reads _state_db_path."""
-    adapter = plugin.SidekickAdapter.__new__(plugin.SidekickAdapter)
+    adapter = plugin.ParleyAdapter.__new__(plugin.ParleyAdapter)
     adapter._state_db_path = state_db_path
     return adapter
 
@@ -239,7 +239,7 @@ def test_compaction_injection_block_filtered(plugin, state_db):
     )
 
     adapter = _make_adapter(plugin, state_db)
-    result = plugin.sidekick_route_items._items_by_user_id(
+    result = plugin.parley_route_items._items_by_user_id(
         adapter, chat, "sidekick", 200, None,
     )
     assert result is not None
@@ -296,7 +296,7 @@ def test_no_compaction_marker_means_no_filtering(plugin, state_db):
     _ins_msg(state_db, "child2", "assistant", "real new reply", t0 + 12)
 
     adapter = _make_adapter(plugin, state_db)
-    result = plugin.sidekick_route_items._items_by_user_id(
+    result = plugin.parley_route_items._items_by_user_id(
         adapter, chat, "sidekick", 200, None,
     )
     assert result is not None
@@ -340,7 +340,7 @@ def test_multiple_compaction_events_filter_each(plugin, state_db):
     _ins_msg(state_db, "c2", "assistant", "real-C from c2", t0 + 200.6)
 
     adapter = _make_adapter(plugin, state_db)
-    result = plugin.sidekick_route_items._items_by_user_id(
+    result = plugin.parley_route_items._items_by_user_id(
         adapter, chat, "sidekick", 200, None,
     )
     assert result is not None

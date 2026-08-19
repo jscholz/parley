@@ -1,5 +1,5 @@
 // Agent-pushed media lane (2026-08-04): an agent registers a produced
-// file with POST /api/sidekick/media/register and references it in its
+// file with POST /api/parley/media/register and references it in its
 // reply as a markdown image; a video extension must render an inline
 // VIDEO card (controls + playsInline, src resolved via apiUrl so the
 // CAP capacitor:// origin fetches from the API host, not the bundle).
@@ -8,7 +8,7 @@
 // into its reply_final, and handleReplyFinal's parseCardsFromText
 // fallback classifies the markdown link by extension. The media GET is
 // page.route-stubbed — this proves the client lane; the server route
-// has its own unit coverage (proxy/sidekick/__tests__/media.test.ts).
+// has its own unit coverage (proxy/parley/__tests__/media.test.ts).
 
 import { waitForReady, assert } from './lib.mjs';
 
@@ -17,13 +17,13 @@ export const DESCRIPTION = 'Markdown video link in an agent reply renders an inl
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const MEDIA_PATH = '/api/sidekick/media/00c0ffee00c0ffee.mp4';
+const MEDIA_PATH = '/api/parley/media/00c0ffee00c0ffee.mp4';
 
 export default async function run({ page, log }) {
   await waitForReady(page);
 
   // Stub the media bytes — the <video> element will probe the src.
-  await page.route(/\/api\/sidekick\/media\/[a-f0-9]+\.mp4$/, (route) =>
+  await page.route(/\/api\/parley\/media\/[a-f0-9]+\.mp4$/, (route) =>
     route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(64) }));
 
   await page.evaluate((path) => {

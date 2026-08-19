@@ -11,8 +11,8 @@
  *   POST /v1/push/visibility               ← {chat_id, visible}
  *   POST /v1/push/test                     ← {chat_id?, text?}  (test push dispatch)
  *
- *  The proxy at /api/sidekick/notifications/* forwards to these when
- *  configured with SIDEKICK_PUSH_OWNED_BY_PLUGIN=true.
+ *  The proxy at /api/parley/notifications/* forwards to these when
+ *  configured with PARLEY_PUSH_OWNED_BY_PLUGIN=true.
  */
 import {
   ensureVapidKeys,
@@ -157,7 +157,7 @@ export function registerPushRoutes(api, { db, dispatcher }) {
     handler: async (req, res) => {
       if (req.method !== 'POST') { sendJson(res, 405, { error: 'method_not_allowed' }); return true; }
       const body = await readJson(req);
-      const chatId = body?.chat_id ?? body?.chatId ?? 'sidekick-test';
+      const chatId = body?.chat_id ?? body?.chatId ?? 'parley-test';
       const text = body?.text ?? 'Test notification from openclaw plugin';
       const result = await dispatcher.dispatchPush({ chatId, text, kind: 'test' });
       sendJson(res, 200, { ok: true, ...result });

@@ -1,14 +1,14 @@
-// Regression gate for the keyterms IDB→sidekick.db migration
+// Regression gate for the keyterms IDB→parley.db migration
 // (Phase 1 of the settings→DB consolidation).
 //
 // What changed: STT key-terms were device-local in IndexedDB for
 // months, so a list curated on one device never reached another. The
-// migration made the server (sidekick.db user_settings, key
-// `stt_keyterms`, surfaced at /api/sidekick/prefs/stt_keyterms) the
+// migration made the server (parley.db user_settings, key
+// `stt_keyterms`, surfaced at /api/parley/prefs/stt_keyterms) the
 // source of truth, with IDB demoted to a write-through offline mirror.
 //
 // This smoke drives the real chip UI through the real fetch path the
-// PWA uses (the mock backend mirrors the /api/sidekick/prefs/<key>
+// PWA uses (the mock backend mirrors the /api/parley/prefs/<key>
 // GET/PUT surface the proxy forwards to /v1/user-settings):
 //   1. Seed a server value (simulates "another device already saved a
 //      list"). On boot the settings chips should render it — proving
@@ -71,7 +71,7 @@ export default async function run({ page, log, mock }) {
   // through the same GET the PWA reads, not the mock internals).
   await pollUntil(page,
     async () => {
-      const r = await fetch('/api/sidekick/prefs/stt_keyterms');
+      const r = await fetch('/api/parley/prefs/stt_keyterms');
       const body = await r.json();
       return Array.isArray(body?.value) && body.value.includes('Blueberry');
     },
@@ -79,7 +79,7 @@ export default async function run({ page, log, mock }) {
     { timeout: 3_000, polling: 100, label: 'added keyterm never reached the synced server row' },
   );
   const serverList = await page.evaluate(async () => {
-    const r = await fetch('/api/sidekick/prefs/stt_keyterms');
+    const r = await fetch('/api/parley/prefs/stt_keyterms');
     return (await r.json()).value;
   });
   assert(serverList.includes('Blueberry'), `server row should include the added term; got ${JSON.stringify(serverList)}`);

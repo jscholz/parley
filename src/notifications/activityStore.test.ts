@@ -91,7 +91,7 @@ describe('reconcileActivity: superseded-approval prune ("agent moved on")', () =
     assert.equal(pruned.resolved, 'dismissed', 'kept with a Dismissed pill, not deleted');
     assert.equal(pruned.read, true);
     assert.deepEqual(posts, [
-      { path: '/api/sidekick/activity/resolve', body: { id: 'ap1', resolution: 'dismissed' } },
+      { path: '/api/parley/activity/resolve', body: { id: 'ap1', resolution: 'dismissed' } },
     ]);
   });
 
@@ -199,7 +199,7 @@ describe('reconcileActivity: firstServerHydrate push-up preconditions', () => {
     const b = item({ id: 'n2', kind: 'agent_reply', createdAt: 6_000 });
     const res = reconcileActivity(toMap(), toMap(a, b), { firstServerHydrate: true }, post);
     assert.equal(res, 'skip', 'must abort the apply so local rows are not wiped');
-    const upPosts = posts.filter((p) => p.path === '/api/sidekick/activity');
+    const upPosts = posts.filter((p) => p.path === '/api/parley/activity');
     assert.deepEqual(upPosts.map((p) => p.body.id).sort(), ['n1', 'n2']);
     // created_at goes up in Unix seconds (server convention), not ms.
     assert.equal(upPosts.find((p) => p.body.id === 'n1')!.body.created_at, 5);

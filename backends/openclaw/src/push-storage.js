@@ -9,15 +9,18 @@
  *
  * The proxy used to keep these as JSON files under
  * ~/.sidekick/notifications/; for openclaw the plugin owns them so
- * each backend's sidekick-shaped state is self-contained. See
- * `../docs/sidekick-supplemental-store-schema.md`
+ * each backend's parley-shaped state is self-contained. See
+ * `../docs/parley-supplemental-store-schema.md`
  * for the design discussion.
  */
 import webpush from 'web-push';
 
 const { generateVAPIDKeys } = webpush;
 
-const DEFAULT_VAPID_SUBJECT = process.env.SIDEKICK_VAPID_SUBJECT
+// PARLEY_/PARLEY_ fallback matches proxy/env.mjs in the parley repo
+// (this plugin installs standalone, so the shim is inlined here).
+const DEFAULT_VAPID_SUBJECT = process.env.PARLEY_VAPID_SUBJECT
+  || process.env.PARLEY_VAPID_SUBJECT
   || 'mailto:jscholz@reimaginerobotics.ai';
 
 /** Get the active VAPID identity, generating one on first call. */

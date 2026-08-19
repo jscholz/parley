@@ -91,7 +91,7 @@ export default async function run({ page, log, mock }) {
   // finger is down before the request even starts; the response lands
   // ~450ms later, mid-gesture.
   await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('sidekick:draft-changed'));
+    window.dispatchEvent(new CustomEvent('parley:draft-changed'));
   });
   await page.mouse.move(cx, cy);
   await page.mouse.down();
@@ -99,7 +99,7 @@ export default async function run({ page, log, mock }) {
   // Deterministic: wait for the delayed list response to land, then a
   // beat for doRefresh's post-await render to run.
   await page.waitForResponse(
-    (r) => /\/api\/sidekick\/sessions(\?|$)/.test(r.url()),
+    (r) => /\/api\/parley\/sessions(\?|$)/.test(r.url()),
     { timeout: 10_000 },
   );
   await page.waitForTimeout(150);

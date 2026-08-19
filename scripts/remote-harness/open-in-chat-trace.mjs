@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Remote Playwright harness: trace the Sidekick "Open in chat" drill.
+// Remote Playwright harness: trace the Parley "Open in chat" drill.
 //
 // Runs on a remote machine (jons-macbook-air) so we can exploit real
 // network distance to fontbrain/London — the latency is what surfaces
@@ -19,7 +19,7 @@
 // miss) vs warm (cached) — the user reports it "never gets faster" warm.
 //
 // Env:
-//   SIDEKICK_URL   (default https://fontbrain.taile0c895.ts.net:3001)
+//   PARLEY_URL   (default https://fontbrain.taile0c895.ts.net:3001)
 //   PIN_INDEX      which pin to click (default 0)
 //   REPEATS        click count: 1=cold only, 2=cold+warm (default 2)
 //   DRILL_TIMEOUT  ms to wait for bubble visible (default 30000)
@@ -29,11 +29,11 @@ import { chromium } from 'playwright-core';
 import os from 'node:os';
 import path from 'node:path';
 
-const URL = process.env.SIDEKICK_URL || 'https://fontbrain.taile0c895.ts.net:3001';
+const URL = process.env.PARLEY_URL || process.env.PARLEY_URL || 'https://fontbrain.taile0c895.ts.net:3001';
 const PIN_INDEX = Number(process.env.PIN_INDEX || 0);
 const REPEATS = Number(process.env.REPEATS || 2);
 const DRILL_TIMEOUT = Number(process.env.DRILL_TIMEOUT || 30000);
-const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.sidekick-harness-profile');
+const PROFILE_DIR = process.env.PROFILE_DIR || path.join(os.homedir(), '.parley-harness-profile');
 
 // Injected into every page before app scripts. Sets up trace buffers +
 // hooks. Timings are raw performance.now(); the runner stamps clickT and

@@ -4,7 +4,7 @@ Coverage matrix:
   - Engagement gate suppresses push when chat is visible (within window).
   - Engagement window expires after ENGAGEMENT_WINDOW_MS.
   - Engagement key matches the chat_id form the dispatch path uses
-    (UUID, no `sidekick:` prefix) — the route handler normalizes
+    (UUID, no `parley:` prefix) — the route handler normalizes
     PWA-supplied prefixed ids before recording.
   - Per-kind pref toggle: `push_kind_agent_reply=False` silences
     reply_final; `push_kind_cron=False` silences cron notifications
@@ -18,7 +18,7 @@ Coverage matrix:
   - Mute, not-eligible, missing-chat-id, no-subscribers skip paths.
 
 Tests stub out pywebpush entirely (no network). The dispatcher's
-sqlite-backed pref store is shared with the plugin's sidekick_state
+sqlite-backed pref store is shared with the plugin's parley_state
 module; we open a fresh in-memory DB per test for isolation.
 """
 
@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..sidekick_dispatcher import (
+from ..parley_dispatcher import (
     ENGAGEMENT_WINDOW_MS,
     EngagementState,
     PushDispatcher,
@@ -40,8 +40,8 @@ from ..sidekick_dispatcher import (
     _parse_cron_content,
     _strip_leading_metadata,
 )
-from ..sidekick_db import SidekickDB
-from .. import sidekick_state as state
+from ..parley_db import ParleyDB
+from .. import parley_state as state
 
 
 # ── Test fixtures ──────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ from .. import sidekick_state as state
 def db(tmp_path):
     """Fresh on-disk sqlite per test (in-memory sqlite doesn't play well
     with the dispatcher's commit-on-prefs semantics)."""
-    db = SidekickDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "sidekick.db")
     yield db
     db.close()
 
@@ -63,7 +63,7 @@ def dispatcher(db, monkeypatch):
     The webpush function is replaced with a counter so tests can
     assert delivery semantics without making HTTP calls.
     """
-    from .. import sidekick_dispatcher as sd
+    from .. import parley_dispatcher as sd
 
     sent = []
 
@@ -562,7 +562,7 @@ def test_dispatch_payload_includes_unread_total(db, monkeypatch):
     IS an unread-worthy event even if the msg_links write-through
     hasn't landed when the count is computed."""
     import json as _json
-    from .. import sidekick_dispatcher as sd
+    from .. import parley_dispatcher as sd
 
     sent = []
     monkeypatch.setattr(sd, "webpush", lambda *, subscription_info, data, **kw:

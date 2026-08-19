@@ -3,7 +3,7 @@
 // loadEarlierHistory (main.ts:4350) fires when the user scrolls to the
 // top of the transcript and chat.setPaginationState says hasMore. It
 // fetches via backend.loadEarlier(id, beforeId) which hits
-// GET /api/sidekick/sessions/<id>/messages?before=N, then prepends
+// GET /api/parley/sessions/<id>/messages?before=N, then prepends
 // the returned messages in REVERSE iteration order (i.length-1 → 0)
 // because each chat.addLine(prepend=true) inserts at firstChild —
 // LAST call ends up at the top.
@@ -80,7 +80,7 @@ export default async function run({ page, log }) {
   // landed in the wrong order" failure.
   const beforeRequests = [];
   page.on('request', (req) => {
-    if (/\/api\/sidekick\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
+    if (/\/api\/parley\/sessions\/[^/]+\/messages\?.*before=/.test(req.url())) {
       beforeRequests.push(req.url());
     }
   });

@@ -9,26 +9,26 @@
 //
 // Why the sibling smoke (pin-window-prewarm.mjs) didn't catch this: it
 // seeds the pin server-side BEFORE boot, so the boot refreshFromServer GET
-// returns it and the boot-time `sidekick:pins-changed` path covers it. The
+// returns it and the boot-time `parley:pins-changed` path covers it. The
 // fresh-install reality is different: localStorage is EMPTY at boot (boot
 // prewarm sees listAllPins()==[] and warms nothing), and the pins land
 // LATER via the cross-device server-reconcile path:
 //   proxyClient `pins_changed` stream envelope
-//     → window `sidekick:server-pins-changed`
+//     → window `parley:server-pins-changed`
 //     → ServerBackedStore requestRefresh() (debounced) → refreshFromServer()
 //
 // This scenario reproduces exactly that: NO pin is seeded at boot. After
 // the app is ready, a pin is seeded server-side (mock.seedPin) and the
 // cross-device envelope is simulated by dispatching the same
-// `sidekick:server-pins-changed` event proxyClient would. The prewarm must
+// `parley:server-pins-changed` event proxyClient would. The prewarm must
 // then warm the pin's around-window with NO manual drill.
 //
 // Discriminator (no drill anywhere): after the post-boot server pin lands,
 // drillWindowCache.getWindow(chatId, msgId) must return a populated window
 // purely from the background prewarm. Pre-fix (prewarm only listens on
-// `sidekick:pins-changed`) the window can stay empty until a manual drill,
+// `parley:pins-changed`) the window can stay empty until a manual drill,
 // so getWindow returns null and the assertion fails. Post-fix (prewarm
-// also listens on `sidekick:server-pins-changed`) the prewarm fills it.
+// also listens on `parley:server-pins-changed`) the prewarm fills it.
 
 import { waitForReady, pollUntil, assert } from './lib.mjs';
 
@@ -88,7 +88,7 @@ export default async function run({ page, log, mock }) {
   // Server-arrival trigger: a pin is created on ANOTHER device. Seed it in
   // the mock's server-side pin store, then simulate the cross-device sync
   // envelope proxyClient would deliver on the /stream — it dispatches
-  // `sidekick:server-pins-changed`, which the ServerBackedStore turns into
+  // `parley:server-pins-changed`, which the ServerBackedStore turns into
   // a (debounced) refreshFromServer() GET. The mock now returns the pin, so
   // it hydrates into the store WITHOUT any local POST or manual drill.
   mock.seedPin(CHAT_ID, serverPinMsg, {
@@ -96,7 +96,7 @@ export default async function run({ page, log, mock }) {
     timestamp: Date.now(), pinnedAt: Date.now(),
   });
   await page.evaluate(() => {
-    window.dispatchEvent(new CustomEvent('sidekick:server-pins-changed', { detail: {} }));
+    window.dispatchEvent(new CustomEvent('parley:server-pins-changed', { detail: {} }));
   });
 
   // The pin must hydrate into the store from the server reconcile...
@@ -121,7 +121,7 @@ export default async function run({ page, log, mock }) {
   assert(len > 0,
     `BUG: a pin that arrived FROM THE SERVER after boot did not prewarm its ` +
     `around-window (getWindow → ${len}). prewarm must re-run when server pins ` +
-    `land (sidekick:server-pins-changed / the reconcile's sidekick:pins-changed), ` +
+    `land (parley:server-pins-changed / the reconcile's parley:pins-changed), ` +
     `not stay cold until the first manual drill.`);
   log(`server-arrival pin prewarmed: ${serverPinMsg} window n=${len} (no drill) ✓`);
 }

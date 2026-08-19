@@ -6,7 +6,7 @@
 //
 // Background (2026-05-02 bug): the hermes plugin used to expose
 // `id = chat_id`, which is unique only under `(source, chat_id)`. When
-// a sidekick test session happened to use a WhatsApp lid as its
+// a parley test session happened to use a WhatsApp lid as its
 // chat_id, two rows came back with identical `data-chat-id`; click
 // activated both LIs, history fetch went through
 // _resolve_source_for_chat_id which picks one source arbitrarily, and
@@ -41,8 +41,8 @@ export function MOCK_SETUP(mock) {
     title: 'Barge in test with cookie explanation',
     source: 'sidekick',
     messages: [
-      { role: 'user', content: 'sidekick-marker-cookies', timestamp: now / 1000 - 60 },
-      { role: 'assistant', content: 'sidekick-reply-cookies-are-tiny', timestamp: now / 1000 - 59 },
+      { role: 'user', content: 'parley-marker-cookies', timestamp: now / 1000 - 60 },
+      { role: 'assistant', content: 'parley-reply-cookies-are-tiny', timestamp: now / 1000 - 59 },
     ],
     lastActiveAt: now - 120_000,
   });
@@ -83,14 +83,14 @@ export default async function run({ page, log }) {
   // Both rows must render — distinct ids mean distinct LIs.
   const skLi = await page.locator(`#sessions-list li[data-chat-id="${SK_ID}"]`).count();
   const waLi = await page.locator(`#sessions-list li[data-chat-id="${WA_ID}"]`).count();
-  assert(skLi === 1, `expected 1 sidekick LI; got ${skLi}`);
+  assert(skLi === 1, `expected 1 parley LI; got ${skLi}`);
   assert(waLi === 1, `expected 1 whatsapp LI; got ${waLi}`);
   log('two rows rendered ✓');
 
-  // Click sidekick row → only it is active, transcript shows sidekick content.
+  // Click parley row → only it is active, transcript shows parley content.
   await clickRow(page, SK_ID);
   await page.waitForFunction(
-    () => (document.getElementById('transcript')?.textContent || '').includes('sidekick-marker-cookies'),
+    () => (document.getElementById('transcript')?.textContent || '').includes('parley-marker-cookies'),
     null, { timeout: 5_000, polling: 50 },
   );
   let active = await activeIds(page);
@@ -99,10 +99,10 @@ export default async function run({ page, log }) {
   let t = await transcriptText(page);
   assert(!t.includes('whatsapp-marker'),
     `after sk click: transcript leaked whatsapp content. sample=${JSON.stringify(t.slice(0, 200))}`);
-  log('click sidekick row → only sidekick active + transcript matches ✓');
+  log('click parley row → only parley active + transcript matches ✓');
 
   // Click whatsapp row → only it is active, transcript shows whatsapp content.
-  // The previous click's sidekick state must NOT linger.
+  // The previous click's parley state must NOT linger.
   await clickRow(page, WA_ID);
   await page.waitForFunction(
     () => (document.getElementById('transcript')?.textContent || '').includes('whatsapp-marker-voice-memo'),
@@ -112,8 +112,8 @@ export default async function run({ page, log }) {
   assert(active.length === 1 && active[0] === WA_ID,
     `after wa click: expected only [${WA_ID}] active; got ${JSON.stringify(active)}`);
   t = await transcriptText(page);
-  assert(!t.includes('sidekick-marker'),
-    `after wa click: transcript leaked sidekick content. sample=${JSON.stringify(t.slice(0, 200))}`);
+  assert(!t.includes('parley-marker'),
+    `after wa click: transcript leaked parley content. sample=${JSON.stringify(t.slice(0, 200))}`);
   log('click whatsapp row → only whatsapp active + transcript matches ✓');
 
   // Bounce-back guard: after the second click settles, hold and

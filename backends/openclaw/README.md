@@ -1,11 +1,11 @@
 # backends/openclaw
 
-OpenClaw plugin that exposes the sidekick `/v1/*` HTTP+SSE contract.
+OpenClaw plugin that exposes the parley `/v1/*` HTTP+SSE contract.
 
 Mirrors the responsibilities of `backends/hermes/plugin/__init__.py`
-(the Python reference implementation against hermes-agent). Sidekick
+(the Python reference implementation against hermes-agent). Parley
 proxy treats this plugin and the hermes plugin identically — it just
-changes `SIDEKICK_PLATFORM_URL`.
+changes `PARLEY_PLATFORM_URL`.
 
 **Status (2026-05-16):** full surface implemented. Drawer, transcript
 replay, turn dispatch with SSE, out-of-band events, push, pins,
@@ -27,29 +27,29 @@ openclaw --profile sk-integ gateway run --port 8646 --dev --auth none --bind loo
 
 # 4. Verify:
 curl http://127.0.0.1:8646/v1/health
-# → {"ok":true,"status":"live","via":"sidekick-plugin"}
+# → {"ok":true,"status":"live","via":"parley-plugin"}
 ```
 
-Point sidekick proxy at it via `SIDEKICK_PLATFORM_URL=http://127.0.0.1:8646`
+Point parley proxy at it via `PARLEY_PLATFORM_URL=http://127.0.0.1:8646`
 in the proxy's `.env`.
 
-## Why not in `sidekick/backends/openclaw/`?
+## Why not in `parley/backends/openclaw/`?
 
 Plugins are loaded by openclaw at startup from a path it knows about
 (linked via `openclaw plugins install --link`). Keeping the plugin in
 its own repo + dev-linked from openclaw's plugin profile keeps the
-sidekick repo's `backends/` directory the protocol contract surface
+parley repo's `backends/` directory the protocol contract surface
 (types + tests) without dragging openclaw's runtime as a dep.
 
 ## State (openclaw-specific)
 
-Cross-reference: the [top-level sidekick README](https://github.com/jscholz/sidekick#api--state-surface)
+Cross-reference: the [top-level parley README](https://github.com/jscholz/parley#api--state-surface)
 has the cross-tier state map. This section is the openclaw plugin's
 piece of it.
 
-### Supplemental DB — `$OPENCLAW_STATE_DIR/sidekick.db`
+### Supplemental DB — `$OPENCLAW_STATE_DIR/parley.db`
 
-Default `~/.openclaw-<profile>/sidekick.db`. Schema in `src/schema.sql`,
+Default `~/.openclaw-<profile>/parley.db`. Schema in `src/schema.sql`,
 opened by `src/db.js`.
 
 | Table | Key columns | Purpose |
@@ -100,13 +100,13 @@ changes.
 | `OPENCLAW_SK_AGENT` | Agent ID within profile | `dev` |
 | `OPENCLAW_STATE_DIR` | Override openclaw state dir | `~/.openclaw-<profile>` |
 | `OPENCLAW_GATEWAY_PORT` | Gateway WS port | `8646` |
-| `SIDEKICK_VAPID_SUBJECT` | WebPush subject mailto | `mailto:admin@example.com` |
+| `PARLEY_VAPID_SUBJECT` | WebPush subject mailto | `mailto:admin@example.com` |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | One-time bootstrap into `vapid_keys` table | Generated fresh if absent |
 
 ### Differences from the hermes plugin
 
 Both plugins implement the same `/v1/*` contract and use the same
-`sidekick.db` schema (modulo column-name conventions: JS plugin uses
+`parley.db` schema (modulo column-name conventions: JS plugin uses
 camelCase in JS, snake_case in SQL; Python plugin uses snake_case
 both sides). Differences:
 
@@ -145,7 +145,7 @@ Done (this branch):
 
 Open:
 - `/v1/gateway/conversations` (cross-platform drawer parity with
-  hermes — telegram / whatsapp / slack alongside sidekick)
+  hermes — telegram / whatsapp / slack alongside parley)
 - `/v1/settings/*` (model picker — openclaw's model config is
   different from hermes's; needs adapter design)
 - `/v1/commands`, `/v1/conversations/search` (optional)

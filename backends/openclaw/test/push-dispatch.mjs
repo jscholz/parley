@@ -11,7 +11,7 @@ import { PushDispatcher, EngagementState, ENGAGEMENT_WINDOW_MS, buildPayload, no
 
 function withDb(fn) {
   return async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'sidekick-openclaw-push-'));
+    const dir = mkdtempSync(join(tmpdir(), 'parley-openclaw-push-'));
     const db = openDb({ path: join(dir, 'sidekick.db') });
     try {
       return await fn(db);

@@ -1,30 +1,30 @@
-"""Sidekick platform adapter for hermes-agent.
+"""Parley platform adapter for hermes-agent.
 
 Runs an aiohttp HTTP server bound to localhost that speaks the abstract
-agent contract (OpenAI-Responses-shaped). The sidekick proxy (Node.js)
+agent contract (OpenAI-Responses-shaped). The parley proxy (Node.js)
 talks to it via /v1/* endpoints; the agent contract is documented at
-``docs/ABSTRACT_AGENT_PROTOCOL.md`` in the sidekick repo.
+``docs/ABSTRACT_AGENT_PROTOCOL.md`` in the parley repo.
 
-Sidekick is a peer of telegram / slack / signal — the hermes gateway
+Parley is a peer of telegram / slack / signal — the hermes gateway
 owns the chat_id → session_id mapping natively.
 
 HTTP surface
 ------------
 All routes auth-gate on ``Authorization: Bearer <token>`` where
-``<token>`` is read from env var ``SIDEKICK_PLATFORM_TOKEN`` at adapter
+``<token>`` is read from env var ``PARLEY_PLATFORM_TOKEN`` at adapter
 startup.
 
 Channel contract (the OAI-compat surface)::
 
     GET    /health
-    GET    /v1/conversations              # drawer list (sidekick rows)
+    GET    /v1/conversations              # drawer list (parley rows)
     GET    /v1/conversations/{id}/items   # transcript replay
     DELETE /v1/conversations/{id}         # cascade delete
     PATCH  /v1/conversations/{id}         # rename (sets sessions.title)
     POST   /v1/responses                  # turn dispatch (SSE on stream:true)
     GET    /v1/events                     # out-of-turn SSE
 
-Gateway extension (sidekick-defined, optional)::
+Gateway extension (parley-defined, optional)::
 
     GET    /v1/gateway/conversations      # cross-platform drawer list
 
@@ -39,7 +39,7 @@ session via the standard
 ``build_session_key(SessionSource(platform=Platform.SIDEKICK, chat_id=...))``
 DM path — ``agent:main:sidekick:dm:<chat_id>``.
 
-Outbound envelope shapes (see SidekickEnvelope in
+Outbound envelope shapes (see ParleyEnvelope in
 ``server-lib/backends/hermes-gateway/upstream.ts``)::
 
     {"type": "reply_delta",     "chat_id": "...", "text": "<accumulated>",
@@ -53,7 +53,7 @@ Outbound envelope shapes (see SidekickEnvelope in
     {"type": "tool_call" / "tool_result" / "error", ...}
 
 In-turn envelopes ride the ``/v1/responses`` SSE stream as OAI events
-(translated by the proxy back to the sidekick envelope shape). All
+(translated by the proxy back to the parley envelope shape). All
 others ride ``/v1/events`` with a Last-Event-ID replay ring.
 
 ``session_changed`` is detected via state.db polling
@@ -63,11 +63,11 @@ title.
 
 PDF rasterization
 -----------------
-Sidekick PWA uploads of ``application/pdf`` are rasterized to per-page
+Parley PWA uploads of ``application/pdf`` are rasterized to per-page
 PNGs in ``_materialize_attachments`` via ``_rasterize_pdf`` (which
 shells out to ``pdftoppm`` from poppler-utils). The PDF tempfile is
 unlinked after rasterization; the agent only sees images via the
-existing ``media_urls`` → vision-tool pipeline. This is sidekick-only
+existing ``media_urls`` → vision-tool pipeline. This is parley-only
 scope — telegram / slack / whatsapp / signal each have separate
 attachment flows in ``gateway/platforms/*.py`` and don't share this
 materializer (yet).
@@ -77,18 +77,18 @@ System dep: ``apt install poppler-utils`` on Debian/Ubuntu, or
 clear error is logged at the first PDF upload attempt.
 
 Knobs (env, with defaults sized for a Pi 5 host):
-``SIDEKICK_PDF_DPI`` (150), ``SIDEKICK_PDF_MAX_PAGES`` (50),
-``SIDEKICK_PDF_RASTERIZE_TIMEOUT_S`` (30),
-``SIDEKICK_PDF_MAX_BYTES`` (20 MiB).
+``PARLEY_PDF_DPI`` (150), ``PARLEY_PDF_MAX_PAGES`` (50),
+``PARLEY_PDF_RASTERIZE_TIMEOUT_S`` (30),
+``PARLEY_PDF_MAX_BYTES`` (20 MiB).
 
-See ``docs/archive/PDF_RASTERIZATION_PROPOSAL.md`` in the sidekick
+See ``docs/archive/PDF_RASTERIZATION_PROPOSAL.md`` in the parley
 repo for design notes.
 
 Install
 -------
 This adapter requires a hermes patch that registers
 ``Platform.SIDEKICK`` and the adapter-factory branch. See
-``0001-add-sidekick-platform.patch`` and ``README.md`` next to this file.
+``0001-add-parley-platform.patch`` and ``README.md`` next to this file.
 
 Plugin shape note
 -----------------
@@ -107,6 +107,7 @@ import contextlib
 import json
 import logging
 import os
+from .parley_env import env_get
 import re
 import secrets
 import socket as _socket
@@ -145,7 +146,7 @@ _CRON_RESPONSE_RE = re.compile(
 )
 
 # ── PDF rasterization knobs ───────────────────────────────────────────
-# When the PWA uploads a PDF via /api/sidekick/messages, we shell out to
+# When the PWA uploads a PDF via /api/parley/messages, we shell out to
 # `pdftoppm` (poppler-utils) and replace the PDF tempfile with one PNG
 # per page so vision-capable models (gemma-3, claude, gpt-4o, gemini)
 # see it as N images via the existing media_urls path. The PDF tempfile
@@ -157,13 +158,13 @@ _CRON_RESPONSE_RE = re.compile(
 #  * 30s timeout is the hard ceiling per upload.
 #  * 100 MB file-size cap (task #158) rejects abusive uploads before we
 #    shell out; matches the client cap + the upload route ceiling.
-SIDEKICK_PDF_DPI = int(os.environ.get("SIDEKICK_PDF_DPI", "150"))
-SIDEKICK_PDF_MAX_PAGES = int(os.environ.get("SIDEKICK_PDF_MAX_PAGES", "50"))
-SIDEKICK_PDF_RASTERIZE_TIMEOUT_S = int(
-    os.environ.get("SIDEKICK_PDF_RASTERIZE_TIMEOUT_S", "30")
+PARLEY_PDF_DPI = int(env_get("PARLEY_PDF_DPI", "150"))
+PARLEY_PDF_MAX_PAGES = int(env_get("PARLEY_PDF_MAX_PAGES", "50"))
+PARLEY_PDF_RASTERIZE_TIMEOUT_S = int(
+    env_get("PARLEY_PDF_RASTERIZE_TIMEOUT_S", "30")
 )
-SIDEKICK_PDF_MAX_BYTES = int(
-    os.environ.get("SIDEKICK_PDF_MAX_BYTES", str(100 * 1024 * 1024))
+PARLEY_PDF_MAX_BYTES = int(
+    env_get("PARLEY_PDF_MAX_BYTES", str(100 * 1024 * 1024))
 )
 
 # ── tool-event hook plumbing ──────────────────────────────────────────
@@ -173,9 +174,9 @@ SIDEKICK_PDF_MAX_BYTES = int(
 # hook callbacks can schedule envelope sends onto the adapter's
 # event loop via asyncio.run_coroutine_threadsafe. The adapter sets
 # this in connect() (after capturing its loop) and clears it in
-# disconnect(). When None, hook handlers drop silently — non-sidekick
+# disconnect(). When None, hook handlers drop silently — non-parley
 # deployments still load the plugin but never fire envelopes.
-_active_adapter: Optional["SidekickAdapter"] = None
+_active_adapter: Optional["ParleyAdapter"] = None
 
 # Cap on the result string we put into a tool_result envelope. Tools
 # can return arbitrarily large blobs (web_extract / browse). The PWA
@@ -187,10 +188,10 @@ TOOL_RESULT_MAX_BYTES = 50 * 1024
 # These bound worst-case memory if a consumer hangs.
 TURN_QUEUE_MAX = 1000          # per-chat envelope queue depth
 TURN_TIMEOUT_S = 120           # hold a /v1/responses turn open this long
-# EVENT_REPLAY_CAP moved with the publisher into sidekick_route_events.py
+# EVENT_REPLAY_CAP moved with the publisher into parley_route_events.py
 
 # Session title cap (SESSION_TITLE_MAX_LEN) + sessions.json key prefix
-# (SESSION_KEY_PREFIX) live in sidekick_route_conversations.py — they're
+# (SESSION_KEY_PREFIX) live in parley_route_conversations.py — they're
 # only consumed by the rename / delete cascade.
 
 
@@ -210,7 +211,7 @@ def _iso_from_epoch(t: float) -> str:
 #
 # Trade-off accepted: ~1s lag between compression and the PWA seeing a
 # title refresh. Polling cost is one indexed SELECT per cadence tick;
-# negligible at sidekick's single-user scale.
+# negligible at parley's single-user scale.
 #
 # Cadence: every 1.5s while a proxy client is connected. Skipped when
 # disconnected (no listener — would be wasted I/O). The first time we
@@ -222,11 +223,11 @@ SESSION_POLL_INTERVAL_S = 1.5
 # `sessions.source` value not in this set is dropped at query time.
 # This is the canonical hermes-agent platform set as of the platform-
 # adapter migration; if hermes adds a new platform, drop it in here.
-# ID-encoding helpers + source constants moved to sidekick_ids.py
+# ID-encoding helpers + source constants moved to parley_ids.py
 # so route-handler submodules can import them without a circular dep
 # on this package's __init__. Re-exported here for backward compat
 # with any caller that still references them from the package root.
-from .sidekick_ids import (  # noqa: F401
+from .parley_ids import (  # noqa: F401
     GATEWAY_DRAWER_SOURCES,
     SIDEKICK_SOURCE,
     _GATEWAY_ID_SEP,
@@ -236,21 +237,21 @@ from .sidekick_ids import (  # noqa: F401
 
 
 
-_SIDEKICK_HIDDEN_COMMANDS = frozenset({
-    # Genuinely terminal-coupled commands — sidekick has its own
+_PARLEY_HIDDEN_COMMANDS = frozenset({
+    # Genuinely terminal-coupled commands — parley has its own
     # surfaces for these, OR they're nonsense outside a TUI.
-    "clear",      # terminal screen wipe; sidekick scrollback differs
+    "clear",      # terminal screen wipe; parley scrollback differs
     "redraw",     # TUI repaint
     "skin",       # display theme; TUI-specific
     "indicator",  # TUI busy-indicator style (kaomoji/emoji/...)
     "statusbar",  # TUI status bar toggle
     "copy",       # terminal clipboard via OSC52
     "paste",      # terminal paste of system clipboard
-    "image",      # terminal image attach; sidekick has its own attach UI
-    "quit",       # close TUI; sidekick tabs close differently
+    "image",      # terminal image attach; parley has its own attach UI
+    "quit",       # close TUI; parley tabs close differently
     # /new is dispatchable but triggers the destructive-slash confirm
     # flow (gateway/run.py:_maybe_confirm_destructive_slash). The
-    # sidekick "New chat" button skips that — it's the canonical UX for
+    # parley "New chat" button skips that — it's the canonical UX for
     # this action. Hide here so the slash popover doesn't surface it.
     "new",
 })
@@ -265,7 +266,7 @@ def _serialize_command_registry() -> List[Dict[str, Any]]:
 
     Two filters apply:
 
-      1. ``_SIDEKICK_HIDDEN_COMMANDS`` — manually-curated drop list for
+      1. ``_PARLEY_HIDDEN_COMMANDS`` — manually-curated drop list for
          entries that are nonsense in a chat UI even if dispatchable
          (terminal-only utilities + redundant chat-flow commands).
 
@@ -293,7 +294,7 @@ def _serialize_command_registry() -> List[Dict[str, Any]]:
         return []
     out: List[Dict[str, Any]] = []
     for cmd in COMMAND_REGISTRY:
-        if cmd.name in _SIDEKICK_HIDDEN_COMMANDS:
+        if cmd.name in _PARLEY_HIDDEN_COMMANDS:
             continue
         # Gateway-dispatchable only. Without this, /tools, /skills, /cron,
         # /history, /save etc surface in the popover but fail at dispatch
@@ -324,7 +325,7 @@ def _serialize_command_registry() -> List[Dict[str, Any]]:
     return out
 
 
-def check_sidekick_requirements() -> bool:
+def check_parley_requirements() -> bool:
     """Return True when adapter dependencies are available.
 
     Required: aiohttp (already a hermes core dep — webhook adapter uses it).
@@ -332,18 +333,18 @@ def check_sidekick_requirements() -> bool:
     Note: ``Platform.SIDEKICK`` is created on demand by ``Platform._missing_``
     once this plugin's ``register(ctx)`` has called ``ctx.register_platform``,
     so we no longer have to verify the enum entry by hand. The
-    ``SIDEKICK_PLATFORM_TOKEN`` gate lives in the auth path on the WS
+    ``PARLEY_PLATFORM_TOKEN`` gate lives in the auth path on the WS
     server, not here — adapter instantiation is allowed without a token,
     just unauthenticated requests get rejected.
     """
     if not AIOHTTP_AVAILABLE:
-        logger.warning("[sidekick] aiohttp not installed")
+        logger.warning("[parley] aiohttp not installed")
         return False
     return True
 
 
-class SidekickAdapter(BasePlatformAdapter):
-    """Hermes platform adapter speaking JSON-over-WebSocket to the sidekick proxy.
+class ParleyAdapter(BasePlatformAdapter):
+    """Hermes platform adapter speaking JSON-over-WebSocket to the parley proxy.
 
     A single proxy client connects on startup and stays connected; per-
     conversation traffic is multiplexed by ``chat_id`` on every envelope.
@@ -360,17 +361,20 @@ class SidekickAdapter(BasePlatformAdapter):
         # If a future hermes version drops _missing_ we'd see an
         # AttributeError or ValueError below — surface it loudly rather
         # than papering over.
+        # Platform id stays "sidekick" (legacy name, predates the Parley
+        # rename): it is persisted in every live state.db session key and
+        # referenced by the deployed hermes.config.yaml platforms section.
         super().__init__(config, Platform("sidekick"))
 
         extra = config.extra or {}
         self._host: str = extra.get(
-            "host", os.getenv("SIDEKICK_PLATFORM_HOST", DEFAULT_HOST)
+            "host", env_get("PARLEY_PLATFORM_HOST", DEFAULT_HOST)
         )
         self._port: int = int(
-            extra.get("port", os.getenv("SIDEKICK_PLATFORM_PORT", str(DEFAULT_PORT)))
+            extra.get("port", env_get("PARLEY_PLATFORM_PORT", str(DEFAULT_PORT)))
         )
         self._token: str = extra.get(
-            "token", os.getenv("SIDEKICK_PLATFORM_TOKEN", "")
+            "token", env_get("PARLEY_PLATFORM_TOKEN", "")
         ).strip()
 
         # aiohttp server primitives
@@ -388,7 +392,7 @@ class SidekickAdapter(BasePlatformAdapter):
         # subsequent edit_message calls reference the right outbound bubble on
         # the proxy/PWA side. When a /v1/responses request is active, the
         # route reserves its OpenAI Responses item id here first; send() must
-        # reuse that id so the Sidekick envelope/write-through path and the
+        # reuse that id so the Parley envelope/write-through path and the
         # Responses SSE path describe the same assistant bubble.
         self._message_seq = 0
         self._response_message_ids: Dict[str, str] = {}
@@ -399,7 +403,7 @@ class SidekickAdapter(BasePlatformAdapter):
         # spawned in connect() and cancelled in disconnect().
         self._session_state_cache: Dict[str, Tuple[str, str]] = {}
         self._session_poll_task: Optional[asyncio.Task] = None
-        # Perf-investigation tasks. Both gated behind SIDEKICK_PERF_TRACE
+        # Perf-investigation tasks. Both gated behind PARLEY_PERF_TRACE
         # at the function level — when the env is off these tasks return
         # immediately, so the cost of always-instantiating them is nil.
         self._perf_loop_lag_task: Optional[asyncio.Task] = None
@@ -445,19 +449,19 @@ class SidekickAdapter(BasePlatformAdapter):
         # resume without losing recent envelopes.
         self._event_replay_ring: List[Tuple[int, Dict[str, Any]]] = []
 
-        # ── Sidekick supplemental store (per-backend SSOT) ────────────
+        # ── Parley supplemental store (per-backend SSOT) ────────────
         # Push subs / mutes / prefs / VAPID / pins / unread_state /
-        # msg_links — see backends/hermes/plugin/sidekick_db.py.
+        # msg_links — see backends/hermes/plugin/parley_db.py.
         # Lazy-opened on first use to avoid touching disk during
         # __init__ (keeps test rigs happy).
-        self._sidekick_db = None
+        self._parley_db = None
         self._push_dispatcher = None
         # In-memory mirror of in-flight turns. Source of truth for
         # `/v1/conversations/{id}/items` mid-turn — bridges the gap
         # between POST receipt and the sidekick_msg_links write
         # that happens at reply_final. Mirrors openclaw plugin's
         # TurnBuffer (src/turn-buffer.js).
-        from .sidekick_turn_buffer import TurnBuffer  # noqa: WPS433
+        from .parley_turn_buffer import TurnBuffer  # noqa: WPS433
         self._turn_buffer = TurnBuffer()
     # ------------------------------------------------------------------
     # Lifecycle
@@ -476,12 +480,12 @@ class SidekickAdapter(BasePlatformAdapter):
         """
         if not self._token:
             logger.error(
-                "[sidekick] SIDEKICK_PLATFORM_TOKEN unset — refusing to start. "
+                "[parley] PARLEY_PLATFORM_TOKEN unset — refusing to start. "
                 "All inbound connections will be rejected without it."
             )
             self._set_fatal_error(
                 "missing_token",
-                "SIDEKICK_PLATFORM_TOKEN env var is required",
+                "PARLEY_PLATFORM_TOKEN env var is required",
                 retryable=False,
             )
             return False
@@ -492,8 +496,8 @@ class SidekickAdapter(BasePlatformAdapter):
                 s.settimeout(1)
                 s.connect(("127.0.0.1", self._port))
             logger.error(
-                "[sidekick] Port %d already in use. "
-                "Set SIDEKICK_PLATFORM_PORT or platforms.sidekick.port.",
+                "[parley] Port %d already in use. "
+                "Set PARLEY_PLATFORM_PORT or platforms.parley.port.",
                 self._port,
             )
             return False
@@ -503,30 +507,30 @@ class SidekickAdapter(BasePlatformAdapter):
         # client_max_size lifted from aiohttp's 1 MiB default. Small
         # attachments still ride the base64-in-JSON /v1/responses body
         # (phone photos exceed the 1 MiB default once encoded). Large
-        # files (task #158) come as raw bytes on /v1/sidekick/upload,
+        # files (task #158) come as raw bytes on /v1/parley/upload,
         # which needs ~100 MB headroom — so the app-wide limit is sized
         # for the upload route (the JSON path stays well under it because
         # the PWA routes anything over ~5 MB through the upload endpoint).
         # Perf-investigation arrival-time middleware. No-op unless
-        # SIDEKICK_PERF_TRACE engages downstream handlers that read the
+        # PARLEY_PERF_TRACE engages downstream handlers that read the
         # `t_perf_arrived` request attribute. Adding it unconditionally
         # keeps the import + composition path simple; the cost is a
         # single ``request['key'] = monotonic()`` per request.
-        from . import sidekick_perf_trace as _perf  # noqa: WPS433
+        from . import parley_perf_trace as _perf  # noqa: WPS433
         self._app = web.Application(
             client_max_size=110 * 1024 * 1024,
             middlewares=[_perf.perf_arrival_middleware],
         )
-        # ── Sidekick supplemental store + plugin-owned push/unread/pins ──
-        # See backends/hermes/plugin/sidekick_db.py + sidekick_routes.py.
-        # When SIDEKICK_PUSH_OWNED_BY_PLUGIN=true, the proxy forwards
-        # /api/sidekick/notifications/* to /v1/push/* on us. Same flag
+        # ── Parley supplemental store + plugin-owned push/unread/pins ──
+        # See backends/hermes/plugin/parley_db.py + parley_routes.py.
+        # When PARLEY_PUSH_OWNED_BY_PLUGIN=true, the proxy forwards
+        # /api/parley/notifications/* to /v1/push/* on us. Same flag
         # gates whether _safe_send_envelope fires push directly.
-        from . import sidekick_db as _sdb  # noqa: WPS433 (local import keeps test rigs unaffected)
-        from . import sidekick_routes as _sroutes  # noqa: WPS433
-        from .sidekick_dispatcher import PushDispatcher as _PushDispatcher
+        from . import parley_db as _sdb  # noqa: WPS433 (local import keeps test rigs unaffected)
+        from . import parley_routes as _sroutes  # noqa: WPS433
+        from .parley_dispatcher import PushDispatcher as _PushDispatcher
 
-        self._sidekick_db = _sdb.open_sidekick_db()
+        self._parley_db = _sdb.open_parley_db()
         # One-shot migration: copy legacy push subs from the proxy's
         # JSON file into the supplemental DB. Idempotent — subsequent
         # starts see the rows already there and skip silently.
@@ -536,25 +540,25 @@ class SidekickAdapter(BasePlatformAdapter):
         # into the canonical per-key push_kind_* rows and drop it.
         # No-op when no legacy row exists. Never blocks boot.
         try:
-            from . import sidekick_state as _sstate  # noqa: WPS433
-            _sstate.migrate_legacy_push_prefs(self._sidekick_db)
+            from . import parley_state as _sstate  # noqa: WPS433
+            _sstate.migrate_legacy_push_prefs(self._parley_db)
         except Exception as _mig_err:
-            logger.warning("[sidekick] legacy push_prefs migration failed: %s", _mig_err)
+            logger.warning("[parley] legacy push_prefs migration failed: %s", _mig_err)
         vapid_subject = os.environ.get("VAPID_SUBJECT") or "mailto:jscholz@reimaginerobotics.ai"
         # unread_total_fn: server-truth badge count for push payloads
         # (sw.js → setAppBadge). Deferred closure — _state_db_path is
         # set above; compute_unread is TTL-cached so per-dispatch cost
         # is a cache lookup in the common case. Runs on the dispatch
-        # worker thread, never the loop (sidekick_unread.py warning).
+        # worker thread, never the loop (parley_unread.py warning).
         def _unread_total() -> int:
-            from .sidekick_unread import compute_unread  # noqa: WPS433
+            from .parley_unread import compute_unread  # noqa: WPS433
             return int(compute_unread(
-                db=self._sidekick_db,
+                db=self._parley_db,
                 state_db_path=self._state_db_path,
                 source="sidekick",
             ).get("total", 0))
         self._push_dispatcher = _PushDispatcher(
-            self._sidekick_db, vapid_subject=vapid_subject,
+            self._parley_db, vapid_subject=vapid_subject,
             unread_total_fn=_unread_total,
         )
         # Route ctx — collected fields the route handlers consume.
@@ -563,9 +567,9 @@ class SidekickAdapter(BasePlatformAdapter):
         # plugin's existing out-of-turn fanout (replay ring + SSE
         # subscribers); the events handler picks them up.
         import types
-        from . import sidekick_route_events as _route_events  # noqa: F401
+        from . import parley_route_events as _route_events  # noqa: F401
         ctx = types.SimpleNamespace(
-            db=self._sidekick_db,
+            db=self._parley_db,
             dispatcher=self._push_dispatcher,
             state_db_path=self._state_db_path,
             emit_envelope=lambda env: _route_events.publish_out_of_turn(self, env),
@@ -575,24 +579,24 @@ class SidekickAdapter(BasePlatformAdapter):
         _sroutes.register_routes(self._app, ctx)
 
         self._app.router.add_get("/health", self._handle_health)
-        # Also expose at `/v1/health` so the sidekick proxy can hit a
+        # Also expose at `/v1/health` so the parley proxy can hit a
         # plugin-served path (rather than the gateway's built-in
         # /health). On openclaw, the bare /health is owned by the
         # gateway itself and plugins can't shadow it — so the proxy's
         # healthcheck has to target a plugin-namespaced path to
-        # actually verify "is the sidekick plugin loaded?" instead of
+        # actually verify "is the parley plugin loaded?" instead of
         # "is the gateway process up?". Same handler on both paths
         # keeps hermes side trivial.
         self._app.router.add_get("/v1/health", self._handle_health)
         # ── Agent contract HTTP routes ────────────────────────────────
         # OAI-Responses-shape surface the proxy talks to. See
         # docs/ABSTRACT_AGENT_PROTOCOL.md for the canonical reference.
-        from . import sidekick_route_conversations as _route_conv
+        from . import parley_route_conversations as _route_conv
         self._app.router.add_get(
             "/v1/conversations",
             lambda r: _route_conv.handle_list(self, r),
         )
-        from . import sidekick_route_items as _route_items
+        from . import parley_route_items as _route_items
         self._app.router.add_get(
             "/v1/conversations/{id}/items",
             lambda r: _route_items.handle_get_items(self, r),
@@ -621,22 +625,22 @@ class SidekickAdapter(BasePlatformAdapter):
             lambda r: _route_conv.handle_list_gateway(self, r),
         )
         # Turn dispatch + out-of-turn event channel.
-        from . import sidekick_route_responses as _route_resp
+        from . import parley_route_responses as _route_resp
         self._app.router.add_post(
             "/v1/responses",
             lambda r: _route_resp.handle_responses(self, r),
         )
-        from . import sidekick_route_events as _route_events
+        from . import parley_route_events as _route_events
         self._app.router.add_get(
             "/v1/events",
             lambda r: _route_events.handle_events(self, r),
         )
         # Optional settings extension. Today: a single "model" enum
         # entry that wraps hermes config + the openrouter catalog,
-        # filtered by SIDEKICK_PREFERRED_MODELS. Adding more
+        # filtered by PARLEY_PREFERRED_MODELS. Adding more
         # (persona, temperature, ...) is purely additive: extend
         # _build_settings_schema + _apply_setting.
-        from . import sidekick_route_settings as _route_settings
+        from . import parley_route_settings as _route_settings
         self._app.router.add_get(
             "/v1/settings/schema",
             lambda r: _route_settings.handle_schema(self, r),
@@ -647,7 +651,7 @@ class SidekickAdapter(BasePlatformAdapter):
         )
         # Slash-command catalog. Surfaced as JSON so the PWA composer
         # can render an autocomplete popover from the same registry the
-        # CLI / Telegram / Slack consume. See proposal in the sidekick
+        # CLI / Telegram / Slack consume. See proposal in the parley
         # repo's slashCommands.ts module.
         self._app.router.add_get(
             "/v1/commands", self._handle_list_commands
@@ -660,28 +664,34 @@ class SidekickAdapter(BasePlatformAdapter):
         # attachment button when the primary is text-only — without
         # this advertisement the button would stay disabled even though
         # the upload would actually work end-to-end.
-        self._app.router.add_get(
-            "/v1/sidekick/auxiliary-models",
-            lambda r: _route_settings.handle_auxiliary_models(self, r),
-        )
+        # Route note (Parley rename 2026-08): /v1/parley/* is primary;
+        # /v1/sidekick/* stays registered as a deprecated alias so a
+        # mid-deploy proxy/plugin restart-order mismatch can't 404.
+        for _aux_path in ("/v1/parley/auxiliary-models", "/v1/sidekick/auxiliary-models"):
+            self._app.router.add_get(
+                _aux_path,
+                lambda r: _route_settings.handle_auxiliary_models(self, r),
+            )
         # Model capability lookup — ground truth from hermes's models.dev
         # registry. Replaces the previous OpenRouter-catalog fetch +
-        # regex-fallback in sidekick. Same data hermes consults at request
+        # regex-fallback in parley. Same data hermes consults at request
         # time for native-vs-text image routing.
-        self._app.router.add_get(
-            "/v1/sidekick/model-capabilities",
-            lambda r: _route_settings.handle_model_capabilities(self, r),
-        )
+        for _caps_path in ("/v1/parley/model-capabilities", "/v1/sidekick/model-capabilities"):
+            self._app.router.add_get(
+                _caps_path,
+                lambda r: _route_settings.handle_model_capabilities(self, r),
+            )
         # Large-file staging (task #158). Raw-bytes upload → upload_id;
         # the PWA references the id in its next turn's `attachments`
         # entry instead of inlining a base64 `content`. See
-        # sidekick_route_upload + the upload_id branch in
+        # parley_route_upload + the upload_id branch in
         # _materialize_attachments.
-        from . import sidekick_route_upload as _route_upload
-        self._app.router.add_post(
-            "/v1/sidekick/upload",
-            lambda r: _route_upload.handle_upload(self, r),
-        )
+        from . import parley_route_upload as _route_upload
+        for _upload_path in ("/v1/parley/upload", "/v1/sidekick/upload"):
+            self._app.router.add_post(
+                _upload_path,
+                lambda r: _route_upload.handle_upload(self, r),
+            )
         # Cross-conversation FTS5 search. Reads against the same
         # messages_fts virtual table hermes_state.SessionDB maintains
         # — the index is hermes-owned, we just SELECT against it.
@@ -706,7 +716,7 @@ class SidekickAdapter(BasePlatformAdapter):
         _active_adapter = self
 
         logger.info(
-            "[sidekick] WS server listening on %s:%d (token=%s***)",
+            "[parley] WS server listening on %s:%d (token=%s***)",
             self._host,
             self._port,
             self._token[:4],
@@ -719,18 +729,18 @@ class SidekickAdapter(BasePlatformAdapter):
         # (CREATE INDEX IF NOT EXISTS), best-effort.
         await asyncio.to_thread(self._ensure_state_db_indexes)
 
-        # Perf-investigation watchers (no-op unless SIDEKICK_PERF_TRACE=1).
+        # Perf-investigation watchers (no-op unless PARLEY_PERF_TRACE=1).
         # Loop-lag samples event-loop responsiveness; db-stats logs
-        # sidekick.db size + key row counts at start + hourly.
-        from . import sidekick_perf_trace as _perf
-        _perf.log_db_stats(self._sidekick_db, label="startup")
+        # parley.db size + key row counts at start + hourly.
+        from . import parley_perf_trace as _perf
+        _perf.log_db_stats(self._parley_db, label="startup")
         self._perf_loop_lag_task = asyncio.create_task(
             _perf.loop_lag_watcher(),
-            name="sidekick-perf-loop-lag",
+            name="parley-perf-loop-lag",
         )
         self._perf_db_stats_task = asyncio.create_task(
-            _perf.db_stats_periodic_loop(self._sidekick_db),
-            name="sidekick-perf-db-stats",
+            _perf.db_stats_periodic_loop(self._parley_db),
+            name="parley-perf-db-stats",
         )
 
         # Spawn the state.db poller for session_changed emission. Logs
@@ -738,17 +748,17 @@ class SidekickAdapter(BasePlatformAdapter):
         if self._state_db_path is not None:
             self._session_poll_task = asyncio.create_task(
                 self._session_poll_loop(),
-                name="sidekick-session-poll",
+                name="parley-session-poll",
             )
             logger.info(
-                "[sidekick] session_changed poller armed against %s "
+                "[parley] session_changed poller armed against %s "
                 "(interval=%.1fs)",
                 self._state_db_path,
                 SESSION_POLL_INTERVAL_S,
             )
         else:
             logger.warning(
-                "[sidekick] state.db path not resolved — "
+                "[parley] state.db path not resolved — "
                 "session_changed envelopes will not be emitted"
             )
         return True
@@ -791,7 +801,7 @@ class SidekickAdapter(BasePlatformAdapter):
             self._runner = None
         self._app = None
         self._mark_disconnected()
-        logger.info("[sidekick] disconnected")
+        logger.info("[parley] disconnected")
 
     # ------------------------------------------------------------------
     # HTTP / WS handlers
@@ -892,7 +902,7 @@ class SidekickAdapter(BasePlatformAdapter):
             return decide_image_input_mode(provider, model, cfg) == "native"
         except Exception as exc:
             logger.debug(
-                "[sidekick] image_input_mode decision failed, enriching as text — %s",
+                "[parley] image_input_mode decision failed, enriching as text — %s",
                 exc,
             )
             return False
@@ -906,8 +916,8 @@ class SidekickAdapter(BasePlatformAdapter):
     ) -> Tuple[str, List[str], List[str], "MessageType"]:
         """Pre-enrich image attachments via auxiliary vision in parallel.
 
-        Why this lives in the sidekick plugin (and not in hermes core):
-        sidekick is the only platform that rasterizes PDFs to N image
+        Why this lives in the parley plugin (and not in hermes core):
+        parley is the only platform that rasterizes PDFs to N image
         pages — every other adapter (telegram, signal, slack, ...) sees
         at most a handful of attached images per turn. The gateway's
         ``_enrich_message_with_vision`` (gateway/run.py) iterates
@@ -977,7 +987,7 @@ class SidekickAdapter(BasePlatformAdapter):
                     f"with vision_analyze using image_url: {path}]"
                 )
             except Exception as e:
-                logger.error("[sidekick] parallel vision enrich error: %s", e)
+                logger.error("[parley] parallel vision enrich error: %s", e)
                 return (
                     "[The user sent an image but something went wrong when I "
                     "tried to look at it~ You can try examining it yourself "
@@ -1012,13 +1022,13 @@ class SidekickAdapter(BasePlatformAdapter):
 
         Limits — all overridable via env (see module-level constants):
 
-        * ``SIDEKICK_PDF_MAX_BYTES`` (default 20 MB): if the PDF on disk
+        * ``PARLEY_PDF_MAX_BYTES`` (default 20 MB): if the PDF on disk
           exceeds this, we log a warning and return ``[]`` — caller
           drops the attachment, agent sees no images for it.
-        * ``SIDEKICK_PDF_MAX_PAGES`` (default 50): passed to pdftoppm
+        * ``PARLEY_PDF_MAX_PAGES`` (default 50): passed to pdftoppm
           via ``-l N`` so it stops after N pages.
-        * ``SIDEKICK_PDF_DPI`` (default 150): ``-r N``.
-        * ``SIDEKICK_PDF_RASTERIZE_TIMEOUT_S`` (default 30): subprocess
+        * ``PARLEY_PDF_DPI`` (default 150): ``-r N``.
+        * ``PARLEY_PDF_RASTERIZE_TIMEOUT_S`` (default 30): subprocess
           timeout. On expiry we log + return ``[]``; the request
           continues without crashing.
 
@@ -1033,10 +1043,10 @@ class SidekickAdapter(BasePlatformAdapter):
             logger.warning("[hermes-plugin] PDF stat failed (%s): %s", path, exc)
             return []
 
-        if file_size > SIDEKICK_PDF_MAX_BYTES:
+        if file_size > PARLEY_PDF_MAX_BYTES:
             logger.warning(
                 "[hermes-plugin] PDF %s rejected: %dB > %dB cap",
-                path, file_size, SIDEKICK_PDF_MAX_BYTES,
+                path, file_size, PARLEY_PDF_MAX_BYTES,
             )
             return []
 
@@ -1047,8 +1057,8 @@ class SidekickAdapter(BasePlatformAdapter):
         cmd = [
             "pdftoppm",
             "-png",
-            "-r", str(SIDEKICK_PDF_DPI),
-            "-l", str(SIDEKICK_PDF_MAX_PAGES),
+            "-r", str(PARLEY_PDF_DPI),
+            "-l", str(PARLEY_PDF_MAX_PAGES),
             str(path),
             prefix,
         ]
@@ -1056,7 +1066,7 @@ class SidekickAdapter(BasePlatformAdapter):
             subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=SIDEKICK_PDF_RASTERIZE_TIMEOUT_S,
+                timeout=PARLEY_PDF_RASTERIZE_TIMEOUT_S,
                 check=True,
             )
         except FileNotFoundError:
@@ -1069,7 +1079,7 @@ class SidekickAdapter(BasePlatformAdapter):
         except subprocess.TimeoutExpired:
             logger.warning(
                 "[hermes-plugin] pdftoppm timeout (>%ds) on %s — dropping",
-                SIDEKICK_PDF_RASTERIZE_TIMEOUT_S, path,
+                PARLEY_PDF_RASTERIZE_TIMEOUT_S, path,
             )
             return []
         except subprocess.CalledProcessError as exc:
@@ -1109,13 +1119,13 @@ class SidekickAdapter(BasePlatformAdapter):
         ``{type, mimeType, fileName, content}`` where ``content`` is a
         full ``data:<mime>;base64,<payload>`` string — OR, for large
         files (task #158), as ``{type, mimeType, fileName, uploadId}``
-        referencing a file already staged via ``/v1/sidekick/upload``
+        referencing a file already staged via ``/v1/parley/upload``
         (handled by the ``uploadId`` branch below). Hermes wants
         on-disk paths in ``MessageEvent.media_urls`` (telegram adapter
         models this — it downloads photos to a cache dir, then sets
         media_urls to those paths). We mirror that contract for the
-        sidekick path: write to ``/tmp/sidekick-attach-<uuid>.<ext>``
-        and let the OS clean tmpdirs on its own schedule (sidekick is
+        parley path: write to ``/tmp/parley-attach-<uuid>.<ext>``
+        and let the OS clean tmpdirs on its own schedule (parley is
         single-user, single-host; a stray /tmp file is harmless).
 
         PDF attachments are rasterized server-side before they reach
@@ -1129,7 +1139,7 @@ class SidekickAdapter(BasePlatformAdapter):
         deleted as soon as rasterization completes; only the PNG pages
         are returned (and tracked for end-of-turn cleanup).
 
-        Sidekick-only scope: telegram/whatsapp/slack/signal each have
+        Parley-only scope: telegram/whatsapp/slack/signal each have
         their own platform adapters with separate attachment flows
         (``gateway/platforms/*.py``). Cross-channel PDF support is a
         follow-up.
@@ -1137,7 +1147,7 @@ class SidekickAdapter(BasePlatformAdapter):
         import base64
         import tempfile
 
-        from . import sidekick_route_upload as _route_upload
+        from . import parley_route_upload as _route_upload
 
         paths: List[str] = []
         mimes: List[str] = []
@@ -1154,7 +1164,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 staged = _route_upload.staged_path(str(upload_id))
                 if staged is None:
                     logger.warning(
-                        "[sidekick] upload_id %r not found in staging", upload_id,
+                        "[parley] upload_id %r not found in staging", upload_id,
                     )
                     continue
                 mime = a.get("mimeType") or ""
@@ -1187,17 +1197,17 @@ class SidekickAdapter(BasePlatformAdapter):
             try:
                 payload = base64.b64decode(b64, validate=False)
             except Exception:
-                logger.warning("[sidekick] base64 decode failed for attachment")
+                logger.warning("[parley] base64 decode failed for attachment")
                 continue
             ext = self._ext_for_mime(mime, a.get("fileName"))
             fd, path = tempfile.mkstemp(
-                prefix="sidekick-attach-", suffix=ext, dir="/tmp",
+                prefix="parley-attach-", suffix=ext, dir="/tmp",
             )
             try:
                 with os.fdopen(fd, "wb") as f:
                     f.write(payload)
             except Exception:
-                logger.exception("[sidekick] failed writing attachment to %s", path)
+                logger.exception("[parley] failed writing attachment to %s", path)
                 continue
             # PDFs: rasterize to N PNGs, drop the original PDF tempfile,
             # and append the pages to the output instead. On any
@@ -1358,7 +1368,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 None, self._search_conversations_sync, q, limit,
             )
         except Exception as e:
-            logger.exception("[sidekick] search failed")
+            logger.exception("[parley] search failed")
             return web.json_response(
                 {"sessions": [], "hits": [], "error": str(e)},
                 status=500,
@@ -1561,7 +1571,7 @@ class SidekickAdapter(BasePlatformAdapter):
         return " ".join(tokens) or q.strip()
 
     async def _handle_list_commands(self, request: "web.Request") -> "web.Response":
-        """GET /v1/commands — slash-command catalog for the sidekick PWA.
+        """GET /v1/commands — slash-command catalog for the parley PWA.
 
         Serializes the central CommandDef registry from
         ``hermes_cli.commands`` plus any plugin-registered commands so
@@ -1587,7 +1597,7 @@ class SidekickAdapter(BasePlatformAdapter):
         try:
             data = await asyncio.to_thread(_serialize_command_registry)
         except Exception as e:
-            logger.exception("[sidekick] /v1/commands build failed")
+            logger.exception("[parley] /v1/commands build failed")
             return web.json_response(
                 {"error": {"type": "server_error", "message": str(e)}},
                 status=500,
@@ -1675,7 +1685,7 @@ class SidekickAdapter(BasePlatformAdapter):
         The route handler mints the OpenAI Responses ``msg_*`` id before
         dispatch. Hermes core then calls ``send()`` from inside the adapter.
         Without this reservation, ``send()`` minted a separate ``sk-*`` id for
-        the Sidekick envelope/write-through row while the SSE response exposed
+        the Parley envelope/write-through row while the SSE response exposed
         ``msg_*`` to the proxy/PWA. B2 then joined durable rows back with the
         ``sk-*`` id, so inflight and durable bubbles no longer shared identity.
         """
@@ -1701,7 +1711,7 @@ class SidekickAdapter(BasePlatformAdapter):
     def _push_owned_by_plugin() -> bool:
         """Mirrors the proxy's ``isPushOwnedByPlugin`` env check.
         When set, dispatch lives here; the proxy is just a passthrough."""
-        v = os.environ.get("SIDEKICK_PUSH_OWNED_BY_PLUGIN", "")
+        v = env_get("PARLEY_PUSH_OWNED_BY_PLUGIN", "")
         return v == "true" or v == "1"
 
     def _maybe_migrate_legacy_push_subs(self) -> None:
@@ -1711,9 +1721,9 @@ class SidekickAdapter(BasePlatformAdapter):
         already exist by endpoint. Failure is non-fatal: legacy subs
         stay working until migration succeeds on a later boot.
         """
-        if self._sidekick_db is None:
+        if self._parley_db is None:
             return
-        from .sidekick_state import upsert_subscription, list_subscriptions
+        from .parley_state import upsert_subscription, list_subscriptions
         try:
             json_path = Path.home() / ".sidekick" / "notifications" / "push-subscriptions.json"
             if not json_path.exists():
@@ -1722,7 +1732,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 rows = json.load(f)
             if not isinstance(rows, list):
                 return
-            existing = {s["endpoint"] for s in list_subscriptions(self._sidekick_db)}
+            existing = {s["endpoint"] for s in list_subscriptions(self._parley_db)}
             imported = 0
             for r in rows:
                 ep = r.get("endpoint") if isinstance(r, dict) else None
@@ -1735,14 +1745,14 @@ class SidekickAdapter(BasePlatformAdapter):
                 if ep in existing:
                     continue
                 upsert_subscription(
-                    self._sidekick_db,
+                    self._parley_db,
                     endpoint=ep, p256dh=p256dh, auth=auth, user_agent=ua,
                 )
                 imported += 1
             if imported:
-                logger.info("[sidekick] migrated %d legacy push subscriptions → sqlite", imported)
+                logger.info("[parley] migrated %d legacy push subscriptions → sqlite", imported)
         except Exception as exc:
-            logger.warning("[sidekick] legacy push subs migration skipped: %s", exc)
+            logger.warning("[parley] legacy push subs migration skipped: %s", exc)
 
     async def _safe_send_envelope(self, env: Dict[str, Any]) -> bool:
         """Fan an outbound envelope to consumers.
@@ -1763,7 +1773,7 @@ class SidekickAdapter(BasePlatformAdapter):
         in_turn_types = {"reply_delta", "reply_final", "tool_call",
                           "tool_result", "typing"}
 
-        # Stamp `should_push` so the sidekick proxy can decide push
+        # Stamp `should_push` so the parley proxy can decide push
         # delivery without having to reverse-engineer it from type +
         # content. Plugin owns "what is user-actionable":
         #   - reply_final + notification → True (the user-facing
@@ -1808,27 +1818,27 @@ class SidekickAdapter(BasePlatformAdapter):
                 if env_type == "reply_final" and chat_id:
                     closed_turn_entry = self._turn_buffer.close_turn(chat_id)
             except Exception as exc:
-                logger.warning("[sidekick] turn buffer observe failed: %s", exc)
+                logger.warning("[parley] turn buffer observe failed: %s", exc)
 
         # Notification persistence: cron output, /background results,
         # scheduled reminders, approval prompts all flow as
         # `type=notification` envelopes today. Persist first so the
         # minted sidekick_id is the single identity used by state.db,
-        # sidekick.db write-through, and the live SSE envelope.
+        # parley.db write-through, and the live SSE envelope.
         if env_type == "notification":
             self._persist_notification(env)
 
-        # Phase 1: sidekick.db write-through. Every persisted envelope
+        # Phase 1: parley.db write-through. Every persisted envelope
         # type (user_message / reply_delta / reply_final / tool_call /
-        # tool_result / notification) upserts a row into the sidekick.db
+        # tool_result / notification) upserts a row into the parley.db
         # message store. Items endpoint doesn't read from this yet
         # (Phase 2 switches the read path) — rows accumulate alongside
         # the existing state.db path so a write-path bug here can't
-        # break reads. See top-of-file design block in sidekick_db.py.
-        if self._sidekick_db is not None:
+        # break reads. See top-of-file design block in parley_db.py.
+        if self._parley_db is not None:
             try:
-                from . import sidekick_state as _sstate  # local import
-                _sstate.record_envelope(self._sidekick_db, env)
+                from . import parley_state as _sstate  # local import
+                _sstate.record_envelope(self._parley_db, env)
                 # Drop the compute_unread TTL cache so the next /unread
                 # poll picks up the new envelope's contribution to the
                 # badge count immediately, instead of waiting up to the
@@ -1837,10 +1847,10 @@ class SidekickAdapter(BasePlatformAdapter):
                 # rather than only when persistence actually wrote a row
                 # because the persist-detection requires inspecting the
                 # envelope shape and is much pricier than a dict.clear().
-                from . import sidekick_unread as _sunread
+                from . import parley_unread as _sunread
                 _sunread.invalidate_unread_cache()
             except Exception as exc:
-                logger.warning("[sidekick] sidekick.db record failed: %s", exc)
+                logger.warning("[parley] parley.db record failed: %s", exc)
 
         # Transcript v3 Phase 1 (dark launch): schedule the turn
         # linker's turn-end capture off-loop. reply_final closes the
@@ -1853,18 +1863,18 @@ class SidekickAdapter(BasePlatformAdapter):
         # gateway/run.py). Runs AFTER _persist_notification + the
         # write-through above so a notification's agent_row_id link is
         # already in msg_links when the window classifies (rule-1
-        # pre-exclusion). No-op when SIDEKICK_TURN_LINKER=0.
+        # pre-exclusion). No-op when PARLEY_TURN_LINKER=0.
         if env_type in ("reply_final", "notification") and chat_id:
             try:
-                from . import sidekick_turn_linker as _linker  # noqa: WPS433
+                from . import parley_turn_linker as _linker  # noqa: WPS433
                 _linker.schedule_close(self, chat_id, env, closed_turn_entry)
             except Exception as exc:
                 logger.warning(
-                    "[sidekick] turn-linker close schedule failed: %s", exc,
+                    "[parley] turn-linker close schedule failed: %s", exc,
                 )
 
         # Plugin-owned push dispatch. Fires on push-eligible envelopes
-        # (reply_final, notification) when SIDEKICK_PUSH_OWNED_BY_PLUGIN
+        # (reply_final, notification) when PARLEY_PUSH_OWNED_BY_PLUGIN
         # is set on the matching proxy. Independent of the in-turn vs
         # out-of-turn routing below — we ship the push REGARDLESS of
         # which channel the envelope rides client-side.
@@ -1891,16 +1901,16 @@ class SidekickAdapter(BasePlatformAdapter):
                     dispatch_result=dispatch_result,
                 )
             except Exception as exc:
-                logger.warning("[sidekick.push] dispatch failed: %s", exc)
+                logger.warning("[parley.push] dispatch failed: %s", exc)
 
-        from . import sidekick_route_events as _route_events
+        from . import parley_route_events as _route_events
 
         if env_type in in_turn_types and chat_id:
             queue = self._turn_queues.get(chat_id)
             if queue is not None:
                 # Tool events are observational UI state. Keep feeding the
                 # active /v1/responses queue for Responses-compatible clients,
-                # but also publish them on the persistent Sidekick event stream
+                # but also publish them on the persistent Parley event stream
                 # so every open PWA sees tool progress incrementally. Without
                 # this, the originating request stream saw function-call items
                 # but the transcript-centric event channel only caught up from
@@ -1909,13 +1919,13 @@ class SidekickAdapter(BasePlatformAdapter):
                     try:
                         _route_events.publish_out_of_turn(self, env)
                     except Exception as exc:
-                        logger.warning("[sidekick] tool event publish failed: %s", exc)
+                        logger.warning("[parley] tool event publish failed: %s", exc)
                 try:
                     queue.put_nowait(env)
                     return True
                 except asyncio.QueueFull:
                     logger.warning(
-                        "[sidekick] turn queue full for %s, dropping %s",
+                        "[parley] turn queue full for %s, dropping %s",
                         chat_id, env_type,
                     )
 
@@ -1928,7 +1938,7 @@ class SidekickAdapter(BasePlatformAdapter):
         # the user lost the body whenever the banner dismissed.
         #
         # Mint a sidekick_id for the envelope, write a row to the plugin-owned
-        # `sidekick_notifications` sibling table, stamp the id on the
+        # `parley_notifications` sibling table, stamp the id on the
         # outgoing envelope. The history endpoint merges these rows
         # into /v1/conversations/{id}/items so a refresh-and-scroll
         # finds the notification in the transcript with the same
@@ -1960,7 +1970,7 @@ class SidekickAdapter(BasePlatformAdapter):
                     "cause": env_type,
                 })
             except Exception as exc:
-                logger.debug("[sidekick] unread_changed publish failed: %s", exc)
+                logger.debug("[parley] unread_changed publish failed: %s", exc)
 
         return published
 
@@ -1978,7 +1988,7 @@ class SidekickAdapter(BasePlatformAdapter):
         disabled by prefs, do not create an Activity item. This keeps the right
         drawer aligned with what the user was externally alerted about.
         """
-        if self._sidekick_db is None:
+        if self._parley_db is None:
             return
         delivered = 0
         if isinstance(dispatch_result, dict):
@@ -2028,7 +2038,7 @@ class SidekickAdapter(BasePlatformAdapter):
         urgent = bool(env.get("urgent")) or kind == "approval"
 
         try:
-            from . import sidekick_state as _sstate
+            from . import parley_state as _sstate
             # True mint time: notif_* ids embed their epoch-ms mint. A
             # replayed envelope (gateway restart re-driving the
             # notification path) re-persisting a PRUNED item must land
@@ -2048,17 +2058,17 @@ class SidekickAdapter(BasePlatformAdapter):
             read = False
             if kind != "approval":
                 try:
-                    row = _sstate.get_unread_row(self._sidekick_db, chat_id)
+                    row = _sstate.get_unread_row(self._parley_db, chat_id)
                     if row is None and raw_chat_id != chat_id:
                         # Legacy bare-id unread_state rows.
-                        row = _sstate.get_unread_row(self._sidekick_db, raw_chat_id)
+                        row = _sstate.get_unread_row(self._parley_db, raw_chat_id)
                     last_read_at = row.get("lastReadAt") if row else None
                     if isinstance(last_read_at, (int, float)) and created_at <= last_read_at:
                         read = True
                 except Exception:
                     read = False
             _sstate.upsert_activity_item(
-                self._sidekick_db,
+                self._parley_db,
                 id=item_id,
                 chat_id=chat_id,
                 kind=kind,
@@ -2071,7 +2081,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 resolved=None,
             )
             try:
-                from . import sidekick_route_events as _route_events
+                from . import parley_route_events as _route_events
                 _route_events.publish_out_of_turn(self, {
                     "type": "activity_changed",
                     "chat_id": chat_id,
@@ -2080,22 +2090,22 @@ class SidekickAdapter(BasePlatformAdapter):
                     "cause": env_type,
                 })
             except Exception as exc:
-                logger.debug("[sidekick] activity_changed publish failed: %s", exc)
+                logger.debug("[parley] activity_changed publish failed: %s", exc)
         except Exception as exc:
-            logger.warning("[sidekick] activity persist failed: %s", exc)
+            logger.warning("[parley] activity persist failed: %s", exc)
 
     def _persist_notification(self, env: Dict[str, Any]) -> None:
         """Persist a notification in Hermes' canonical message history.
 
         The assistant body belongs in ``state.db.messages`` so the agent sees
-        its own out-of-turn output on the next turn. Sidekick-specific identity
-        and ``kind`` metadata belong in ``sidekick.db.msg_links``; the
+        its own out-of-turn output on the next turn. Parley-specific identity
+        and ``kind`` metadata belong in ``parley.db.msg_links``; the
         subsequent write-through reads ``agent_row_id`` from this envelope and
         links the supplemental row directly. The retired
         ``state.db.sidekick_msg_links`` table must not be recreated.
 
         Best-effort: failures only mean the row won't enter Hermes context or
-        survive through state.db alone. The sidekick.db write-through and live
+        survive through state.db alone. The parley.db write-through and live
         SSE fan-out still happen regardless."""
         if self._state_db_path is None or not self._state_db_path.exists():
             return
@@ -2115,7 +2125,7 @@ class SidekickAdapter(BasePlatformAdapter):
         session_id = self._resolve_session_id_for_chat(chat_id_bare)
         if not session_id:
             logger.warning(
-                "[sidekick] notification persist: no session for chat=%s — skipping",
+                "[parley] notification persist: no session for chat=%s — skipping",
                 chat_id_bare,
             )
             return
@@ -2133,18 +2143,18 @@ class SidekickAdapter(BasePlatformAdapter):
                         (session_id, content, time.time()),
                     )
                     state_db_id = cur.lastrowid
-                # The transaction committed successfully. The sidekick.db
+                # The transaction committed successfully. The parley.db
                 # write-through immediately after this method consumes the
                 # cross-link and stores kind + sidekick_id there.
                 env["agent_row_id"] = str(state_db_id)
         except Exception as exc:
             logger.warning(
-                "[sidekick] notification persist failed (non-fatal): %s", exc
+                "[parley] notification persist failed (non-fatal): %s", exc
             )
 
     def _resolve_session_id_for_chat(self, chat_id_bare: str) -> Optional[str]:
         """Best-effort: return the latest active state.db session_id
-        for a sidekick chat. Used by notification persistence so the
+        for a parley chat. Used by notification persistence so the
         row lands in the same session lineage hermes will read at
         history-fetch time. None when state.db is missing or the chat
         has no rows yet (fresh-chat notification — should be rare)."""
@@ -2165,7 +2175,7 @@ class SidekickAdapter(BasePlatformAdapter):
         except Exception:
             return None
 
-    # _publish_out_of_turn moved to sidekick_route_events.publish_out_of_turn
+    # _publish_out_of_turn moved to parley_route_events.publish_out_of_turn
     # (2026-05-17). Call sites use `_route_events.publish_out_of_turn(self,
     # env)` directly so the same module owns the SSE reader + publisher.
 
@@ -2219,7 +2229,7 @@ class SidekickAdapter(BasePlatformAdapter):
         }
         ok = await self._safe_send_envelope(env)
         logger.info(
-            "[sidekick] clarify %s → agent_question envelope (chat=%s choices=%d ok=%s)",
+            "[parley] clarify %s → agent_question envelope (chat=%s choices=%d ok=%s)",
             clarify_id, chat_id, len(choices or []), ok,
         )
         return SendResult(success=ok, message_id=clarify_id)
@@ -2239,8 +2249,8 @@ class SidekickAdapter(BasePlatformAdapter):
         wire: the message_id we return here is what the proxy keys the
         UI bubble on.
         """
-        from .sidekick_dispatcher import is_approval_prompt
-        from .sidekick_route_conversations import is_chat_deleted
+        from .parley_dispatcher import is_approval_prompt
+        from .parley_route_conversations import is_chat_deleted
 
         # Late output for a chat the user DELETED mid-turn: drop it.
         # The delete handler interrupts the running turn, but a reply
@@ -2256,14 +2266,14 @@ class SidekickAdapter(BasePlatformAdapter):
         # the rare zombie row. Tombstone TTL 10min.
         if is_chat_deleted(self, chat_id):
             logger.info(
-                "[sidekick] send() dropped for deleted chat %s (%d chars) — "
+                "[parley] send() dropped for deleted chat %s (%d chars) — "
                 "turn outlived its session's deletion", chat_id, len(content or ""),
             )
             return SendResult(success=True, message_id="")
 
         # Hermes approval prompts are blocking workflow events. They
         # arrive as normal adapter text, so classify them into a
-        # Sidekick-owned urgent notification before the regular reply
+        # Parley-owned urgent notification before the regular reply
         # path persists/renders them as assistant prose.
         if is_approval_prompt(content or ""):
             if chat_id not in self._known_chat_ids:
@@ -2345,7 +2355,7 @@ class SidekickAdapter(BasePlatformAdapter):
     # adapter at all.
     #
     # That's the behaviour we want here. Tool-progress messages
-    # (`⚙️ tool_name: "preview"` lines) reach sidekick TWICE on every
+    # (`⚙️ tool_name: "preview"` lines) reach parley TWICE on every
     # tool call: once via the gateway's progress_callback path (would
     # become reply_delta text bubbles if we accepted them) and once via
     # this plugin's own on_pre_tool_call hook (which emits proper
@@ -2400,7 +2410,7 @@ class SidekickAdapter(BasePlatformAdapter):
     # event is dropped — non-critical observational data.
     #
     # The PWA gates rendering off the agentActivity setting, so the
-    # adapter is intentionally promiscuous: it relays every sidekick
+    # adapter is intentionally promiscuous: it relays every parley
     # tool call/result faithfully and lets the client decide visibility.
     # ------------------------------------------------------------------
 
@@ -2464,7 +2474,7 @@ class SidekickAdapter(BasePlatformAdapter):
         **_kwargs: Any,
     ) -> None:
         """Hook callback. Sync, fires from worker thread. No-op for
-        non-sidekick sessions."""
+        non-parley sessions."""
         if not session_id or not tool_call_id:
             return
         chat_id = self._resolve_chat_id_from_session_id(session_id)
@@ -2505,12 +2515,12 @@ class SidekickAdapter(BasePlatformAdapter):
         **_kwargs: Any,
     ) -> None:
         """Hook callback. Sync, fires from worker thread. No-op when
-        there's no matching pre_tool_call entry (filters non-sidekick)."""
+        there's no matching pre_tool_call entry (filters non-parley)."""
         if not tool_call_id:
             return
         entry = self._inflight_tool_calls.pop(tool_call_id, None)
         if entry is None:
-            # Either pre fired in a non-sidekick session (and we filtered
+            # Either pre fired in a non-parley session (and we filtered
             # out), or the agent path skipped the pre hook (edge case).
             # Re-resolve to be safe; fall through silently if still not
             # ours.
@@ -2619,16 +2629,16 @@ class SidekickAdapter(BasePlatformAdapter):
                     )
         except Exception as exc:
             logger.warning(
-                "[sidekick] index ensure failed (non-fatal): %s", exc
+                "[parley] index ensure failed (non-fatal): %s", exc
             )
 
     # Legacy linker methods (_capture_msg_high_water_mark,
     # _write_msg_links_after_turn) + the state.db sidekick_msg_links
     # side-table were deleted 2026-05-19 as part of the supplemental-
-    # store migration. The replacement is sidekick.db.msg_links plus
+    # store migration. The replacement is parley.db.msg_links plus
     # the content-fingerprint linker in
-    # `sidekick_state.reconcile_from_state_db`. See top-of-file design
-    # block in `sidekick_db.py` for the full architecture.
+    # `parley_state.reconcile_from_state_db`. See top-of-file design
+    # block in `parley_db.py` for the full architecture.
     #
     # If a rollback is ever needed, the deleted code lives in git
     # history at commit a7d6c17's parent (8d4820a).
@@ -2661,7 +2671,7 @@ class SidekickAdapter(BasePlatformAdapter):
             except Exception:
                 # Never let a transient sqlite error kill the poller —
                 # we want it to recover the next tick.
-                logger.exception("[sidekick] session poll iteration failed")
+                logger.exception("[parley] session poll iteration failed")
             await asyncio.sleep(SESSION_POLL_INTERVAL_S)
 
     async def _poll_sessions_once(self) -> None:
@@ -2683,7 +2693,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 continue
             self._session_state_cache[chat_id] = current
             logger.info(
-                "[sidekick] session_changed chat_id=%s session_id=%s title=%r",
+                "[parley] session_changed chat_id=%s session_id=%s title=%r",
                 chat_id,
                 current[0],
                 current[1],
@@ -2696,11 +2706,11 @@ class SidekickAdapter(BasePlatformAdapter):
             })
 
     def _resolve_chat_id_from_session_id(self, session_id: str) -> Optional[str]:
-        """Map a hermes session_id back to its sidekick chat_id, if any.
+        """Map a hermes session_id back to its parley chat_id, if any.
 
-        chat_id IS ``sessions.user_id`` for sidekick sessions, so we
+        chat_id IS ``sessions.user_id`` for parley sessions, so we
         look it up directly in state.db (one row, primary-key seek).
-        Non-sidekick sessions naturally fail to resolve (source filter)
+        Non-parley sessions naturally fail to resolve (source filter)
         and the caller treats that as "not for us" — that's the filter
         for tool calls coming from telegram / whatsapp / etc. running
         on the same gateway. Safe to call from worker threads.
@@ -2734,7 +2744,7 @@ class SidekickAdapter(BasePlatformAdapter):
         return chat_id
 
     def _get_conversation_title_override(self, chat_id: str) -> Optional[str]:
-        db = getattr(self, "_sidekick_db", None)
+        db = getattr(self, "_parley_db", None)
         if db is None:
             return None
         try:
@@ -2743,7 +2753,7 @@ class SidekickAdapter(BasePlatformAdapter):
                 (SIDEKICK_SOURCE, chat_id),
             )
         except Exception as exc:
-            logger.debug("[sidekick] title override read failed for %s: %s", chat_id, exc)
+            logger.debug("[parley] title override read failed for %s: %s", chat_id, exc)
             return None
         if row is None:
             return None
@@ -2752,7 +2762,7 @@ class SidekickAdapter(BasePlatformAdapter):
 
     def _read_session_rows(self) -> list:
         """Synchronous sqlite read — runs in a worker thread. Returns
-        ``[(chat_id, session_id, title), …]`` for every sidekick
+        ``[(chat_id, session_id, title), …]`` for every parley
         chat's currently-latest session. Callers swallow exceptions.
 
         Powers the session_changed poller: a transition in either
@@ -2768,7 +2778,7 @@ class SidekickAdapter(BasePlatformAdapter):
         """
         if self._state_db_path is None or not self._state_db_path.exists():
             return []
-        # For each sidekick user_id, pick the row with the largest
+        # For each parley user_id, pick the row with the largest
         # started_at. The window-function approach keeps this to a
         # single round-trip; the index on (user_id, source) added at
         # startup speeds the partition scan.
@@ -2844,15 +2854,15 @@ class SidekickAdapter(BasePlatformAdapter):
 # ---------------------------------------------------------------------------
 
 
-def _sidekick_env_enablement() -> Optional[Dict[str, Any]]:
-    """Read SIDEKICK_PLATFORM_TOKEN at startup.
+def _parley_env_enablement() -> Optional[Dict[str, Any]]:
+    """Read PARLEY_PLATFORM_TOKEN at startup.
 
     Returning a non-None dict signals to the platform registry that the
     plugin is enabled for this run. Mirrors the env-var gate the
     pre-migration patch installed in ``_apply_env_overrides``: token
     present → enabled, missing → adapter never instantiates.
     """
-    token = os.getenv("SIDEKICK_PLATFORM_TOKEN")
+    token = env_get("PARLEY_PLATFORM_TOKEN")
     if not token:
         return None
     return {"enabled": True, "token": token}
@@ -2864,31 +2874,31 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
     Two responsibilities:
 
     1. Platform registration (added 2026-05). Replaces the
-       0001-add-sidekick-platform.patch we used to carry against
+       0001-add-parley-platform.patch we used to carry against
        gateway/config.py + gateway/run.py + hermes_cli/platforms.py.
        Upstream's gateway/platform_registry.py now offers a clean
        hook for this.
     2. Tool-event hooks (pre_tool_call / post_tool_call). These dispatch
-       to the live SidekickAdapter via a module-level reference set in
+       to the live ParleyAdapter via a module-level reference set in
        connect(); when no adapter is live the callbacks are silent
        no-ops.
     """
     try:
         ctx.register_platform(
             name="sidekick",
-            label="Sidekick",
-            adapter_factory=lambda cfg: SidekickAdapter(cfg),
-            check_fn=check_sidekick_requirements,
-            required_env=["SIDEKICK_PLATFORM_TOKEN"],
+            label="Parley",
+            adapter_factory=lambda cfg: ParleyAdapter(cfg),
+            check_fn=check_parley_requirements,
+            required_env=["PARLEY_PLATFORM_TOKEN"],
             install_hint="aiohttp ships with hermes-agent — no extra packages needed",
-            env_enablement_fn=_sidekick_env_enablement,
-            allowed_users_env="SIDEKICK_PLATFORM_ALLOWED_USERS",
-            allow_all_env="SIDEKICK_PLATFORM_ALLOW_ALL_USERS",
+            env_enablement_fn=_parley_env_enablement,
+            allowed_users_env="PARLEY_PLATFORM_ALLOWED_USERS",
+            allow_all_env="PARLEY_PLATFORM_ALLOW_ALL_USERS",
             emoji="🎙️",
             pii_safe=False,
             allow_update_command=True,
             platform_hint=(
-                "You are chatting via the Sidekick PWA — a same-browser "
+                "You are chatting via the Parley PWA — a same-browser "
                 "interface with full markdown + image rendering. Replies "
                 "are streamed token-by-token. The user can also speak to "
                 "you via the audio bridge (Deepgram STT → text → reply → "
@@ -2901,11 +2911,11 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         # branch). If both are missing, the adapter just won't load and
         # the gateway logs will say so. We don't crash the plugin.
         logger.warning(
-            "[sidekick] ctx.register_platform unavailable on this hermes "
+            "[parley] ctx.register_platform unavailable on this hermes "
             "version; falling back to patch-driven registration"
         )
     except Exception:
-        logger.exception("[sidekick] register_platform failed")
+        logger.exception("[parley] register_platform failed")
 
     # Agent-facing display_doc tool (Docs side panel in the PWA).
     # Registered against hermes' public tools.registry via its own
@@ -2914,10 +2924,10 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
     # Docs panel just stays empty. The lambda re-reads _active_adapter
     # per call so adapter restarts don't strand a stale reference.
     try:
-        from .sidekick_doc_tool import register_display_doc_tool
+        from .parley_doc_tool import register_display_doc_tool
         register_display_doc_tool(lambda: _active_adapter)
     except Exception:
-        logger.exception("[sidekick] display_doc tool wiring failed")
+        logger.exception("[parley] display_doc tool wiring failed")
 
     def _pre(**kwargs: Any) -> None:
         adapter = _active_adapter
@@ -2926,7 +2936,7 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         try:
             adapter.on_pre_tool_call(**kwargs)
         except Exception:
-            logger.exception("[sidekick] pre_tool_call hook crashed")
+            logger.exception("[parley] pre_tool_call hook crashed")
 
     def _post(**kwargs: Any) -> None:
         adapter = _active_adapter
@@ -2935,15 +2945,15 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         try:
             adapter.on_post_tool_call(**kwargs)
         except Exception:
-            logger.exception("[sidekick] post_tool_call hook crashed")
+            logger.exception("[parley] post_tool_call hook crashed")
 
     try:
         ctx.register_hook("pre_tool_call", _pre)
         ctx.register_hook("post_tool_call", _post)
     except Exception:
         logger.exception(
-            "[sidekick] failed to register pre/post_tool_call hooks; "
+            "[parley] failed to register pre/post_tool_call hooks; "
             "tool-event envelopes will not be emitted"
         )
         return
-    logger.debug("[sidekick] registered pre_tool_call / post_tool_call hooks")
+    logger.debug("[parley] registered pre_tool_call / post_tool_call hooks")

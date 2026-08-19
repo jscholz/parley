@@ -1,6 +1,6 @@
 // Activity tray persistence is server-backed, not browser-profile-local.
 //
-// The mocked /api/sidekick/activity endpoint starts with one server row.
+// The mocked /api/parley/activity endpoint starts with one server row.
 // A fresh browser context with empty localStorage must render it, a reload
 // after clearing localStorage must still render it, and dismiss must DELETE
 // it from the server so it stays gone after reload.
@@ -8,7 +8,7 @@
 import { waitForReady, openSidebar, assert } from './lib.mjs';
 
 export const NAME = 'activity-server-backed-store';
-export const DESCRIPTION = 'Activity tray hydrates from /api/sidekick/activity and deletes through the server API';
+export const DESCRIPTION = 'Activity tray hydrates from /api/parley/activity and deletes through the server API';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -58,7 +58,7 @@ export default async function run({ page, log, mock }) {
   );
   log('fresh profile hydrated Activity from server ✓');
 
-  await page.evaluate(() => localStorage.removeItem('sidekick.activity.items.v1'));
+  await page.evaluate(() => localStorage.removeItem('parley.activity.items.v1'));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#composer-input', { timeout: 5_000 });
   await openActivity(page);

@@ -320,7 +320,7 @@ def _speech_fixture() -> Path:
     root = HERE.parent.parent  # audio-bridge/tests → repo root
     for rel in (
         "scripts/smoke/fixtures/barge-speech.wav",
-        "scripts/smoke/fixtures/hello-sidekick.wav",
+        "scripts/smoke/fixtures/hello-parley.wav",
         "test/fixtures/audio/user-says-stop.wav",
     ):
         p = root / rel

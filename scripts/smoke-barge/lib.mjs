@@ -4,7 +4,7 @@
  * The rig orchestrates four processes:
  *   - stub agent on port 4022 (mock hermes; AGENT_LLM=fixed)
  *   - audio-bridge on port 8650 (fixture TTS; noop STT)
- *   - sidekick proxy on port 3022 (points at the above)
+ *   - parley proxy on port 3022 (points at the above)
  *   - chromium (playwright)
  *
  * All on 127.0.0.1, no Tailscale, no real Deepgram. End-to-end audio
@@ -52,7 +52,7 @@ function tryConnect(port) {
   });
 }
 
-/** Boot stub agent + audio-bridge + sidekick proxy with smoke env.
+/** Boot stub agent + audio-bridge + parley proxy with smoke env.
  *  Resolves once all three are ready. Returns a teardown fn. */
 export async function bootRig({ wavPath }) {
   if (!wavPath) throw new Error('bootRig requires wavPath (TTS fixture)');
@@ -80,24 +80,24 @@ export async function bootRig({ wavPath }) {
     AGENT_PORT: String(PORTS.stub),
     AGENT_LLM: 'fixed',
     AGENT_LLM_FIXED_REPLY: '1, 2, 3, 4, 5, 6, 7, 8, 9, 10.',
-    AGENT_DATA_DIR: '/tmp/sidekick-smoke-barge-stub',
+    AGENT_DATA_DIR: '/tmp/parley-smoke-barge-stub',
   });
   await waitForPort(PORTS.stub);
 
   // 2. Audio-bridge — fixture TTS, noop STT.
   const bridgePython = resolve(REPO_ROOT, 'audio-bridge/.venv/bin/python');
   spawnLogged('bridge', bridgePython, ['bridge.py'], {
-    SIDEKICK_AUDIO_HOST: '127.0.0.1',
-    SIDEKICK_AUDIO_PORT: String(PORTS.bridge),
-    SIDEKICK_AUDIO_TTS_PROVIDER: 'fixture',
-    SIDEKICK_AUDIO_TTS_WAV_PATH: absWav,
-    SIDEKICK_AUDIO_STT_PROVIDER: 'noop',
-    SIDEKICK_PROXY_URL: PROXY_URL,
-    SIDEKICK_AUDIO_LOG_FILE: '',
+    PARLEY_AUDIO_HOST: '127.0.0.1',
+    PARLEY_AUDIO_PORT: String(PORTS.bridge),
+    PARLEY_AUDIO_TTS_PROVIDER: 'fixture',
+    PARLEY_AUDIO_TTS_WAV_PATH: absWav,
+    PARLEY_AUDIO_STT_PROVIDER: 'noop',
+    PARLEY_PROXY_URL: PROXY_URL,
+    PARLEY_AUDIO_LOG_FILE: '',
   }, resolve(REPO_ROOT, 'audio-bridge'));
   await waitForPort(PORTS.bridge);
 
-  // 3. Sidekick proxy — points at the stub + bridge above.
+  // 3. Parley proxy — points at the stub + bridge above.
   //
   // The proxy reads frontend settings (realtime, tts, etc.) from a
   // yaml file. The smoke needs realtime=true so the call button opens
@@ -105,7 +105,7 @@ export async function bootRig({ wavPath }) {
   // tts=true so the bridge is asked to TTS the reply (where the
   // fixture provider replays our pre-recorded WAV). Write a tiny
   // smoke-mode yaml and point the proxy at it.
-  const smokeConfigPath = '/tmp/sidekick-smoke-barge-config.yaml';
+  const smokeConfigPath = '/tmp/parley-smoke-barge-config.yaml';
   mkdirSync(dirname(smokeConfigPath), { recursive: true });
   // Ports + provider come from env; the yaml carries the FRONTEND
   // settings the smoke needs (realtime mode, TTS-on-call, default
@@ -123,10 +123,10 @@ export async function bootRig({ wavPath }) {
     ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'server.ts'],
     {
       PORT: String(PORTS.proxy),
-      SIDEKICK_PLATFORM_URL: `http://127.0.0.1:${PORTS.stub}`,
-      SIDEKICK_PLATFORM_TOKEN: '',
-      SIDEKICK_AUDIO_BRIDGE_URL: `http://127.0.0.1:${PORTS.bridge}`,
-      SIDEKICK_CONFIG: smokeConfigPath,
+      PARLEY_PLATFORM_URL: `http://127.0.0.1:${PORTS.stub}`,
+      PARLEY_PLATFORM_TOKEN: '',
+      PARLEY_AUDIO_BRIDGE_URL: `http://127.0.0.1:${PORTS.bridge}`,
+      PARLEY_CONFIG: smokeConfigPath,
     });
   await waitForPort(PORTS.proxy);
 

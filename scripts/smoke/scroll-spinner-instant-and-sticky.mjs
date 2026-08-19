@@ -52,7 +52,7 @@ export default async function run({ page, log }) {
 
   // Stall the before-cursor page so the in-flight window is wide.
   let beforeHits = 0;
-  await page.route('**/api/sidekick/sessions/**/messages?*', async (route) => {
+  await page.route('**/api/parley/sessions/**/messages?*', async (route) => {
     if (/[?&]before=/.test(route.request().url())) {
       beforeHits++;
       await new Promise((r) => setTimeout(r, STALL_MS));

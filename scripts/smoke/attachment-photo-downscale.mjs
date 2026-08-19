@@ -11,7 +11,7 @@
 // Test plan (mocked):
 //   1. Generate a ~2-4.5MB noisy 4032×3024 JPEG in the browser.
 //   2. Attach it via #attach-input; wait for the chip.
-//   3. Send. Assert the /api/sidekick/messages POST body is <1.5MB,
+//   3. Send. Assert the /api/parley/messages POST body is <1.5MB,
 //      the attachment is inline data:image/jpeg (no uploadId, no
 //      upload call), and the sent image decodes to ≤2048px.
 
@@ -38,20 +38,20 @@ export function MOCK_SETUP(mock) {
 
 export default async function run({ page, log }) {
   let uploadCalls = 0;
-  await page.route('**/api/sidekick/upload', async (route) => {
+  await page.route('**/api/parley/upload', async (route) => {
     uploadCalls += 1;
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ upload_id: 'unused', size: 1 }),
     });
   });
-  await page.route('**/api/sidekick/auxiliary-models', async (route) => {
+  await page.route('**/api/parley/auxiliary-models', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({ vision: null }),
     });
   });
-  await page.route('**/api/sidekick/model-capabilities*', async (route) => {
+  await page.route('**/api/parley/model-capabilities*', async (route) => {
     await route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
@@ -113,7 +113,7 @@ export default async function run({ page, log }) {
   log('chip rendered ✓');
 
   // 3. Send and inspect the wire.
-  const msgReqP = page.waitForRequest('**/api/sidekick/messages', { timeout: 15_000 });
+  const msgReqP = page.waitForRequest('**/api/parley/messages', { timeout: 15_000 });
   await page.fill('#composer-input', 'receipt from the cafe');
   await page.evaluate(() => document.getElementById('composer-send')?.click());
   const req = await msgReqP;

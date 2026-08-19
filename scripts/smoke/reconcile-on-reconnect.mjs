@@ -7,7 +7,7 @@
 // Hard to simulate cleanly headless — Playwright doesn't easily fake
 // "iOS background-kill". Possible approaches:
 //   - Dispatch a `visibilitychange` event from the page context.
-//   - kill the sidekick.service mid-flight then restart it (heavy,
+//   - kill the parley.service mid-flight then restart it (heavy,
 //     touches real systemd; only viable on blueberry).
 // Picking the lighter approach for v1 stub.
 

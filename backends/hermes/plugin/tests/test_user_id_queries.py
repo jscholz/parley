@@ -1,7 +1,7 @@
-"""Unit tests for the user_id-keyed read path in the sidekick plugin.
+"""Unit tests for the user_id-keyed read path in the parley plugin.
 
-Covers ``SidekickAdapter._summaries_by_user_id`` and
-``SidekickAdapter._items_by_user_id`` against an in-temp-file SQLite
+Covers ``ParleyAdapter._summaries_by_user_id`` and
+``ParleyAdapter._items_by_user_id`` against an in-temp-file SQLite
 state.db that mirrors hermes-agent's schema.
 
 What we exercise:
@@ -13,7 +13,7 @@ What we exercise:
     old recursive parent_session_id CTE missed messages that lived
     in a session_reset-rotated session.
   * Source filter discriminates: telegram chat_id "1000000001" and
-    a synthetic sidekick chat_id "1000000001" do NOT cross-contaminate
+    a synthetic parley chat_id "1000000001" do NOT cross-contaminate
     even though they share the user_id string.
   * Sources allow-list controls which platforms appear in the drawer.
   * Index migration is idempotent (runs cleanly twice).
@@ -46,7 +46,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            SIDEKICK = "sidekick"
+            PARLEY = "sidekick"
 
         class _PlatformConfig:
             pass
@@ -81,14 +81,14 @@ def _install_hermes_stubs() -> None:
 
 
 def _load_plugin():
-    """Import the sidekick plugin under its real package name so the
-    package's relative imports (`.sidekick_ids`,
-    `.sidekick_route_conversations`, ...) resolve. The earlier
+    """Import the parley plugin under its real package name so the
+    package's relative imports (`.parley_ids`,
+    `.parley_route_conversations`, ...) resolve. The earlier
     ``spec_from_file_location`` loader minted a fake module name and
     Python's relative-import machinery couldn't resolve siblings
     against it — the test file errored at collection from the
     ``ff9a70b`` extraction onward. Eager-load the route submodules
-    too so tests can access them as ``plugin.sidekick_route_*``."""
+    too so tests can access them as ``plugin.parley_route_*``."""
     _install_hermes_stubs()
     plugin_pkg = Path(__file__).resolve().parents[1]
     parent_dir = str(plugin_pkg.parent)
@@ -97,12 +97,12 @@ def _load_plugin():
     pkg_name = plugin_pkg.name
     pkg = importlib.import_module(pkg_name)
     for sub in (
-        "sidekick_ids",
-        "sidekick_route_conversations",
-        "sidekick_route_items",
-        "sidekick_route_events",
-        "sidekick_route_responses",
-        "sidekick_route_settings",
+        "parley_ids",
+        "parley_route_conversations",
+        "parley_route_items",
+        "parley_route_events",
+        "parley_route_responses",
+        "parley_route_settings",
     ):
         importlib.import_module(f"{pkg_name}.{sub}")
     return pkg
@@ -215,10 +215,10 @@ def _make_adapter(plugin, state_db_path: Path):
     them as adapter methods here as a test-side ergonomic wrapper
     so the existing test bodies read naturally; production code
     calls the free functions directly via the route modules."""
-    _route_conv = plugin.sidekick_route_conversations
-    _route_items = plugin.sidekick_route_items
+    _route_conv = plugin.parley_route_conversations
+    _route_items = plugin.parley_route_items
 
-    class _TestAdapter(plugin.SidekickAdapter):
+    class _TestAdapter(plugin.ParleyAdapter):
         def _summaries_by_user_id(self, sources, limit):
             return _route_conv._summaries_by_user_id(self, sources, limit)
 
@@ -237,7 +237,7 @@ def _make_adapter(plugin, state_db_path: Path):
 
     adapter = _TestAdapter.__new__(_TestAdapter)
     adapter._state_db_path = state_db_path
-    adapter._sidekick_db = None
+    adapter._parley_db = None
     return adapter
 
 
@@ -306,13 +306,13 @@ def test_history_walks_rotated_sessions(plugin, state_db):
 
 
 def test_source_filter_discriminates_collisions(plugin, state_db):
-    """A telegram numeric chat_id and a (synthetic) sidekick chat_id
+    """A telegram numeric chat_id and a (synthetic) parley chat_id
     that happen to share the same string don't cross-contaminate."""
     same_id = "1000000001"
     _insert_session(state_db, "tg", "telegram", same_id, 1000.0, title="TG")
     _insert_message(state_db, "tg", "user", "telegram-only", 1001.0)
     _insert_session(state_db, "sk", "sidekick", same_id, 2000.0, title="SK")
-    _insert_message(state_db, "sk", "user", "sidekick-only", 2001.0)
+    _insert_message(state_db, "sk", "user", "parley-only", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
 
@@ -321,7 +321,7 @@ def test_source_filter_discriminates_collisions(plugin, state_db):
     sk = adapter._items_by_user_id(same_id, "sidekick", 200, None)
     assert tg is not None and sk is not None
     assert [m["content"] for m in tg[0]] == ["telegram-only"]
-    assert [m["content"] for m in sk[0]] == ["sidekick-only"]
+    assert [m["content"] for m in sk[0]] == ["parley-only"]
 
     # Drawer side: with a single source filter, only that source row appears.
     rows_sk_only = adapter._summaries_by_user_id(("sidekick",), 50)
@@ -420,7 +420,7 @@ def test_drawer_includes_compression_forks_via_user_id(plugin, state_db):
     assert last_active == 2001.0
 
 
-_SIDEKICK_PROMPT = (
+_PARLEY_PROMPT = (
     "# SOUL.md - Who You Are (Clawdian)\n\n"
     "## Core Truths\n\n"
     "**Be concise by default.** Skip preamble.\n\n"
@@ -429,7 +429,7 @@ _SIDEKICK_PROMPT = (
     "ideas that don't have evidence behind them. Distinguish what "
     "you know from what you're inferring."
 )
-assert len(_SIDEKICK_PROMPT) >= 200, "fixture must exceed prefix-match threshold"
+assert len(_PARLEY_PROMPT) >= 200, "fixture must exceed prefix-match threshold"
 _HERMES_DEFAULT_PROMPT = (
     "You are Hermes Agent, an intelligent AI assistant created by "
     "Nous Research. You help with various tasks including coding, "
@@ -456,7 +456,7 @@ def test_drawer_rolls_up_compacted_null_user_id_child(plugin, state_db):
     Post-CTE: child resolves to root_user_id via parent chain →
     mcount=5 (both root + child). Drawer-list shows the full chat."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0, title="root",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "before compaction", 1001.0)
     _insert_message(state_db, "root", "assistant", "reply 1", 1002.0)
     # Compacted child — user_id IS NULL (the broken upstream
@@ -464,7 +464,7 @@ def test_drawer_rolls_up_compacted_null_user_id_child(plugin, state_db):
     # continuation inherits the prompt).
     _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
                     title="root #2", parent="root",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "compacted", "user", "post compaction", 2001.0)
     _insert_message(state_db, "compacted", "assistant", "reply 2", 2002.0)
     _insert_message(state_db, "compacted", "assistant", "reply 3", 2003.0)
@@ -491,7 +491,7 @@ def test_drawer_excludes_delegate_subtask_with_different_prompt(plugin, state_db
     Without the prompt gate the drawer can inflate message_count
     significantly by including unrelated delegate sub-task messages."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0, title="root",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "user msg", 1001.0)
     _insert_message(state_db, "root", "assistant", "reply", 1002.0)
     # Delegate sub-task — parent=root, user_id=NULL, but DIFFERENT
@@ -518,11 +518,11 @@ def test_history_walks_compacted_null_user_id_child(plugin, state_db):
     child sessions when the child has user_id=NULL AND a matching
     system_prompt. Pre-CTE: only root's messages appear. Post-CTE: both."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0,
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "root msg 1", 1001.0)
     _insert_message(state_db, "root", "assistant", "root reply 1", 1002.0)
     _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
-                    parent="root", system_prompt=_SIDEKICK_PROMPT)
+                    parent="root", system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "compacted", "user", "child msg 1", 2001.0)
     _insert_message(state_db, "compacted", "assistant", "child reply 1", 2002.0)
 
@@ -541,7 +541,7 @@ def test_history_excludes_delegate_subtask_messages(plugin, state_db):
     via parent_session_id but its messages are NOT user-visible
     transcript content. The CTE's system_prompt gate excludes them."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0,
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "user msg", 1001.0)
     _insert_session(state_db, "delegate", "sidekick", None, 2000.0,
                     parent="root", system_prompt=_HERMES_DEFAULT_PROMPT)
@@ -562,13 +562,13 @@ def test_history_walks_multi_level_compaction_chain(plugin, state_db):
     full parent_session_id chain, not just one level. All links in
     the chain must carry a matching system_prompt to count."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0,
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "root msg", 1001.0)
     _insert_session(state_db, "child1", "sidekick", None, 2000.0, parent="root",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "child1", "user", "child1 msg", 2001.0)
     _insert_session(state_db, "child2", "sidekick", None, 3000.0, parent="child1",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "child2", "user", "child2 msg", 3001.0)
 
     adapter = _make_adapter(plugin, state_db)
@@ -590,11 +590,11 @@ def test_drawer_accepts_compacted_child_with_appended_prompt(plugin, state_db):
     the root's, not just exact-match (compaction appends a context
     summary suffix to the base prompt)."""
     _insert_session(state_db, "root", "sidekick", "u", 1000.0,
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "before", 1001.0)
     _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
                     parent="root",
-                    system_prompt=_SIDEKICK_PROMPT + "\n\n[CONTEXT SUMMARY: ...]")
+                    system_prompt=_PARLEY_PROMPT + "\n\n[CONTEXT SUMMARY: ...]")
     _insert_message(state_db, "compacted", "user", "after", 2001.0)
     _insert_message(state_db, "compacted", "assistant", "ok", 2002.0)
 
@@ -665,11 +665,11 @@ def test_drawer_session_ids_includes_rotated_children(plugin, state_db):
     pastes from agent output (field bug 2026-06-11: a rotated child's
     id matched nothing in the Filter Sessions box)."""
     _insert_session(state_db, "20260601_root", "sidekick", "u", 1000.0,
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "20260601_root", "user", "hi", 1001.0)
     _insert_session(state_db, "20260611_223425_98bd2b", "sidekick", None,
                     2000.0, parent="20260601_root",
-                    system_prompt=_SIDEKICK_PROMPT)
+                    system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "20260611_223425_98bd2b", "user", "more", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
@@ -686,7 +686,7 @@ def test_drawer_session_ids_includes_rotated_children(plugin, state_db):
 def _id_matches(plugin, state_db, q):
     conn = sqlite3.connect(state_db)
     try:
-        return plugin.SidekickAdapter._session_id_matches(conn, q)
+        return plugin.ParleyAdapter._session_id_matches(conn, q)
     finally:
         conn.close()
 
@@ -792,8 +792,8 @@ def test_gateway_id_unique_for_cross_source_chat_id_collision(plugin, state_db):
 
 def test_delete_conversation_sync_source_aware(plugin, state_db):
     """Deleting `(whatsapp, chat_id)` must scrub the whatsapp session
-    rows ONLY — not the sidekick rows that share the same user_id.
-    Previously _delete_conversation_sync hardcoded source=sidekick
+    rows ONLY — not the parley rows that share the same user_id.
+    Previously _delete_conversation_sync hardcoded source=parley
     and would silently delete the wrong rows for cross-source
     collisions."""
     same_id = "199999999999999@lid"
@@ -806,7 +806,7 @@ def test_delete_conversation_sync_source_aware(plugin, state_db):
     result = adapter._delete_conversation_sync(same_id, "whatsapp")
     assert result == "ok"
 
-    # Whatsapp session gone, sidekick session intact.
+    # Whatsapp session gone, parley session intact.
     conn = sqlite3.connect(state_db)
     rows = conn.execute(
         "SELECT id, source FROM sessions WHERE user_id = ?", (same_id,),
@@ -960,7 +960,7 @@ def test_rename_conversation_sync_clears_stale_sibling_title(plugin, state_db):
 
 def test_rename_conversation_sync_targets_latest_continuation(plugin, state_db):
     """Compression continuations can have user_id=NULL and inherit the
-    Sidekick chat through parent_session_id. Rename must update the latest
+    Parley chat through parent_session_id. Rename must update the latest
     continuation row, because that is the title the drawer displays.
     """
     conn = sqlite3.connect(state_db)
@@ -972,7 +972,7 @@ def test_rename_conversation_sync_targets_latest_continuation(plugin, state_db):
     conn.close()
 
     chat = "chat-compressed"
-    prompt = "Sidekick prompt " * 30
+    prompt = "Parley prompt " * 30
     _insert_session(
         state_db, "root", "sidekick", chat, 1000.0,
         title="pitch deck v10+", system_prompt=prompt,
@@ -1000,12 +1000,12 @@ def test_rename_conversation_sync_targets_latest_continuation(plugin, state_db):
     assert drawer[0][3] == "pitch deck v10+"
 
 
-def test_sidekick_title_override_wins_over_latest_continuation(plugin, state_db, tmp_path):
-    """User-provided Sidekick titles are chat-level UI state and should
+def test_parley_title_override_wins_over_latest_continuation(plugin, state_db, tmp_path):
+    """User-provided Parley titles are chat-level UI state and should
     override whatever Hermes auto-titles the latest compressed session.
     """
     chat = "chat-title-override"
-    prompt = "Sidekick prompt " * 30
+    prompt = "Parley prompt " * 30
     _insert_session(
         state_db, "root", "sidekick", chat, 1000.0,
         title="User Name", system_prompt=prompt,
@@ -1017,10 +1017,10 @@ def test_sidekick_title_override_wins_over_latest_continuation(plugin, state_db,
     )
     _insert_message(state_db, "child", "user", "follow-up", 2001.0)
 
-    sdb_mod = importlib.import_module(f"{plugin.__name__}.sidekick_db")
+    sdb_mod = importlib.import_module(f"{plugin.__name__}.parley_db")
     adapter = _make_adapter(plugin, state_db)
-    adapter._sidekick_db = sdb_mod.SidekickDB(tmp_path / "sidekick.db")
-    adapter._sidekick_db.exec(
+    adapter._parley_db = sdb_mod.ParleyDB(tmp_path / "sidekick.db")
+    adapter._parley_db.exec(
         "INSERT INTO conversation_titles (source, chat_id, title, updated_at) VALUES (?, ?, ?, ?)",
         ("sidekick", chat, "User Name", 3000.0),
     )
@@ -1053,7 +1053,7 @@ def test_rename_conversation_sync_not_found(plugin, state_db):
 
 
 def test_rename_conversation_sync_source_isolation(plugin, state_db):
-    """Renaming `(sidekick, chat_id)` doesn't touch a `(whatsapp,
+    """Renaming `(parley, chat_id)` doesn't touch a `(whatsapp,
     chat_id)` row that happens to share the same user_id string."""
     same_id = "199999999999999@lid"
     _insert_session(state_db, "wa", "whatsapp", same_id, 1000.0, title="WA-orig")
@@ -1080,7 +1080,7 @@ def test_rename_conversation_sync_source_isolation(plugin, state_db):
 
 def test_session_title_max_len_constant(plugin):
     """Document the cap so a future bump doesn't silently lose data.
-    Constant moved into sidekick_route_conversations alongside its
+    Constant moved into parley_route_conversations alongside its
     consumers (the rename + delete sync paths) in the 2026-05-17
     refactor; the package-root re-export is gone."""
-    assert plugin.sidekick_route_conversations.SESSION_TITLE_MAX_LEN == 200
+    assert plugin.parley_route_conversations.SESSION_TITLE_MAX_LEN == 200

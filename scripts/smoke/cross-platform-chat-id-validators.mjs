@@ -12,10 +12,10 @@
 //
 // Asserts each of the three proxy endpoints accept a representative
 // cross-platform chat_id:
-//   1. GET /api/sidekick/sessions/<id>/messages → 200 (history)
-//   2. DELETE /api/sidekick/sessions/<id> → 200 OR upstream error
+//   1. GET /api/parley/sessions/<id>/messages → 200 (history)
+//   2. DELETE /api/parley/sessions/<id> → 200 OR upstream error
 //      (anything other than 400 invalid-chat_id)
-//   3. GET /api/sidekick/stream?chat_id=<id> → no immediate "invalid
+//   3. GET /api/parley/stream?chat_id=<id> → no immediate "invalid
 //      chat_id" error frame on connect
 
 export const NAME = 'cross-platform-chat-id-validators';
@@ -31,7 +31,7 @@ const SAMPLES = [
   '15551234567@s.whatsapp.net',         // whatsapp direct
   '1234567890',                           // telegram numeric
   'C01234ABCDE',                          // slack channel
-  '550e8400-e29b-41d4-a716-446655440000', // sidekick UUID
+  '550e8400-e29b-41d4-a716-446655440000', // parley UUID
 ];
 
 function assert(cond, msg) {
@@ -44,7 +44,7 @@ export default async function run({ page, log }) {
   // contract but unused here.
   for (const id of SAMPLES) {
     const enc = encodeURIComponent(id);
-    const url = `http://127.0.0.1:3001/api/sidekick/sessions/${enc}/messages`;
+    const url = `http://127.0.0.1:3001/api/parley/sessions/${enc}/messages`;
     const r = await fetch(url);
     // 200 = upstream had it. 4xx OTHER than 400-invalid-chat_id is
     // also fine (404 not-found, etc.) — we just want to confirm the
@@ -67,7 +67,7 @@ export default async function run({ page, log }) {
     // The one whatsapp sample probably doesn't exist; upstream 404 is
     // the expected harmless reply.
     const enc = encodeURIComponent('test-nonexistent-' + id);
-    const url = `http://127.0.0.1:3001/api/sidekick/sessions/${enc}`;
+    const url = `http://127.0.0.1:3001/api/parley/sessions/${enc}`;
     const r = await fetch(url, { method: 'DELETE' });
     let body = null;
     try { body = await r.json(); } catch {}

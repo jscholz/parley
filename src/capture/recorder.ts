@@ -71,7 +71,7 @@ const LOCAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  *  again). */
 function lifecycleHeaders(json = false): Record<string, string> {
   return {
-    'x-sidekick-client': 'pwa-recorder',
+    'x-parley-client': 'pwa-recorder',
     ...(json ? { 'content-type': 'application/json' } : {}),
   };
 }
@@ -105,7 +105,7 @@ let lastChunkAt = 0;         // epoch ms of the last dataavailable
 
 function emit(): void {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:capture-state', { detail: { ...state } }));
+    window.dispatchEvent(new CustomEvent('parley:capture-state', { detail: { ...state } }));
   } catch { /* non-browser */ }
 }
 
@@ -366,7 +366,7 @@ export async function startMeetingCapture(
   // in the session the user is standing in.
   let capture: { id: string; title: string; linked_chat: string | null };
   try {
-    const res = await fetch(apiUrl('/api/sidekick/captures'), {
+    const res = await fetch(apiUrl('/api/parley/captures'), {
       method: 'POST',
       headers: lifecycleHeaders(true),
       body: JSON.stringify({
@@ -398,7 +398,7 @@ export async function startMeetingCapture(
   // discard, and erased a real meeting). If this call can't get
   // through, the server's pending TTL reaches the same 'failed' state.
   const abortStart = (reason: string) => fetch(
-    apiUrl(`/api/sidekick/captures/${capture.id}/abort-start`),
+    apiUrl(`/api/parley/captures/${capture.id}/abort-start`),
     { method: 'POST', headers: lifecycleHeaders(true), body: JSON.stringify({ reason }) },
   ).catch(() => { /* unreachable — pending TTL fails it in place */ });
 
@@ -444,7 +444,7 @@ export async function startMeetingCapture(
   // destructive calls (the server already resolved its fate).
   let refused = false;
   try {
-    const res = await fetch(apiUrl(`/api/sidekick/captures/${capture.id}/activate`), {
+    const res = await fetch(apiUrl(`/api/parley/captures/${capture.id}/activate`), {
       method: 'POST', headers: lifecycleHeaders(),
     });
     refused = res.status === 409;
@@ -490,7 +490,7 @@ export async function stopMeetingCapture(): Promise<void> {
   await new Promise((r) => setTimeout(r, 400));
   const postStop = async () => {
     try {
-      await fetch(apiUrl(`/api/sidekick/captures/${captureId}/stop`), {
+      await fetch(apiUrl(`/api/parley/captures/${captureId}/stop`), {
         method: 'POST', headers: lifecycleHeaders(),
       });
     } catch { /* server unreachable — stale heal completes it server-side */ }
@@ -533,10 +533,10 @@ export async function cancelMeetingCapture(): Promise<void> {
   try { mic.release('meeting'); } catch { /* fine */ }
   stream = null;
   try {
-    const res = await fetch(apiUrl(`/api/sidekick/captures/${captureId}/discard`), {
+    const res = await fetch(apiUrl(`/api/parley/captures/${captureId}/discard`), {
       method: 'POST',
       headers: lifecycleHeaders(true),
-      // Machine-readable reason + x-sidekick-client identity: the
+      // Machine-readable reason + x-parley-client identity: the
       // audit log must answer "who discarded this, and why" (the
       // incident's DELETE was unattributable).
       body: JSON.stringify({ reason: 'user_discard_pill' }),
@@ -591,7 +591,7 @@ export function markMoment(): void {
   if (!state.active || !state.captureId) return;
   state.marks += 1;
   emit();
-  void fetch(apiUrl(`/api/sidekick/captures/${state.captureId}/marks`), {
+  void fetch(apiUrl(`/api/parley/captures/${state.captureId}/marks`), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ t_ms: nowMs() }),
@@ -603,7 +603,7 @@ export async function renameCapture(title: string): Promise<void> {
   if (!state.captureId) return;
   state.title = title;
   emit();
-  await fetch(apiUrl(`/api/sidekick/captures/${state.captureId}`), {
+  await fetch(apiUrl(`/api/parley/captures/${state.captureId}`), {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ title }),

@@ -1,7 +1,7 @@
 // Scenario: Cmd/Ctrl + Backspace deletes session(s) from the sidebar.
 //
 // Mac convention: cmd+delete (Backspace key) deletes whatever's
-// "in front of you." In sidekick that's:
+// "in front of you." In parley that's:
 //   - the currently-active chat (single delete), if no multi-select; OR
 //   - all multi-selected chats (bulk delete), if a selection is active.
 // Both routes go through the same confirm + backend.deleteSession path

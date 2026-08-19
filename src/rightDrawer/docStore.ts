@@ -1,9 +1,9 @@
 // Docs-panel store — the SHELF of documents the agent pushed via the
-// display_doc tool (server: sidekick_doc_tool.py → doc_show envelope →
+// display_doc tool (server: parley_doc_tool.py → doc_show envelope →
 // proxy FANOUT → proxyClient → backendEventHandlers.handleToolEvent).
 //
 // v2 model (design doc: workspace/documents/agent-development/
-// sidekick-docs-panel-ux-research-2026-07-07.md): a small list of docs
+// parley-docs-panel-ux-research-2026-07-07.md): a small list of docs
 // (newest-activity first) + one ACTIVE doc the reader shows. The
 // load-bearing identity rule: a doc's id is derived from its PATH
 // (fallback: title) — a re-push of the same path REPLACES that shelf
@@ -16,7 +16,7 @@
 // ~MAX_PERSIST_CHARS total serialized — LRU-evict oldest non-active
 // (quota is shared with transcript snapshots).
 //
-// Consumers listen for `sidekick:doc-changed`; detail carries
+// Consumers listen for `parley:doc-changed`; detail carries
 // `{ autoOpen }` so the drawer host can distinguish an agent push
 // (auto-open — the user asked to SEE it) from hydrate/clear/select.
 
@@ -38,7 +38,7 @@ export interface DocPayload {
    *  record glyph — ring+dot — instead of emoji in the title). */
   source?: string;
   /** For capture docs: the capture id — the reader's player strip
-   *  streams /api/sidekick/captures/{captureId}/audio. */
+   *  streams /api/parley/captures/{captureId}/audio. */
   captureId?: string;
 }
 
@@ -48,7 +48,7 @@ export interface DocState extends DocPayload {
   updatedAt: number;
 }
 
-const LS_KEY = 'sidekick.docs.v2';
+const LS_KEY = 'parley.docs.v2'; // migrated from sidekick.docs.v2
 const LEGACY_LS_KEY = 'sidekick.doc.current';
 const MAX_DOCS = 7;
 // The SHELF budget that matters for localStorage (shared quota with
@@ -63,7 +63,7 @@ let hydrated = false;
  *  dot); 'change' = local mutations (select/remove/clear/hydrate). */
 function notify(autoOpen: boolean, kind: 'push' | 'change' = 'change'): void {
   try {
-    window.dispatchEvent(new CustomEvent('sidekick:doc-changed', { detail: { autoOpen, kind } }));
+    window.dispatchEvent(new CustomEvent('parley:doc-changed', { detail: { autoOpen, kind } }));
   } catch { /* non-browser test context */ }
 }
 

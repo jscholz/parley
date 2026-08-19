@@ -32,7 +32,7 @@ import {
   waitForReady, openSidebar, send, clickRow, assert,
 } from './lib.mjs';
 
-export const NAME = 'inflight-dedups-against-synthetic-sidekick-id';
+export const NAME = 'inflight-dedups-against-synthetic-parley-id';
 export const DESCRIPTION = 'Projection dedups inflight reply against durable row whose sidekick_id has synthetic sk-<unix>-<seq> shape';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';

@@ -86,7 +86,7 @@ export default async function run({ page, log, mock }) {
     null, { timeout: 6000, polling: 50 },
   );
   const stamp1 = await page.evaluate(() => {
-    const raw = localStorage.getItem('sidekick.docs.v2');
+    const raw = localStorage.getItem('parley.docs.v2');
     const d = JSON.parse(raw).docs.find(x => x.path === '/w/legacy.txt');
     return d?.updatedAt;
   });
@@ -94,7 +94,7 @@ export default async function run({ page, log, mock }) {
   mock.pushEnvelope({ ...legacy, _replay: true });
   await new Promise(r => setTimeout(r, 300));
   const stamp2 = await page.evaluate(() => {
-    const raw = localStorage.getItem('sidekick.docs.v2');
+    const raw = localStorage.getItem('parley.docs.v2');
     const d = JSON.parse(raw).docs.find(x => x.path === '/w/legacy.txt');
     return d?.updatedAt;
   });
@@ -110,7 +110,7 @@ export default async function run({ page, log, mock }) {
     null, { timeout: 6000, polling: 50 },
   );
   const stamp3 = await page.evaluate(() => {
-    const raw = localStorage.getItem('sidekick.docs.v2');
+    const raw = localStorage.getItem('parley.docs.v2');
     const d = JSON.parse(raw).docs.find(x => x.path === '/w/legacy.txt');
     return d?.updatedAt;
   });

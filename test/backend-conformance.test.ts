@@ -1,5 +1,5 @@
 /**
- * @fileoverview Cross-backend conformance harness for the sidekick
+ * @fileoverview Cross-backend conformance harness for the parley
  * `/v1/*` agent contract.
  *
  * Three interchangeable backends each re-implement the same HTTP+SSE
@@ -47,6 +47,7 @@ import type { Server } from 'node:http';
 // The stub is loaded lazily (only when BACKEND=stub) so a hermes /
 // openclaw run doesn't depend on the stub sources being importable.
 import { createServer } from '../backends/stub/src/server.mjs';
+import { readEnv } from '../proxy/env.mjs';
 import { Conversations } from '../backends/stub/src/conversations.mjs';
 import { EchoLLM } from '../backends/stub/src/llm/echo.mjs';
 
@@ -87,7 +88,7 @@ async function bootStub(): Promise<Target> {
 /** Point at an already-running external plugin. */
 function useExternal(): Target {
   const base = (process.env.UPSTREAM_URL || '').replace(/\/+$/, '');
-  const token = (process.env.UPSTREAM_TOKEN || process.env.SIDEKICK_PLATFORM_TOKEN || '').trim();
+  const token = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
   if (!base) {
     throw new Error(`BACKEND=${BACKEND} requires UPSTREAM_URL (+ UPSTREAM_TOKEN)`);
   }

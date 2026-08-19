@@ -1,6 +1,6 @@
 # Hermes backend
 
-Sidekick + [hermes-agent](https://github.com/NousResearch/hermes-agent) —
+Parley + [hermes-agent](https://github.com/NousResearch/hermes-agent) —
 the recommended path for full features (cross-platform drawer,
 agent-declared model picker, openrouter-backed catalog).
 
@@ -9,7 +9,7 @@ agent-declared model picker, openrouter-backed catalog).
 | Path | What |
 |---|---|
 | `plugin/__init__.py` | The hermes plugin. Exposes the agent contract (`/v1/responses`, `/v1/conversations*`, `/v1/events`) plus the optional `/v1/gateway/conversations` (cross-platform drawer) and `/v1/settings/*` (model picker) extensions. Loads into hermes-agent's process via the plugin loader. |
-| `plugin/0001-add-sidekick-platform.patch` | One-time patch against hermes-core that registers `Platform.SIDEKICK`. Apply to your hermes install before first run. |
+| `plugin/0001-add-parley-platform.patch` | One-time patch against hermes-core that registers `Platform.SIDEKICK`. Apply to your hermes install before first run. |
 | `plugin/plugin.yaml` | Hermes plugin manifest. |
 | `plugin/README.md` | Plugin-specific install + protocol notes. |
 | `config.example.yaml` | Hermes-side config keys the plugin reads/writes — annotated subset of `~/.hermes/config.yaml`. |
@@ -22,32 +22,32 @@ agent-declared model picker, openrouter-backed catalog).
 
 # 2. Apply the one-time hermes-core patch (registers Platform.SIDEKICK):
 cd <your hermes-agent install>
-patch -p1 < <sidekick-repo>/backends/hermes/plugin/0001-add-sidekick-platform.patch
+patch -p1 < <parley-repo>/backends/hermes/plugin/0001-add-parley-platform.patch
 
 # 3. Symlink the plugin into hermes's plugin search path:
-ln -s "<sidekick-repo>/backends/hermes/plugin" ~/.hermes/plugins/sidekick
+ln -s "<parley-repo>/backends/hermes/plugin" ~/.hermes/plugins/parley
 
 # 4. Set the shared bearer token on the hermes side:
 echo "SIDEKICK_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 
-# 5. Enable BOTH sidekick toolsets in ~/.hermes/config.yaml.
-#    hermes-sidekick = the auto-generated core-tools composite (file,
-#    terminal, web, ...). sidekick = the plugin's own tools
+# 5. Enable BOTH parley toolsets in ~/.hermes/config.yaml.
+#    hermes-parley = the auto-generated core-tools composite (file,
+#    terminal, web, ...). parley = the plugin's own tools
 #    (display_doc). The second entry must be explicit: hermes'
 #    validate_toolset() has no auto-gen branch, so without it the
 #    plugin's tools are silently dropped from sessions.
 #      platform_toolsets:
-#        sidekick:
-#        - hermes-sidekick
-#        - sidekick
+#        parley:
+#        - hermes-parley
+#        - parley
 
 # 6. Restart hermes-gateway to load the plugin.
 systemctl --user restart hermes-gateway
 ```
 
-Then in sidekick's `.env`:
+Then in parley's `.env`:
 ```
-SIDEKICK_PLATFORM_URL=http://127.0.0.1:8645
+PARLEY_PLATFORM_URL=http://127.0.0.1:8645
 SIDEKICK_PLATFORM_TOKEN=<same token from ~/.hermes/.env>
 ```
 
@@ -57,9 +57,9 @@ SIDEKICK_PLATFORM_TOKEN=<same token from ~/.hermes/.env>
   plugin's `/v1/conversations*` handlers translate state.db rows
   into the agent contract's row shape.
 - **Cross-platform drawer** (`/v1/gateway/conversations`) — telegram,
-  whatsapp, slack sessions surface alongside sidekick in the drawer
-  with per-row source badges. Sidekick's composer goes read-only on
-  non-sidekick rows (since you'd be hijacking another platform's
+  whatsapp, slack sessions surface alongside parley in the drawer
+  with per-row source badges. Parley's composer goes read-only on
+  non-parley rows (since you'd be hijacking another platform's
   thread).
 - **Model picker** (`/v1/settings/*`) — the `model` setting wraps
   `~/.hermes/config.yaml`'s `model:` field plus the openrouter
@@ -72,16 +72,16 @@ SIDEKICK_PLATFORM_TOKEN=<same token from ~/.hermes/.env>
 
 ## Config keys hermes-side
 
-See `config.example.yaml` in this directory. Sidekick reads:
+See `config.example.yaml` in this directory. Parley reads:
 - `model:` (scalar or `model.default:`) — current model id, also
-  the value sidekick's settings panel displays.
+  the value parley's settings panel displays.
 - `model.provider:`, `model.base_url:` — passed into `switch_model`
   when the user picks a new model.
 - `providers:`, `custom_providers:`, `fallback_providers:` —
-  hermes's own provider config. Sidekick doesn't write these but
+  hermes's own provider config. Parley doesn't write these but
   the model picker honors them.
 
-Sidekick writes (only via the model picker):
+Parley writes (only via the model picker):
 - `model.default:` (or `model:` scalar form, depending on the
   shape already present).
 - `model.provider:`, `model.base_url:` if `switch_model` resolves
@@ -93,10 +93,10 @@ Cross-reference: the [top-level README](../../README.md#api--state-surface)
 has the cross-tier state map. This section is the hermes plugin's
 piece of it.
 
-### Supplemental DB — `$HERMES_STATE_DIR/sidekick.db`
+### Supplemental DB — `$HERMES_STATE_DIR/parley.db`
 
-Default `~/.hermes/sidekick.db`. Opened by `plugin/sidekick_db.py`
-with thread-safe locking; CRUD lives in `plugin/sidekick_state.py`.
+Default `~/.hermes/parley.db`. Opened by `plugin/parley_db.py`
+with thread-safe locking; CRUD lives in `plugin/parley_state.py`.
 
 | Table | Key columns | Purpose |
 |---|---|---|
@@ -114,7 +114,7 @@ with thread-safe locking; CRUD lives in `plugin/sidekick_state.py`.
 The plugin opens hermes's own sqlite store via a read-only URI
 (`file:state_db_path?mode=ro`) — never writes. Used by:
 
-- **`compute_unread()`** (`sidekick_unread.py`) — walks `sessions` +
+- **`compute_unread()`** (`parley_unread.py`) — walks `sessions` +
   `messages`, counts assistant rows newer than each chat's
   `last_read_at`. Recursive CTE rolls up compaction-rotated child
   sessions under their root `user_id` (so a long chat that hermes
@@ -129,7 +129,7 @@ The plugin opens hermes's own sqlite store via a read-only URI
 
 ### In-memory state (per-process, lost on restart)
 
-Owned by the `SidekickAdapter` singleton in `plugin/__init__.py`:
+Owned by the `ParleyAdapter` singleton in `plugin/__init__.py`:
 
 | Field | Purpose |
 |---|---|
@@ -147,21 +147,21 @@ Owned by the `SidekickAdapter` singleton in `plugin/__init__.py`:
 
 | Var | Used for | Default |
 |---|---|---|
-| `HERMES_STATE_DIR` | `sidekick.db` location | `~/.hermes` |
+| `HERMES_STATE_DIR` | `parley.db` location | `~/.hermes` |
 | `SIDEKICK_PLATFORM_TOKEN` | Bearer for `/v1/*` routes (fatal if missing) | — |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | One-time bootstrap into `vapid_keys` table (raw base64url, NOT PEM) | Generated fresh if absent on first run |
 | `VAPID_SUBJECT` | WebPush subject line | `mailto:jscholz@reimaginerobotics.ai` |
-| `SIDEKICK_PDF_*` | PDF rasterization knobs (DPI, max pages, timeout, max bytes) | 150 / 50 / 30s / 20MB |
+| `PARLEY_PDF_*` | PDF rasterization knobs (DPI, max pages, timeout, max bytes) | 150 / 50 / 30s / 20MB |
 
 The plugin does NOT read `~/.hermes/*.json` dotfiles. Push subs /
-mutes / prefs that used to live there moved into `sidekick.db` in
+mutes / prefs that used to live there moved into `parley.db` in
 the 2026-05 consolidation; the env-driven `VAPID_*` bootstrap is
 the only "config from outside the DB" path remaining.
 
 ### Differences from the openclaw plugin
 
 Both plugins implement the same `/v1/*` contract and use the same
-`sidekick.db` schema. Differences:
+`parley.db` schema. Differences:
 
 - **Language**: hermes plugin is Python (loaded into hermes-agent's
   aiohttp process); openclaw plugin is JavaScript (loaded by

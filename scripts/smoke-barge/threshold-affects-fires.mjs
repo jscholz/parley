@@ -24,8 +24,8 @@ export const DESCRIPTION = 'High threshold suppresses fires; low threshold passe
 async function fireCountAtThreshold(page, threshold) {
   // Set bargeVadThreshold yaml-side via the proxy config endpoint
   // BEFORE the page loads — settings.load() picks it up cleanly via
-  // /api/sidekick/config on first hydrate.
-  const r = await fetch(`${PROXY_URL}/api/sidekick/config/bargeVadThreshold`, {
+  // /api/parley/config on first hydrate.
+  const r = await fetch(`${PROXY_URL}/api/parley/config/bargeVadThreshold`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ value: threshold }),

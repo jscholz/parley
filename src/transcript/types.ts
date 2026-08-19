@@ -43,7 +43,7 @@ export interface ChatState {
   /** In-flight envelopes from TurnBuffer. Plugin emits these in the
    *  canonical order user_message → tool_call/result → reply_delta;
    *  this array preserves that order. */
-  inflight: SidekickEnvelope[];
+  inflight: ParleyEnvelope[];
   /** Optimistic sends not yet acknowledged. The shell pre-mints a
    *  message_id, drops the row here, and waits for the matching
    *  `user_message` envelope to land in `inflight` (which dedups by
@@ -110,13 +110,13 @@ export interface PendingSend {
 
 /**
  * One row from the plugin's items endpoint. Lifted from the existing
- * ad-hoc shape — see `proxy/sidekick/upstream.ts` ConversationItem.
+ * ad-hoc shape — see `proxy/parley/upstream.ts` ConversationItem.
  */
 export interface ConversationItem {
   id: number | string;
   role: 'user' | 'assistant' | 'tool' | 'system' | 'notification' | 'gap';
   content: string;
-  /** Sidekick wire-shape id (umsg_… / msg_…). Optional; older plugin
+  /** Parley wire-shape id (umsg_… / msg_…). Optional; older plugin
    *  rows or legacy adapters omit it and we fall back to `id`. */
   sidekick_id?: string;
   /** State.db extensions on assistant rows that issued tool calls. */
@@ -142,11 +142,11 @@ export interface ConversationItem {
 }
 
 /**
- * SSE-shape envelope. Mirror of `proxy/sidekick/upstream.ts`
- * SidekickEnvelope. Re-declared here so this module can be imported
+ * SSE-shape envelope. Mirror of `proxy/parley/upstream.ts`
+ * ParleyEnvelope. Re-declared here so this module can be imported
  * without a circular dep through the proxy layer.
  */
-export type SidekickEnvelope =
+export type ParleyEnvelope =
   | { type: 'reply_delta'; chat_id: string; text: string; message_id: string; edit?: boolean }
   | { type: 'reply_final'; chat_id: string; message_id: string; text?: string }
   | { type: 'tool_call'; chat_id: string; call_id: string; tool_name: string; args: unknown; started_at?: string }

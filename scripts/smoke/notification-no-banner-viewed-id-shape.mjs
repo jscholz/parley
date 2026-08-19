@@ -23,7 +23,7 @@
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
 
 export const NAME = 'notification-no-banner-viewed-id-shape';
-export const DESCRIPTION = 'a notification whose chat_id differs only by the sidekick: prefix from the VIEWED chat must not raise a banner (#234)';
+export const DESCRIPTION = 'a notification whose chat_id differs only by the parley: prefix from the VIEWED chat must not raise a banner (#234)';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -82,7 +82,7 @@ export default async function run({ page, log, mock }) {
     !state.bannerVisible,
     `notification for the VIEWED chat raised a banner (id-shape mismatch leaked to off-screen path): ${state.bannerText}`,
   );
-  log('no banner for the viewed chat despite the sidekick: prefix mismatch ✓');
+  log('no banner for the viewed chat despite the parley: prefix mismatch ✓');
 
   // Sanity: it still took the on-screen path and rendered a .system row.
   const hasSystemRow = await page.evaluate((marker) => {

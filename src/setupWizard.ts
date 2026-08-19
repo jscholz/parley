@@ -2,7 +2,7 @@
  * First-run setup wizard — the "model gate" (FTUE research 2026-07-07,
  * Agent Zero pattern). Engages ONLY when the backend reports
  * needsSetup=true (in-tree stub still on its echo LLM — a fresh
- * `npx sidekick-portal` trial). Real deployments never see it.
+ * `npx parleyvoo` trial). Real deployments never see it.
  *
  * Three provider paths, then an optional voice step:
  *   Cloud key  — any OpenAI-compatible API (OpenRouter default).
@@ -47,7 +47,7 @@ export function gateIfNeeded(): boolean {
  *  no gate (a broken status probe must never lock a working install). */
 export async function init(): Promise<void> {
   try {
-    const r = await fetch('/api/sidekick/setup/status');
+    const r = await fetch('/api/parley/setup/status');
     if (!r.ok) return;
     status = await r.json();
   } catch { return; }
@@ -98,7 +98,7 @@ function buildOverlay(): HTMLElement {
     if (e.key === 'Escape' && overlay && !overlay.hidden) close();
   });
 
-  const h = el('h2', 'setup-wizard-title', 'Welcome to Sidekick');
+  const h = el('h2', 'setup-wizard-title', 'Welcome to Parley');
   card.appendChild(h);
   card.appendChild(el('p', 'setup-wizard-sub',
     'You’re chatting with a demo echo agent. Connect a real brain — it takes under a minute.'));
@@ -186,7 +186,7 @@ function applyButton(label: string, run: (btn: HTMLButtonElement, out: HTMLEleme
 }
 
 async function apply(bodyJson: Record<string, unknown>): Promise<{ llm: string | null; restartRequired: boolean }> {
-  const r = await fetch('/api/sidekick/setup', {
+  const r = await fetch('/api/parley/setup', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(bodyJson),
@@ -266,7 +266,7 @@ function renderCustom(host: HTMLElement): void {
   field(host, 'Token', token);
   host.appendChild(applyButton('Save', async (_b, out) => {
     await apply({ path: 'custom', platformUrl: url.value.trim(), platformToken: token.value.trim() });
-    out.textContent = 'Saved — restart Sidekick to connect';
+    out.textContent = 'Saved — restart Parley to connect';
     out.classList.add('ok');
     completedThisSession = true;
     if (status) status.needsSetup = false;
@@ -300,7 +300,7 @@ function renderVoiceStep(): void {
     try {
       const r = await fetch('/tts', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'Sidekick voice is ready.' }),
+        body: JSON.stringify({ text: 'Parley voice is ready.' }),
       });
       if (r.ok) {
         const blob = await r.blob();
