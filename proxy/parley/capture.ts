@@ -1095,7 +1095,11 @@ export async function handleCaptureSegment(
     const seq = Number(seqRaw);
     const body = await readBody(req, MAX_SEGMENT_BYTES);
     const { duplicate } = await putSegment(id, seq, body, {
-      t0Ms: Number(req.headers['x-parley-t0-ms'] || 0),
+      // Legacy spelling accepted alongside the new one: a cached
+      // pre-rename bundle that fell back to 0 here would place every
+      // segment at capture-start, scrambling transcript timing and
+      // mark alignment for the whole meeting.
+      t0Ms: Number(req.headers['x-parley-t0-ms'] ?? req.headers['x-sidekick-t0-ms'] ?? 0),
       mime: String(req.headers['content-type'] || 'application/octet-stream'),
       // Both spellings accepted: the renamed PWA sends x-parley-sha256,
       // but an installed/cached pre-rename bundle still sends the
