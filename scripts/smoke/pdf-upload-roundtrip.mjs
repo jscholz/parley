@@ -40,7 +40,11 @@ const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'marker.pdf');
 // as a PNG, gemma/claude/etc. transcribe it back. Unique enough to be
 // unambiguous in a model reply (no false positives from "PDF" or
 // "test" alone).
-const PDF_MARKER = 'ParleyPDFTestMarker0451';
+// Legacy spelling is REQUIRED: this is the literal text baked into the
+// binary fixtures/marker.pdf, which the rename sweep can't (and
+// shouldn't) rewrite. The agent reads the PDF and echoes it verbatim,
+// so the expectation must match the bytes on disk, not the new brand.
+const PDF_MARKER = 'SidekickPDFTestMarker0451';
 
 export default async function run({ page, log, fail }) {
   await waitForReady(page);
