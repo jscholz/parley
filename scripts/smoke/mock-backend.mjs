@@ -616,14 +616,28 @@ export async function installMockBackend(page) {
     if (!cap) {
       return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"unknown capture"}' });
     }
-    // Guarded like the real server (postmortem P0 #2): live, discarded,
-    // or segment-bearing captures cannot be hard-deleted.
-    if (cap.status === 'pending' || cap.status === 'recording' || cap.status === 'transcribing'
-        || cap.status === 'discarded' || cap.segments.length) {
+    // Safety-mapped like the real server (2026-08-18 incident): legacy
+    // DELETE on anything live/segment-bearing tombstones (soft
+    // discard); empty pending fails in place; discarded → 409; only a
+    // terminal empty husk is actually removed.
+    if (cap.status === 'discarded') {
       return route.fulfill({
         status: 409, contentType: 'application/json',
-        body: JSON.stringify({ error: `capture is ${cap.status} / has segments; use /discard then /purge` }),
+        body: JSON.stringify({ error: 'capture is in Recently Deleted; use /purge' }),
       });
+    }
+    if (cap.segments.length || cap.status === 'recording' || cap.status === 'transcribing') {
+      cap.pre_discard_status = cap.status;
+      cap.status = 'discarded';
+      cap.discarded_at = Date.now();
+      if (!cap.ended_at) cap.ended_at = Date.now();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: cap.id }) });
+    }
+    if (cap.status === 'pending') {
+      cap.status = 'failed';
+      cap.failed_reason = 'legacy DELETE on a pending capture — failed in place';
+      cap.ended_at = Date.now();
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: cap.id }) });
     }
     captures.delete(cap.id);
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, deleted: cap.id }) });

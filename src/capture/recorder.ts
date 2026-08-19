@@ -536,7 +536,10 @@ export async function cancelMeetingCapture(): Promise<void> {
     const res = await fetch(apiUrl(`/api/sidekick/captures/${captureId}/discard`), {
       method: 'POST',
       headers: lifecycleHeaders(true),
-      body: JSON.stringify({ reason: 'user cancel (pill discard)' }),
+      // Machine-readable reason + x-sidekick-client identity: the
+      // audit log must answer "who discarded this, and why" (the
+      // incident's DELETE was unattributable).
+      body: JSON.stringify({ reason: 'user_discard_pill' }),
     });
     if (!res.ok) {
       log(`[capture] discard of ${captureId} answered ${res.status} — server reconciles via sweep`);

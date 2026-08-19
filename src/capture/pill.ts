@@ -19,6 +19,7 @@ import {
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
 import * as switchCtl from '../switchController.ts';
+import { confirmDialog } from '../confirmDialog.ts';
 import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
@@ -202,11 +203,20 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
     else void startFromUi();
   });
   // Cancel = discard, the inverse promise of stop — confirm before
-  // throwing audio away.
+  // moving audio to Recently Deleted. IN-APP dialog, not
+  // window.confirm (2026-08-18 incident: native confirm in an iOS
+  // standalone PWA is unreliable, and a tap queued on a frozen phone
+  // can replay onto its OK — the in-app dialog default-focuses CANCEL
+  // and names the action explicitly). The dialog is UX; the safety
+  // boundary is the server's soft discard underneath.
   document.getElementById('capture-pill-cancel')?.addEventListener('click', () => {
-    if (window.confirm('Discard this recording? It moves to Recently Deleted (recoverable for ~7 days); nothing is sent to the agent.')) {
-      void cancelMeetingCapture();
-    }
+    void confirmDialog({
+      title: 'Discard this recording?',
+      body: 'It moves to Recently Deleted on the server (recoverable for ~7 days). Nothing is saved to the chat or sent to the agent.',
+      confirmLabel: 'Discard to Recently Deleted',
+      cancelLabel: 'Keep recording',
+      danger: true,
+    }).then((ok) => { if (ok) void cancelMeetingCapture(); });
   });
 
   // External control plane: capture_control envelopes broadcast by

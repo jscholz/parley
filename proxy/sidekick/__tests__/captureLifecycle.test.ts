@@ -165,25 +165,77 @@ test('one-active rule still holds for RECORDING captures', async () => {
     (e: CaptureError) => e.status === 409);
 });
 
-// ── P0 #2: no automatic path may hard-delete ───────────────────────────
+// ── P0 #2: no path may hard-delete audio — legacy DELETE is safety-mapped ──
+//
+// THE incident path (corrected forensics 2026-08-18): the old client
+// bundle's pill ✕ fired this raw DELETE against a HEALTHY recording
+// with ~28 uploaded segments, and fs.rm erased 20 minutes of meeting.
+// The phone keeps running that old bundle until the next CAP rebuild,
+// so the server alone must make the same call harmless: DELETE on
+// anything live or segment-bearing performs the SOFT DISCARD
+// (tombstone, restorable) — never fs.rm.
 
-test('DELETE rejects pending / recording / transcribing / segment-bearing captures', async () => {
-  // pending
+test('THE INCIDENT: legacy DELETE on a live capture with N uploaded segments tombstones — audio intact, restorable, rm never happens', async () => {
+  const m = await createCapture({ title: 'Board sync' });
+  await activateCapture(m.id);
+  const bodies: Buffer[] = [];
+  for (let seq = 0; seq < 5; seq++) {
+    const body = Buffer.from(`meeting audio segment ${seq} — irreplaceable`);
+    bodies.push(body);
+    await putSegment(m.id, seq, body, { t0Ms: seq * 45_000, mime: 'audio/mp4' });
+  }
+
+  // The old bundle's cancel path: raw DELETE, mid-recording.
+  await deleteCapture(m.id, { source: 'legacy-pwa', userAgent: 'OldBundle/1.0' });
+
+  // Tombstoned, not erased.
+  const after = await getCapture(m.id);
+  assert.equal(after.status, 'discarded');
+  assert.equal(after.pre_discard_status, 'recording');
+  assert.equal(after.segments.length, 5);
+  for (let seq = 0; seq < 5; seq++) {
+    const onDisk = await fs.readFile(path.join(dir, m.id, 'seg', `${seq}.m4a`));
+    assert.deepEqual(onDisk, bodies[seq], `segment ${seq} bytes must survive`);
+  }
+
+  // Attributable: the audit names the caller and what was at stake.
+  const events = (await readCaptureAudit()).filter((e) => e.capture_id === m.id);
+  const del = events.find((e) => e.action === 'delete')!;
+  assert.equal(del.source, 'legacy-pwa');
+  assert.equal(del.user_agent, 'OldBundle/1.0');
+  const discard = events.find((e) => e.action === 'discard')!;
+  assert.equal(discard.segment_count, 5);
+  assert.ok(discard.total_bytes! > 0);
+
+  // And the meeting comes back whole.
+  const restored = await restoreCapture(m.id);
+  assert.equal(restored.status, 'complete');
+  assert.equal(restored.segments.length, 5);
+});
+
+test('legacy DELETE on an empty pending capture fails it in place (old startup rollback)', async () => {
   const p = await createCapture({});
-  await assert.rejects(() => deleteCapture(p.id), (e: CaptureError) => e.status === 409);
+  await deleteCapture(p.id, { source: 'legacy-pwa' });
+  const after = await getCapture(p.id);
+  assert.equal(after.status, 'failed');            // in place — dir survives
   await fs.access(path.join(dir, p.id, 'manifest.json'));
-  await abortStartCapture(p.id, { reason: 'cleanup' });
+});
 
-  // recording + segment-bearing
+test('legacy DELETE on a segment-bearing COMPLETE capture also tombstones', async () => {
   const r = await createCapture({});
   await activateCapture(r.id);
   await putSegment(r.id, 0, Buffer.from('meeting audio'), { t0Ms: 0, mime: 'audio/mp4' });
-  await assert.rejects(() => deleteCapture(r.id), (e: CaptureError) => e.status === 409);
-
-  // complete but segment-bearing — still refuses hard delete
   await stopCapture(r.id);
-  await assert.rejects(() => deleteCapture(r.id), (e: CaptureError) => e.status === 409);
+  await deleteCapture(r.id);
+  assert.equal((await getCapture(r.id)).status, 'discarded');
   await fs.access(path.join(dir, r.id, 'seg', '0.m4a'));   // audio recoverable
+});
+
+test('DELETE on a discarded capture → 409 (purge is the only irreversible verb)', async () => {
+  const m = await createCapture({});
+  await activateCapture(m.id);
+  await discardCapture(m.id, { reason: 'cancel' });
+  await assert.rejects(() => deleteCapture(m.id), (e: CaptureError) => e.status === 409);
 });
 
 test('DELETE still works for a terminal zero-segment husk', async () => {

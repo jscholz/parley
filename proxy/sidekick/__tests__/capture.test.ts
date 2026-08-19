@@ -197,12 +197,13 @@ test('deleteCapture refuses segment-bearing captures; discard → purge is the r
 
   const { deleteCapture } = await import('../capture.ts');
   // Hard delete of real audio is impossible (2026-08-18 postmortem) —
-  // this exact call is what erased the lost meeting.
-  await assert.rejects(() => deleteCapture(b.id), (e: CaptureError) => e.status === 409);
+  // this exact call erased a 20-minute meeting. Legacy DELETE is
+  // safety-mapped to the soft discard: tombstone, audio intact.
+  await deleteCapture(b.id);
+  assert.equal((await getCapture(b.id)).status, 'discarded');
   await fs.access(path.join(dir, b.id, 'seg', '0.m4a'));
 
-  // The deliberate two-step lane removes it for real.
-  await discardCapture(b.id, { reason: 'test cleanup' });
+  // The deliberate second step removes it for real.
   await purgeCapture(b.id, { reason: 'test cleanup' });
   await assert.rejects(() => getCapture(b.id), (e: CaptureError) => e.status === 404);
   await assert.rejects(

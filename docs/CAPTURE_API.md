@@ -31,7 +31,7 @@ POST /captures/{id}/abort-start   startup failed → pending becomes failed IN P
 POST /captures/{id}/discard       → status: discarded (Recently Deleted, restorable)
 POST /captures/{id}/restore       discarded → complete/failed
 POST /captures/{id}/purge         irreversible removal (discarded-only)
-DELETE /captures/{id}             guarded: terminal zero-segment husks only
+DELETE /captures/{id}             legacy verb, safety-mapped (see below)
 ```
 
 `status` walks `pending → recording → transcribing → complete` (or
@@ -146,11 +146,19 @@ Body `{reason?}`. Permanently removes the capture directory. Only
 valid on a `discarded` capture (two deliberate steps by construction);
 unreachable from automatic/error paths. The audit log survives.
 
-### `DELETE /api/sidekick/captures/{id}` — guarded legacy verb
-`409` for anything `pending`/`recording`/`transcribing`/`discarded` or
-with segments — real audio can only leave disk via discard → purge.
-Only a terminal, zero-segment husk can be deleted here. (Pre-2026-08-18
-this hard-deleted unconditionally; that path erased a live meeting.)
+### `DELETE /api/sidekick/captures/{id}` — safety-mapped legacy verb
+Pre-2026-08-18 this hard-deleted unconditionally — it is the verb that
+erased a healthy 20-minute recording. Old clients keep calling it, so
+the server maps it to safe semantics instead of trusting the caller:
+
+| Capture state | DELETE now does |
+|---|---|
+| live or has segments | soft **discard** (tombstone, restorable) |
+| pending, empty | **failed in place** (startup rollback) |
+| discarded | `409` — use `/purge` |
+| terminal, zero segments | actually removed (nothing at stake) |
+
+New clients should call `/discard` / `/purge` explicitly.
 
 ### `POST /api/sidekick/captures/control`
 `{action: "start"|"stop", title?, capture_id?}` — broadcasts a

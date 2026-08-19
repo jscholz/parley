@@ -830,30 +830,56 @@ async function purgeCaptureLocked(id: string, actor?: CaptureActor): Promise<voi
   notifyChanged(m, 'deleted');
 }
 
-/** Hard delete — LAST-RESORT husk removal only. After the 2026-08-18
- *  data loss this verb refuses anything live (pending/recording/
- *  transcribing), anything discarded (that's /purge's job), and
- *  anything with segments: real audio can only leave disk through the
- *  two-step discard→purge lane. Kept for API compat (legacy clients
- *  fire-and-forget DELETE on startup rollback/cancel — they now get a
- *  409 and the data survives). */
+/** Legacy DELETE — SAFETY-MAPPED, never destructive while data exists.
+ *
+ *  THE incident verb (corrected forensics 2026-08-18): the old client
+ *  bundle's pill ✕ fired this raw DELETE against a healthy recording
+ *  with ~28 uploaded segments, and the old fs.rm body erased 20
+ *  minutes of meeting. Old bundles keep calling this until the next
+ *  CAP rebuild, so the SERVER maps the call to safe semantics:
+ *
+ *    live or segment-bearing  → soft discard (tombstone, restorable)
+ *    empty pending            → failed in place (startup rollback)
+ *    discarded                → 409 (that's /purge's deliberate job)
+ *    terminal empty husk      → actual removal (nothing at stake)
+ *
+ *  Every call is audited with caller identity — "who deleted this?"
+ *  must never be unanswerable again. */
 export function deleteCapture(id: string, actor?: CaptureActor): Promise<void> {
   return withCaptureLock(id, () => deleteCaptureLocked(id, actor));
 }
 
 async function deleteCaptureLocked(id: string, actor?: CaptureActor): Promise<void> {
   const m = await readManifest(id);   // 404s unknown ids; validates shape
-  if (m.status === 'pending' || m.status === 'recording' || m.status === 'transcribing') {
-    void audit(m, 'delete', { actor, priorStatus: m.status, error: 'rejected: capture is live' });
-    throw new CaptureError(409, `capture ${id} is ${m.status}; live captures cannot be hard-deleted — use /discard`);
-  }
   if (m.status === 'discarded') {
     throw new CaptureError(409, `capture ${id} is in Recently Deleted; use /purge for permanent removal`);
   }
-  if (m.segments.length) {
-    void audit(m, 'delete', { actor, priorStatus: m.status, error: 'rejected: capture has segments' });
-    throw new CaptureError(409, `capture ${id} has ${m.segments.length} segments; use /discard (recoverable) then /purge`);
+  if (m.segments.length || m.status === 'recording' || m.status === 'transcribing') {
+    void audit(m, 'delete', {
+      actor, priorStatus: m.status, newStatus: 'discarded',
+      reason: actor?.reason || 'legacy DELETE on a live/segment-bearing capture',
+      detail: { mapped_to: 'discard' },
+    });
+    await discardCaptureLocked(id, {
+      ...actor,
+      reason: actor?.reason || 'legacy DELETE mapped to soft-discard (live/segment-bearing capture)',
+    });
+    return;
   }
+  if (m.status === 'pending') {
+    void audit(m, 'delete', {
+      actor, priorStatus: 'pending', newStatus: 'failed',
+      reason: actor?.reason || 'legacy DELETE on an empty pending capture',
+      detail: { mapped_to: 'abort-start' },
+    });
+    await abortStartCaptureLocked(id, {
+      ...actor,
+      reason: actor?.reason || 'legacy DELETE on a pending capture (startup rollback) — failed in place',
+    });
+    return;
+  }
+  // Terminal (complete/failed) with ZERO segments — an empty husk;
+  // removing it destroys no audio.
   await audit(m, 'delete', { actor, priorStatus: m.status, newStatus: 'purged' });
   await fs.rm(captureDir(m.id), { recursive: true, force: true });
   await rebuildIndex();

@@ -12,8 +12,6 @@ export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
 export default async function run({ page, log, mock }) {
-  // The cancel button sits behind a confirm() — accept it.
-  page.on('dialog', (d) => { void d.accept(); });
   await waitForReady(page);
 
   // Start and wait for a CONFIRMED recording (past the starting phase).
@@ -31,8 +29,20 @@ export default async function run({ page, log, mock }) {
   }
   assert(mock.getCaptures()[0]?.status === 'recording', 'capture should be recording before cancel');
 
-  // Cancel via the pill's ✕.
+  // Cancel via the pill's ✕ → the IN-APP confirm dialog (not
+  // window.confirm — 2026-08-18 incident: native confirm is unreliable
+  // in iOS standalone PWAs). Cancel must hold default focus (queued
+  // taps land safe), and the accept button names the action.
   await page.click('#capture-pill-cancel');
+  await page.waitForSelector('.sk-confirm-overlay', { timeout: 5000 });
+  const dialog = await page.evaluate(() => ({
+    focusIsCancel: document.activeElement?.classList?.contains('sk-confirm-cancel') || false,
+    acceptLabel: document.querySelector('.sk-confirm-accept')?.textContent || '',
+  }));
+  assert(dialog.focusIsCancel, 'the SAFE (cancel) button must hold default focus');
+  assert(/Recently Deleted/i.test(dialog.acceptLabel),
+    `accept button must name the action, got "${dialog.acceptLabel}"`);
+  await page.click('.sk-confirm-accept');
   await page.waitForFunction(
     () => document.getElementById('capture-pill')?.hidden,
     null, { timeout: 10_000, polling: 100 },
@@ -50,9 +60,14 @@ export default async function run({ page, log, mock }) {
     `pre_discard_status should record what was discarded, got ${cap.pre_discard_status}`);
   assert(cap.discarded_at > 0, 'discarded_at tombstone stamp missing');
 
-  const actions = mock.getCaptureLifecycle().map((e) => e.action);
+  const lifecycle = mock.getCaptureLifecycle();
+  const actions = lifecycle.map((e) => e.action);
   assert(actions.includes('discard'), `discard missing from lifecycle (got: ${actions.join(', ')})`);
   assert(!actions.includes('delete'),
     'cancel hit the hard DELETE endpoint — the postmortem data-loss path');
-  log(`cancel → discarded (pre=${cap.pre_discard_status}, restorable); lifecycle: ${actions.join(' → ')}`);
+  // Attribution (the incident was unattributable): explicit reason.
+  const discardCall = lifecycle.find((e) => e.action === 'discard');
+  assert(discardCall?.body?.reason === 'user_discard_pill',
+    `discard must carry the explicit reason user_discard_pill, got: ${JSON.stringify(discardCall?.body)}`);
+  log(`cancel → discarded (pre=${cap.pre_discard_status}, reason=user_discard_pill, restorable); lifecycle: ${actions.join(' → ')}`);
 }
