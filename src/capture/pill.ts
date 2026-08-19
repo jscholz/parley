@@ -19,6 +19,7 @@ import {
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
 import * as switchCtl from '../switchController.ts';
+import { confirmDialog } from '../confirmDialog.ts';
 import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
@@ -43,7 +44,10 @@ function render(state: CaptureUiState): void {
   if (!pill) return;
   const title = document.getElementById('capture-pill-title');
   const timer = document.getElementById('capture-pill-timer');
-  const show = state.active || state.phase === 'finishing';
+  // 'starting' shows the pill in its honest gray "Starting microphone…"
+  // form (postmortem 2026-08-18 P1): visible progress, NO red recording
+  // state — nothing may look like success until the recorder is proven.
+  const show = state.active || state.phase === 'starting' || state.phase === 'finishing';
   pill.hidden = !show;
   const headerBtn = document.getElementById('btn-capture-header');
   if (headerBtn) {
@@ -57,6 +61,7 @@ function render(state: CaptureUiState): void {
     headerBtn.setAttribute('title', title);
     headerBtn.setAttribute('aria-label', title);
   }
+  pill.classList.toggle('starting', state.phase === 'starting');
   pill.classList.toggle('interrupted', state.phase === 'interrupted');
   pill.classList.toggle('paused', state.phase === 'paused');
   pill.classList.toggle('finishing', state.phase === 'finishing');
@@ -65,13 +70,15 @@ function render(state: CaptureUiState): void {
     return;
   }
   if (title) {
-    title.textContent = state.phase === 'finishing'
-      ? 'Uploading…'
-      : state.phase === 'interrupted'
-        ? `${state.title} — mic interrupted, resuming…`
-        : state.phase === 'paused'
-          ? `${state.title} — paused`
-          : state.title;
+    title.textContent = state.phase === 'starting'
+      ? 'Starting microphone…'
+      : state.phase === 'finishing'
+        ? 'Uploading…'
+        : state.phase === 'interrupted'
+          ? `${state.title} — mic interrupted, resuming…`
+          : state.phase === 'paused'
+            ? `${state.title} — paused`
+            : state.title;
   }
   // Pause button doubles as resume; swap glyphs + label.
   const pauseBtn = document.getElementById('capture-pill-pause');
@@ -82,7 +89,7 @@ function render(state: CaptureUiState): void {
     pauseBtn.setAttribute('title', paused ? 'Resume recording' : 'Pause recording');
     pauseBtn.setAttribute('aria-label', paused ? 'Resume recording' : 'Pause recording');
   }
-  if (timer && state.startedAt) timer.textContent = fmtElapsed(state);
+  if (timer) timer.textContent = state.startedAt ? fmtElapsed(state) : '';
   if (timerInterval == null) {
     timerInterval = window.setInterval(() => {
       const s = getCaptureState();
@@ -196,11 +203,20 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
     else void startFromUi();
   });
   // Cancel = discard, the inverse promise of stop — confirm before
-  // throwing audio away.
+  // moving audio to Recently Deleted. IN-APP dialog, not
+  // window.confirm (2026-08-18 incident: native confirm in an iOS
+  // standalone PWA is unreliable, and a tap queued on a frozen phone
+  // can replay onto its OK — the in-app dialog default-focuses CANCEL
+  // and names the action explicitly). The dialog is UX; the safety
+  // boundary is the server's soft discard underneath.
   document.getElementById('capture-pill-cancel')?.addEventListener('click', () => {
-    if (window.confirm('Discard this recording? Nothing will be saved or sent to the agent.')) {
-      void cancelMeetingCapture();
-    }
+    void confirmDialog({
+      title: 'Discard this recording?',
+      body: 'It moves to Recently Deleted on the server (recoverable for ~7 days). Nothing is saved to the chat or sent to the agent.',
+      confirmLabel: 'Discard to Recently Deleted',
+      cancelLabel: 'Keep recording',
+      danger: true,
+    }).then((ok) => { if (ok) void cancelMeetingCapture(); });
   });
 
   // External control plane: capture_control envelopes broadcast by

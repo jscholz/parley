@@ -1061,6 +1061,18 @@ if (DEEPGRAM_KEY) {
   console.warn('[capture] transcription pipeline not wired (no DEEPGRAM_API_KEY) — captures record+store only');
 }
 
+// Capture janitor (postmortem 2026-08-18): expire never-activated
+// pending captures to 'failed' IN PLACE (a reload during "Starting
+// microphone…" must reconcile without announcing or deleting), heal
+// stale recordings, and purge Recently-Deleted captures only after the
+// retention window. Also runs inline on every create; the timer covers
+// the no-new-capture case. unref(): never keeps the process alive.
+setInterval(() => {
+  void sidekick.sweepCaptures().catch((e: unknown) => {
+    console.warn(`[capture] sweep failed: ${String(e)}`);
+  });
+}, 60_000).unref();
+
 // First-run wizard backing (proxy/sidekick/setup.ts). Persists to the
 // same .env start-all loads (SIDEKICK_ENV_FILE from the npx launcher,
 // else the repo-root .env) and live-swaps the TTS key above.
@@ -1216,6 +1228,36 @@ const requestHandler: http.RequestListener = async (req, res) => {
       && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/stop$/);
     if (capStop) {
       return sidekick.handleCaptureStop(req, res, capStop[1]);
+    }
+    // Two-phase lifecycle (2026-08-18 postmortem): activate confirms a
+    // real recorder is running (pending→recording, fires the announce);
+    // abort-start fails a pending capture in place. Discard/restore/
+    // purge are the recoverable deletion lane — the generic DELETE
+    // below rejects anything live or segment-bearing.
+    const capActivate = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/activate$/);
+    if (capActivate) {
+      return sidekick.handleCaptureActivate(req, res, capActivate[1]);
+    }
+    const capAbortStart = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/abort-start$/);
+    if (capAbortStart) {
+      return sidekick.handleCaptureAbortStart(req, res, capAbortStart[1]);
+    }
+    const capDiscard = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/discard$/);
+    if (capDiscard) {
+      return sidekick.handleCaptureDiscard(req, res, capDiscard[1]);
+    }
+    const capRestore = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/restore$/);
+    if (capRestore) {
+      return sidekick.handleCaptureRestore(req, res, capRestore[1]);
+    }
+    const capPurgeAll = req.method === 'POST'
+      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/purge$/);
+    if (capPurgeAll) {
+      return sidekick.handleCapturePurge(req, res, capPurgeAll[1]);
     }
     const capMark = req.method === 'POST'
       && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/marks$/);

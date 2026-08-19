@@ -13,8 +13,8 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 
 import {
-  initCapture, createCapture, putSegment, stopCapture, addMark,
-  getCapture, setCaptureHooks, listCaptures,
+  initCapture, createCapture, activateCapture, putSegment, stopCapture,
+  addMark, getCapture, setCaptureHooks, listCaptures,
 } from '../capture.ts';
 import {
   initCaptureTranscription, recoverPendingTranscriptions, rebuildTranscript,
@@ -83,7 +83,12 @@ test('segments → ordered transcript with marks; stop claims, drains, completes
   const sent = wire(fn);
 
   const m = await createCapture({ title: 'Standup', linkedChat: 'sidekick:mtg', diarize: false });
-  // Start-message fired on create.
+  // NO start-message at create (2026-08-18 postmortem): a pending
+  // capture is not a recording — announcing here is the exact false
+  // success that hid a 21-minute dead mic.
+  assert.equal(sent.length, 0);
+  await activateCapture(m.id);
+  // Start-message fires on ACTIVATE — the client proved a recorder.
   assert.equal(sent.length, 1);
   assert.match(sent[0].text, /Recording "Standup" started/);
   assert.match(sent[0].text, /transcript\.md/);
@@ -342,6 +347,7 @@ test('titling: minted session gets the placeholder start-title', async () => {
     title: 'Meeting 2026-08-10', linkedChat: 'sidekick:minted-1',
     mintedSession: true, diarize: false,
   });
+  await activateCapture(m.id);   // start-title fires on activation, not create
   await waitFor(async () => renames.length >= 1);
   assert.deepEqual(renames[0], { chatId: 'sidekick:minted-1', title: 'Meeting 2026-08-10' });
   await stopCapture(m.id);
@@ -433,6 +439,7 @@ test('titling: transient rename failure retries and lands', async () => {
     title: 'Meeting 2026-08-10', linkedChat: 'sidekick:retry-1',
     mintedSession: true, diarize: false,
   });
+  await activateCapture(m.id);   // start-title fires on activation
   await waitFor(async () => attempts.length >= 3);
   assert.equal(attempts.length, 3, 'succeeded on the third attempt — no further retries');
   await stopCapture(m.id);

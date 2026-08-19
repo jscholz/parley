@@ -15,8 +15,9 @@ import * as os from 'node:os';
 import * as crypto from 'node:crypto';
 
 import {
-  initCapture, createCapture, putSegment, stopCapture, patchCapture,
-  addMark, getCapture, listCaptures, CaptureError,
+  initCapture, createCapture, activateCapture, putSegment, stopCapture,
+  patchCapture, addMark, getCapture, listCaptures, discardCapture,
+  purgeCapture, CaptureError,
 } from '../capture.ts';
 
 let dir = '';
@@ -30,11 +31,16 @@ function sha(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
-test('lifecycle: create → segments → stop → complete manifest + index', async () => {
-  const m = await createCapture({ title: 'Standup', linkedChat: 'sidekick:abc' });
-  assert.match(m.id, /^cap_\d+_[0-9a-f]{6}$/);
+test('lifecycle: create → activate → segments → stop → complete manifest + index', async () => {
+  const created = await createCapture({ title: 'Standup', linkedChat: 'sidekick:abc' });
+  assert.match(created.id, /^cap_\d+_[0-9a-f]{6}$/);
+  // Two-phase (2026-08-18 postmortem): create is a PENDING placeholder;
+  // only /activate — after the client proved a running recorder —
+  // makes it 'recording'.
+  assert.equal(created.status, 'pending');
+  assert.equal(created.diarize, true);      // default ON for meetings
+  const m = await activateCapture(created.id);
   assert.equal(m.status, 'recording');
-  assert.equal(m.diarize, true);            // default ON for meetings
 
   const seg0 = Buffer.from('segment-zero-bytes');
   const seg1 = Buffer.from('segment-one-bytes!');
@@ -91,6 +97,7 @@ test('segments still accepted after stop is requested… but not after terminal 
   // Resumable-uploader contract: an outage during the meeting means
   // tail segments arrive late. Terminal states freeze the capture.
   const m = await createCapture({});
+  await activateCapture(m.id);
   await stopCapture(m.id);   // Phase 1 goes straight to 'complete'
   await assert.rejects(
     () => putSegment(m.id, 0, Buffer.from('late'), { t0Ms: 0, mime: 'audio/mp4' }),
@@ -100,6 +107,7 @@ test('segments still accepted after stop is requested… but not after terminal 
 
 test('one active capture at a time; stale recording auto-heals', async () => {
   const a = await createCapture({ title: 'A' });
+  await activateCapture(a.id);
   await assert.rejects(() => createCapture({ title: 'B' }),
     (e: CaptureError) => e.status === 409);
 
@@ -114,7 +122,7 @@ test('one active capture at a time; stale recording auto-heals', async () => {
   await fs.utimes(manifestPath, old, old);
 
   const b = await createCapture({ title: 'B' });   // heals A, starts B
-  assert.equal(b.status, 'recording');
+  assert.equal(b.status, 'pending');
   // Segment-less husk → 'failed' (a capture WITH audio heals to
   // 'complete' instead — see the dedicated test below).
   assert.equal((await getCapture(a.id)).status, 'failed');
@@ -122,6 +130,7 @@ test('one active capture at a time; stale recording auto-heals', async () => {
 
 test('patch: rename, re-link, diarize toggle; diarize frozen after finish', async () => {
   const m = await createCapture({ title: 'Meeting 2026-07-08' });
+  await activateCapture(m.id);
   const p1 = await patchCapture(m.id, { title: 'R2 fundraise sync', linkedChat: 'sidekick:xyz' });
   assert.equal(p1.title, 'R2 fundraise sync');
   assert.equal(p1.linked_chat, 'sidekick:xyz');
@@ -138,6 +147,10 @@ test('patch: rename, re-link, diarize toggle; diarize frozen after finish', asyn
 
 test('marks append while recording only', async () => {
   const m = await createCapture({});
+  // Pending (not yet activated) refuses marks too — nothing is
+  // "recording" until a device proved a recorder.
+  await assert.rejects(() => addMark(m.id, 100), (e: CaptureError) => e.status === 409);
+  await activateCapture(m.id);
   await addMark(m.id, 61_500);
   await addMark(m.id, 125_000);
   assert.deepEqual((await getCapture(m.id)).marks, [{ t_ms: 61_500 }, { t_ms: 125_000 }]);
@@ -175,15 +188,23 @@ test('stop is idempotent', async () => {
   assert.equal(s1.ended_at, s2.ended_at);
 });
 
-test('deleteCapture: whole dir gone, index rebuilt, later ops 404', async () => {
+test('deleteCapture refuses segment-bearing captures; discard → purge is the removal lane', async () => {
   const a = await createCapture({ title: 'Keep' });
+  await activateCapture(a.id);
   await stopCapture(a.id);
   const b = await createCapture({ title: 'Discard' });
   await putSegment(b.id, 0, Buffer.from('bytes'), { t0Ms: 0, mime: 'audio/mp4' });
 
   const { deleteCapture } = await import('../capture.ts');
+  // Hard delete of real audio is impossible (2026-08-18 postmortem) —
+  // this exact call erased a 20-minute meeting. Legacy DELETE is
+  // safety-mapped to the soft discard: tombstone, audio intact.
   await deleteCapture(b.id);
+  assert.equal((await getCapture(b.id)).status, 'discarded');
+  await fs.access(path.join(dir, b.id, 'seg', '0.m4a'));
 
+  // The deliberate second step removes it for real.
+  await purgeCapture(b.id, { reason: 'test cleanup' });
   await assert.rejects(() => getCapture(b.id), (e: CaptureError) => e.status === 404);
   await assert.rejects(
     () => putSegment(b.id, 1, Buffer.from('late'), { t0Ms: 45_000, mime: 'audio/mp4' }),
@@ -205,14 +226,24 @@ test('concurrent putSegment: every segment lands in the manifest (per-id lock)',
   assert.deepEqual(after.segments.map((s) => s.seq), [0, 1, 2, 3, 4]);
 });
 
-test('concurrent createCapture: one-active rule holds (global lock)', async () => {
+test('concurrent createCapture: one-active rule holds (global lock + supersede)', async () => {
+  // Two-phase semantics: both creates mint PENDING placeholders (the
+  // serialized second one supersedes the first — failed in place), so
+  // at most ONE can ever activate into a real recording.
   const results = await Promise.allSettled([
     createCapture({ title: 'X' }), createCapture({ title: 'Y' }),
   ]);
-  const ok = results.filter((r) => r.status === 'fulfilled');
-  const rejected = results.filter((r) => r.status === 'rejected');
-  assert.equal(ok.length, 1);
-  assert.equal(rejected.length, 1);
+  const ok = results.filter((r) => r.status === 'fulfilled')
+    .map((r) => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof createCapture>>>).value);
+  assert.equal(ok.length, 2);
+  const activations = await Promise.allSettled(ok.map((m) => activateCapture(m.id)));
+  const activated = activations.filter((r) => r.status === 'fulfilled');
+  const refused = activations.filter((r) => r.status === 'rejected');
+  assert.equal(activated.length, 1);
+  assert.equal(refused.length, 1);
+  // And a fresh create is now blocked by the one that activated.
+  await assert.rejects(() => createCapture({ title: 'Z' }),
+    (e: CaptureError) => e.status === 409);
 });
 
 test('stale heal COMPLETES a segment-bearing capture (audio is a meeting, not a failure)', async () => {
@@ -228,7 +259,7 @@ test('stale heal COMPLETES a segment-bearing capture (audio is a meeting, not a 
   await fs.utimes(mp, old, old);
 
   const b = await createCapture({ title: 'Next' });
-  assert.equal(b.status, 'recording');
+  assert.equal(b.status, 'pending');
   assert.equal((await getCapture(a.id)).status, 'complete');   // NOT 'failed'
 });
 

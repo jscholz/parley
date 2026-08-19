@@ -4719,6 +4719,41 @@
  * The "model gate": shown only on fresh trial installs (stub echo LLM).
  * DOM is module-built; these styles reuse the app's tokens so the
  * wizard reads as native chrome in both themes. */
+/* ── In-app confirm dialog (src/confirmDialog.ts) ──
+   Replaces window.confirm for destructive actions — iOS standalone
+   PWA / WKWebView native confirm is unreliable (2026-08-18 incident).
+   Cancel holds default focus; the accept button names the action. */
+.sk-confirm-overlay {
+  position: fixed; inset: 0; z-index: 260;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(3px);
+  padding: 16px;
+}
+.sk-confirm {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%; max-width: 400px;
+  padding: 18px 20px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+}
+.sk-confirm-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+.sk-confirm-body { font-size: 13px; color: var(--muted, #9a9a9a); line-height: 1.45; }
+.sk-confirm-actions {
+  display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;
+}
+.sk-confirm-actions button {
+  border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-1, #1c1c1e);
+  color: var(--fg, #eee);
+}
+.sk-confirm-cancel:focus-visible { outline: 2px solid var(--accent, #6ea8fe); outline-offset: 1px; }
+.sk-confirm-accept.danger {
+  border-color: color-mix(in srgb, #e5484d 55%, transparent);
+  background: color-mix(in srgb, #e5484d 16%, var(--surface-1, #1c1c1e));
+  color: #ff8589;
+}
+
 .setup-wizard-overlay {
   position: fixed; inset: 0; z-index: 200;
   display: flex; align-items: center; justify-content: center;
@@ -4903,6 +4938,15 @@
 .capture-pill.interrupted .capture-pill-dot {
   background: #f1c40f; animation: none;
 }
+/* Starting (mic acquisition/recorder start in flight — honest-UI,
+   postmortem 2026-08-18): neutral gray, NO red, NO pulse. Nothing may
+   look like "recording" until the recorder is proven live. */
+.capture-pill.starting {
+  border-color: var(--border, #333);
+  background: var(--surface-1, #1c1c1e);
+  box-shadow: none;
+}
+.capture-pill.starting .capture-pill-dot { background: #8a8a8a; animation: none; }
 /* Finishing (uploader draining after stop): neutral, no red urgency. */
 .capture-pill.finishing {
   border-color: var(--border, #333);

@@ -47,8 +47,14 @@ export default async function run({ page, log, mock }) {
     document.getElementById('mic-menu-record-meeting')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true }));
   });
+  // The pill first appears in the honest 'starting' phase ("Starting
+  // microphone…" — postmortem 2026-08-18); the meeting title lands once
+  // activation is confirmed. Wait past 'starting' before asserting.
   await page.waitForFunction(
-    () => !document.getElementById('capture-pill')?.hidden,
+    () => {
+      const pill = document.getElementById('capture-pill');
+      return !!(pill && !pill.hidden && !pill.classList.contains('starting'));
+    },
     null, { timeout: 8000, polling: 50 },
   );
   const title = await page.textContent('#capture-pill-title');

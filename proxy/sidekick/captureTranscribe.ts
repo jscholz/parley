@@ -496,7 +496,13 @@ async function finalizeInner(id: string): Promise<void> {
 export function initCaptureTranscription(config: TranscribeConfig): void {
   cfg = config;
   setCaptureHooks({
-    onCreated(m) {
+    // NOT onCreated (2026-08-18 postmortem): creation only proves the
+    // server minted an entity — announcing there told Jonathan
+    // "Recording started" while his iPhone's getUserMedia hung forever
+    // and no audio ever existed. onActivated fires only after a client
+    // confirmed mic ownership + a running MediaRecorder (or, legacy
+    // compat, real audio arrived), so the message below is honest.
+    onActivated(m) {
       if (!m.linked_chat) return;
       (cfg?.dispatchFn ?? dispatchInternalMessage)(
         m.linked_chat,
@@ -527,9 +533,16 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
       // drain() finalizes when the queue empties.
       if (!j.running && !j.queue.length && !j.finalizing) void finalize(m.id);
     },
+    onDiscarded(id) {
+      // Soft-discard (Recently Deleted): drop queued work — the files
+      // stay on disk, so a later /restore can retro-transcribe.
+      const j = jobs.get(id);
+      if (j?.pushTimer != null) clearTimeout(j.pushTimer);
+      jobs.delete(id);
+    },
     onDeleted(id) {
-      // Cancel/delete: drop queued work; an in-flight transcribe of a
-      // now-missing file errors harmlessly (drain catches it).
+      // Purge/hard delete: drop queued work; an in-flight transcribe of
+      // a now-missing file errors harmlessly (drain catches it).
       const j = jobs.get(id);
       if (j?.pushTimer != null) clearTimeout(j.pushTimer);
       jobs.delete(id);

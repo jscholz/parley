@@ -26,6 +26,8 @@ export { handleSidekickMessage } from './messages.ts';
 export { handleSidekickUpload } from './upload.ts';
 export {
   handleCaptureCreate,
+  handleCaptureActivate,
+  handleCaptureAbortStart,
   handleCaptureSegment,
   handleCaptureStop,
   handleCapturePatch,
@@ -33,9 +35,13 @@ export {
   handleCaptureList,
   handleCaptureGet,
   handleCaptureDelete,
+  handleCaptureDiscard,
+  handleCaptureRestore,
+  handleCapturePurge,
   handleCapturePurgeAudio,
   handleCaptureControl,
   listCaptures,
+  sweepCaptures,
 } from './capture.ts';
 export {
   initCaptureTranscription,
