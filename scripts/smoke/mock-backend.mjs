@@ -516,7 +516,7 @@ export async function installMockBackend(page) {
   });
   // Two-phase lifecycle verbs (postmortem 2026-08-18): activate,
   // abort-start, discard, restore, purge. One route, dispatch on tail.
-  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/(activate|abort-start|discard|restore|purge)$/, async (route) => {
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/(activate|abort-start|discard|restore|purge)$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname
       .match(/\/captures\/([^/]+)\/(activate|abort-start|discard|restore|purge)$/);
@@ -568,7 +568,7 @@ export async function installMockBackend(page) {
     captures.delete(cap.id);
     return reply(200, { ok: true, purged: cap.id });
   });
-  await page.route(/.*\/api\/sidekick\/captures\/[^/]+\/segments\/\d+$/, async (route) => {
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/segments\/\d+$/, async (route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     if (captureOutage) {
       return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"outage"}' });

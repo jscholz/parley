@@ -150,7 +150,7 @@ export interface CaptureHooks {
  *  the audit log (postmortem P0 #3: the DELETE handler ignored `_req`,
  *  so the incident's caller is unknowable forever). */
 export interface CaptureActor {
-  /** 'pwa-recorder', 'api', 'sweep', … (x-sidekick-client header). */
+  /** 'pwa-recorder', 'api', 'sweep', … (x-parley-client header). */
   source?: string;
   userAgent?: string;
   remote?: string;
@@ -974,11 +974,17 @@ async function readJson(req: IncomingMessage): Promise<any> {
 }
 
 /** Caller identity for the audit log (postmortem P0 #3: handlers must
- *  stop ignoring `_req`). `x-sidekick-client` is the cooperative
+ *  stop ignoring `_req`). `x-parley-client` is the cooperative
  *  self-identification header the PWA recorder sends; UA + remote are
- *  what the transport knows regardless. */
+ *  what the transport knows regardless.
+ *
+ *  Rename note (2026-08): the legacy `x-sidekick-client` spelling is
+ *  still accepted. This header is only ever read for attribution, so
+ *  an installed pre-rename bundle must keep identifying as
+ *  'pwa-recorder' rather than silently degrading to 'api' — the
+ *  incident's core failure was an UNATTRIBUTABLE delete. */
 function actorFromReq(req: IncomingMessage, reason?: string): CaptureActor {
-  const src = req.headers['x-sidekick-client'];
+  const src = req.headers['x-parley-client'] ?? req.headers['x-sidekick-client'];
   const fwd = req.headers['x-forwarded-for'];
   return {
     source: typeof src === 'string' && src ? src : 'api',

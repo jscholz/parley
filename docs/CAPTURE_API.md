@@ -45,7 +45,7 @@ and retro-transcribable.
 Every lifecycle transition is recorded in an **append-only audit log**
 (`<capturesDir>/audit.log`, JSONL) that lives outside the capture
 directories and survives purge: event id, timestamp, action, reason,
-caller (send `x-sidekick-client: <name>` to self-identify; user-agent
+caller (send `x-parley-client: <name>` to self-identify (legacy `x-sidekick-client` still accepted); user-agent
 and remote address are recorded regardless), prior→new status, and
 pre-action segment/byte counts.
 
@@ -198,7 +198,7 @@ reads transcripts natively — that's the backend-neutrality trick.
 
 ## Writing your own capture client
 
-1. `POST /captures` (keep the id). Send an `x-sidekick-client` header
+1. `POST /captures` (keep the id). Send an `x-parley-client` header
    so the audit log can name you.
 2. Start your recorder. Once it is REALLY running, `POST /activate`
    (skip it and your first segment activates implicitly — but then the

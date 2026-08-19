@@ -31,7 +31,7 @@ export interface CaptureAuditEvent {
    *  rejected", "retention window elapsed", …). */
   reason?: string;
   /** Caller identity: 'pwa-recorder', 'api', 'sweep', … (from the
-   *  x-sidekick-client header when the caller is HTTP). */
+   *  x-parley-client header when the caller is HTTP). */
   source?: string;
   user_agent?: string;
   /** Remote address / x-forwarded-for of the HTTP caller. */

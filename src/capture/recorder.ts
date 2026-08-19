@@ -71,7 +71,7 @@ const LOCAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  *  again). */
 function lifecycleHeaders(json = false): Record<string, string> {
   return {
-    'x-sidekick-client': 'pwa-recorder',
+    'x-parley-client': 'pwa-recorder',
     ...(json ? { 'content-type': 'application/json' } : {}),
   };
 }
@@ -536,7 +536,7 @@ export async function cancelMeetingCapture(): Promise<void> {
     const res = await fetch(apiUrl(`/api/parley/captures/${captureId}/discard`), {
       method: 'POST',
       headers: lifecycleHeaders(true),
-      // Machine-readable reason + x-sidekick-client identity: the
+      // Machine-readable reason + x-parley-client identity: the
       // audit log must answer "who discarded this, and why" (the
       // incident's DELETE was unattributable).
       body: JSON.stringify({ reason: 'user_discard_pill' }),

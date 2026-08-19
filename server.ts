@@ -1250,29 +1250,29 @@ const requestHandler: http.RequestListener = async (req, res) => {
     // purge are the recoverable deletion lane — the generic DELETE
     // below rejects anything live or segment-bearing.
     const capActivate = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/activate$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/activate$/);
     if (capActivate) {
-      return sidekick.handleCaptureActivate(req, res, capActivate[1]);
+      return parley.handleCaptureActivate(req, res, capActivate[1]);
     }
     const capAbortStart = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/abort-start$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/abort-start$/);
     if (capAbortStart) {
-      return sidekick.handleCaptureAbortStart(req, res, capAbortStart[1]);
+      return parley.handleCaptureAbortStart(req, res, capAbortStart[1]);
     }
     const capDiscard = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/discard$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/discard$/);
     if (capDiscard) {
-      return sidekick.handleCaptureDiscard(req, res, capDiscard[1]);
+      return parley.handleCaptureDiscard(req, res, capDiscard[1]);
     }
     const capRestore = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/restore$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/restore$/);
     if (capRestore) {
-      return sidekick.handleCaptureRestore(req, res, capRestore[1]);
+      return parley.handleCaptureRestore(req, res, capRestore[1]);
     }
     const capPurgeAll = req.method === 'POST'
-      && req.url.match(/^\/api\/sidekick\/captures\/([^/]+)\/purge$/);
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/purge$/);
     if (capPurgeAll) {
-      return sidekick.handleCapturePurge(req, res, capPurgeAll[1]);
+      return parley.handleCapturePurge(req, res, capPurgeAll[1]);
     }
     const capMark = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/marks$/);
