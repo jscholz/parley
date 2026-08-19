@@ -45,8 +45,9 @@ and retro-transcribable.
 Every lifecycle transition is recorded in an **append-only audit log**
 (`<capturesDir>/audit.log`, JSONL) that lives outside the capture
 directories and survives purge: event id, timestamp, action, reason,
-caller (send `x-parley-client: <name>` to self-identify (legacy `x-sidekick-client` still accepted); user-agent
-and remote address are recorded regardless), prior→new status, and
+caller (send `x-parley-client: <name>` to self-identify — the legacy
+`x-sidekick-client` spelling is still accepted; user-agent and remote
+address are recorded regardless), prior→new status, and
 pre-action segment/byte counts.
 
 ## Endpoints
@@ -95,6 +96,9 @@ byte-sliced stream). Headers:
 | `Content-Type` | segment mime (`audio/mp4`, `audio/webm`, `audio/wav`) |
 | `x-parley-t0-ms` | capture-relative start of this segment, ms |
 | `x-parley-sha256` | optional integrity hash; mismatch → `409` (retry) |
+
+Both segment headers also accept their legacy `x-sidekick-*` spelling,
+so a client built before the Parley rename keeps working unchanged.
 
 Idempotent: re-uploading the same bytes acks `{duplicate: true}` —
 safe-by-construction for at-least-once uploaders (delete your durable
