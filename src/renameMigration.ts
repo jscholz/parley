@@ -98,12 +98,17 @@ function openRaw(
   });
 }
 
-function deleteDb(name: string): Promise<void> {
+/** Delete a database. Resolves TRUE only when the delete actually
+ *  happened. `blocked` (another tab/connection holds it open) and
+ *  `error` resolve FALSE: the caller must not assume a clean slate —
+ *  proceeding on a surviving DB is what wedged boot (see the
+ *  verifyStores bail-out in copyDatabase). */
+function deleteDb(name: string): Promise<boolean> {
   return new Promise((resolve) => {
     const req = indexedDB.deleteDatabase(name);
-    req.onsuccess = () => resolve();
-    req.onerror = () => resolve(); // best-effort
-    req.onblocked = () => resolve();
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => resolve(false);
+    req.onblocked = () => resolve(false);
   });
 }
 
@@ -138,18 +143,28 @@ function copyStore(oldDb: IDBDatabase, newDb: IDBDatabase, shape: StoreShape): P
     const keysReq = rst.getAllKeys();
     rtx.onerror = () => reject(rtx.error ?? new Error(`read ${shape.name} failed`));
     rtx.oncomplete = () => {
-      const values = valuesReq.result || [];
-      const keys = keysReq.result || [];
-      const wtx = newDb.transaction(shape.name, 'readwrite');
-      const wst = wtx.objectStore(shape.name);
-      for (let i = 0; i < values.length; i++) {
-        // Out-of-line keys (no keyPath) must be carried explicitly so
-        // autoIncrement ids survive the copy.
-        if (shape.keyPath == null) wst.put(values[i], keys[i]);
-        else wst.put(values[i]);
+      // EVERYTHING in here runs in an IDB event callback, NOT in the
+      // Promise executor — a synchronous throw (e.g. newDb.transaction()
+      // on a missing store) would escape as an uncaught error AND leave
+      // this promise unsettled forever, hanging the awaiting migration
+      // and with it the whole of boot(). That is a permanent white
+      // screen, not a logged warning. Never let this block throw.
+      try {
+        const values = valuesReq.result || [];
+        const keys = keysReq.result || [];
+        const wtx = newDb.transaction(shape.name, 'readwrite');
+        const wst = wtx.objectStore(shape.name);
+        for (let i = 0; i < values.length; i++) {
+          // Out-of-line keys (no keyPath) must be carried explicitly so
+          // autoIncrement ids survive the copy.
+          if (shape.keyPath == null) wst.put(values[i], keys[i]);
+          else wst.put(values[i]);
+        }
+        wtx.oncomplete = () => resolve();
+        wtx.onerror = () => reject(wtx.error ?? new Error(`write ${shape.name} failed`));
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
       }
-      wtx.oncomplete = () => resolve();
-      wtx.onerror = () => reject(wtx.error ?? new Error(`write ${shape.name} failed`));
     };
   });
 }
@@ -178,12 +193,21 @@ function readMigrationDone(db: IDBDatabase): Promise<boolean> {
   });
 }
 
+/** Guarded like readMigrationDone: `db.transaction()` throws
+ *  synchronously when the store is absent, and callers must get a
+ *  rejected promise rather than a raw throw. Reaching this with no
+ *  marker store means the DB was NOT the one our upgrade built — a
+ *  real anomaly, so it rejects loudly instead of silently no-oping. */
 function writeMigrationDone(db: IDBDatabase): Promise<void> {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(MIGRATION_META_STORE, 'readwrite');
-    tx.objectStore(MIGRATION_META_STORE).put({ at: Date.now() }, 'done');
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('migration done-mark failed'));
+    try {
+      const tx = db.transaction(MIGRATION_META_STORE, 'readwrite');
+      tx.objectStore(MIGRATION_META_STORE).put({ at: Date.now() }, 'done');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('migration done-mark failed'));
+    } catch (e) {
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
   });
 }
 
@@ -210,7 +234,14 @@ async function copyDatabase(oldName: string, newName: string): Promise<string> {
   } else {
     probeNew.db.close();
   }
-  await deleteDb(newName); // remove the probe artifact / half-copy
+  // The clean slate must be REAL. deleteDatabase() is a no-op when
+  // another tab (or an app module that already opened the new name)
+  // holds a connection: it fires onblocked and we used to sail on,
+  // then opened that surviving DB at the same version — so our
+  // createObjectStore upgrade never ran and the copy wrote into a DB
+  // with no stores. Bail out instead and retry on a later boot; the
+  // legacy DB is untouched, so nothing is lost by waiting.
+  if (!await deleteDb(newName)) return 'retry-blocked';
 
   // Probe the old name. If the probe created it, there is nothing to
   // migrate — clean up the accidental empty DB.
@@ -236,6 +267,22 @@ async function copyDatabase(oldName: string, newName: string): Promise<string> {
       // Interruption forensics — see MIGRATION_META_STORE docstring.
       db.createObjectStore(MIGRATION_META_STORE);
     });
+    // Verify we are writing into the database our own upgrade built.
+    // If any expected store is missing, this is somebody else's DB
+    // (a delete that silently didn't happen, a racing tab) — writing
+    // into it would either throw mid-copy or, worse, half-populate
+    // app data. Leave BOTH databases exactly as they are and retry on
+    // a later boot.
+    const missing = [...structure.map((s) => s.name), MIGRATION_META_STORE]
+      .filter((n) => !newDb.objectStoreNames.contains(n));
+    if (missing.length > 0) {
+      newDb.close();
+      console.warn(
+        `[parley] IndexedDB migration ${oldName} -> ${newName} aborted: target DB is missing `
+        + `${missing.join(', ')} — not ours to write. Retrying next boot.`,
+      );
+      return 'retry-not-ours';
+    }
     try {
       for (const s of structure) await copyStore(oldDb, newDb, s);
       // Commit the done-mark LAST: its absence is what lets the next
@@ -265,7 +312,14 @@ export async function migrateIndexedDbDatabases(storage: StorageLike): Promise<v
     } catch { /* private mode */ }
     try {
       const status = await copyDatabase(oldName, newName);
-      try { storage.setItem(flag, status); } catch { /* private mode */ }
+      // 'retry-*' verdicts are NOT terminal: something transient (a
+      // second tab, a blocked delete) stopped us from owning the
+      // target. Flagging them would skip this DB on every later boot
+      // and strand the legacy data forever — the exact failure the
+      // marker store exists to prevent. Leave the flag unset.
+      if (!status.startsWith('retry-')) {
+        try { storage.setItem(flag, status); } catch { /* private mode */ }
+      }
       if (status === 'copied') {
         console.info(`[parley] migrated IndexedDB ${oldName} -> ${newName}`);
       }
