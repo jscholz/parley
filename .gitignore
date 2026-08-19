@@ -28,3 +28,9 @@ __pycache__/
 /server.mjs
 # Auto-generated self-signed certs (scripts/https-cert.mjs).
 /.certs/
+
+# Virtualenvs are local, never tracked (2026-08-19: a tracked self-
+# referential .venv symlink landed in the rename sweep and its checkout
+# destroyed the audio-bridge venv, taking voice input down).
+.venv/
+**/.venv
