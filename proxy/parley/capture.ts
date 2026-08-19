@@ -196,7 +196,8 @@ let capturesDirOverride: string | null = null;
 /** Test seam + explicit boot configuration. Production resolution
  *  order: PARLEY_CAPTURES_DIR (Jonathan points this at his agent
  *  workspace so hermes reads transcripts as plain files) → the
- *  parley data home (`PARLEY_HOME`, else ~/.sidekick) /captures. */
+ *  parley data home (dataHome(): PARLEY_HOME, else ~/.parley, else an
+ *  existing ~/.sidekick) /captures. */
 export function initCapture(opts?: { dir?: string }): void {
   capturesDirOverride = opts?.dir ?? null;
 }

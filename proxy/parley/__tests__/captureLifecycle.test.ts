@@ -34,7 +34,7 @@ import { readCaptureAudit } from '../captureAudit.ts';
 let dir = '';
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidekick-caplife-test-'));
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'parley-caplife-test-'));
   initCapture({ dir });
 });
 
