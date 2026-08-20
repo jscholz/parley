@@ -107,7 +107,7 @@ import contextlib
 import json
 import logging
 import os
-from .parley_env import env_get
+from .parley_env import bridge_legacy_env, env_get
 import re
 import secrets
 import socket as _socket
@@ -2883,6 +2883,16 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
        connect(); when no adapter is live the callbacks are silent
        no-ops.
     """
+    # These two are handed to hermes as NAMES; its authz path does a raw
+    # os.getenv on them, so env_get's legacy fallback never runs for them.
+    # Bridge the old spelling forward first — otherwise an upgraded
+    # deployment whose .env still says SIDEKICK_PLATFORM_ALLOW_ALL_USERS
+    # default-denies every chat and locks the owner out behind pairing
+    # codes (2026-08-20 incident).
+    bridge_legacy_env(
+        "PARLEY_PLATFORM_ALLOW_ALL_USERS",
+        "PARLEY_PLATFORM_ALLOWED_USERS",
+    )
     try:
         ctx.register_platform(
             name="sidekick",

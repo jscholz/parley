@@ -22,7 +22,7 @@ keep the three in sync.
 from __future__ import annotations
 
 import os
-from typing import Mapping, Optional
+from typing import List, Mapping, MutableMapping, Optional
 
 _NEW_PREFIX = "PARLEY_"
 _LEGACY_PREFIX = "SIDEKICK_"
@@ -51,3 +51,31 @@ def env_is_set(name: str, *, environ: Optional[Mapping[str, str]] = None) -> boo
     """True when either spelling is defined."""
     sentinel = object()
     return env_get(name, sentinel, environ=environ) is not sentinel
+
+
+def bridge_legacy_env(*names: str, environ: Optional[MutableMapping[str, str]] = None) -> List[str]:
+    """Materialize legacy ``SIDEKICK_*`` values under their ``PARLEY_*`` names.
+
+    ``env_get`` covers every var the plugin reads itself, but some values
+    are consumed by code we hand a var *name* to rather than a value —
+    notably hermes' platform registry (``allow_all_env=`` /
+    ``allowed_users_env=``), which stores the string and later does a raw
+    ``os.getenv`` on it. That lookup never routes through ``env_get``, so
+    the legacy spelling is invisible to it.
+
+    Copy the old value forward at startup so an upgraded deployment whose
+    ``.env`` still says ``SIDEKICK_PLATFORM_ALLOW_ALL_USERS`` keeps
+    working. Without this, hermes finds the declared name unset, falls
+    through to default-deny, and locks the owner out of every chat behind
+    pairing codes (2026-08-20 incident). Returns the names bridged.
+    """
+    env = os.environ if environ is None else environ
+    bridged: List[str] = []
+    for name in names:
+        if name in env:
+            continue
+        legacy = legacy_env_name(name)
+        if legacy is not None and legacy in env:
+            env[name] = env[legacy]
+            bridged.append(name)
+    return bridged

@@ -47,3 +47,38 @@ def test_env_is_set_for_either_spelling():
     assert env_is_set("PARLEY_TEST_GUARD", environ={"SIDEKICK_TEST_GUARD": "1"})
     assert env_is_set("PARLEY_TEST_GUARD", environ={"PARLEY_TEST_GUARD": ""})
     assert not env_is_set("PARLEY_TEST_GUARD", environ={})
+
+
+# ── bridge_legacy_env (2026-08-20 pairing-lockout regression) ──────────
+#
+# hermes' platform registry is handed env var NAMES and later does a raw
+# os.getenv on them, so env_get's fallback never runs for those. The
+# rename changed the declared name to PARLEY_PLATFORM_ALLOW_ALL_USERS
+# while deployed .env files still said SIDEKICK_* — hermes read the new
+# name, found nothing, default-denied, and locked the owner out of every
+# chat behind pairing codes.
+
+def test_bridge_legacy_env_copies_legacy_value_forward():
+    from backends.hermes.plugin.parley_env import bridge_legacy_env
+    env = {"SIDEKICK_PLATFORM_ALLOW_ALL_USERS": "true"}
+    bridged = bridge_legacy_env("PARLEY_PLATFORM_ALLOW_ALL_USERS", environ=env)
+    # A raw getenv-style lookup on the NEW name must now succeed.
+    assert env["PARLEY_PLATFORM_ALLOW_ALL_USERS"] == "true"
+    assert bridged == ["PARLEY_PLATFORM_ALLOW_ALL_USERS"]
+
+
+def test_bridge_legacy_env_never_clobbers_an_explicit_new_name():
+    from backends.hermes.plugin.parley_env import bridge_legacy_env
+    env = {
+        "PARLEY_PLATFORM_ALLOW_ALL_USERS": "false",
+        "SIDEKICK_PLATFORM_ALLOW_ALL_USERS": "true",
+    }
+    assert bridge_legacy_env("PARLEY_PLATFORM_ALLOW_ALL_USERS", environ=env) == []
+    assert env["PARLEY_PLATFORM_ALLOW_ALL_USERS"] == "false"
+
+
+def test_bridge_legacy_env_noop_when_neither_spelling_is_set():
+    from backends.hermes.plugin.parley_env import bridge_legacy_env
+    env = {}
+    assert bridge_legacy_env("PARLEY_PLATFORM_ALLOW_ALL_USERS", environ=env) == []
+    assert env == {}
