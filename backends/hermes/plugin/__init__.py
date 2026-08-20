@@ -2892,6 +2892,11 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
     bridge_legacy_env(
         "PARLEY_PLATFORM_ALLOW_ALL_USERS",
         "PARLEY_PLATFORM_ALLOWED_USERS",
+        # Also declared (required_env=) and read back by the hermes CLI's
+        # setup/status views via get_env_value — cosmetic rather than an
+        # authz gate, but it makes `hermes gateway status` report Parley
+        # as unconfigured on a host that still exports the legacy name.
+        "PARLEY_PLATFORM_TOKEN",
     )
     try:
         ctx.register_platform(
