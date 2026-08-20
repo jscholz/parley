@@ -42,7 +42,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  */
 
 const config: CapacitorConfig = {
-  appId: 'com.reimaginerobotics.sidekick',
+  appId: 'com.jscholz.parley',
   appName: 'Parley',
   webDir: 'mobile/webdir',
   ios: { path: 'mobile/ios' },
