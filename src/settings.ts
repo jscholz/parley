@@ -1377,11 +1377,18 @@ export function hydrate(handlers: {
       // without a custom UIDelegate handler, AND the action itself
       // is benign (saved URL is preserved as the default in the
       // bootstrap form). One tap = reset.
-      const handler = (window as any).webkit?.messageHandlers?.sidekickReset;
+      // The native handler is named parleyReset as of 2026-08-20. The
+      // web bundle updates the instant the proxy redeploys, but the
+      // NATIVE side only changes on an app rebuild+reinstall — so an
+      // installed older binary still listens on sidekickReset. Try the
+      // new name, fall back to the legacy one, and this fallback can be
+      // deleted once the rebuilt app is installed everywhere.
+      const handlers = (window as any).webkit?.messageHandlers;
+      const handler = handlers?.parleyReset ?? handlers?.sidekickReset;
       log(`[settings] reset-server tap (handler=${!!handler})`);
       if (handler && typeof handler.postMessage === 'function') {
         try { handler.postMessage({}); }
-        catch (e: any) { console.warn('[settings] sidekickReset postMessage failed:', e?.message || e); }
+        catch (e: any) { console.warn('[settings] parleyReset postMessage failed:', e?.message || e); }
       } else {
         // No bridge — likely a misconfigured Cap build (or developer
         // pointed Cap at a URL that bypasses the bundled bootstrap).

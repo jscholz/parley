@@ -10,8 +10,7 @@
     "url": "git+https://github.com/jscholz/parley.git"
   },
   "bin": {
-    "parleyvoo": "bin/cli.mjs",
-    "sidekick-portal": "bin/cli.mjs"
+    "parleyvoo": "bin/cli.mjs"
   },
   "files": [
     "bin/",

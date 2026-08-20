@@ -24,7 +24,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Configure the shared AVAudioSession early so TTS playback + the
         // silent keepalive survive backgrounding. We launch in PLAYBACK,
         // not .playAndRecord:
-        //   - Field bug: opening Sidekick while a podcast streamed over
+        //   - Field bug: opening Parley while a podcast streamed over
         //     Bluetooth A2DP (Meta glasses) dropped the BT route to the
         //     mono call codec (HFP/SCO) and degraded the podcast — even
         //     though the user never started a call/dictate/listen. Cause:
@@ -52,7 +52,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         //   - .defaultToSpeaker: with no headset attached, output goes to
         //     the loudspeaker rather than the earpiece during capture.
         //   - .mixWithOthers: don't kill other apps' audio (Spotify,
-        //     podcast app, navigation). Sidekick coexists.
+        //     podcast app, navigation). Parley coexists.
         // Pairs with the UIBackgroundModes=[audio] entry in Info.plist —
         // without that, iOS suspends the AVAudioSession on backgrounding
         // regardless of the category we set.
@@ -97,9 +97,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             if activate {
                 try session.setActive(true)
             }
-            NSLog("[Sidekick] AVAudioSession category=\(desired == .playAndRecord ? "playAndRecord" : "playback") active=\(activate)")
+            NSLog("[Parley] AVAudioSession category=\(desired == .playAndRecord ? "playAndRecord" : "playback") active=\(activate)")
         } catch {
-            NSLog("[Sidekick] AVAudioSession apply failed: \(error.localizedDescription)")
+            NSLog("[Parley] AVAudioSession apply failed: \(error.localizedDescription)")
         }
     }
 
@@ -114,14 +114,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let player = AVAudioPlayerNode()
         engine.attach(player)
         guard let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1) else {
-            NSLog("[Sidekick] keepalive: failed to create audio format")
+            NSLog("[Parley] keepalive: failed to create audio format")
             return
         }
         engine.connect(player, to: engine.mainMixerNode, format: format)
 
         let frameCount: AVAudioFrameCount = 44100  // 1 second @ 44.1kHz
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            NSLog("[Sidekick] keepalive: failed to allocate silent buffer")
+            NSLog("[Parley] keepalive: failed to allocate silent buffer")
             return
         }
         buffer.frameLength = frameCount
@@ -133,9 +133,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             player.play()
             self.keepaliveEngine = engine
             self.keepalivePlayer = player
-            NSLog("[Sidekick] silent keepalive started (44.1kHz mono, looping)")
+            NSLog("[Parley] silent keepalive started (44.1kHz mono, looping)")
         } catch {
-            NSLog("[Sidekick] keepalive engine start failed: \(error.localizedDescription)")
+            NSLog("[Parley] keepalive engine start failed: \(error.localizedDescription)")
         }
     }
 
@@ -145,9 +145,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
               let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
         switch type {
         case .began:
-            NSLog("[Sidekick] audio interruption began (phone call / Siri / etc.)")
+            NSLog("[Parley] audio interruption began (phone call / Siri / etc.)")
         case .ended:
-            NSLog("[Sidekick] audio interruption ended — reasserting category + keepalive")
+            NSLog("[Parley] audio interruption ended — reasserting category + keepalive")
             // Re-assert the CURRENT desired category (not unconditionally
             // .playAndRecord) so an interruption while at rest doesn't drag
             // Bluetooth back onto the HFP codec.
@@ -165,7 +165,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         guard let info = notif.userInfo,
               let reasonRaw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
-        NSLog("[Sidekick] audio route changed (reason: \(reason.rawValue))")
+        NSLog("[Parley] audio route changed (reason: \(reason.rawValue))")
         // Headphone unplug = .oldDeviceUnavailable — iOS may auto-pause us.
         // BT (dis)connect = .newDeviceAvailable / .oldDeviceUnavailable.
         // Re-assert the CURRENT desired category (.playback at rest) + nudge
@@ -217,9 +217,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 // MARK: - Lock-screen Now Playing integration
 
 /// Singleton owning the lock-screen / Control-Center Now Playing widget.
-/// Widget appears with the Sidekick brand + dark icon while the audio
+/// Widget appears with the Parley brand + dark icon while the audio
 /// session is active. The four MPRemoteCommandCenter callbacks fire
-/// JS-side `sidekick:remote-control` events via webView.evaluateJS.
+/// JS-side `parley:remote-control` events via webView.evaluateJS.
 /// JS subscribes (src/remoteControl.ts) and dispatches the matching
 /// action — stop hangs up active call, play/pause toggles agent TTS.
 /// Bluetooth headset transport buttons (BT play/pause/skip) route
@@ -239,7 +239,7 @@ final class CallControls {
     /// reach JS yet).
     var webViewProvider: (() -> WKWebView?)?
 
-    func setActive(title: String = "Sidekick", subtitle: String = "Agent ready") {
+    func setActive(title: String = "Parley", subtitle: String = "Agent ready") {
         registerRemoteCommandsIfNeeded()
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
@@ -256,13 +256,13 @@ final class CallControls {
         }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         UIApplication.shared.beginReceivingRemoteControlEvents()
-        NSLog("[Sidekick] Now Playing set: \(title) — \(subtitle)")
+        NSLog("[Parley] Now Playing set: \(title) — \(subtitle)")
     }
 
     func clear() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         UIApplication.shared.endReceivingRemoteControlEvents()
-        NSLog("[Sidekick] Now Playing cleared")
+        NSLog("[Parley] Now Playing cleared")
     }
 
     /// Forward a remote-control action to JS as a custom event. Best-
@@ -270,22 +270,22 @@ final class CallControls {
     /// log and return success to iOS (returning .commandFailed makes
     /// the lockscreen flash a "failed" indicator which is worse UX).
     private func postRemoteAction(_ action: String) {
-        NSLog("[Sidekick] remote: \(action) — forwarding to JS")
+        NSLog("[Parley] remote: \(action) — forwarding to JS")
         guard let webView = webViewProvider?() else {
-            NSLog("[Sidekick] remote: \(action) — no webView, dropping")
+            NSLog("[Parley] remote: \(action) — no webView, dropping")
             return
         }
         // Build the JS expression. Action names are hardcoded constants
         // so no escaping concerns; if that ever changes, switch to
         // JSONSerialization. CustomEvent + window.dispatchEvent matches
-        // the existing sidekick:engine-changed / hotkeys-changed pattern.
+        // the existing parley:engine-changed / hotkeys-changed pattern.
         let js = """
-        window.dispatchEvent(new CustomEvent('sidekick:remote-control', { detail: { action: '\(action)' } }));
+        window.dispatchEvent(new CustomEvent('parley:remote-control', { detail: { action: '\(action)' } }));
         """
         DispatchQueue.main.async {
             webView.evaluateJavaScript(js) { _, err in
                 if let err = err {
-                    NSLog("[Sidekick] remote: \(action) — JS dispatch failed: \(err)")
+                    NSLog("[Parley] remote: \(action) — JS dispatch failed: \(err)")
                 }
             }
         }

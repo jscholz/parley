@@ -5,7 +5,7 @@ import AVFoundation
 /// Owns the app's *desired* AVAudioSession category and flips it on demand.
 ///
 /// Why this exists: the app launches in `.playback` (output-only,
-/// A2DP-friendly) so opening Sidekick while a podcast streams over
+/// A2DP-friendly) so opening Parley while a podcast streams over
 /// Bluetooth A2DP does NOT drag the BT route onto the low-sample HFP/SCO
 /// call codec. A record-capable category (`.playAndRecord`) forces BT to
 /// HFP the instant the session activates, even with `.allowBluetoothA2DP`
@@ -64,9 +64,9 @@ final class AudioSessionController {
                     options: AudioSessionController.options(for: category)
                 )
                 try session.setActive(true)
-                NSLog("[Sidekick] AudioSession flipped to \(category == .playAndRecord ? "playAndRecord" : "playback")")
+                NSLog("[Parley] AudioSession flipped to \(category == .playAndRecord ? "playAndRecord" : "playback")")
             } catch {
-                NSLog("[Sidekick] AudioSession flip to \(category.rawValue) failed: \(error.localizedDescription)")
+                NSLog("[Parley] AudioSession flip to \(category.rawValue) failed: \(error.localizedDescription)")
             }
         }
         if Thread.isMainThread {

@@ -18,7 +18,7 @@ import WebKit
 /// Subclass the Capacitor bridge view controller so we own the WKUIDelegate.
 /// The default Main.storyboard already instantiates `CAPBridgeViewController`;
 /// we re-point it at this subclass below in didFinishLaunching.
-class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScriptMessageHandler {
+class ParleyBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScriptMessageHandler {
 
     /// Cap-specific JS+CSS injected at document_start so the PWA core
     /// (index.html, styles/app.css) has zero Capacitor-conditional code.
@@ -117,7 +117,7 @@ class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScr
         // .atDocumentStart so the body class + viewport meta are in place
         // before the PWA's main bundle parses + the first paint happens.
         let userScript = WKUserScript(
-            source: SidekickBridgeViewController.capOverlayScript,
+            source: ParleyBridgeViewController.capOverlayScript,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         )
@@ -131,27 +131,27 @@ class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScr
             self?.bridge?.webView
         }
         // Reset-server bridge: the in-app "Reset Server URL" button
-        // posts a webkit.messageHandlers.sidekickReset message. We
+        // posts a webkit.messageHandlers.parleyReset message. We
         // can't navigate JS-side from an HTTPS origin back to
         // capacitor:// scheme (Cap blocks it for security), so the
         // native side must perform the load. JS posts → we receive
         // → load the bundled bootstrap with ?config=1 to force the
         // form display.
-        webView.configuration.userContentController.add(self, name: "sidekickReset")
+        webView.configuration.userContentController.add(self, name: "parleyReset")
     }
 
     // MARK: - WKScriptMessageHandler
     //
     // Single dispatch for all named messages from the bundled JS.
-    // Today only `sidekickReset` is registered; future bridges can
+    // Today only `parleyReset` is registered; future bridges can
     // add more named handlers in capacitorDidLoad().
     func userContentController(_ userContentController: WKUserContentController,
                                 didReceive message: WKScriptMessage) {
         switch message.name {
-        case "sidekickReset":
-            handleSidekickReset()
+        case "parleyReset":
+            handleParleyReset()
         default:
-            NSLog("[Sidekick] unknown JS message: \(message.name)")
+            NSLog("[Parley] unknown JS message: \(message.name)")
         }
     }
 
@@ -161,9 +161,9 @@ class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScr
     /// reinstalling the app. The ?config=1 query param tells the
     /// bootstrap to suppress its auto-redirect even when a saved URL
     /// is present, and pre-fill the field with the prior choice.
-    private func handleSidekickReset() {
+    private func handleParleyReset() {
         guard let webView = self.bridge?.webView else {
-            NSLog("[Sidekick] sidekickReset: no webView")
+            NSLog("[Parley] parleyReset: no webView")
             return
         }
         // The bundled webDir lands as `public/` inside the .app at
@@ -171,14 +171,14 @@ class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScr
         // is the entry point we want.
         guard let bundleURL = Bundle.main.url(forResource: "public/index",
                                                withExtension: "html") else {
-            NSLog("[Sidekick] sidekickReset: bundled index.html not found in app")
+            NSLog("[Parley] parleyReset: bundled index.html not found in app")
             return
         }
         // Append the query param. URLComponents handles the encoding.
         var components = URLComponents(url: bundleURL, resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "config", value: "1")]
         guard let target = components?.url else {
-            NSLog("[Sidekick] sidekickReset: URLComponents failed")
+            NSLog("[Parley] parleyReset: URLComponents failed")
             return
         }
         DispatchQueue.main.async {
@@ -186,7 +186,7 @@ class SidekickBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScr
             // bootstrap can load any sibling assets it might add later.
             let readDir = bundleURL.deletingLastPathComponent()
             webView.loadFileURL(target, allowingReadAccessTo: readDir)
-            NSLog("[Sidekick] sidekickReset: loaded bootstrap with ?config=1")
+            NSLog("[Parley] parleyReset: loaded bootstrap with ?config=1")
         }
     }
 
