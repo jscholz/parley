@@ -1,39 +1,32 @@
-"""Unit tests for the audio-bridge copy of the PARLEY_*/SIDEKICK_* env
-compat shim (audio-bridge/parley_env.py).
+"""Unit tests for the audio-bridge copy of the PARLEY_* env accessor.
 
-The live parley-audio (né sidekick-audio) systemd unit still exports
-legacy SIDEKICK_AUDIO_* / SIDEKICK_PROXY_URL spellings; the fallback
-keeps the bridge booting against those. Contract: new name wins, old
-honored, presence-based.
+Historical note: the SIDEKICK_* legacy fallback met its documented
+removal condition in the 2026-08 identity purge (every deployment
+surface exports PARLEY_*) and was deleted. Keep this copy in sync with
+backends/hermes/plugin/parley_env.py and proxy/env.mjs.
 """
 
-from __future__ import annotations
-
+import os
 import sys
-from pathlib import Path
 
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from parley_env import env_get, env_is_set, legacy_env_name  # noqa: E402
+from parley_env import env_get, env_is_set  # noqa: E402
 
 
-def test_legacy_name_only_is_honored():
-    env = {"SIDEKICK_AUDIO_PORT": "8643"}
-    assert env_get("PARLEY_AUDIO_PORT", environ=env) == "8643"
+def test_set_returns_value():
+    assert env_get("PARLEY_AUDIO_PORT", environ={"PARLEY_AUDIO_PORT": "8643"}) == "8643"
 
 
-def test_both_set_new_name_wins():
-    env = {"PARLEY_PROXY_URL": "http://new:3001", "SIDEKICK_PROXY_URL": "http://old:3001"}
-    assert env_get("PARLEY_PROXY_URL", environ=env) == "http://new:3001"
+def test_unset_returns_default():
+    assert env_get("PARLEY_NOPE", environ={}) is None
+    assert env_get("PARLEY_NOPE", "dflt", environ={}) == "dflt"
 
 
-def test_neither_set_returns_default():
-    assert env_get("PARLEY_AUDIO_HOST", "127.0.0.1", environ={}) == "127.0.0.1"
+def test_no_implicit_fallback_between_names():
+    assert env_get("PARLEY_AUDIO_PORT", environ={"SIDEKICK_AUDIO_PORT": "8643"}) is None
 
 
-def test_legacy_env_name_and_is_set():
-    assert legacy_env_name("PARLEY_AUDIO_LOG_FILE") == "SIDEKICK_AUDIO_LOG_FILE"
-    assert legacy_env_name("DEEPGRAM_API_KEY") is None
-    assert env_is_set("PARLEY_BACKEND", environ={"SIDEKICK_BACKEND": "hermes"})
-    assert not env_is_set("PARLEY_BACKEND", environ={})
+def test_env_is_set_presence():
+    assert env_is_set("PARLEY_AUDIO_LOG_FILE", environ={"PARLEY_AUDIO_LOG_FILE": ""})
+    assert not env_is_set("PARLEY_AUDIO_LOG_FILE", environ={})

@@ -23,7 +23,7 @@
 //   PIN_INDEX      which pin to click (default 0)
 //   REPEATS        click count: 1=cold only, 2=cold+warm (default 2)
 //   DRILL_TIMEOUT  ms to wait for bubble visible (default 30000)
-//   PROFILE_DIR    persistent profile (default ~/.sidekick-harness-profile)
+//   PROFILE_DIR    persistent profile (default ~/.parley-harness-profile)
 
 import { chromium } from 'playwright-core';
 import os from 'node:os';
@@ -140,9 +140,9 @@ async function main() {
     );
     if (!pins.length) throw new Error('no pins to drill');
     const target = pins[PIN_INDEX] || pins[0];
-    // Sidebar rows are keyed `sidekick:<uuid>`; pins may store either form.
-    const bareId = String(target.chatId || '').replace(/^sidekick:/, '');
-    const tgtIds = [bareId, `sidekick:${bareId}`];
+    // Sidebar rows are keyed `parley:<uuid>`; pins may store either form.
+    const bareId = String(target.chatId || '').replace(/^parley:/, '');
+    const tgtIds = [bareId, `parley:${bareId}`];
     report.target = target;
 
     for (let run = 0; run < REPEATS; run++) {

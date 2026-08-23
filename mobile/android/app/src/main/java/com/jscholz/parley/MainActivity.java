@@ -1,4 +1,4 @@
-package com.reimaginerobotics.sidekick;
+package com.jscholz.parley;
 
 import com.getcapacitor.BridgeActivity;
 

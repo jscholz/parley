@@ -24,7 +24,7 @@ Marker semantics — a marker row asserts, as of ``migrated_at``:
     content-compatible with (pre-fix positional zips of status
     bubbles / slash-command envelopes onto real transcript rows —
     2026-07-30 flip-prep sweep found 213 across 32 live chats; under
-    the v2 read these only corrupt the sidekick_id annotation, under
+    the v2 read these only corrupt the parley_id annotation, under
     the v3 read they would serve the WRONG BODY at that position).
 
 Both new criteria landed at ``SCHEMA_VERSION`` 2 so already-minted
@@ -65,7 +65,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from .parley_ids import SIDEKICK_SOURCE
+from .parley_ids import PARLEY_SOURCE
 from .parley_state import (
     _classify_replay_duplicate_state_ids,
     _is_compaction_seed,
@@ -159,7 +159,7 @@ def _find_orchestration_mislinks(db, orch_ids: set, chat_id: str) -> List[str]:
 
 
 def heal_orchestration_mislinks_sync(
-    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+    db, state_db_path, chat_id: str, source: str = PARLEY_SOURCE,
 ) -> int:
     """NULL the agent_row_id on every mislinked row — never relink
     here: the follow-up reconcile re-links tr:* by exact call id and
@@ -411,7 +411,7 @@ def _audit_chat_sync(
 
 
 def backfill_chat_sync(
-    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+    db, state_db_path, chat_id: str, source: str = PARLEY_SOURCE,
 ) -> Optional[Dict[str, Any]]:
     """One-time legacy import + marker mint for one chat (worker
     thread only). Sequence: marker short-circuit → mislink heal →
@@ -497,7 +497,7 @@ def backfill_chat_sync(
 
 
 def repair_chat_sync(
-    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+    db, state_db_path, chat_id: str, source: str = PARLEY_SOURCE,
 ) -> Optional[Dict[str, Any]]:
     """OFFLINE repair entry point — transcript v3 Phase 4. With the
     content reconcile retired from the serving chain

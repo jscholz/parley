@@ -54,7 +54,7 @@ export function MOCK_SETUP(mock) {
   for (let i = 0; i < TOTAL_MSGS; i++) {
     const idx = i + 1;  // 1..100
     const role = i % 2 === 0 ? 'user' : 'assistant';
-    // sidekick_id only (string) — the PWA uses this as the DOM dedup
+    // parley_id only (string) — the PWA uses this as the DOM dedup
     // key. We deliberately OMIT `message_id` so the mock falls back
     // to its integer chat-local id (1000+i); pagination cursor
     // (?before=) requires `/^\d+$/` in the proxy/mock contract, so
@@ -62,17 +62,17 @@ export function MOCK_SETUP(mock) {
     // paging (the cursor would round-trip as null and every page
     // would return the same newest slice — caught the hard way
     // running this smoke). Production mirrors this: state.db has
-    // both integer `id` and string `sidekick_id`.
+    // both integer `id` and string `parley_id`.
     messages.push({
       role,
       content: role === 'user' ? `user marker ${idx}` : `agent reply ${idx}`,
-      sidekick_id: `cycle-msg-${idx}`,
+      parley_id: `cycle-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Pin cycle test',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });

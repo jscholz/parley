@@ -12,7 +12,7 @@
 //      multi-platform agent (e.g. hermes) implements it and returns
 //      cross-source rows with `source` + `chat_type` in metadata.
 //   2. On 404 (single-channel agent — stub, raw OAI third-party),
-//      fall back to `/v1/conversations` and stamp `source: 'sidekick'`
+//      fall back to `/v1/conversations` and stamp `source: 'parley'`
 //      on each row so the composer stays editable.
 
 import { getUpstream } from './index.ts';
@@ -95,7 +95,7 @@ export async function handleParleySessionDelete(req, res, chatId: string) {
   const upstream = getUpstream();
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'sidekick_platform_unconfigured' }));
+    res.end(JSON.stringify({ error: 'parley_platform_unconfigured' }));
     return;
   }
   // Same validator as history.ts — accepts cross-platform IDs
@@ -134,7 +134,7 @@ export async function handleParleySessionRename(
   const upstream = getUpstream();
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'sidekick_platform_unconfigured' }));
+    res.end(JSON.stringify({ error: 'parley_platform_unconfigured' }));
     return;
   }
   if (!chatId || !/^[A-Za-z0-9._@:-]{1,128}$/.test(chatId)) {
@@ -229,8 +229,8 @@ function gatewayRowToParleyRow(
   };
 }
 
-/** Channel-only fallback: source defaults to 'sidekick' so the
- *  composer stays editable (`source !== 'sidekick'` => read-only,
+/** Channel-only fallback: source defaults to 'parley' so the
+ *  composer stays editable (`source !== 'parley'` => read-only,
  *  src/main.ts:2446). For single-channel agents (stub / raw OAI
  *  third-party / future openclaw-without-gateway), the agent IS the
  *  parley channel by definition. */
@@ -240,7 +240,7 @@ function channelRowToParleyRow(
   const m = row.metadata;
   return {
     chat_id: row.id,
-    source: 'sidekick',
+    source: 'parley',
     title: m.title,
     message_count: m.message_count,
     turn_count: m.turn_count,

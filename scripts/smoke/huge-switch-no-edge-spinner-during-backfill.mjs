@@ -69,30 +69,30 @@ export function MOCK_SETUP(mock) {
       // NO message_id: the mock uses message_id verbatim as the row id,
       // and a STRING id makes it emit firstId=null (numeric-only
       // cursor) — pagination would be structurally dead and step 4
-      // below (legit scroll-back load) couldn't fire. sidekick_id alone
+      // below (legit scroll-back load) couldn't fire. parley_id alone
       // keeps stable data-keys; the mock auto-assigns numeric ids.
-      sidekick_id: `edge-msg-${idx}`,
+      parley_id: `edge-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL - idx) * 60,
     });
   }
   messages.push({
     role: 'user',
     content: 'EDGE-TAIL-MARKER final question',
-    sidekick_id: 'edge-msg-tail',
+    parley_id: 'edge-msg-tail',
     timestamp: Date.now() / 1000 - 30,
   });
   mock.addChat(HUGE, {
     title: 'Pitch deck (edge spinner)',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(SMALL, {
     title: 'Small sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'EDGE-SMALL-MARKER hello', message_id: 'edge-small-1',
-        sidekick_id: 'edge-small-1', timestamp: Date.now() / 1000 - 40 },
+        parley_id: 'edge-small-1', timestamp: Date.now() / 1000 - 40 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

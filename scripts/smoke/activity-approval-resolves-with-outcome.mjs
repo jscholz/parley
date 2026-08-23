@@ -30,22 +30,22 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(CHAT_ID, {
     title: 'Approval resolution chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_ar_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_ar_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
 }
 
-function approvalEnvelope(sidekickId, reason) {
+function approvalEnvelope(parleyId, reason) {
   return {
     type: 'notification',
     chat_id: CHAT_ID,
     kind: 'approval',
     content:
       '⚠️ Dangerous command requires approval:\n\n' +
-      `printf ${sidekickId}\n\n` +
+      `printf ${parleyId}\n\n` +
       `Reason: ${reason}\n` +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: sidekickId,
+    parley_id: parleyId,
     urgent: true,
   };
 }

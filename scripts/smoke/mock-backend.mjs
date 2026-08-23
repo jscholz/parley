@@ -227,7 +227,7 @@ export async function installMockBackend(page) {
       return {
         chat_id: c.chatId,
         session_id: `mock-${c.chatId}`,
-        source: c.source || 'sidekick',
+        source: c.source || 'parley',
         title: c.title,
         last_active_at: new Date(c.lastActiveAt).toISOString(),
         message_count: messageCount,
@@ -277,7 +277,7 @@ export async function installMockBackend(page) {
     let limit = Math.max(1, Math.min(500, parseInt(url.searchParams.get('limit') || '200', 10)));
     const beforeRaw = url.searchParams.get('before');
     const before = beforeRaw && /^\d+$/.test(beforeRaw) ? parseInt(beforeRaw, 10) : null;
-    // `around=<sidekick_id|integer id>` — one-shot deep-drill BOUNDED
+    // `around=<parley_id|integer id>` — one-shot deep-drill BOUNDED
     // window. Mirrors the plugin (list_messages_around_for_chat_with_
     // state_db_source): a slice CENTERED on the target (context above +
     // below), capped at ~limit rows — payload is O(limit), independent of
@@ -307,12 +307,12 @@ export async function installMockBackend(page) {
         // had `created_at=0` and the bubble rendered at unix 0).
         timestamp: m.timestamp != null ? m.timestamp : (chat.lastActiveAt / 1000),
       };
-      // Mirror the real plugin's surfacing of sidekick_id from
+      // Mirror the real plugin's surfacing of parley_id from
       // parley_msg_links — present when the live SSE round-trip
       // recorded a link, absent for legacy / other-channel rows.
-      // Tests can opt in per-message by setting `sidekick_id` on the
+      // Tests can opt in per-message by setting `parley_id` on the
       // mock chat's message dict.
-      if (m.sidekick_id) out.sidekick_id = m.sidekick_id;
+      if (m.parley_id) out.parley_id = m.parley_id;
       // Tool-call linkage (hermes plugin /items extension, 2026-05-17).
       // role='tool' rows carry tool_call_id referencing back to the
       // assistant message that issued the call. role='assistant'
@@ -341,7 +341,7 @@ export async function installMockBackend(page) {
     // list_messages_around_for_chat_with_state_db_source.
     if (around !== null) {
       const idx = allMessages.findIndex(
-        (m) => String(m.sidekick_id || '') === around || String(m.id) === around,
+        (m) => String(m.parley_id || '') === around || String(m.id) === around,
       );
       let body;
       if (idx < 0) {
@@ -500,7 +500,7 @@ export async function installMockBackend(page) {
       id,
       title: body.title || `Meeting ${new Date().toISOString().slice(0, 10)}`,
       linked_chat: body.linked_chat === 'new'
-        ? `sidekick:mock-capture-${Math.random().toString(16).slice(2, 8)}`
+        ? `parley:mock-capture-${Math.random().toString(16).slice(2, 8)}`
         : (body.linked_chat || null),
       diarize: body.diarize !== false,
       status: 'pending',
@@ -585,7 +585,7 @@ export async function installMockBackend(page) {
       });
     }
     // Legacy-compat gate: a first segment on a pending capture implies
-    // activation (matches proxy/sidekick/capture.ts).
+    // activation (matches proxy/parley/capture.ts).
     if (cap.status === 'pending') {
       cap.status = 'recording';
       cap.activated_at = Date.now();
@@ -604,7 +604,7 @@ export async function installMockBackend(page) {
     const cap = captures.get(m ? m[1] : '');
     captureLifecycle.push({ action: 'stop', id: m ? m[1] : '' });
     // Idempotent; a still-pending capture stays pending (server sweep
-    // fails it in place later) — matches proxy/sidekick/capture.ts.
+    // fails it in place later) — matches proxy/parley/capture.ts.
     if (cap && cap.status === 'recording') { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
@@ -683,20 +683,20 @@ export async function installMockBackend(page) {
       const replyText = `[mock] echo: ${text}`;
       const messageId = `mock-msg-${envelopeId + 1}`;
       // Persist the user+assistant rows with their SSE-shape ids so a
-      // later history-fetch returns sidekick_id matching what the live
+      // later history-fetch returns parley_id matching what the live
       // user_message / reply_final envelopes carried. Without this, the
       // smoke's history endpoint mints synthetic ids that DON'T match
       // the optimistic-bubble or user_message keys — and the smoke
       // silently exercises a different upsert path than production.
       // Reproducing field bug 2026-05-11: the user bubble in production
       // is keyed by umsg_*, the history-replay path ALSO needs to upsert
-      // with umsg_* (via sidekick_id) for the bubble to render after a
+      // with umsg_* (via parley_id) for the bubble to render after a
       // switch-away-and-back clear-and-replay.
       chat.messages.push({
         role: 'user',
         content: text,
         message_id: userMsgId,
-        sidekick_id: userMsgId,
+        parley_id: userMsgId,
         timestamp: Date.now() / 1000,
       });
       chat.lastActiveAt = Date.now();
@@ -736,7 +736,7 @@ export async function installMockBackend(page) {
           role: 'assistant',
           content: replyText,
           message_id: messageId,
-          sidekick_id: messageId,
+          parley_id: messageId,
           timestamp: Date.now() / 1000,
         });
         chat.lastActiveAt = Date.now();
@@ -1237,7 +1237,7 @@ export async function installMockBackend(page) {
     addChat(chatId, opts = {}) {
       chats.set(chatId, {
         chatId,
-        source: opts.source || 'sidekick',
+        source: opts.source || 'parley',
         title: opts.title ?? 'Mock chat',
         messages: opts.messages || [],
         lastActiveAt: opts.lastActiveAt || Date.now(),
@@ -1271,7 +1271,7 @@ export async function installMockBackend(page) {
       if (chat) {
         chat.messages.push({
           role: 'assistant', content: fullText, message_id: id,
-          sidekick_id: id, timestamp: Date.now() / 1000,
+          parley_id: id, timestamp: Date.now() / 1000,
         });
       }
       return id;
@@ -1293,7 +1293,7 @@ export async function installMockBackend(page) {
           role: 'assistant',
           content: text,
           message_id: id,
-          sidekick_id: id,
+          parley_id: id,
           timestamp: Date.now() / 1000,
         });
         chat.lastActiveAt = Date.now();

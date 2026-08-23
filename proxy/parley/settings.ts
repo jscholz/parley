@@ -28,7 +28,7 @@ export async function handleParleySettingsSchema(_req, res) {
   const upstream = getUpstream();
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'sidekick_platform_unconfigured' }));
+    res.end(JSON.stringify({ error: 'parley_platform_unconfigured' }));
     return;
   }
   let schema;
@@ -60,7 +60,7 @@ export async function handleParleySettingsUpdate(req, res, id: string) {
   const upstream = getUpstream();
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'sidekick_platform_unconfigured' }));
+    res.end(JSON.stringify({ error: 'parley_platform_unconfigured' }));
     return;
   }
   if (!SETTING_ID_RE.test(id)) {

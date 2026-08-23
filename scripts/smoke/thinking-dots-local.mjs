@@ -45,8 +45,8 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 3600;
   const msgs = [];
   for (let i = 0; i < 30; i++) {
-    msgs.push({ role: 'user', content: `DOTS turn ${i}`, sidekick_id: `u_d${i}`, timestamp: t0 + i * 60 });
-    msgs.push({ role: 'assistant', content: `DOTS reply ${i}`, sidekick_id: `a_d${i}`, timestamp: t0 + i * 60 + 5 });
+    msgs.push({ role: 'user', content: `DOTS turn ${i}`, parley_id: `u_d${i}`, timestamp: t0 + i * 60 });
+    msgs.push({ role: 'assistant', content: `DOTS reply ${i}`, parley_id: `a_d${i}`, timestamp: t0 + i * 60 + 5 });
   }
   mock.addChat(CHAT, { title: 'Dots', messages: msgs, lastActiveAt: Date.now() - 1000 });
   mock.setHistoryFirstPageLimit(10);   // forces hasMore=true on first page

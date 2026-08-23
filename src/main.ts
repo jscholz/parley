@@ -4,7 +4,6 @@
  */
 
 import { loadConfig, getConfig, gwWsUrl, getAppName, applySkinning, onConfigUnreachable } from './config.ts';
-import { runRenameMigrations } from './renameMigration.ts';
 import { log, diag, setDebugElement } from './util/log.ts';
 import { apiUrl, isLocalShell } from './apiBase.ts';
 import { showReconnectModal } from './reconnectModal.ts';
@@ -271,7 +270,7 @@ function updateSendButtonState() {
  *  honest affordance. */
 let readOnlyComposer = false;
 
-function setComposerReadOnly(readOnly: boolean, source: string = 'sidekick') {
+function setComposerReadOnly(readOnly: boolean, source: string = 'parley') {
   readOnlyComposer = readOnly;
   const input = document.getElementById('composer-input') as HTMLTextAreaElement | null;
   if (input) {
@@ -401,7 +400,7 @@ function sendEchoSeen(chatId: string | null, messageId: string): boolean {
   const s = transcriptStore.peekState(chatId);
   if (!s) return false;
   return s.inflight.some((e: any) => e.type === 'user_message' && e.message_id === messageId)
-    || s.durable.some((d: any) => d.sidekick_id === messageId);
+    || s.durable.some((d: any) => d.parley_id === messageId);
 }
 
 /** Offline-first send dispatch. Fire the POST now; classify a failure as
@@ -475,12 +474,6 @@ async function boot() {
     log(`[boot-timing] ${label} +${Math.round(perfNow() - __bootT0)}ms (since-nav ${Math.round(perfNow())}ms)`);
   };
   bootMark('start');
-
-  // One-time Parley → Parley persisted-state migration (localStorage
-  // + IndexedDB). MUST complete before any module opens its new-name
-  // stores — an empty new-name DB would block the copy forever.
-  await runRenameMigrations();
-  bootMark('rename migrations done');
 
   // Platform gating runs FIRST so settings.load() and downstream
   // wiring see the post-gate DOM. Otherwise settings.ts's
@@ -582,7 +575,7 @@ async function boot() {
   });
 
   // Background-lifecycle diagnostic tracer — opt-in via ?bg_trace=1 or
-  // localStorage.sidekick_bg_trace=1. Noop when not enabled. Install
+  // localStorage.parley_bg_trace=1. Noop when not enabled. Install
   // before audioSession/capture touch anything so we catch the first
   // transitions. Getters are lazy — each poll reads live state, no
   // eager construction.
@@ -722,13 +715,13 @@ async function boot() {
     id: 'sidebar',
     side: 'left',
     bodyClass: 'sidebar-expanded',
-    prefKey: 'parley.sidebar.expanded', // migrated from sidekick.sidebar.expanded
+    prefKey: 'parley.sidebar.expanded',
     toggleIds: ['sb-toggle', 'sb-toggle-mobile'],
     excludeSwipeWhenTargetIn: ['#pin-drawer'],
     resizer: {
       handleId: 'sidebar-resizer',
       cssVar: '--sidebar-width',
-      widthPrefKey: 'parley.sidebarWidth.v3', // migrated from sidekick.sidebarWidth.v3
+      widthPrefKey: 'parley.sidebarWidth.v3',
       defaultWidthPx: defaultDrawerWidthPx(),
       minWidthPx: 260,
       maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
@@ -742,7 +735,7 @@ async function boot() {
   // behind explicit diagnostics instead of taxing phone PWAs in normal use.
   if (new URLSearchParams(location.search).get('click_diag') === '1'
       // legacy name, predates Parley rename — dev toggle, not worth migrating
-      || localStorage.getItem('sidekick_click_diag') === '1') {
+      || localStorage.getItem('parley_click_diag') === '1') {
     clickFreezeDiag.init();
   }
 
@@ -803,7 +796,7 @@ async function boot() {
     //
     // Replaces the pre-unification rule "refuse if id contains ':'":
     // post-IDB-schema-v2 EVERY id is prefixed (mintChatId stamps
-    // `sidekick:`; cross-device hydrate carries the gateway prefix),
+    // `parley:`; cross-device hydrate carries the gateway prefix),
     // so the old gate would refuse every cleanup. The new rule keys
     // off whether the SERVER knows about the row, not the id shape:
     //   - cached row not in sessions list  → server never registered;
@@ -953,7 +946,7 @@ async function boot() {
       // round-trip to distinguish "deleted" from "not-yet-listed". This
       // removes the ~1MB blocking fetchSessionMessages that used to gate
       // EVERY activity jump with no feedback (field 2026-05-29).
-      const bare = (x: string) => String(x || '').replace(/^sidekick:/, '');
+      const bare = (x: string) => String(x || '').replace(/^parley:/, '');
       const known = sessionDrawer.getCachedSessions()
         .some((s: any) => bare(s.id) === bare(chatId));
       if (!known) {
@@ -986,7 +979,7 @@ async function boot() {
     // dropped (bubble never appeared) and deep jumps fired redundant
     // concurrent ~1MB fetches. Route straight to a single bounded around
     // fetch (or an in-DOM scroll when the bubble is already rendered).
-    const bare = (x: string) => String(x || '').replace(/^sidekick:/, '');
+    const bare = (x: string) => String(x || '').replace(/^parley:/, '');
     if (msgId && bare(switchCtl.viewedId() || '') === bare(chatId)) {
       try {
         await drillToMessageInViewedSession(chatId, msgId);
@@ -1007,7 +1000,7 @@ async function boot() {
   // In-app notification banner — when a notification envelope arrives
   // for a chat OTHER than the currently-viewed one, show a top-of-
   // viewport toast. Tap → same drill path as the pin drawer (resume +
-  // replay + scroll to data-message-id = sidekick_id).
+  // replay + scroll to data-message-id = parley_id).
   const approvalCommandForAction = (action: inAppBanner.ApprovalAction): string => {
     if (action === 'approve_session') return '/approve session';
     if (action === 'deny') return '/deny';
@@ -2312,7 +2305,7 @@ async function boot() {
         sessionDrawer.handleSessionAnnounced({
           id: sendChatId,
           snippet,
-          source: 'sidekick',
+          source: 'parley',
           started_at: new Date().toISOString(),
         });
       }
@@ -4121,7 +4114,7 @@ async function boot() {
   // ── VAD source override (call-mode menu) ────────────────────────────
   // Three buttons (Auto / Client / Bridge) that pin the VAD strategy.
   // Auto defers to chooseVadStrategy() (default: bridge). Backed by
-  // localStorage (sidekick_vad_override) so it survives PWA reloads —
+  // localStorage (parley_vad_override) so it survives PWA reloads —
   // the URL ?vad= override is unreachable inside an installed PWA
   // (browser caches the entry URL).
   //

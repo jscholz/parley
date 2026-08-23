@@ -73,7 +73,7 @@ TOOL_CALL_ID = "call_CCdyCfrAT8P0tDmGVygH0UfE"
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -108,7 +108,7 @@ def state_db(tmp_path):
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?, ?, ?, ?)",
-        (SESSION, "sidekick", CHAT_ID, time.time()),
+        (SESSION, "parley", CHAT_ID, time.time()),
     )
     conn.commit()
     conn.close()
@@ -181,7 +181,7 @@ def _post_flush_turn(state_db):
 
 def _read(db, state_db, **kw):
     return state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", **kw)
+        db, state_db, CHAT_ID, "parley", **kw)
 
 
 # ── Tail read: single copy, original ids, summaries survive ──────────
@@ -224,7 +224,7 @@ def test_around_read_serves_one_copy(db, state_db):
     _post_flush_turn(state_db)
 
     out = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target=str(ids["a_repeat"]),
+        db, state_db, CHAT_ID, "parley", target=str(ids["a_repeat"]),
         limit=200)
     assert out["target_found"] is True
     got_ids = [it["id"] for it in out["items"]]
@@ -257,7 +257,7 @@ def test_bounded_read_filters_dup_whose_original_is_outside_window(db, state_db)
     _seed_deep_history(state_db)
     dup = _flush_compaction_replay(state_db)
     new = _post_flush_turn(state_db)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick",
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley",
                                   force_full=True)
 
     out = _read(db, state_db, limit=10)
@@ -282,7 +282,7 @@ def test_paging_to_exhaustion_yields_each_message_exactly_once(db, state_db):
     fillers = _seed_deep_history(state_db)
     dup = _flush_compaction_replay(state_db)
     new = _post_flush_turn(state_db)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick",
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley",
                                   force_full=True)
 
     pages, cursor = [], None
@@ -312,11 +312,11 @@ def test_after_cursor_read_filters_dups(db, state_db):
     ids = _seed_originals(state_db)
     dup = _flush_compaction_replay(state_db)
     new = _post_flush_turn(state_db)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick",
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley",
                                   force_full=True)
 
     out = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=ids["u_truth"], limit=200)
+        db, state_db, CHAT_ID, "parley", after_id=ids["u_truth"], limit=200)
     got_ids = [it["id"] for it in out["items"]]
     assert got_ids == [dup["summary"], new["u_new"], new["a_new"]], got_ids
     assert out["has_more_newer"] is False
@@ -339,7 +339,7 @@ def test_identical_repeat_without_flush_context_still_serves(db, state_db):
     out = _read(db, state_db)
     assert [it["id"] for it in out["items"]] == [a1, b1, a2, b2]
 
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick",
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley",
                                   force_full=True)
     out = _read(db, state_db)
     assert [it["id"] for it in out["items"]] == [a1, b1, a2, b2], (

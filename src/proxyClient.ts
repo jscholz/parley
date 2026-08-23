@@ -250,7 +250,7 @@ interface SessionsResponse {
   sessions: Array<{
     chat_id: string;
     session_id?: string | null;
-    source?: string;            // 'sidekick' | 'telegram' | 'slack' | … (added 2026-04-29 for cross-platform drawer)
+    source?: string;            // 'parley' | 'telegram' | 'slack' | … (added 2026-04-29 for cross-platform drawer)
     title?: string | null;
     message_count?: number;
     /** User-role message count ("turns"). Drawer renders as "N turns".
@@ -864,17 +864,17 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       // thread, badge on the drawer entry, etc.).
       const kind = typeof env.kind === 'string' ? env.kind : 'unknown';
       const content = typeof env.content === 'string' ? env.content : '';
-      // Plugin-minted sidekick_id (notif_*) — used as the
+      // Plugin-minted parley_id (notif_*) — used as the
       // data-message-id on the rendered transcript row so:
       //   (a) reload dedups against the same row fetched from
       //       /v1/conversations/{id}/items (server adds it from
       //       parley_notifications)
       //   (b) `?msg=Y` URL param on push-click scrolls to the same
       //       row via existing pin-drawer-jump machinery.
-      const sidekickId = typeof env.sidekick_id === 'string' ? env.sidekick_id : '';
+      const parleyId = typeof env.parley_id === 'string' ? env.parley_id : '';
       const isReplay = env?._replay === true;
-      log(`proxy-client: notification kind=${kind} chat_id=${chatId} sk=${sidekickId}${isReplay ? ' (replay)' : ''}`);
-      subs?.onNotification?.({ chatId, kind, content, sidekickId, isReplay });
+      log(`proxy-client: notification kind=${kind} chat_id=${chatId} sk=${parleyId}${isReplay ? ' (replay)' : ''}`);
+      subs?.onNotification?.({ chatId, kind, content, parleyId, isReplay });
       // Bump the drawer ordering so the chat with the freshest
       // notification floats up. Skip on replay (see reply_final's
       // matching guard for cascade rationale).
@@ -1230,7 +1230,7 @@ export const proxyClientAdapter = {
         const messageCount = messages.length || prev.messageCount || 0;
         return {
           id: conv.chat_id,
-          source: prev.source || (conv.chat_id.includes(':') ? conv.chat_id.split(':')[0] : 'sidekick'),
+          source: prev.source || (conv.chat_id.includes(':') ? conv.chat_id.split(':')[0] : 'parley'),
           title: localTitle || prev.title || snippet || 'New chat',
           snippet,
           lastMessageAt: Math.floor(conv.last_message_at / 1000) || prev.lastMessageAt || 0,
@@ -1302,7 +1302,7 @@ export const proxyClientAdapter = {
         // slack / …). Empty/missing means parley by convention (the
         // legacy single-platform default). Drawer uses this to render
         // a source badge on non-parley rows + go composer-read-only.
-        source: e.source || 'sidekick',
+        source: e.source || 'parley',
         title: resolvedTitle,
         snippet,
         lastMessageAt: lastActive,
@@ -1322,8 +1322,8 @@ export const proxyClientAdapter = {
     //
     // v0.383 unification (2026-05-03): post-IDB-schema-v2 the local
     // store and server use the SAME prefixed id format
-    // (`sidekick:<uuid>` from mintChatId). The merge collapses to a
-    // straight key-equality check — no more `sidekick:${chat_id}`
+    // (`parley:<uuid>` from mintChatId). The merge collapses to a
+    // straight key-equality check — no more `parley:${chat_id}`
     // prefix arithmetic. The earlier prefix-aware dedup hack was
     // covering for the bare/prefixed mismatch that's now eliminated
     // at the source.
@@ -1335,7 +1335,7 @@ export const proxyClientAdapter = {
         // Source is encoded in the chat_id prefix; default to parley
         // for any unprefixed legacy row (v1 IDB blasted on upgrade, so
         // this should never happen — defensive only).
-        source: conv.chat_id.includes(':') ? conv.chat_id.split(':')[0] : 'sidekick',
+        source: conv.chat_id.includes(':') ? conv.chat_id.split(':')[0] : 'parley',
         title: conv.title || 'New chat',
         // Local-only chats have no server-side snippet — they exist
         // because the user just minted a chat and hasn't sent yet.
@@ -1361,7 +1361,7 @@ export const proxyClientAdapter = {
     for (const m of merged) idCounts.set(m.id, (idCounts.get(m.id) || 0) + 1);
     const dupes = [...idCounts.entries()].filter(([, n]) => n > 1);
     if (dupes.length > 0) {
-      const enrichSummary = enrich.map(e => ({ id: e.chat_id, source: e.source || 'sidekick', msgs: e.message_count || 0 }));
+      const enrichSummary = enrich.map(e => ({ id: e.chat_id, source: e.source || 'parley', msgs: e.message_count || 0 }));
       const localOnlyAppended = local.filter(c => !new Set(enrich.map(e => e.chat_id)).has(c.chat_id)).map(c => ({ id: c.chat_id, source: 'parley (local-only)' }));
       const dupeSummary = dupes.map(([id, n]) => `${id}×${n}`).join(', ');
       log(`[listSessions] DUPLICATE IDs: ${dupeSummary}`);
@@ -1374,7 +1374,7 @@ export const proxyClientAdapter = {
     if (unconfigured && merged.length === 0) {
       merged.unshift({
         id: '__parley:hint:unconfigured',
-        source: 'sidekick',
+        source: 'parley',
         title: 'Parley proxy missing PARLEY_PLATFORM_TOKEN — sends will 503',
         snippet: '',
         lastMessageAt: Math.floor(Date.now() / 1000),

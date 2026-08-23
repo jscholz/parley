@@ -13,9 +13,9 @@ const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const CHAT_ID = readFileSync('/tmp/demo-final', 'utf-8').trim();
-const FULL_CHAT_ID = `sidekick:${CHAT_ID}`;
+const FULL_CHAT_ID = `parley:${CHAT_ID}`;
 const PROMPT = "give me directions from my office to the nearest tesco";
-const SETTINGS_KEY = 'sidekick.settings.v2';
+const SETTINGS_KEY = 'parley.settings.v2';
 
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
 const browser = await chromium.launch({ executablePath: exec, headless: true });
@@ -33,7 +33,7 @@ await ctx.addInitScript(({ key, theme }) => {
     const cur = JSON.parse(localStorage.getItem(key) || '{}');
     cur.theme = theme;
     localStorage.setItem(key, JSON.stringify(cur));
-    localStorage.setItem('sidekick.sidebar.expanded', '0');
+    localStorage.setItem('parley.sidebar.expanded', '0');
   } catch {}
 }, { key: SETTINGS_KEY, theme: 'dark' });
 
@@ -115,7 +115,7 @@ await page.evaluate(() => {
   const sb = document.getElementById('sidebar');
   if (sb) { sb.classList.add('expanded'); sb.classList.remove('collapsed'); }
   document.body.classList.add('sidebar-expanded');
-  localStorage.setItem('sidekick.sidebar.expanded', '1');
+  localStorage.setItem('parley.sidebar.expanded', '1');
 });
 await page.waitForTimeout(800);
 // Re-scroll because viewport change resets scroll behavior.

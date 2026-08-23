@@ -29,15 +29,15 @@ Gateway extension (parley-defined, optional)::
     GET    /v1/gateway/conversations      # cross-platform drawer list
 
 The proxy probes ``/v1/gateway/conversations`` first; on 404 it falls
-back to the channel surface and stamps source='sidekick'. Hermes
+back to the channel surface and stamps source='parley'. Hermes
 implements the gateway endpoint because hermes IS a gateway —
 telegram, slack, whatsapp etc. live behind the same state.db.
 
 Inbound dispatch goes through ``/v1/responses`` which calls
 ``self.handle_message(MessageEvent(...))``. The gateway resolves the
 session via the standard
-``build_session_key(SessionSource(platform=Platform.SIDEKICK, chat_id=...))``
-DM path — ``agent:main:sidekick:dm:<chat_id>``.
+``build_session_key(SessionSource(platform=Platform.PARLEY, chat_id=...))``
+DM path — ``agent:main:parley:dm:<chat_id>``.
 
 Outbound envelope shapes (see ParleyEnvelope in
 ``server-lib/backends/hermes-gateway/upstream.ts``)::
@@ -87,7 +87,7 @@ repo for design notes.
 Install
 -------
 This adapter requires a hermes patch that registers
-``Platform.SIDEKICK`` and the adapter-factory branch. See
+the Platform entry and the adapter-factory branch. See
 ``0001-add-parley-platform.patch`` and ``README.md`` next to this file.
 
 Plugin shape note
@@ -107,7 +107,7 @@ import contextlib
 import json
 import logging
 import os
-from .parley_env import bridge_legacy_env, env_get
+from .parley_env import env_get
 import re
 import secrets
 import socket as _socket
@@ -229,7 +229,7 @@ SESSION_POLL_INTERVAL_S = 1.5
 # with any caller that still references them from the package root.
 from .parley_ids import (  # noqa: F401
     GATEWAY_DRAWER_SOURCES,
-    SIDEKICK_SOURCE,
+    PARLEY_SOURCE,
     _GATEWAY_ID_SEP,
     _format_gateway_id,
     _parse_gateway_id,
@@ -330,7 +330,7 @@ def check_parley_requirements() -> bool:
 
     Required: aiohttp (already a hermes core dep — webhook adapter uses it).
 
-    Note: ``Platform.SIDEKICK`` is created on demand by ``Platform._missing_``
+    Note: ``Platform.PARLEY`` is created on demand by ``Platform._missing_``
     once this plugin's ``register(ctx)`` has called ``ctx.register_platform``,
     so we no longer have to verify the enum entry by hand. The
     ``PARLEY_PLATFORM_TOKEN`` gate lives in the auth path on the WS
@@ -355,16 +355,17 @@ class ParleyAdapter(BasePlatformAdapter):
     MAX_MESSAGE_LENGTH: int = 64 * 1024
 
     def __init__(self, config: PlatformConfig):
-        # Platform.SIDEKICK is created on demand by Platform._missing_ as
-        # soon as our register(ctx) calls ctx.register_platform("sidekick"),
+        # Platform.PARLEY is created on demand by Platform._missing_ as
+        # soon as our register(ctx) calls ctx.register_platform("parley"),
         # so by the time we land here the enum lookup always succeeds.
         # If a future hermes version drops _missing_ we'd see an
         # AttributeError or ValueError below — surface it loudly rather
         # than papering over.
-        # Platform id stays "sidekick" (legacy name, predates the Parley
-        # rename): it is persisted in every live state.db session key and
-        # referenced by the deployed hermes.config.yaml platforms section.
-        super().__init__(config, Platform("sidekick"))
+        # Platform id was "sidekick" until the 2026-08 identity purge:
+        # every store (state.db session keys, gateway_routing, parley.db
+        # chat-id prefixes, hindsight metadata) was rewritten in the same
+        # cutover by scripts/migrate-sidekick-to-parley.sh.
+        super().__init__(config, Platform("parley"))
 
         extra = config.extra or {}
         self._host: str = extra.get(
@@ -458,7 +459,7 @@ class ParleyAdapter(BasePlatformAdapter):
         self._push_dispatcher = None
         # In-memory mirror of in-flight turns. Source of truth for
         # `/v1/conversations/{id}/items` mid-turn — bridges the gap
-        # between POST receipt and the sidekick_msg_links write
+        # between POST receipt and the parley_msg_links write
         # that happens at reply_final. Mirrors openclaw plugin's
         # TurnBuffer (src/turn-buffer.js).
         from .parley_turn_buffer import TurnBuffer  # noqa: WPS433
@@ -555,7 +556,7 @@ class ParleyAdapter(BasePlatformAdapter):
             return int(compute_unread(
                 db=self._parley_db,
                 state_db_path=self._state_db_path,
-                source="sidekick",
+                source="parley",
             ).get("total", 0))
         self._push_dispatcher = _PushDispatcher(
             self._parley_db, vapid_subject=vapid_subject,
@@ -664,34 +665,28 @@ class ParleyAdapter(BasePlatformAdapter):
         # attachment button when the primary is text-only — without
         # this advertisement the button would stay disabled even though
         # the upload would actually work end-to-end.
-        # Route note (Parley rename 2026-08): /v1/parley/* is primary;
-        # /v1/sidekick/* stays registered as a deprecated alias so a
-        # mid-deploy proxy/plugin restart-order mismatch can't 404.
-        for _aux_path in ("/v1/parley/auxiliary-models", "/v1/sidekick/auxiliary-models"):
-            self._app.router.add_get(
-                _aux_path,
-                lambda r: _route_settings.handle_auxiliary_models(self, r),
-            )
+        self._app.router.add_get(
+            "/v1/parley/auxiliary-models",
+            lambda r: _route_settings.handle_auxiliary_models(self, r),
+        )
         # Model capability lookup — ground truth from hermes's models.dev
         # registry. Replaces the previous OpenRouter-catalog fetch +
         # regex-fallback in parley. Same data hermes consults at request
         # time for native-vs-text image routing.
-        for _caps_path in ("/v1/parley/model-capabilities", "/v1/sidekick/model-capabilities"):
-            self._app.router.add_get(
-                _caps_path,
-                lambda r: _route_settings.handle_model_capabilities(self, r),
-            )
+        self._app.router.add_get(
+            "/v1/parley/model-capabilities",
+            lambda r: _route_settings.handle_model_capabilities(self, r),
+        )
         # Large-file staging (task #158). Raw-bytes upload → upload_id;
         # the PWA references the id in its next turn's `attachments`
         # entry instead of inlining a base64 `content`. See
         # parley_route_upload + the upload_id branch in
         # _materialize_attachments.
         from . import parley_route_upload as _route_upload
-        for _upload_path in ("/v1/parley/upload", "/v1/sidekick/upload"):
-            self._app.router.add_post(
-                _upload_path,
-                lambda r: _route_upload.handle_upload(self, r),
-            )
+        self._app.router.add_post(
+            "/v1/parley/upload",
+            lambda r: _route_upload.handle_upload(self, r),
+        )
         # Cross-conversation FTS5 search. Reads against the same
         # messages_fts virtual table hermes_state.SessionDB maintains
         # — the index is hermes-owned, we just SELECT against it.
@@ -811,7 +806,7 @@ class ParleyAdapter(BasePlatformAdapter):
         return web.json_response(
             {
                 "status": "ok",
-                "platform": "sidekick",
+                "platform": "parley",
                 "protocol_version": PROTOCOL_VERSION,
             }
         )
@@ -836,10 +831,10 @@ class ParleyAdapter(BasePlatformAdapter):
         self._known_chat_ids.add(chat_id)
         source = self.build_source(
             chat_id=chat_id,
-            chat_name=f"sidekick:{chat_id[:8]}",
+            chat_name=f"parley:{chat_id[:8]}",
             chat_type="dm",
             user_id=chat_id,        # one user-per-chat in single-tenant model
-            user_name="sidekick-user",
+            user_name="parley-user",
         )
 
         media_urls: List[str] = []
@@ -1716,7 +1711,7 @@ class ParleyAdapter(BasePlatformAdapter):
 
     def _maybe_migrate_legacy_push_subs(self) -> None:
         """One-shot migration: copy push subscriptions out of the
-        proxy's JSON file (``~/.sidekick/notifications/push-subscriptions.json``)
+        proxy's JSON file (``~/.parley/notifications/push-subscriptions.json``)
         into the supplemental DB. Idempotent — re-runs skip rows that
         already exist by endpoint. Failure is non-fatal: legacy subs
         stay working until migration succeeds on a later boot.
@@ -1725,7 +1720,7 @@ class ParleyAdapter(BasePlatformAdapter):
             return
         from .parley_state import upsert_subscription, list_subscriptions
         try:
-            json_path = Path.home() / ".sidekick" / "notifications" / "push-subscriptions.json"
+            json_path = Path.home() / ".parley" / "notifications" / "push-subscriptions.json"
             if not json_path.exists():
                 return
             with open(json_path, "r", encoding="utf-8") as f:
@@ -1787,7 +1782,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # reply_final that's just a tool acknowledgement.
         if "should_push" not in env:
             # Mutate the caller-owned envelope. Notification persistence
-            # deliberately stamps ``sidekick_id`` onto this same object and
+            # deliberately stamps ``parley_id`` onto this same object and
             # send() returns that id to the gateway. Rebinding to a shallow
             # copy here made the persisted/live envelope correct while the
             # caller still saw an empty message_id.
@@ -1823,7 +1818,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # Notification persistence: cron output, /background results,
         # scheduled reminders, approval prompts all flow as
         # `type=notification` envelopes today. Persist first so the
-        # minted sidekick_id is the single identity used by state.db,
+        # minted parley_id is the single identity used by state.db,
         # parley.db write-through, and the live SSE envelope.
         if env_type == "notification":
             self._persist_notification(env)
@@ -1937,7 +1932,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # opened the chat but the content wasn't anywhere durable, so
         # the user lost the body whenever the banner dismissed.
         #
-        # Mint a sidekick_id for the envelope, write a row to the plugin-owned
+        # Mint a parley_id for the envelope, write a row to the plugin-owned
         # `parley_notifications` sibling table, stamp the id on the
         # outgoing envelope. The history endpoint merges these rows
         # into /v1/conversations/{id}/items so a refresh-and-scroll
@@ -2003,7 +1998,7 @@ class ParleyAdapter(BasePlatformAdapter):
         raw_chat_id = env.get("chat_id") if isinstance(env.get("chat_id"), str) else ""
         if not raw_chat_id:
             return
-        chat_id = raw_chat_id if _GATEWAY_ID_SEP in raw_chat_id else f"{SIDEKICK_SOURCE}{_GATEWAY_ID_SEP}{raw_chat_id}"
+        chat_id = raw_chat_id if _GATEWAY_ID_SEP in raw_chat_id else f"{PARLEY_SOURCE}{_GATEWAY_ID_SEP}{raw_chat_id}"
 
         if env_type == "reply_final":
             kind = "agent_reply"
@@ -2014,12 +2009,12 @@ class ParleyAdapter(BasePlatformAdapter):
         elif env_type == "notification":
             env_kind = env.get("kind") if isinstance(env.get("kind"), str) else "notification"
             kind = env_kind if env_kind in ("approval", "cron") else "notification"
-            item_id = env.get("sidekick_id") if isinstance(env.get("sidekick_id"), str) else ""
+            item_id = env.get("parley_id") if isinstance(env.get("parley_id"), str) else ""
             if not item_id:
                 item_id = env.get("message_id") if isinstance(env.get("message_id"), str) else ""
             if not item_id:
                 item_id = f"notif_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
-                env["sidekick_id"] = item_id
+                env["parley_id"] = item_id
             raw_title = env.get("title") if isinstance(env.get("title"), str) else ""
             if kind == "approval":
                 title = raw_title or "Approval required"
@@ -2102,7 +2097,7 @@ class ParleyAdapter(BasePlatformAdapter):
         and ``kind`` metadata belong in ``parley.db.msg_links``; the
         subsequent write-through reads ``agent_row_id`` from this envelope and
         links the supplemental row directly. The retired
-        ``state.db.sidekick_msg_links`` table must not be recreated.
+        ``state.db.parley_msg_links`` table must not be recreated.
 
         Best-effort: failures only mean the row won't enter Hermes context or
         survive through state.db alone. The parley.db write-through and live
@@ -2119,7 +2114,7 @@ class ParleyAdapter(BasePlatformAdapter):
         content = env.get("content")
         if not isinstance(content, str) or not content:
             return
-        existing_sk_id = env.get("sidekick_id")
+        existing_sk_id = env.get("parley_id")
         if isinstance(existing_sk_id, str) and existing_sk_id.startswith("notif_"):
             return
         session_id = self._resolve_session_id_for_chat(chat_id_bare)
@@ -2130,7 +2125,7 @@ class ParleyAdapter(BasePlatformAdapter):
             )
             return
         sk_id = f"notif_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
-        env["sidekick_id"] = sk_id
+        env["parley_id"] = sk_id
         try:
             with contextlib.closing(
                 sqlite3.connect(self._state_db_path, timeout=5.0)
@@ -2145,7 +2140,7 @@ class ParleyAdapter(BasePlatformAdapter):
                     state_db_id = cur.lastrowid
                 # The transaction committed successfully. The parley.db
                 # write-through immediately after this method consumes the
-                # cross-link and stores kind + sidekick_id there.
+                # cross-link and stores kind + parley_id there.
                 env["agent_row_id"] = str(state_db_id)
         except Exception as exc:
             logger.warning(
@@ -2169,7 +2164,7 @@ class ParleyAdapter(BasePlatformAdapter):
                     "SELECT id FROM sessions "
                     "WHERE user_id = ? AND source = ? "
                     "ORDER BY started_at DESC LIMIT 1",
-                    (chat_id_bare, SIDEKICK_SOURCE),
+                    (chat_id_bare, PARLEY_SOURCE),
                 ).fetchone()
             return row[0] if row else None
         except Exception:
@@ -2303,7 +2298,7 @@ class ParleyAdapter(BasePlatformAdapter):
                 "expires_at": int((time.time() + approval_timeout_s) * 1000),
             }
             ok = await self._safe_send_envelope(env)
-            return SendResult(success=ok, message_id=env.get("sidekick_id") or "")
+            return SendResult(success=ok, message_id=env.get("parley_id") or "")
 
         # Hermes cron delivery naturally arrives here through the live
         # platform adapter as a regular send() with a canonical wrapper.
@@ -2323,7 +2318,7 @@ class ParleyAdapter(BasePlatformAdapter):
                 "text": content,
             }
             ok = await self._safe_send_envelope(env)
-            return SendResult(success=ok, message_id=env.get("sidekick_id") or "")
+            return SendResult(success=ok, message_id=env.get("parley_id") or "")
 
         message_id = self._next_message_id(chat_id)
         # Surface a session_changed envelope the first time we ever see this
@@ -2397,7 +2392,7 @@ class ParleyAdapter(BasePlatformAdapter):
         return SendResult(success=ok)
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
-        return {"name": chat_id, "type": "sidekick", "chat_id": chat_id}
+        return {"name": chat_id, "type": "parley", "chat_id": chat_id}
 
     # ------------------------------------------------------------------
     # Tool-event emission (Phase 3)
@@ -2633,7 +2628,7 @@ class ParleyAdapter(BasePlatformAdapter):
             )
 
     # Legacy linker methods (_capture_msg_high_water_mark,
-    # _write_msg_links_after_turn) + the state.db sidekick_msg_links
+    # _write_msg_links_after_turn) + the state.db parley_msg_links
     # side-table were deleted 2026-05-19 as part of the supplemental-
     # store migration. The replacement is parley.db.msg_links plus
     # the content-fingerprint linker in
@@ -2733,7 +2728,7 @@ class ParleyAdapter(BasePlatformAdapter):
             ) as conn:
                 row = conn.execute(
                     "SELECT user_id FROM sessions WHERE id = ? AND source = ?",
-                    (session_id, SIDEKICK_SOURCE),
+                    (session_id, PARLEY_SOURCE),
                 ).fetchone()
         except Exception:
             return None
@@ -2750,7 +2745,7 @@ class ParleyAdapter(BasePlatformAdapter):
         try:
             row = db.fetchone(
                 "SELECT title FROM conversation_titles WHERE source = ? AND chat_id = ?",
-                (SIDEKICK_SOURCE, chat_id),
+                (PARLEY_SOURCE, chat_id),
             )
         except Exception as exc:
             logger.debug("[parley] title override read failed for %s: %s", chat_id, exc)
@@ -2770,7 +2765,7 @@ class ParleyAdapter(BasePlatformAdapter):
         ``session_changed`` envelope to the proxy.
 
         Picks the LATEST session per ``user_id`` (chat_id) where
-        ``source = 'sidekick'`` — i.e., whatever rotation
+        ``source = 'parley'`` — i.e., whatever rotation
         compression/auto-reset has done, the row reflects what hermes
         is actively writing into right now. Also opportunistically
         refreshes the session_id → chat_id cache so the tool-event
@@ -2816,7 +2811,7 @@ class ParleyAdapter(BasePlatformAdapter):
             with contextlib.closing(
                 sqlite3.connect(uri, uri=True, timeout=2.0)
             ) as conn:
-                rows = conn.execute(sql, (SIDEKICK_SOURCE,)).fetchall()
+                rows = conn.execute(sql, (PARLEY_SOURCE,)).fetchall()
         except sqlite3.OperationalError:
             # Older SQLite without window functions — fall back to a
             # correlated subquery. Pi 5 ships SQLite 3.40+ so this is
@@ -2835,7 +2830,7 @@ class ParleyAdapter(BasePlatformAdapter):
                 sqlite3.connect(uri, uri=True, timeout=2.0)
             ) as conn:
                 rows = conn.execute(
-                    sql_fallback, (SIDEKICK_SOURCE, SIDEKICK_SOURCE),
+                    sql_fallback, (PARLEY_SOURCE, PARLEY_SOURCE),
                 ).fetchall()
         out = [(chat_id, sid, title) for chat_id, sid, title in rows]
         # Refresh the sid → chat_id cache opportunistically.
@@ -2883,24 +2878,9 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
        connect(); when no adapter is live the callbacks are silent
        no-ops.
     """
-    # These two are handed to hermes as NAMES; its authz path does a raw
-    # os.getenv on them, so env_get's legacy fallback never runs for them.
-    # Bridge the old spelling forward first — otherwise an upgraded
-    # deployment whose .env still says SIDEKICK_PLATFORM_ALLOW_ALL_USERS
-    # default-denies every chat and locks the owner out behind pairing
-    # codes (2026-08-20 incident).
-    bridge_legacy_env(
-        "PARLEY_PLATFORM_ALLOW_ALL_USERS",
-        "PARLEY_PLATFORM_ALLOWED_USERS",
-        # Also declared (required_env=) and read back by the hermes CLI's
-        # setup/status views via get_env_value — cosmetic rather than an
-        # authz gate, but it makes `hermes gateway status` report Parley
-        # as unconfigured on a host that still exports the legacy name.
-        "PARLEY_PLATFORM_TOKEN",
-    )
     try:
         ctx.register_platform(
-            name="sidekick",
+            name="parley",
             label="Parley",
             adapter_factory=lambda cfg: ParleyAdapter(cfg),
             check_fn=check_parley_requirements,
@@ -2922,7 +2902,7 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         )
     except AttributeError:
         # Older hermes-agent without ctx.register_platform — fall back to
-        # the patch-driven path (Platform.SIDEKICK + _create_adapter
+        # the patch-driven path (a hardcoded Platform entry + _create_adapter
         # branch). If both are missing, the adapter just won't load and
         # the gateway logs will say so. We don't crash the plugin.
         logger.warning(

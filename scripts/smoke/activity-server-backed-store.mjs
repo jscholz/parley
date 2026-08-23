@@ -18,7 +18,7 @@ export function MOCK_SETUP(mock) {
   mock.addChat('mock-activity-server-chat', {
     title: 'Server Activity Chat',
     messages: [
-      { role: 'user', content: 'server activity seed', sidekick_id: 'umsg_activity_server_seed', timestamp: Date.now() / 1000 - 60 },
+      { role: 'user', content: 'server activity seed', parley_id: 'umsg_activity_server_seed', timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,
   });

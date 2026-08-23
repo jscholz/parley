@@ -121,7 +121,7 @@ def test_display_doc_missing_file_errors_cleanly(monkeypatch, adapter, handler):
 
 
 def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
-    """Regression: toolset MUST be the bare platform name "sidekick".
+    """Regression: toolset MUST be the bare platform name "parley".
 
     Registering under "hermes-parley" (v1, 2026-07-04) created a real
     registry toolset with that name, which SHADOWS hermes' auto-generated
@@ -148,7 +148,7 @@ def test_display_doc_registers_under_bare_platform_toolset(monkeypatch):
 
     assert doc_tool.register_display_doc_tool(lambda: None) is True
     assert calls["name"] == "display_doc"
-    assert calls["toolset"] == "sidekick", (
+    assert calls["toolset"] == "parley", (
         "toolset must be the bare platform name; a literal 'hermes-parley' "
         "registry toolset shadows the core-tools composite and strips "
         "filesystem/terminal tools from every parley session"

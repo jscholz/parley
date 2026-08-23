@@ -25,10 +25,10 @@ const CHAT_B = 'mock-chat-b-for-pin-agg';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
     title: 'Second chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'first msg in B', message_id: 'b-user-1', sidekick_id: 'b-user-1', timestamp: Date.now() / 1000 - 100 },
-      { role: 'assistant', content: 'first reply in B', message_id: 'b-asst-1', sidekick_id: 'b-asst-1', timestamp: Date.now() / 1000 - 99 },
+      { role: 'user', content: 'first msg in B', message_id: 'b-user-1', parley_id: 'b-user-1', timestamp: Date.now() / 1000 - 100 },
+      { role: 'assistant', content: 'first reply in B', message_id: 'b-asst-1', parley_id: 'b-asst-1', timestamp: Date.now() / 1000 - 99 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });

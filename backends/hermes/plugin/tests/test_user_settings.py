@@ -38,7 +38,7 @@ from ..parley_routes import handle_user_settings
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 

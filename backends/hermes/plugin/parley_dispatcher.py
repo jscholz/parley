@@ -92,7 +92,7 @@ class EngagementState:
     Note: callers must use the SAME chat_id shape on both sides.
     The plugin's envelope path uses the source-stripped id (UUID
     only); ``handle_visibility`` normalizes the PWA-supplied
-    ``sidekick:<uuid>`` form via ``_strip_source_prefix`` before
+    ``parley:<uuid>`` form via ``_strip_source_prefix`` before
     recording. See parley_routes.py.
     """
 
@@ -314,12 +314,12 @@ def _build_payload(env: Dict, *, body_override: Optional[str] = None,
         body = body[: max(0, available - 1)].rstrip() + "…"
     body = body + suffix
 
-    message_id = env.get("sidekick_id") or env.get("message_id") or ""
+    message_id = env.get("parley_id") or env.get("message_id") or ""
     if not isinstance(message_id, str):
         message_id = ""
     url = "/"
     if chat_id:
-        url_chat_id = chat_id if ":" in chat_id else f"sidekick:{chat_id}"
+        url_chat_id = chat_id if ":" in chat_id else f"parley:{chat_id}"
         url = f"/?chat={quote(url_chat_id, safe='')}"
         if message_id:
             url += f"&msg={quote(message_id, safe='')}"
@@ -328,7 +328,7 @@ def _build_payload(env: Dict, *, body_override: Optional[str] = None,
         "title": f"{icon} {title_label}".strip(),
         "body": body[:PUSH_BODY_MAX_CHARS],
         "chat_id": chat_id,
-        "tag": chat_id or "sidekick",
+        "tag": chat_id or "parley",
         "url": url,
     }
     if isinstance(badge, int):

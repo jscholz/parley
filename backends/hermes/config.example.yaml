@@ -37,7 +37,7 @@ custom_providers: []
 # config; parley neither reads nor writes.
 fallback_providers: []
 
-# Plugin loader — must include 'sidekick' for the parley plugin to
+# Plugin loader — must include 'parley' for the parley plugin to
 # load at hermes-gateway startup.
 plugins:
   enabled:
@@ -49,7 +49,7 @@ plugins:
 # systemd unit drop-in):
 # ─────────────────────────────────────────────────────────────────────
 #
-#   SIDEKICK_PLATFORM_TOKEN     — bearer token shared with the parley
+#   PARLEY_PLATFORM_TOKEN     — bearer token shared with the parley
 #                                 proxy. Required.
 #
 #   PARLEY_PREFERRED_MODELS   — optional comma-separated glob list.

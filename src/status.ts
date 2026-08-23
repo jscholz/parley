@@ -7,7 +7,7 @@
  *     state to a consistent text + kind, so multiple call sites stay aligned
  *     ("Weak signal" always renders the same way).
  *
- *  2. Debug line: only rendered when `?debug=1` or `localStorage.sidekick_debug=1`.
+ *  2. Debug line: only rendered when `?debug=1` or `localStorage.parley_debug=1`.
  *     Callers use setDebugStatus(msg) to push a raw diagnostic hint — last WS
  *     event, last fetch result, etc. Keeps the primary line clean for the
  *     curated user-visible narrative while still surfacing detail during dev.

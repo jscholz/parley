@@ -1,7 +1,7 @@
 /**
  * Capture store + HTTP surface — the server half of meeting capture
  * (design: workspace/documents/agent-development/
- * sidekick-capture-design-and-plan-2026-07-07.md §3.1/§3.3).
+ * the 2026-07-07 capture design doc §3.1/§3.3 (hermes-agent-private)).
  *
  * PROXY-owned by design (not the hermes plugin): capture must work on
  * every backend — hermes, Claude Code, even the npx stub with only a
@@ -196,8 +196,8 @@ let capturesDirOverride: string | null = null;
 /** Test seam + explicit boot configuration. Production resolution
  *  order: PARLEY_CAPTURES_DIR (Jonathan points this at his agent
  *  workspace so hermes reads transcripts as plain files) → the
- *  parley data home (dataHome(): PARLEY_HOME, else ~/.parley, else an
- *  existing ~/.sidekick) /captures. */
+ *  parley data home (dataHome(): PARLEY_HOME, else ~/.parley)
+ *  /captures. */
 export function initCapture(opts?: { dir?: string }): void {
   capturesDirOverride = opts?.dir ?? null;
 }
@@ -978,14 +978,9 @@ async function readJson(req: IncomingMessage): Promise<any> {
  *  stop ignoring `_req`). `x-parley-client` is the cooperative
  *  self-identification header the PWA recorder sends; UA + remote are
  *  what the transport knows regardless.
- *
- *  Rename note (2026-08): the legacy `x-sidekick-client` spelling is
- *  still accepted. This header is only ever read for attribution, so
- *  an installed pre-rename bundle must keep identifying as
- *  'pwa-recorder' rather than silently degrading to 'api' — the
- *  incident's core failure was an UNATTRIBUTABLE delete. */
+ * */
 function actorFromReq(req: IncomingMessage, reason?: string): CaptureActor {
-  const src = req.headers['x-parley-client'] ?? req.headers['x-sidekick-client'];
+  const src = req.headers['x-parley-client'];
   const fwd = req.headers['x-forwarded-for'];
   return {
     source: typeof src === 'string' && src ? src : 'api',
@@ -1004,7 +999,7 @@ const MAX_SEGMENT_BYTES = 32 * 1024 * 1024;
 /** POST /api/parley/captures — start. Body {title?, linked_chat?, diarize?}.
  *  linked_chat: "new" mints a fresh session id (the PWA's chats are
  *  lazily created server-side on first message, so minting = issuing
- *  an id in the same `sidekick:<uuid>` shape the composer's new-chat
+ *  an id in the same `parley:<uuid>` shape the composer's new-chat
  *  path uses — see src/main.ts new-chat). */
 export async function handleCaptureCreate(req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
@@ -1012,7 +1007,7 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
     let linkedChat: string | null = null;
     let mintedSession = false;
     if (body.linked_chat === 'new') {
-      linkedChat = `sidekick:${crypto.randomUUID()}`;
+      linkedChat = `parley:${crypto.randomUUID()}`;
       mintedSession = true;
     } else if (typeof body.linked_chat === 'string' && body.linked_chat) linkedChat = body.linked_chat;
     const manifest = await createCapture({
@@ -1096,19 +1091,10 @@ export async function handleCaptureSegment(
     const seq = Number(seqRaw);
     const body = await readBody(req, MAX_SEGMENT_BYTES);
     const { duplicate } = await putSegment(id, seq, body, {
-      // Legacy spelling accepted alongside the new one: a cached
-      // pre-rename bundle that fell back to 0 here would place every
-      // segment at capture-start, scrambling transcript timing and
-      // mark alignment for the whole meeting.
-      t0Ms: Number(req.headers['x-parley-t0-ms'] ?? req.headers['x-sidekick-t0-ms'] ?? 0),
+      t0Ms: Number(req.headers['x-parley-t0-ms'] ?? 0),
       mime: String(req.headers['content-type'] || 'application/octet-stream'),
-      // Both spellings accepted: the renamed PWA sends x-parley-sha256,
-      // but an installed/cached pre-rename bundle still sends the
-      // legacy header and its uploads must keep their integrity check.
       sha256: typeof req.headers['x-parley-sha256'] === 'string'
-        ? req.headers['x-parley-sha256']
-        : typeof req.headers['x-sidekick-sha256'] === 'string'
-          ? req.headers['x-sidekick-sha256'] : undefined,
+        ? req.headers['x-parley-sha256'] : undefined,
     }, actorFromReq(req));
     sendJson(res, 200, { ok: true, seq, duplicate });
   } catch (err) { sendError(res, err); }

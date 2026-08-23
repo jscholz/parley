@@ -57,7 +57,7 @@ routing between modules.
    `RightDrawerModuleContext` and write only inside the module panel.
 3. Register the module in the `modules` array passed to
    `createRightDrawerHost` from `src/pins/drawer.ts`.
-4. Use a domain event, such as `sidekick:activity-changed`, to notify the
+4. Use a domain event, such as `parley:activity-changed`, to notify the
    drawer when the module store changes.
 5. Add a mocked smoke that proves the module can render, switch, clear or act,
    and survive drawer open/close transitions.

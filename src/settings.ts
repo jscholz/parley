@@ -16,12 +16,12 @@ import { clearAllUnread, totalUnreadCount } from './notifications/badge.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { apiUrl } from './apiBase.ts';
 
-const STORAGE_KEY = 'parley.settings.v2'; // migrated from sidekick.settings.v2
+const STORAGE_KEY = 'parley.settings.v2';
 // Last-good snapshot of the SYNCED settings (parley.db-backed). Written
 // after every successful /prefs read so the next boot can hydrate synced
 // values synchronously from localStorage instead of awaiting the network —
 // see load() / revalidate().
-const SYNCED_CACHE_KEY = 'parley.synced.cache.v1'; // migrated from sidekick.synced.cache.v1
+const SYNCED_CACHE_KEY = 'parley.synced.cache.v1';
 
 // Model state — tracked separately from user settings (lives in openclaw
 // config on the gateway, not in localStorage). Re-fetched on panel open
@@ -783,7 +783,7 @@ export function hydrate(handlers: {
   const setMarkAllReadHint = $any('set-mark-all-read-hint');
 
   // Apply `current` snapshot to every form control + label. Called
-  // once at hydrate time and again on the cross-tab `sidekick:settings-
+  // once at hydrate time and again on the cross-tab `parley:settings-
   // changed` event so two PWA tabs stay visibly in sync without reload.
   // Pure DOM writes — does NOT fire onchange handlers (the cross-tab
   // path's source of truth is `current`, already updated by load()).
@@ -1361,7 +1361,7 @@ export function hydrate(handlers: {
   // getElementById here returns null in PWA and the handler isn't
   // attached.
   //
-  // Action: post a webkit.messageHandlers.sidekickReset message to
+  // Action: post a webkit.messageHandlers.parleyReset message to
   // the native side, which loads the bundled bootstrap with
   // ?config=1 in the WebView. We can't navigate JS-side to
   // capacitor://localhost from an HTTPS origin (Cap WebView blocks
@@ -1377,14 +1377,10 @@ export function hydrate(handlers: {
       // without a custom UIDelegate handler, AND the action itself
       // is benign (saved URL is preserved as the default in the
       // bootstrap form). One tap = reset.
-      // The native handler is named parleyReset as of 2026-08-20. The
-      // web bundle updates the instant the proxy redeploys, but the
-      // NATIVE side only changes on an app rebuild+reinstall — so an
-      // installed older binary still listens on sidekickReset. Try the
-      // new name, fall back to the legacy one, and this fallback can be
-      // deleted once the rebuilt app is installed everywhere.
+      // The native handler is parleyReset (renamed 2026-08-20; the
+      // rebuilt app has been installed since, so no legacy fallback).
       const handlers = (window as any).webkit?.messageHandlers;
-      const handler = handlers?.parleyReset ?? handlers?.sidekickReset;
+      const handler = handlers?.parleyReset;
       log(`[settings] reset-server tap (handler=${!!handler})`);
       if (handler && typeof handler.postMessage === 'function') {
         try { handler.postMessage({}); }

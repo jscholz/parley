@@ -35,9 +35,9 @@ export function MOCK_SETUP(mock) {
     title: 'Tool reload chat',
     messages: [
       { role: 'user', content: 'do the thing',
-        sidekick_id: 'umsg_tool_dedup_user', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'umsg_tool_dedup_user', timestamp: Date.now() / 1000 - 60 },
       { role: 'assistant', content: 'done!',
-        sidekick_id: 'msg_tool_dedup_agent', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'msg_tool_dedup_agent', timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

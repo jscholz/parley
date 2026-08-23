@@ -24,7 +24,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(CHAT_ID, {
     title: 'Focused approval chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_bf_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_bf_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
 }
@@ -61,7 +61,7 @@ export default async function run({ page, log, mock }) {
       'printf parley-banner-focused\n\n' +
       'Reason: focused-chat banner smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: 'notif_bf_approval_1',
+    parley_id: 'notif_bf_approval_1',
     urgent: true,
   });
 

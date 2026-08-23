@@ -61,7 +61,7 @@ let onResumeCb: ((tok: switchCtl.SwitchToken, messages: any[], pagination?: any,
 let onBeforeSwitchCb: ((leavingId: string | null) => void) | null = null;
 /** Drill-to-message callback for message hits. Routes through the
  *  same path pin clicks + activity opens use (main.ts drillToChatMessage),
- *  which guarantees the ``around=<sidekick_id>`` window fetch lands so
+ *  which guarantees the ``around=<parley_id>`` window fetch lands so
  *  the target row exists in the DOM before scrollIntoView runs.
  *
  *  History: 2026-06-23 — cmd+K used to call onResumeCb for message hits
@@ -308,7 +308,7 @@ async function runUnifiedSearch(q: string) {
       // The user's RENAMED session title lives in parley.db
       // conversation_titles (client-cached), NOT in the hermes FTS index —
       // so server search results carry the stale/auto title (often empty,
-      // → renderSessionRow falls back to the raw `sidekick:<uuid>` id).
+      // → renderSessionRow falls back to the raw `parley:<uuid>` id).
       // Merge the cached override title by id so the server repaint doesn't
       // clobber the name the user gave it (field 2026-05-27: search match
       // flashed the real name, then ~300ms later showed the raw id).

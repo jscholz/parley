@@ -36,20 +36,20 @@ const READING_MARKER = 'reading-chat-marker-225';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(AGENT_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Agent replying here',
     messages: [
-      { role: 'user', content: AGENT_MARKER, sidekick_id: 'b225-a-1', timestamp: Date.now() / 1000 - 60 },
-      { role: 'assistant', content: 'streaming away', sidekick_id: 'b225-a-2', timestamp: Date.now() / 1000 - 30 },
+      { role: 'user', content: AGENT_MARKER, parley_id: 'b225-a-1', timestamp: Date.now() / 1000 - 60 },
+      { role: 'assistant', content: 'streaming away', parley_id: 'b225-a-2', timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 30_000, // most recent → the no-snapshot fallback landing
   });
   mock.addChat(READING_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Chat being read',
     messages: [
-      { role: 'user', content: READING_MARKER, sidekick_id: 'b225-r-1', timestamp: Date.now() / 1000 - 3600 },
-      { role: 'assistant', content: 'long interesting reply', sidekick_id: 'b225-r-2', timestamp: Date.now() / 1000 - 3590 },
+      { role: 'user', content: READING_MARKER, parley_id: 'b225-r-1', timestamp: Date.now() / 1000 - 3600 },
+      { role: 'assistant', content: 'long interesting reply', parley_id: 'b225-r-2', timestamp: Date.now() / 1000 - 3590 },
     ],
     lastActiveAt: Date.now() - 3600_000,
   });

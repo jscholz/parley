@@ -138,7 +138,7 @@ export class TurnBuffer {
    *  bubble instead of forking a duplicate.
    *
    *  This replaces the older `renderItems` items-merge approach.
-   *  Items merge produced finalized rows without `sidekick_id` on
+   *  Items merge produced finalized rows without `parley_id` on
    *  the in-flight assistant, which caused a visible double-render
    *  once live SSE deltas resumed. Envelope shape carries the
    *  message_id end-to-end.
@@ -197,7 +197,7 @@ export class TurnBuffer {
   renderItems(turn, { startSeq = 1_000_000 } = {}) {
     // High seq base for in-flight items so they never collide with
     // durable seqs (which start at 0 and grow). The PWA dedups by
-    // sidekick_id, so seq is just for ordering within the response.
+    // parley_id, so seq is just for ordering within the response.
     const out = [];
     let seq = startSeq;
     out.push({
@@ -206,7 +206,7 @@ export class TurnBuffer {
       role: 'user',
       content: turn.userMessage,
       created_at: Math.floor(turn.startedAt / 1000),
-      sidekick_id: turn.userMessageId,
+      parley_id: turn.userMessageId,
     });
     // Tool calls + results interleaved by timestamp.
     const events = [
@@ -233,7 +233,7 @@ export class TurnBuffer {
         role: 'assistant',
         content: turn.assistantText,
         created_at: Math.floor(Date.now() / 1000),
-        // No sidekick_id yet — the link write happens at turn close.
+        // No parley_id yet — the link write happens at turn close.
         // The PWA's reload-replay path will dedup against the live
         // SSE msg_id once the durable row materializes.
       });

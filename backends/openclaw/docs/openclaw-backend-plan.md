@@ -8,7 +8,7 @@ state-layer audit context 2026-05-15. **Not yet started.**
 - *Inflight cache stays hermes-specific.* Don't try to abstract it
   for the second backend; let openclaw teach us its real needs.
 - *Notifications persist as `role='assistant'` in `state.db.messages`*
-  (single source of truth) with `sidekick_msg_links.kind` carrying
+  (single source of truth) with `parley_msg_links.kind` carrying
   the cron/reminder/approval discriminator. Same source-of-truth
   pattern openclaw's plugin should follow if/when it adds out-of-band
   events. This landed 2026-05-15 in commits `737f7e9` + `223f421`.
@@ -60,7 +60,7 @@ interface, expressed as HTTP routes:
 
 **Plus parley extension fields (additive — vanilla OAI servers ignore):**
 - `POST /v1/responses` body accepts `metadata.user_message_id` (pre-mint), `metadata.voice` (boolean), `attachments` (array)
-- `GET /v1/conversations/{id}/items` rows MAY include `sidekick_id` (SSE-shape `umsg_*` / `msg_*` ID for reload-time dedup)
+- `GET /v1/conversations/{id}/items` rows MAY include `parley_id` (SSE-shape `umsg_*` / `msg_*` ID for reload-time dedup)
 - `GET /v1/gateway/conversations` rows MUST include `metadata.source` and emit `id = "${source}:${native_id}"` per the multi-identity rule (see `parley-openclaw-compat.md` for the precedent bug)
 
 **SSE event protocol (out of /v1/responses + /v1/events):**
@@ -153,7 +153,7 @@ Mitigation: stand up a minimal "hello world" openclaw plugin first, log every bi
 
 5. **Test surface doubles.** Existing parley smokes assume hermes-side state.db semantics in places. Mitigation: introduce a `BACKEND=hermes|openclaw` env in the smoke runner; backend-agnostic smokes run against both, backend-specific smokes are tagged.
 
-6. **The biggest risk is implicit.** Building openclaw-side will surface abstraction leaks in `proxy/parley/upstream.ts` we haven't seen yet because the only consumer is hermes. Most likely: SSE-ring semantics, inflight cache's coupling to hermes-side state.db row-id assignment, the `sidekick_msg_links` dedup machinery that today lives in hermes' state.db. Plan for the upstream.ts contract to grow in response to what we learn — DON'T treat it as frozen.
+6. **The biggest risk is implicit.** Building openclaw-side will surface abstraction leaks in `proxy/parley/upstream.ts` we haven't seen yet because the only consumer is hermes. Most likely: SSE-ring semantics, inflight cache's coupling to hermes-side state.db row-id assignment, the `parley_msg_links` dedup machinery that today lives in hermes' state.db. Plan for the upstream.ts contract to grow in response to what we learn — DON'T treat it as frozen.
 
 ## Open decisions
 
@@ -196,16 +196,16 @@ and that openclaw should follow:
   results all land here as `role='assistant'`. Hermes' context
   loader picks them up — which is correct (the agent should see
   what it produced).
-- `sidekick_msg_links` (plugin-owned sibling table in same state.db
-  file) has columns: `state_db_id, sidekick_id, kind`. The `kind`
+- `parley_msg_links` (plugin-owned sibling table in same state.db
+  file) has columns: `state_db_id, parley_id, kind`. The `kind`
   column was added 2026-05-14 to discriminate notification rows
   ('cron' / 'reminder' / 'approval' / etc.) from regular assistant
   replies for PWA render purposes. The PWA also detects cron-shape
   by content regex as a fallback when `kind` is unset.
-- Push notification state lives in `~/.sidekick/` JSON files
+- Push notification state lives in `~/.parley/` JSON files
   (subscriptions, mutes, prefs) on the proxy side. Not state.db.
   These should eventually move into a plugin-owned SQLite alongside
-  `sidekick_msg_links`, but the migration is deferred until after
+  `parley_msg_links`, but the migration is deferred until after
   openclaw lands.
 
 **Inflight cache (proxy in-memory):**
@@ -221,7 +221,7 @@ and that openclaw should follow:
 
 **Why this matters for openclaw:**
 1. The openclaw plugin's `/v1/conversations/{id}/items` handler
-   probably won't need a `sidekick_msg_links` equivalent — that table
+   probably won't need a `parley_msg_links` equivalent — that table
    exists to bridge hermes' integer message ids to the SSE-shape
    `umsg_*` / `msg_*` ids the PWA emits live. If openclaw's session
    store already uses string ids matching the PWA's pre-mint ids,
@@ -231,7 +231,7 @@ and that openclaw should follow:
    isNotificationItem` works on any agent that delivers cron-style
    output via reply_final. Openclaw doesn't need to emit a special
    envelope kind — the regex catches the canonical wrapper.
-3. The `sidekick_msg_links.kind` column is plugin-extension state.
+3. The `parley_msg_links.kind` column is plugin-extension state.
    If openclaw wants notification UI fidelity (the cron emoji,
    stripped boilerplate, jump-to-message), it can either populate
    the same plugin-local table OR rely on the PWA's shape-detection
@@ -268,7 +268,7 @@ pipeline before starting the openclaw plugin:
 
 - `737f7e9` (2026-05-14) — Notification persistence refactor: dropped
   the `parley_notifications` sibling table, moved to messages +
-  `sidekick_msg_links.kind`. Includes the in-app banner module
+  `parley_msg_links.kind`. Includes the in-app banner module
   (`src/notifications/inAppBanner.ts`) for non-viewed-chat surfaces.
 - `223f421` (2026-05-15) — Cron shape detection: `parseCronContent`
   now applies to any envelope (reply_final, notification, etc.) by

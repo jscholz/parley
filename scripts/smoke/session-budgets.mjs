@@ -32,8 +32,8 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 600;
   const mkMessages = (tag) => Array.from({ length: 12 }, (_, i) => (
     i % 2 === 0
-      ? { role: 'user', content: `${tag} user msg ${i}`, sidekick_id: `u_${tag}_${i}`, timestamp: t0 + i }
-      : { role: 'assistant', content: `${tag} reply ${i}`, sidekick_id: `a_${tag}_${i}`, timestamp: t0 + i }
+      ? { role: 'user', content: `${tag} user msg ${i}`, parley_id: `u_${tag}_${i}`, timestamp: t0 + i }
+      : { role: 'assistant', content: `${tag} reply ${i}`, parley_id: `a_${tag}_${i}`, timestamp: t0 + i }
   ));
   mock.addChat(CHAT_A, { title: 'Budget A', messages: mkMessages('BGA'), lastActiveAt: Date.now() - 2000 });
   mock.addChat(CHAT_B, { title: 'Budget B', messages: mkMessages('BGB'), lastActiveAt: Date.now() - 1000 });

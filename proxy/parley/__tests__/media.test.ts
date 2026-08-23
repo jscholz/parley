@@ -2,7 +2,7 @@
  * Agent-pushed media endpoint tests — registration guards (roots,
  * dotfiles, extensions, idempotency) + HTTP Range semantics on GET.
  * Registry + roots pointed at a temp dir via env so tests never touch
- * the real ~/.sidekick. fakeRes pattern from captureAudio.test.ts.
+ * the real ~/.parley. fakeRes pattern from captureAudio.test.ts.
  * Strip-only TS.
  */
 import { test, beforeEach, afterEach } from 'node:test';

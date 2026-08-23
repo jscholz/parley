@@ -28,7 +28,7 @@
 // Note: the mock backend's /messages endpoint does
 // NOT currently surface the `kind` field even when set on the mock chat
 // (mock-backend.mjs lines 228-251 pass through tool_call_id, tool_calls,
-// sidekick_id but not kind). So the test relies on the content-shape
+// parley_id but not kind). So the test relies on the content-shape
 // fallback regex in renderHistoryMessage to identify the row. The
 // `kind` field is still set on the mock data for forward-compat: when
 // the mock endpoint is updated to pass `kind` through, the server-tag
@@ -62,14 +62,14 @@ export function MOCK_SETUP(mock) {
       {
         role: 'user',
         content: 'what is the weather?',
-        sidekick_id: 'umsg_notif_history_user1',
+        parley_id: 'umsg_notif_history_user1',
         timestamp: t0,
       },
       // Regular assistant reply.
       {
         role: 'assistant',
         content: 'I will check periodically.',
-        sidekick_id: 'msg_notif_history_assist1',
+        parley_id: 'msg_notif_history_assist1',
         timestamp: t0 + 1,
       },
       // Cron-style notification row persisted as role='assistant' with
@@ -83,14 +83,14 @@ export function MOCK_SETUP(mock) {
         role: 'assistant',
         content: CRON_CONTENT,
         kind: 'cron',
-        sidekick_id: 'notif_notif_history_cron1',
+        parley_id: 'notif_notif_history_cron1',
         timestamp: t0 + 2,
       },
       // Another regular assistant reply after.
       {
         role: 'assistant',
         content: 'Anything else?',
-        sidekick_id: 'msg_notif_history_assist2',
+        parley_id: 'msg_notif_history_assist2',
         timestamp: t0 + 3,
       },
     ],
@@ -104,7 +104,7 @@ export function MOCK_SETUP(mock) {
       {
         role: 'user',
         content: 'unrelated chat',
-        sidekick_id: 'umsg_notif_history_other_seed',
+        parley_id: 'umsg_notif_history_other_seed',
         timestamp: t0,
       },
     ],

@@ -3,7 +3,7 @@
 // agent_reply case in activity-row-drills-to-bubble.mjs).
 //
 // Post-v2 invariant: notification bubbles are keyed by the bare
-// `sidekick_id` (not `notif:${sidekick_id}` as pre-v2), matching the
+// `parley_id` (not `notif:${parley_id}` as pre-v2), matching the
 // activity tray's stored `messageId` 1:1 — the drill is a single
 // querySelector with no prefix dance. The pre-v2 prefix caused
 // `querySelector([data-key="${messageId}"])` to miss; drillScrollTo
@@ -24,7 +24,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(VIEWED_CHAT, {
     title: 'Viewed',
-    messages: [{ role: 'user', content: 'viewed seed', sidekick_id: 'umsg_apd_view_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'viewed seed', parley_id: 'umsg_apd_view_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
   // Seed the approval as a DURABLE notification row in the source chat,
@@ -41,14 +41,14 @@ export function MOCK_SETUP(mock) {
     tail.push({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `post-approval line ${i} ${'lorem ipsum dolor sit amet consectetur '.repeat(4)}`,
-      sidekick_id: `umsg_apd_tail_${i}`,
+      parley_id: `umsg_apd_tail_${i}`,
       timestamp: t0 + 2 + i,
     });
   }
   mock.addChat(APPROVAL_CHAT, {
     title: 'Approval source',
     messages: [
-      { role: 'user', content: 'kick off the job', sidekick_id: 'umsg_apd_source_seed', timestamp: t0 },
+      { role: 'user', content: 'kick off the job', parley_id: 'umsg_apd_source_seed', timestamp: t0 },
       {
         role: 'assistant',
         kind: 'approval',
@@ -57,7 +57,7 @@ export function MOCK_SETUP(mock) {
           'printf approval-drill-target\n\n' +
           'Reason: approval drill smoke\n' +
           'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-        sidekick_id: APPROVAL_NOTIF_ID,
+        parley_id: APPROVAL_NOTIF_ID,
         timestamp: t0 + 1,
       },
       ...tail,
@@ -76,7 +76,7 @@ export default async function run({ page, log, mock }) {
   );
 
   // Push an approval notification for the OFF-screen chat. This creates
-  // both (a) an Activity tray row with messageId = sidekick_id, and (b)
+  // both (a) an Activity tray row with messageId = parley_id, and (b)
   // an in-chat approval bubble in APPROVAL_CHAT with data-key carrying
   // whatever the reconciler keys it with.
   mock.pushEnvelope({
@@ -88,7 +88,7 @@ export default async function run({ page, log, mock }) {
       'printf approval-drill-target\n\n' +
       'Reason: approval drill smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: APPROVAL_NOTIF_ID,
+    parley_id: APPROVAL_NOTIF_ID,
     urgent: true,
   });
 
@@ -112,7 +112,7 @@ export default async function run({ page, log, mock }) {
 
   // Drill must (1) switch the viewed chat, and (2) flash-highlight the
   // approval bubble in the transcript. Post-v2 the bubble data-key is
-  // the bare sidekick_id, matching the activity's stored messageId.
+  // the bare parley_id, matching the activity's stored messageId.
   await page.waitForFunction(
     (cid) => {
       const active = document.querySelector('#sessions-list li.active');
@@ -158,7 +158,7 @@ export default async function run({ page, log, mock }) {
   assert(state.activeChatId === APPROVAL_CHAT,
     `clicking the approval row must switch to the approval chat (${APPROVAL_CHAT}); got "${state.activeChatId}"`);
   assert(state.bubblePresent,
-    `approval bubble (data-key="${APPROVAL_NOTIF_ID}") missing from transcript after drill — projection should key it by bare sidekick_id`);
+    `approval bubble (data-key="${APPROVAL_NOTIF_ID}") missing from transcript after drill — projection should key it by bare parley_id`);
   assert(state.hasFlash,
     `clicking the approval row must flash the approval bubble (.search-target-flash) so the user sees what they were brought to`);
   assert(state.inView, 'approval bubble must be scrolled into view after drill');

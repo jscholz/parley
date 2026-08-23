@@ -35,12 +35,12 @@ from .. import parley_turn_linker as linker
 
 CHAT_ID = "b3e11a02-linker-test"
 SESSION = "20260720_000000_test"
-SRC = "sidekick"
+SRC = "parley"
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -599,13 +599,13 @@ def test_background_notification_window(db, state_db):
     notif = _add_msg(state_db, "assistant", "cron says hi", 301.0)
     state.record_envelope(db, {
         "type": "notification", "chat_id": CHAT_ID,
-        "sidekick_id": "notif_1784900000000_abc",
+        "parley_id": "notif_1784900000000_abc",
         "content": "cron says hi", "kind": "cron",
         "agent_row_id": str(notif),
     })
     linker._close_sync(
         db, state_db, CHAT_ID, SRC,
-        {"type": "notification", "sidekick_id": "notif_1784900000000_abc",
+        {"type": "notification", "parley_id": "notif_1784900000000_abc",
          "chat_id": CHAT_ID, "content": "cron says hi"},
     )
     o = _obs(db, "notif_1784900000000_abc")
@@ -625,7 +625,7 @@ def test_notification_during_open_window_is_noop(db, state_db):
     linker._open_sync(db, state_db, CHAT_ID, SRC, "umsg_m1", user_text="go")
     linker._close_sync(
         db, state_db, CHAT_ID, SRC,
-        {"type": "notification", "sidekick_id": "notif_mid", "chat_id": CHAT_ID},
+        {"type": "notification", "parley_id": "notif_mid", "chat_id": CHAT_ID},
     )
     assert _obs(db, "umsg_m1")["status"] == "open"
     assert _obs(db, "notif_mid") is None
@@ -782,13 +782,13 @@ def test_compare_sweep_skips_background_windows(db, state_db):
     notif = _add_msg(state_db, "assistant", "cron says hi", 301.0)
     state.record_envelope(db, {
         "type": "notification", "chat_id": CHAT_ID,
-        "sidekick_id": "notif_1784900000001_bg",
+        "parley_id": "notif_1784900000001_bg",
         "content": "cron says hi", "kind": "cron",
         "agent_row_id": str(notif),
     })
     linker._close_sync(
         db, state_db, CHAT_ID, SRC,
-        {"type": "notification", "sidekick_id": "notif_1784900000001_bg",
+        {"type": "notification", "parley_id": "notif_1784900000001_bg",
          "chat_id": CHAT_ID, "content": "cron says hi"},
     )
     # Reconcile linked the stray background row too.

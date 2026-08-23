@@ -32,7 +32,7 @@ export function MOCK_SETUP(mock) {
     messages: [
       { role: 'assistant',
         content: 'The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.',
-        sidekick_id: 'amsg_select_seed',
+        parley_id: 'amsg_select_seed',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,

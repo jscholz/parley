@@ -65,9 +65,9 @@ export function MOCK_SETUP(mock) {
     title: 'A — mid-turn tools',
     messages: [
       { role: 'user', content: 'first message in A',
-        sidekick_id: 'umsg_a_prev', timestamp: t0 },
+        parley_id: 'umsg_a_prev', timestamp: t0 },
       { role: 'assistant', content: 'first reply in A',
-        sidekick_id: 'msg_a_prev', timestamp: t0 + 1 },
+        parley_id: 'msg_a_prev', timestamp: t0 + 1 },
     ],
     lastActiveAt: Date.now(),
   });
@@ -76,8 +76,8 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
     title: 'B — switch target',
     messages: [
-      { role: 'user', content: 'hi B', sidekick_id: 'umsg_b', timestamp: t0 + 200 },
-      { role: 'assistant', content: 'B-REPLY', sidekick_id: 'msg_b', timestamp: t0 + 201 },
+      { role: 'user', content: 'hi B', parley_id: 'umsg_b', timestamp: t0 + 200 },
+      { role: 'assistant', content: 'B-REPLY', parley_id: 'msg_b', timestamp: t0 + 201 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });
@@ -236,7 +236,7 @@ export default async function run({ page, log, mock }) {
   chat.messages.push({
     role: 'assistant',
     content: 'A-DONE — used 3 tools.',
-    sidekick_id: 'msg_a_final',
+    parley_id: 'msg_a_final',
     timestamp: t1 + 100,
   });
   // reply_final closes the turn. After this the proxy's inflight

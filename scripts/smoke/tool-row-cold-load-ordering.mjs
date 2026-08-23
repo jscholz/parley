@@ -69,7 +69,7 @@ export function MOCK_SETUP(mock) {
   const messages = [
     // ── Turn 1 ──
     { role: 'user', content: 'first prompt — run two tools',
-      sidekick_id: 'cold_t1_user', timestamp: t0 },
+      parley_id: 'cold_t1_user', timestamp: t0 },
     { role: 'assistant', content: '',
       tool_calls: makeAssistantToolCall('cold_call_1', 'list_files', { path: '/a' }),
       timestamp: t0 + 1 },
@@ -81,17 +81,17 @@ export function MOCK_SETUP(mock) {
     { role: 'tool', content: JSON.stringify({ output: 'r2', exit_code: 0 }),
       tool_call_id: 'cold_call_2', timestamp: t0 + 4 },
     { role: 'assistant', content: 'Turn 1 reply — done two tools.',
-      sidekick_id: 'cold_t1_final', timestamp: t0 + 5 },
+      parley_id: 'cold_t1_final', timestamp: t0 + 5 },
     // ── Turn 2 ──
     { role: 'user', content: 'second prompt — one more',
-      sidekick_id: 'cold_t2_user', timestamp: t0 + 10 },
+      parley_id: 'cold_t2_user', timestamp: t0 + 10 },
     { role: 'assistant', content: '',
       tool_calls: makeAssistantToolCall('cold_call_3', 'list_files', { path: '/b' }),
       timestamp: t0 + 11 },
     { role: 'tool', content: JSON.stringify({ output: 'r3', exit_code: 0 }),
       tool_call_id: 'cold_call_3', timestamp: t0 + 12 },
     { role: 'assistant', content: 'Turn 2 reply — done.',
-      sidekick_id: 'cold_t2_final', timestamp: t0 + 13 },
+      parley_id: 'cold_t2_final', timestamp: t0 + 13 },
   ];
   mock.addChat(CHAT_ID, {
     title: 'Cold-load ordering chat',

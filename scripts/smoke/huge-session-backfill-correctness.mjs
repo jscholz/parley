@@ -63,7 +63,7 @@ export function MOCK_SETUP(mock) {
       content: role === 'user'
         ? `Question ${idx}: how does slide ${idx} land?`
         : fatMarkdown(idx),
-      sidekick_id: `bfc-msg-${idx}`,
+      parley_id: `bfc-msg-${idx}`,
       message_id: `bfc-msg-${idx}`,
       timestamp: Date.now() / 1000 - (N_MSGS - idx) * 60,
     });
@@ -71,22 +71,22 @@ export function MOCK_SETUP(mock) {
   messages.push({
     role: 'user',
     content: 'BFC-TAIL-MARKER final question',
-    sidekick_id: 'bfc-msg-tail',
+    parley_id: 'bfc-msg-tail',
     message_id: 'bfc-msg-tail',
     timestamp: Date.now() / 1000 - 30,
   });
   mock.addChat(HUGE, {
     title: 'Pitch deck (backfill correctness)',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(SMALL, {
     title: 'Small sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'BFC-SMALL-MARKER hello', message_id: 'bfc-small-1',
-        sidekick_id: 'bfc-small-1', timestamp: Date.now() / 1000 - 40 },
+        parley_id: 'bfc-small-1', timestamp: Date.now() / 1000 - 40 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

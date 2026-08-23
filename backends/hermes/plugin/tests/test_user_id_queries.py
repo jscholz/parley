@@ -46,7 +46,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            PARLEY = "sidekick"
+            PARLEY = "parley"
 
         class _PlatformConfig:
             pass
@@ -147,9 +147,9 @@ CREATE TABLE messages (
 );
 CREATE INDEX idx_messages_session ON messages(session_id, timestamp);
 
-CREATE TABLE sidekick_msg_links (
+CREATE TABLE parley_msg_links (
     state_db_id INTEGER PRIMARY KEY,
-    sidekick_id TEXT NOT NULL,
+    parley_id TEXT NOT NULL,
     -- 2026-05-14 notification-persistence extension: cron output /
     -- background results / scheduled reminders / approvals all flow
     -- as notification envelopes, and the items endpoint surfaces this
@@ -227,7 +227,7 @@ def _make_adapter(plugin, state_db_path: Path):
                 self, chat_id, source, limit, before_id,
             )
 
-        def _delete_conversation_sync(self, chat_id, source="sidekick"):
+        def _delete_conversation_sync(self, chat_id, source="parley"):
             return _route_conv.delete_conversation_sync(self, chat_id, source)
 
         def _rename_conversation_sync(self, chat_id, source, title):
@@ -250,26 +250,26 @@ def test_drawer_aggregate_one_row_per_user_id(plugin, state_db):
     created_at, latest last_active_at, and first user message."""
     chat = "709fdd42-7d8c-4105-a1ce-977f3b56e77e"
     # Older session (Series A)
-    _insert_session(state_db, "20260430_old", "sidekick", chat, 1000.0,
+    _insert_session(state_db, "20260430_old", "parley", chat, 1000.0,
                     title="Series A Pitch Deck")
     _insert_message(state_db, "20260430_old", "user", "draft me a pitch deck for series A", 1001.0)
     for i in range(36):
         _insert_message(state_db, "20260430_old", "assistant", f"reply {i}", 1002.0 + i)
     # Newer session (Collaborative scratchpad) — auto-reset, no parent
-    _insert_session(state_db, "20260501_new", "sidekick", chat, 2000.0,
+    _insert_session(state_db, "20260501_new", "parley", chat, 2000.0,
                     title="Collaborative Pitch Deck")
     for i in range(28):
         _insert_message(state_db, "20260501_new", "user" if i == 0 else "assistant",
                         f"new {i}", 2001.0 + i)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
 
     assert len(rows) == 1
     (chat_id, source, chat_type, title, mcount, _turn, _tool,
      last_active, created, first, _sids) = rows[0]
     assert chat_id == chat
-    assert source == "sidekick"
+    assert source == "parley"
     assert chat_type == "dm"
     # Title comes from the LATEST session
     assert title == "Collaborative Pitch Deck"
@@ -288,16 +288,16 @@ def test_history_walks_rotated_sessions(plugin, state_db):
     even though the older one has no parent_session_id (session_reset
     case, not compression). This is the core regression fix."""
     chat = "709fdd42-7d8c-4105-a1ce-977f3b56e77e"
-    _insert_session(state_db, "old", "sidekick", chat, 1000.0, title="Old")
+    _insert_session(state_db, "old", "parley", chat, 1000.0, title="Old")
     _insert_message(state_db, "old", "user", "first message", 1001.0)
     _insert_message(state_db, "old", "assistant", "first reply", 1002.0)
     # Auto-reset rotates: brand new session, parent=NULL
-    _insert_session(state_db, "new", "sidekick", chat, 2000.0, title="New")
+    _insert_session(state_db, "new", "parley", chat, 2000.0, title="New")
     _insert_message(state_db, "new", "user", "second message", 2001.0)
     _insert_message(state_db, "new", "assistant", "second reply", 2002.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._items_by_user_id(chat, "sidekick", 200, None)
+    result = adapter._items_by_user_id(chat, "parley", 200, None)
     assert result is not None
     items, _first_id, has_more = result
     assert has_more is False
@@ -311,61 +311,61 @@ def test_source_filter_discriminates_collisions(plugin, state_db):
     same_id = "1000000001"
     _insert_session(state_db, "tg", "telegram", same_id, 1000.0, title="TG")
     _insert_message(state_db, "tg", "user", "telegram-only", 1001.0)
-    _insert_session(state_db, "sk", "sidekick", same_id, 2000.0, title="SK")
+    _insert_session(state_db, "sk", "parley", same_id, 2000.0, title="SK")
     _insert_message(state_db, "sk", "user", "parley-only", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
 
     # History side: each (user_id, source) returns its own messages.
     tg = adapter._items_by_user_id(same_id, "telegram", 200, None)
-    sk = adapter._items_by_user_id(same_id, "sidekick", 200, None)
+    sk = adapter._items_by_user_id(same_id, "parley", 200, None)
     assert tg is not None and sk is not None
     assert [m["content"] for m in tg[0]] == ["telegram-only"]
     assert [m["content"] for m in sk[0]] == ["parley-only"]
 
     # Drawer side: with a single source filter, only that source row appears.
-    rows_sk_only = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows_sk_only = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows_sk_only) == 1
     assert rows_sk_only[0][0] == same_id
-    assert rows_sk_only[0][1] == "sidekick"
+    assert rows_sk_only[0][1] == "parley"
 
     # With both sources, BOTH rows appear (one per source).
-    rows_both = adapter._summaries_by_user_id(("sidekick", "telegram"), 50)
+    rows_both = adapter._summaries_by_user_id(("parley", "telegram"), 50)
     sources_returned = sorted(r[1] for r in rows_both if r[0] == same_id)
-    assert sources_returned == ["sidekick", "telegram"]
+    assert sources_returned == ["parley", "telegram"]
 
 
 def test_drawer_sources_allowlist(plugin, state_db):
     """Sources NOT in the allow-list are filtered out."""
     _insert_session(state_db, "tg", "telegram", "tg_chat", 1000.0, title="TG")
     _insert_message(state_db, "tg", "user", "hi", 1001.0)
-    _insert_session(state_db, "sk", "sidekick", "sk_chat", 2000.0, title="SK")
+    _insert_session(state_db, "sk", "parley", "sk_chat", 2000.0, title="SK")
     _insert_message(state_db, "sk", "user", "hi", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows_sk_only = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows_sk_only = adapter._summaries_by_user_id(("parley",), 50)
     assert [r[0] for r in rows_sk_only] == ["sk_chat"]
 
-    rows_both = adapter._summaries_by_user_id(("sidekick", "telegram"), 50)
+    rows_both = adapter._summaries_by_user_id(("parley", "telegram"), 50)
     assert sorted(r[0] for r in rows_both) == ["sk_chat", "tg_chat"]
 
 
 def test_history_before_id_pagination(plugin, state_db):
     """before_id cursor returns only older messages."""
-    _insert_session(state_db, "s1", "sidekick", "u", 1000.0, title="t")
+    _insert_session(state_db, "s1", "parley", "u", 1000.0, title="t")
     ids = []
     for i in range(10):
         ids.append(_insert_message(state_db, "s1", "user", f"m{i}", 1001.0 + i))
 
     adapter = _make_adapter(plugin, state_db)
     # Fetch latest 5 (no cursor)
-    result = adapter._items_by_user_id("u", "sidekick", 5, None)
+    result = adapter._items_by_user_id("u", "parley", 5, None)
     assert result is not None
     items, first_id, has_more = result
     assert [m["content"] for m in items] == ["m5", "m6", "m7", "m8", "m9"]
     assert has_more is True
     # Page back from first_id
-    result2 = adapter._items_by_user_id("u", "sidekick", 5, first_id)
+    result2 = adapter._items_by_user_id("u", "parley", 5, first_id)
     assert result2 is not None
     items2, _, has_more2 = result2
     assert [m["content"] for m in items2] == ["m0", "m1", "m2", "m3", "m4"]
@@ -374,28 +374,28 @@ def test_history_before_id_pagination(plugin, state_db):
 
 def test_history_no_match_returns_none(plugin, state_db):
     adapter = _make_adapter(plugin, state_db)
-    assert adapter._items_by_user_id("nonexistent", "sidekick", 50, None) is None
+    assert adapter._items_by_user_id("nonexistent", "parley", 50, None) is None
 
 
 def test_history_skips_context_compaction_rows(plugin, state_db):
-    _insert_session(state_db, "s1", "sidekick", "u", 1000.0)
+    _insert_session(state_db, "s1", "parley", "u", 1000.0)
     _insert_message(state_db, "s1", "user", "real", 1001.0)
     _insert_message(state_db, "s1", "system", "[CONTEXT COMPACTION] internal", 1002.0)
     _insert_message(state_db, "s1", "assistant", "real reply", 1003.0)
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._items_by_user_id("u", "sidekick", 50, None)
+    result = adapter._items_by_user_id("u", "parley", 50, None)
     assert result is not None
     items, _, _ = result
     assert [m["content"] for m in items] == ["real", "real reply"]
 
 
 def test_drawer_orders_by_last_active_desc(plugin, state_db):
-    _insert_session(state_db, "old", "sidekick", "old_chat", 1000.0, title="O")
+    _insert_session(state_db, "old", "parley", "old_chat", 1000.0, title="O")
     _insert_message(state_db, "old", "user", "old", 1001.0)
-    _insert_session(state_db, "new", "sidekick", "new_chat", 2000.0, title="N")
+    _insert_session(state_db, "new", "parley", "new_chat", 2000.0, title="N")
     _insert_message(state_db, "new", "user", "new", 2001.0)
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert [r[0] for r in rows] == ["new_chat", "old_chat"]
 
 
@@ -403,14 +403,14 @@ def test_drawer_includes_compression_forks_via_user_id(plugin, state_db):
     """parent_session_id chains (compression case) ALSO inherit user_id,
     so they're already covered by the (user_id, source) GROUP BY.
     Counts include both the root and the fork."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0, title="root")
+    _insert_session(state_db, "root", "parley", "u", 1000.0, title="root")
     _insert_message(state_db, "root", "user", "rooted", 1001.0)
-    _insert_session(state_db, "fork", "sidekick", "u", 2000.0, title="fork",
+    _insert_session(state_db, "fork", "parley", "u", 2000.0, title="fork",
                     parent="root")
     _insert_message(state_db, "fork", "user", "forked", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     chat_id, _src, _ctype, title, mcount, _turn, _tool, last_active, created, _first, _sids = rows[0]
     assert chat_id == "u"
@@ -455,14 +455,14 @@ def test_drawer_rolls_up_compacted_null_user_id_child(plugin, state_db):
 
     Post-CTE: child resolves to root_user_id via parent chain →
     mcount=5 (both root + child). Drawer-list shows the full chat."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0, title="root",
+    _insert_session(state_db, "root", "parley", "u", 1000.0, title="root",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "before compaction", 1001.0)
     _insert_message(state_db, "root", "assistant", "reply 1", 1002.0)
     # Compacted child — user_id IS NULL (the broken upstream
     # invariant) but system_prompt MATCHES the root (compaction
     # continuation inherits the prompt).
-    _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
+    _insert_session(state_db, "compacted", "parley", None, 2000.0,
                     title="root #2", parent="root",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "compacted", "user", "post compaction", 2001.0)
@@ -470,7 +470,7 @@ def test_drawer_rolls_up_compacted_null_user_id_child(plugin, state_db):
     _insert_message(state_db, "compacted", "assistant", "reply 3", 2003.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     chat_id, _src, _ctype, title, mcount, _turn, _tool, last_active, created, _first, _sids = rows[0]
     assert chat_id == "u"
@@ -490,20 +490,20 @@ def test_drawer_excludes_delegate_subtask_with_different_prompt(plugin, state_db
 
     Without the prompt gate the drawer can inflate message_count
     significantly by including unrelated delegate sub-task messages."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0, title="root",
+    _insert_session(state_db, "root", "parley", "u", 1000.0, title="root",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "user msg", 1001.0)
     _insert_message(state_db, "root", "assistant", "reply", 1002.0)
     # Delegate sub-task — parent=root, user_id=NULL, but DIFFERENT
     # system_prompt (default hermes-agent persona). Should NOT roll up.
-    _insert_session(state_db, "delegate", "sidekick", None, 2000.0,
+    _insert_session(state_db, "delegate", "parley", None, 2000.0,
                     parent="root", system_prompt=_HERMES_DEFAULT_PROMPT)
     for i in range(10):
         _insert_message(state_db, "delegate", "assistant", f"delegate msg {i}",
                         2001.0 + i)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     _chat_id, _src, _ctype, _title, mcount, _turn, _tool, _last, _created, _first, _sids = rows[0]
     assert mcount == 2, (
@@ -517,17 +517,17 @@ def test_history_walks_compacted_null_user_id_child(plugin, state_db):
     fetch must return messages from BOTH the root and compacted
     child sessions when the child has user_id=NULL AND a matching
     system_prompt. Pre-CTE: only root's messages appear. Post-CTE: both."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "root", "parley", "u", 1000.0,
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "root msg 1", 1001.0)
     _insert_message(state_db, "root", "assistant", "root reply 1", 1002.0)
-    _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
+    _insert_session(state_db, "compacted", "parley", None, 2000.0,
                     parent="root", system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "compacted", "user", "child msg 1", 2001.0)
     _insert_message(state_db, "compacted", "assistant", "child reply 1", 2002.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._items_by_user_id("u", "sidekick", 200, None)
+    result = adapter._items_by_user_id("u", "parley", 200, None)
     assert result is not None
     items, _first_id, _has_more = result
     assert len(items) == 4
@@ -540,15 +540,15 @@ def test_history_excludes_delegate_subtask_messages(plugin, state_db):
     delegate sub-task with a different system_prompt is reachable
     via parent_session_id but its messages are NOT user-visible
     transcript content. The CTE's system_prompt gate excludes them."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "root", "parley", "u", 1000.0,
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "user msg", 1001.0)
-    _insert_session(state_db, "delegate", "sidekick", None, 2000.0,
+    _insert_session(state_db, "delegate", "parley", None, 2000.0,
                     parent="root", system_prompt=_HERMES_DEFAULT_PROMPT)
     _insert_message(state_db, "delegate", "assistant", "delegate work", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._items_by_user_id("u", "sidekick", 200, None)
+    result = adapter._items_by_user_id("u", "parley", 200, None)
     assert result is not None
     items, _first_id, _has_more = result
     contents = [it["content"] for it in items]
@@ -561,18 +561,18 @@ def test_history_walks_multi_level_compaction_chain(plugin, state_db):
     """Compaction can rotate multiple times. The CTE must walk the
     full parent_session_id chain, not just one level. All links in
     the chain must carry a matching system_prompt to count."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "root", "parley", "u", 1000.0,
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "root msg", 1001.0)
-    _insert_session(state_db, "child1", "sidekick", None, 2000.0, parent="root",
+    _insert_session(state_db, "child1", "parley", None, 2000.0, parent="root",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "child1", "user", "child1 msg", 2001.0)
-    _insert_session(state_db, "child2", "sidekick", None, 3000.0, parent="child1",
+    _insert_session(state_db, "child2", "parley", None, 3000.0, parent="child1",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "child2", "user", "child2 msg", 3001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._items_by_user_id("u", "sidekick", 200, None)
+    result = adapter._items_by_user_id("u", "parley", 200, None)
     assert result is not None
     items, _first_id, _has_more = result
     contents = [it["content"] for it in items]
@@ -589,17 +589,17 @@ def test_drawer_accepts_compacted_child_with_appended_prompt(plugin, state_db):
     The CTE must roll up children whose system_prompt STARTS WITH
     the root's, not just exact-match (compaction appends a context
     summary suffix to the base prompt)."""
-    _insert_session(state_db, "root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "root", "parley", "u", 1000.0,
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "root", "user", "before", 1001.0)
-    _insert_session(state_db, "compacted", "sidekick", None, 2000.0,
+    _insert_session(state_db, "compacted", "parley", None, 2000.0,
                     parent="root",
                     system_prompt=_PARLEY_PROMPT + "\n\n[CONTEXT SUMMARY: ...]")
     _insert_message(state_db, "compacted", "user", "after", 2001.0)
     _insert_message(state_db, "compacted", "assistant", "ok", 2002.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     _chat_id, _src, _ctype, _title, mcount, _turn, _tool, _last, _created, _first, _sids = rows[0]
     assert mcount == 3, (
@@ -608,7 +608,7 @@ def test_drawer_accepts_compacted_child_with_appended_prompt(plugin, state_db):
     )
 
     # Same expectation for history fetch.
-    result = adapter._items_by_user_id("u", "sidekick", 200, None)
+    result = adapter._items_by_user_id("u", "parley", 200, None)
     assert result is not None
     items, _first_id, _has_more = result
     assert [it["content"] for it in items] == ["before", "after", "ok"]
@@ -631,10 +631,10 @@ def test_index_migration_idempotent(plugin, state_db):
 
 def test_drawer_first_user_message_truncated_to_80_chars(plugin, state_db):
     long_msg = "x" * 200
-    _insert_session(state_db, "s1", "sidekick", "u", 1000.0)
+    _insert_session(state_db, "s1", "parley", "u", 1000.0)
     _insert_message(state_db, "s1", "user", long_msg, 1001.0)
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     # Index 9 = first_user_truncated in the 11-tuple shape
     # (chat_id, source, chat_type, title, message_count, turn_count,
@@ -648,12 +648,12 @@ def test_drawer_first_user_message_truncated_to_80_chars(plugin, state_db):
 def test_drawer_excludes_null_user_id_sessions(plugin, state_db):
     """Sessions with NULL user_id (legacy / non-platform sessions)
     should not appear in the drawer."""
-    _insert_session(state_db, "s1", "sidekick", None, 1000.0, title="orphan")
+    _insert_session(state_db, "s1", "parley", None, 1000.0, title="orphan")
     _insert_message(state_db, "s1", "user", "hi", 1001.0)
-    _insert_session(state_db, "s2", "sidekick", "u", 2000.0, title="real")
+    _insert_session(state_db, "s2", "parley", "u", 2000.0, title="real")
     _insert_message(state_db, "s2", "user", "hi", 2001.0)
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert [r[0] for r in rows] == ["u"]
 
 
@@ -664,16 +664,16 @@ def test_drawer_session_ids_includes_rotated_children(plugin, state_db):
     including a rotated child's id, which is exactly what the user
     pastes from agent output (field bug 2026-06-11: a rotated child's
     id matched nothing in the Filter Sessions box)."""
-    _insert_session(state_db, "20260601_root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "20260601_root", "parley", "u", 1000.0,
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "20260601_root", "user", "hi", 1001.0)
-    _insert_session(state_db, "20260611_223425_98bd2b", "sidekick", None,
+    _insert_session(state_db, "20260611_223425_98bd2b", "parley", None,
                     2000.0, parent="20260601_root",
                     system_prompt=_PARLEY_PROMPT)
     _insert_message(state_db, "20260611_223425_98bd2b", "user", "more", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick",), 50)
+    rows = adapter._summaries_by_user_id(("parley",), 50)
     assert len(rows) == 1
     session_ids = rows[0][10]
     ids = set(session_ids.split(" "))
@@ -695,23 +695,23 @@ def test_session_id_search_resolves_null_user_id_child(plugin, state_db):
     """Searching a rotated child's session id (user_id=NULL) resolves
     to the ROOT conversation's (chat_id, source) by walking
     parent_session_id — the exact field-bug case."""
-    _insert_session(state_db, "20260601_root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "20260601_root", "parley", "u", 1000.0,
                     title="Root Chat")
-    _insert_session(state_db, "20260611_223425_98bd2b", "sidekick", None,
+    _insert_session(state_db, "20260611_223425_98bd2b", "parley", None,
                     2000.0, parent="20260601_root")
 
     rows = _id_matches(plugin, state_db, "20260611_223425_98bd2b")
-    assert rows == [("u", "sidekick", "Root Chat")]
+    assert rows == [("u", "parley", "Root Chat")]
     # Fragment of the id matches too (substring semantics).
     rows = _id_matches(plugin, state_db, "98bd2b")
-    assert rows == [("u", "sidekick", "Root Chat")]
+    assert rows == [("u", "parley", "Root Chat")]
 
 
 def test_session_id_search_escapes_like_underscore(plugin, state_db):
     """`_` in the query is a literal underscore, not a LIKE
     single-char wildcard. "2026x611" must NOT match "20260611_x"
     via an unescaped `_` in a query like "2026_611"."""
-    _insert_session(state_db, "20260611_abc", "sidekick", "u1", 1000.0,
+    _insert_session(state_db, "20260611_abc", "parley", "u1", 1000.0,
                     title="T")
     rows = _id_matches(plugin, state_db, "0611_abc")
     assert [(r[0]) for r in rows] == ["u1"]
@@ -722,7 +722,7 @@ def test_session_id_search_escapes_like_underscore(plugin, state_db):
 
 def test_session_id_search_skips_non_id_queries(plugin, state_db):
     """Multi-word, short, and non-alnum queries skip the id pass."""
-    _insert_session(state_db, "20260611_abc", "sidekick", "u1", 1000.0)
+    _insert_session(state_db, "20260611_abc", "parley", "u1", 1000.0)
     assert _id_matches(plugin, state_db, "two words") == []
     assert _id_matches(plugin, state_db, "ab") == []
     assert _id_matches(plugin, state_db, "foo-bar") == []
@@ -731,14 +731,14 @@ def test_session_id_search_skips_non_id_queries(plugin, state_db):
 def test_session_id_search_dedupes_multiple_children(plugin, state_db):
     """Two rotated children of the same root resolving to the same
     chat collapse to one result row."""
-    _insert_session(state_db, "20260601_root", "sidekick", "u", 1000.0,
+    _insert_session(state_db, "20260601_root", "parley", "u", 1000.0,
                     title="Root")
-    _insert_session(state_db, "20260611_aaa", "sidekick", None, 2000.0,
+    _insert_session(state_db, "20260611_aaa", "parley", None, 2000.0,
                     parent="20260601_root")
-    _insert_session(state_db, "20260611_bbb", "sidekick", None, 3000.0,
+    _insert_session(state_db, "20260611_bbb", "parley", None, 3000.0,
                     parent="20260601_root")
     rows = _id_matches(plugin, state_db, "20260611")
-    assert rows == [("u", "sidekick", "Root")]
+    assert rows == [("u", "parley", "Root")]
 
 
 # ── Gateway id encoding (contract uniqueness across sources) ─────────
@@ -748,7 +748,7 @@ def test_format_gateway_id_round_trip(plugin):
     """Encode/decode round-trip preserves source and chat_id, including
     chat_ids with `@` and other platform-shaped characters."""
     cases = [
-        ("sidekick", "709fdd42-7d8c-4105-a1ce-977f3b56e77e"),
+        ("parley", "709fdd42-7d8c-4105-a1ce-977f3b56e77e"),
         ("whatsapp", "199999999999999@lid"),
         ("whatsapp", "15551234567@s.whatsapp.net"),
         ("telegram", "1000000001"),
@@ -778,15 +778,15 @@ def test_gateway_id_unique_for_cross_source_chat_id_collision(plugin, state_db):
     same_id = "199999999999999@lid"
     _insert_session(state_db, "wa", "whatsapp", same_id, 1000.0, title="WhatsApp thread")
     _insert_message(state_db, "wa", "user", "voice memo", 1001.0)
-    _insert_session(state_db, "sk", "sidekick", same_id, 2000.0, title="Barge in test")
+    _insert_session(state_db, "sk", "parley", same_id, 2000.0, title="Barge in test")
     _insert_message(state_db, "sk", "user", "cookies?", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    rows = adapter._summaries_by_user_id(("sidekick", "whatsapp"), 50)
+    rows = adapter._summaries_by_user_id(("parley", "whatsapp"), 50)
     assert len(rows) == 2
     encoded_ids = [plugin._format_gateway_id(src, cid) for cid, src, *_ in rows]
     assert len(set(encoded_ids)) == 2
-    assert "sidekick:199999999999999@lid" in encoded_ids
+    assert "parley:199999999999999@lid" in encoded_ids
     assert "whatsapp:199999999999999@lid" in encoded_ids
 
 
@@ -799,7 +799,7 @@ def test_delete_conversation_sync_source_aware(plugin, state_db):
     same_id = "199999999999999@lid"
     _insert_session(state_db, "wa", "whatsapp", same_id, 1000.0, title="WA")
     _insert_message(state_db, "wa", "user", "wa-msg", 1001.0)
-    _insert_session(state_db, "sk", "sidekick", same_id, 2000.0, title="SK")
+    _insert_session(state_db, "sk", "parley", same_id, 2000.0, title="SK")
     _insert_message(state_db, "sk", "user", "sk-msg", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
@@ -812,14 +812,14 @@ def test_delete_conversation_sync_source_aware(plugin, state_db):
         "SELECT id, source FROM sessions WHERE user_id = ?", (same_id,),
     ).fetchall()
     conn.close()
-    assert sorted(rows) == [("sk", "sidekick")]
+    assert sorted(rows) == [("sk", "parley")]
 
 
 def test_delete_conversation_sync_default_source_back_compat(plugin, state_db):
     """Calling _delete_conversation_sync without a source still defaults
-    to SIDEKICK_SOURCE — preserves behavior for any legacy un-prefixed
+    to PARLEY_SOURCE — preserves behavior for any legacy un-prefixed
     delete callers."""
-    _insert_session(state_db, "sk", "sidekick", "u", 1000.0, title="SK")
+    _insert_session(state_db, "sk", "parley", "u", 1000.0, title="SK")
     _insert_message(state_db, "sk", "user", "hi", 1001.0)
     adapter = _make_adapter(plugin, state_db)
     result = adapter._delete_conversation_sync("u")
@@ -833,24 +833,24 @@ def test_rename_conversation_sync_updates_title(plugin, state_db):
     """Happy path: PATCH-driven rename rewrites sessions.title for the
     `(source, user_id)` pair and is visible via the drawer aggregate."""
     chat = "709fdd42-7d8c-4105-a1ce-977f3b56e77e"
-    _insert_session(state_db, "s1", "sidekick", chat, 1000.0, title="auto-title")
+    _insert_session(state_db, "s1", "parley", chat, 1000.0, title="auto-title")
     _insert_message(state_db, "s1", "user", "hi", 1001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(chat, "sidekick", "Bug bash")
+    result = adapter._rename_conversation_sync(chat, "parley", "Bug bash")
     assert result == "ok"
 
     # Verify state.db was actually written.
     conn = sqlite3.connect(state_db)
     rows = conn.execute(
         "SELECT title FROM sessions WHERE user_id = ? AND source = ?",
-        (chat, "sidekick"),
+        (chat, "parley"),
     ).fetchall()
     conn.close()
     assert rows == [("Bug bash",)]
 
     # And the drawer surfaces the new title via _summaries_by_user_id.
-    drawer = adapter._summaries_by_user_id(("sidekick",), 50)
+    drawer = adapter._summaries_by_user_id(("parley",), 50)
     assert len(drawer) == 1
     assert drawer[0][3] == "Bug bash"
 
@@ -864,27 +864,27 @@ def test_rename_conversation_sync_updates_only_latest_session(plugin, state_db):
     title via ``ORDER BY started_at DESC LIMIT 1`` so this is the
     row that surfaces in the UI."""
     chat = "u"
-    _insert_session(state_db, "old", "sidekick", chat, 1000.0, title="old-auto")
+    _insert_session(state_db, "old", "parley", chat, 1000.0, title="old-auto")
     _insert_message(state_db, "old", "user", "msg1", 1001.0)
-    _insert_session(state_db, "new", "sidekick", chat, 2000.0, title="new-auto")
+    _insert_session(state_db, "new", "parley", chat, 2000.0, title="new-auto")
     _insert_message(state_db, "new", "user", "msg2", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(chat, "sidekick", "Renamed")
+    result = adapter._rename_conversation_sync(chat, "parley", "Renamed")
     assert result == "ok"
 
     conn = sqlite3.connect(state_db)
     rows = conn.execute(
         "SELECT id, title FROM sessions WHERE user_id = ? AND source = ?"
         " ORDER BY id",
-        (chat, "sidekick"),
+        (chat, "parley"),
     ).fetchall()
     conn.close()
     # Only the latest (started_at=2000) row is updated.
     assert rows == [("new", "Renamed"), ("old", "old-auto")]
 
     # Drawer surfaces the updated title regardless.
-    drawer = adapter._summaries_by_user_id(("sidekick",), 50)
+    drawer = adapter._summaries_by_user_id(("parley",), 50)
     assert len(drawer) == 1
     assert drawer[0][3] == "Renamed"
 
@@ -905,13 +905,13 @@ def test_rename_conversation_sync_title_conflict(plugin, state_db):
     conn.commit()
     conn.close()
 
-    _insert_session(state_db, "a", "sidekick", "chat-a", 1000.0, title="Series A")
+    _insert_session(state_db, "a", "parley", "chat-a", 1000.0, title="Series A")
     _insert_message(state_db, "a", "user", "hi", 1001.0)
-    _insert_session(state_db, "b", "sidekick", "chat-b", 2000.0, title="Series B")
+    _insert_session(state_db, "b", "parley", "chat-b", 2000.0, title="Series B")
     _insert_message(state_db, "b", "user", "hi", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync("chat-b", "sidekick", "Series A")
+    result = adapter._rename_conversation_sync("chat-b", "parley", "Series A")
     assert result == "title_conflict"
 
     # Original row untouched.
@@ -940,14 +940,14 @@ def test_rename_conversation_sync_clears_stale_sibling_title(plugin, state_db):
 
     chat = "chat-rotated"
     # Pre-rotation row that holds the user's name.
-    _insert_session(state_db, "s_old", "sidekick", chat, 1000.0, title="[audio test]")
+    _insert_session(state_db, "s_old", "parley", chat, 1000.0, title="[audio test]")
     _insert_message(state_db, "s_old", "user", "hi", 1001.0)
     # Post-rotation row, auto-titled to something else, currently latest.
-    _insert_session(state_db, "s_new", "sidekick", chat, 2000.0, title="Repeating the Number 38")
+    _insert_session(state_db, "s_new", "parley", chat, 2000.0, title="Repeating the Number 38")
     _insert_message(state_db, "s_new", "user", "hi", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(chat, "sidekick", "[audio test]")
+    result = adapter._rename_conversation_sync(chat, "parley", "[audio test]")
     assert result == "ok"
 
     conn = sqlite3.connect(state_db)
@@ -974,19 +974,19 @@ def test_rename_conversation_sync_targets_latest_continuation(plugin, state_db):
     chat = "chat-compressed"
     prompt = "Parley prompt " * 30
     _insert_session(
-        state_db, "root", "sidekick", chat, 1000.0,
+        state_db, "root", "parley", chat, 1000.0,
         title="pitch deck v10+", system_prompt=prompt,
     )
     _insert_message(state_db, "root", "user", "hi", 1001.0)
     _insert_session(
-        state_db, "child", "sidekick", None, 2000.0,
+        state_db, "child", "parley", None, 2000.0,
         title="SpaceX Starship Launch Outcome #2", parent="root",
         system_prompt=prompt,
     )
     _insert_message(state_db, "child", "user", "follow-up", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(chat, "sidekick", "pitch deck v10+")
+    result = adapter._rename_conversation_sync(chat, "parley", "pitch deck v10+")
     assert result == "ok"
 
     conn = sqlite3.connect(state_db)
@@ -995,7 +995,7 @@ def test_rename_conversation_sync_targets_latest_continuation(plugin, state_db):
     assert rows["child"] == "pitch deck v10+"
     assert rows["root"] is None
 
-    drawer = adapter._summaries_by_user_id(("sidekick",), 50)
+    drawer = adapter._summaries_by_user_id(("parley",), 50)
     assert len(drawer) == 1
     assert drawer[0][3] == "pitch deck v10+"
 
@@ -1007,25 +1007,25 @@ def test_parley_title_override_wins_over_latest_continuation(plugin, state_db, t
     chat = "chat-title-override"
     prompt = "Parley prompt " * 30
     _insert_session(
-        state_db, "root", "sidekick", chat, 1000.0,
+        state_db, "root", "parley", chat, 1000.0,
         title="User Name", system_prompt=prompt,
     )
     _insert_message(state_db, "root", "user", "hi", 1001.0)
     _insert_session(
-        state_db, "child", "sidekick", None, 2000.0,
+        state_db, "child", "parley", None, 2000.0,
         title="Compression Auto Title", parent="root", system_prompt=prompt,
     )
     _insert_message(state_db, "child", "user", "follow-up", 2001.0)
 
     sdb_mod = importlib.import_module(f"{plugin.__name__}.parley_db")
     adapter = _make_adapter(plugin, state_db)
-    adapter._parley_db = sdb_mod.ParleyDB(tmp_path / "sidekick.db")
+    adapter._parley_db = sdb_mod.ParleyDB(tmp_path / "parley.db")
     adapter._parley_db.exec(
         "INSERT INTO conversation_titles (source, chat_id, title, updated_at) VALUES (?, ?, ?, ?)",
-        ("sidekick", chat, "User Name", 3000.0),
+        ("parley", chat, "User Name", 3000.0),
     )
 
-    drawer = adapter._summaries_by_user_id(("sidekick",), 50)
+    drawer = adapter._summaries_by_user_id(("parley",), 50)
     assert len(drawer) == 1
     assert drawer[0][3] == "User Name"
 
@@ -1034,11 +1034,11 @@ def test_rename_conversation_sync_idempotent_same_title(plugin, state_db):
     """Renaming to the title the row already has is a no-op success,
     NOT a conflict — the latest row matches its own title."""
     chat = "u"
-    _insert_session(state_db, "s1", "sidekick", chat, 1000.0, title="Existing")
+    _insert_session(state_db, "s1", "parley", chat, 1000.0, title="Existing")
     _insert_message(state_db, "s1", "user", "hi", 1001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(chat, "sidekick", "Existing")
+    result = adapter._rename_conversation_sync(chat, "parley", "Existing")
     assert result == "ok"
 
 
@@ -1047,7 +1047,7 @@ def test_rename_conversation_sync_not_found(plugin, state_db):
     surfaces 404)."""
     adapter = _make_adapter(plugin, state_db)
     result = adapter._rename_conversation_sync(
-        "nonexistent", "sidekick", "Whatever",
+        "nonexistent", "parley", "Whatever",
     )
     assert result == "not_found"
 
@@ -1058,11 +1058,11 @@ def test_rename_conversation_sync_source_isolation(plugin, state_db):
     same_id = "199999999999999@lid"
     _insert_session(state_db, "wa", "whatsapp", same_id, 1000.0, title="WA-orig")
     _insert_message(state_db, "wa", "user", "wa", 1001.0)
-    _insert_session(state_db, "sk", "sidekick", same_id, 2000.0, title="SK-orig")
+    _insert_session(state_db, "sk", "parley", same_id, 2000.0, title="SK-orig")
     _insert_message(state_db, "sk", "user", "sk", 2001.0)
 
     adapter = _make_adapter(plugin, state_db)
-    result = adapter._rename_conversation_sync(same_id, "sidekick", "SK-new")
+    result = adapter._rename_conversation_sync(same_id, "parley", "SK-new")
     assert result == "ok"
 
     conn = sqlite3.connect(state_db)
@@ -1073,7 +1073,7 @@ def test_rename_conversation_sync_source_isolation(plugin, state_db):
     ).fetchall()
     conn.close()
     assert rows == [
-        ("sk", "sidekick", "SK-new"),
+        ("sk", "parley", "SK-new"),
         ("wa", "whatsapp", "WA-orig"),
     ]
 

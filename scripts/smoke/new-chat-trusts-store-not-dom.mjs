@@ -51,11 +51,11 @@ const MARKER = 'CONTENT-IN-STORE-MARKER';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Chat with content the DOM check misses',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: MARKER, message_id: 'm-1', sidekick_id: 'm-1',
+      { role: 'user', content: MARKER, message_id: 'm-1', parley_id: 'm-1',
         timestamp: Date.now() / 1000 - 60 },
-      { role: 'assistant', content: MARKER + ' reply', message_id: 'm-2', sidekick_id: 'm-2',
+      { role: 'assistant', content: MARKER + ' reply', message_id: 'm-2', parley_id: 'm-2',
         timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 10_000,

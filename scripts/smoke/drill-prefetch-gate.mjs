@@ -47,13 +47,13 @@ export function MOCK_SETUP(mock) {
       msgs.push({
         role,
         content: `bg ${i} msg ${j}`,
-        sidekick_id: `bg-${i}-msg-${j}`,
+        parley_id: `bg-${i}-msg-${j}`,
         timestamp: Date.now() / 1000 - (6 - j) * 60,
       });
     }
     mock.addChat(bgId(i), {
       title: `Background ${i}`,
-      source: 'sidekick',
+      source: 'parley',
       messages: msgs,
       lastActiveAt: Date.now() - i * 1000,
     });
@@ -67,13 +67,13 @@ export function MOCK_SETUP(mock) {
     deepMsgs.push({
       role,
       content: role === 'user' ? `deep user ${idx}` : `deep agent ${idx}`,
-      sidekick_id: `deep-msg-${idx}`,
+      parley_id: `deep-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(DEEP_CHAT, {
     title: 'Deep chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: deepMsgs,
     lastActiveAt: Date.now() - 10 * 60_000,  // oldest → outside prefetch top-8
   });

@@ -33,10 +33,10 @@ import * as chat from './chat.ts';
  *  notification row matching the persisted transcript shape (so
  *  reload finds the same data-message-id and dedups). For off-screen
  *  chats: bump the badge counter. */
-export function handleNotification({ chatId, kind, content, sidekickId, isReplay }: any): void {
+export function handleNotification({ chatId, kind, content, parleyId, isReplay }: any): void {
   const replay = isReplay === true;
   // Normalize the incoming chat_id shape. Post-v0.383 chat_ids are
-  // `sidekick:<uuid>`, but a producer can emit the bare uuid and the
+  // `parley:<uuid>`, but a producer can emit the bare uuid and the
   // focused/viewed id may be either form. Compare on the bare id, and when
   // this notification is for the chat that's currently on screen, adopt the
   // app's canonical id (focusedId) so EVERY downstream site keys
@@ -45,7 +45,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // the viewed chat with a mismatched prefix took the off-screen path
   // (spurious banner, #234) AND failed to render its in-chat row.
   const focusedAtEntry = switchCtl.focusedId();
-  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^sidekick:/, ''));
+  const bareId = (id: any) => (id == null ? '' : String(id).replace(/^parley:/, ''));
   if (chatId && focusedAtEntry && bareId(chatId) === bareId(focusedAtEntry)) {
     chatId = focusedAtEntry;
   }
@@ -60,7 +60,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
   // approval that arrived as a push while the app was closed: on the
   // next reconnect the approval only ever comes back as a replayed
   // envelope, so it never landed in the tray and the user couldn't find
-  // it to act on later. The upsert is idempotent on sidekick_id and
+  // it to act on later. The upsert is idempotent on parley_id and
   // preserves prior read/resolved state, so re-projecting a replayed row
   // is safe. The banner + badge bump below STAY replay-gated so a
   // reconnect doesn't re-alert; only the recoverable tray row is added.
@@ -68,7 +68,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
     chatId: chatId || null,
     kind: kind || '',
     content: content || '',
-    sidekickId: typeof sidekickId === 'string' ? sidekickId : null,
+    parleyId: typeof parleyId === 'string' ? parleyId : null,
     urgent: kind === 'approval',
     chatLabel: sessionDrawer.getTitleForChat?.(chatId) || null,
   });
@@ -92,7 +92,7 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
       chatId,
       kind: kind || '',
       content: content || '',
-      sidekickId: typeof sidekickId === 'string' ? sidekickId : null,
+      parleyId: typeof parleyId === 'string' ? parleyId : null,
       chatLabel: sessionDrawer.getTitleForChat?.(chatId) || undefined,
     });
     log(`notification (off-screen) chat=${chatId} kind=${kind} — badge++ + banner`);
@@ -109,13 +109,13 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
       chatId,
       kind: kind || '',
       content: content || '',
-      sidekickId: typeof sidekickId === 'string' ? sidekickId : null,
+      parleyId: typeof parleyId === 'string' ? parleyId : null,
       chatLabel: sessionDrawer.getTitleForChat?.(chatId) || undefined,
     });
   }
   // On-screen notification — push into the store. Projection renders
   // it via the reconciler's notification path; same shape as durable
-  // rows that come back through /messages later (deduped via sidekick_id).
+  // rows that come back through /messages later (deduped via parley_id).
   let displayText = content || '';
   if (kind === 'cron') {
     // Strip the scheduler boilerplate so the in-chat row reads cleanly.
@@ -133,11 +133,11 @@ export function handleNotification({ chatId, kind, content, sidekickId, isReplay
       chat_id: chatId,
       kind: kind || 'notification',
       content: displayText,
-      sidekick_id: typeof sidekickId === 'string' ? sidekickId : undefined,
+      parley_id: typeof parleyId === 'string' ? parleyId : undefined,
     });
     // Live notification landing in a scrolled-up viewport = one unread.
-    // No sidekickId → no stable dedup key → skip (noteLiveMessage no-ops).
-    if (!replay) chat.noteLiveMessage(chatId, typeof sidekickId === 'string' ? sidekickId : null);
+    // No parleyId → no stable dedup key → skip (noteLiveMessage no-ops).
+    if (!replay) chat.noteLiveMessage(chatId, typeof parleyId === 'string' ? parleyId : null);
     void badge.clearUnread(chatId);
   }
 }

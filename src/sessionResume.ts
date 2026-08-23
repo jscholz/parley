@@ -13,7 +13,7 @@
 //
 //   renderHistoryMessage(m, label, mode?, batch?)
 //     Shared per-message renderer for both initial replay (append) and
-//     load-earlier (prepend, batched). Picks sidekick_id over integer id
+//     load-earlier (prepend, batched). Picks parley_id over integer id
 //     so the IDB-cached bubble dedupes against history-replay correctly.
 //
 //   loadEarlierHistory(beforeId)
@@ -174,7 +174,7 @@ export function replaySessionMessages(
 
   // Composer read-only when viewing a non-parley chat.
   const source = sessionDrawer.getSourceForChat(id);
-  setComposerReadOnlyRef(source !== 'sidekick', source);
+  setComposerReadOnlyRef(source !== 'parley', source);
 
   sessionDrawer.scheduleRefresh();
   chat.trackViewedSession(id);
@@ -317,7 +317,7 @@ export function replaySessionMessages(
   // a separate backlog item — see backlog.md.
   if (targetMessageId) {
     const transcriptEl = document.getElementById('transcript');
-    // Bubble data-key is the bare sidekick_id post-v2 (2026-05-29);
+    // Bubble data-key is the bare parley_id post-v2 (2026-05-29);
     // matches activity-tray's stored messageId 1:1 with no prefix
     // gymnastics. Plain querySelector lookup.
     const target: HTMLElement | null =

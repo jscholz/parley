@@ -1,4 +1,4 @@
-# Publish parleyvoo (formerly sidekick-portal) to npm on version tags
+# Publish parleyvoo to npm on version tags
 # — via npm Trusted
 # Publishing (GitHub OIDC), so there are no tokens to store or rotate
 # and no 2FA prompt: npm trusts this exact repo+workflow identity.

@@ -42,7 +42,7 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT, {
     title: 'Pin Boot',
     messages: [
-      { role: 'user', content: 'pin boot seed', sidekick_id: 'umsg_pin_boot_seed', timestamp: t0 },
+      { role: 'user', content: 'pin boot seed', parley_id: 'umsg_pin_boot_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 1000,
   });

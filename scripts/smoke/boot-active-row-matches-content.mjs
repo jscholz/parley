@@ -35,7 +35,7 @@ const WA_MARKER = 'whatsapp-content-marker-bootactive';
 export function MOCK_SETUP(mock) {
   // A parley chat so the drawer has more than just one row.
   mock.addChat(SK_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Parley chat',
     messages: [
       { role: 'user', content: 'sk-msg', timestamp: Date.now() / 1000 - 120 },

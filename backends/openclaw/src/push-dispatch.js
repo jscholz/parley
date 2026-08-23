@@ -77,7 +77,7 @@ function buildPayload({ chatId, text, kind, messageId = '' }) {
     title: `${titleEmoji} ${speaker}`,
     body,
     chat_id: normalizedChatId,
-    tag: normalizedChatId || 'sidekick',
+    tag: normalizedChatId || 'parley',
     url,
   };
 }

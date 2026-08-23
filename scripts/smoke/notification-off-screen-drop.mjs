@@ -29,7 +29,7 @@ export function MOCK_SETUP(mock) {
     title: 'Viewed chat',
     messages: [
       { role: 'user', content: 'viewed seed',
-        sidekick_id: 'umsg_viewed_seed',
+        parley_id: 'umsg_viewed_seed',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,
@@ -38,7 +38,7 @@ export function MOCK_SETUP(mock) {
     title: 'Background chat',
     messages: [
       { role: 'user', content: 'background seed',
-        sidekick_id: 'umsg_bg_seed',
+        parley_id: 'umsg_bg_seed',
         timestamp: Date.now() / 1000 - 120 },
     ],
     lastActiveAt: Date.now() - 5000,

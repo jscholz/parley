@@ -80,9 +80,9 @@ export function MOCK_SETUP(mock) {
     title: 'Anchor B',
     messages: [
       { role: 'user', content: 'anchor B msg',
-        sidekick_id: 'umsg_anchor_b_inflight', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'umsg_anchor_b_inflight', timestamp: Date.now() / 1000 - 30 },
       { role: 'assistant', content: 'anchor B reply',
-        sidekick_id: 'msg_anchor_b_inflight', timestamp: Date.now() / 1000 - 29 },
+        parley_id: 'msg_anchor_b_inflight', timestamp: Date.now() / 1000 - 29 },
     ],
     lastActiveAt: Date.now() - 5000,
   });

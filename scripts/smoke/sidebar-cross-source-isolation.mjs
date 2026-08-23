@@ -1,5 +1,5 @@
 // Scenario: two sessions whose underlying platform chat_id collides
-// across sources (e.g. one `sidekick:199999999999999@lid` test session
+// across sources (e.g. one `parley:199999999999999@lid` test session
 // and one `whatsapp:199999999999999@lid` real WhatsApp thread) must
 // render as TWO distinct drawer rows, click-isolate, and resume the
 // correct transcript per row.
@@ -29,7 +29,7 @@ export const BACKEND = 'mocked';
 // involved a WhatsApp @lid; mock that exact shape so the smoke stays
 // recognizable to anyone debugging future regressions.
 const NATIVE_CHAT_ID = '199999999999999@lid';
-const SK_ID = `sidekick:${NATIVE_CHAT_ID}`;
+const SK_ID = `parley:${NATIVE_CHAT_ID}`;
 const WA_ID = `whatsapp:${NATIVE_CHAT_ID}`;
 
 export function MOCK_SETUP(mock) {
@@ -39,7 +39,7 @@ export function MOCK_SETUP(mock) {
   // whatever source we pass.
   mock.addChat(SK_ID, {
     title: 'Barge in test with cookie explanation',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'parley-marker-cookies', timestamp: now / 1000 - 60 },
       { role: 'assistant', content: 'parley-reply-cookies-are-tiny', timestamp: now / 1000 - 59 },

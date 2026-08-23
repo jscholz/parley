@@ -13,13 +13,13 @@
 import { firstUserMessageText, isDeliveryMirror } from './openclaw-store.js';
 
 /** Strip the openclaw `agent:{agentId}:` prefix from a session key
- *  so PWA-minted chat ids (e.g. `sidekick:<uuid>`) roundtrip stably.
+ *  so PWA-minted chat ids (e.g. `parley:<uuid>`) roundtrip stably.
  *
- *  Why: when the PWA POSTs /v1/responses with `conversation:"sidekick:abc"`,
- *  openclaw normalizes that to `agent:dev:sidekick:abc` and returns it
+ *  Why: when the PWA POSTs /v1/responses with `conversation:"parley:abc"`,
+ *  openclaw normalizes that to `agent:dev:parley:abc` and returns it
  *  in subsequent sessions.list calls. Without normalization, the PWA's
- *  IDB row keyed by `sidekick:abc` doesn't match the server-returned
- *  `agent:dev:sidekick:abc`, so the drawer shows two rows for one chat
+ *  IDB row keyed by `parley:abc` doesn't match the server-returned
+ *  `agent:dev:parley:abc`, so the drawer shows two rows for one chat
  *  (which breaks continuity on subsequent sends).
  *
  *  Reverse normalization (`prefixChatId`) is idempotent — openclaw's
@@ -86,7 +86,7 @@ function extractTitleSnippet(userText, maxLen = 60) {
  *
  *  Returns null for rows that don't render as messages (e.g. system
  *  rows that the PWA filters out anyway; cleaner to drop here). */
-export function toConversationItem({ msg, seq, sidekickIdLookup }) {
+export function toConversationItem({ msg, seq, parleyIdLookup }) {
   // SPECIAL CASE: openclaw uses a `message` tool to deliver the
   // user-facing reply text (args.message). Render it as assistant
   // text rather than a tool_call row so the reload replay matches
@@ -97,26 +97,26 @@ export function toConversationItem({ msg, seq, sidekickIdLookup }) {
   const messageToolReply = extractMessageToolReply(msg);
   if (messageToolReply) {
     const openclawId = msg?.wrapperId;
-    const sidekickId = openclawId && sidekickIdLookup ? sidekickIdLookup.get(openclawId) : undefined;
+    const parleyId = openclawId && parleyIdLookup ? parleyIdLookup.get(openclawId) : undefined;
     return {
       id: seq,
       object: 'message',
       role: 'assistant',
       content: messageToolReply,
       created_at: Math.floor((msg.timestamp ?? Date.parse(msg.wrapperTs)) / 1000),
-      ...(sidekickId ? { sidekick_id: sidekickId } : {}),
+      ...(parleyId ? { parley_id: parleyId } : {}),
     };
   }
   const role = mapRole(msg);
   if (!role) return null;
   const { content, toolName } = flattenContent(msg);
-  // sidekick_id mapping: looked up by openclaw's jsonl wrapper id
+  // parley_id mapping: looked up by openclaw's jsonl wrapper id
   // (msg.wrapperId), which is the stable per-message uuid we stored
-  // as agent_row_id at /v1/responses lifecycle:end. PWA uses sidekick_id
+  // as agent_row_id at /v1/responses lifecycle:end. PWA uses parley_id
   // to dedup the inflight-cached bubble against this reload replay —
   // without it every reload duplicates assistant bubbles.
   const openclawId = msg?.wrapperId;
-  const sidekickId = openclawId && sidekickIdLookup ? sidekickIdLookup.get(openclawId) : undefined;
+  const parleyId = openclawId && parleyIdLookup ? parleyIdLookup.get(openclawId) : undefined;
   return {
     id: seq,
     object: 'message',
@@ -124,7 +124,7 @@ export function toConversationItem({ msg, seq, sidekickIdLookup }) {
     content,
     created_at: Math.floor((msg.timestamp ?? Date.parse(msg.wrapperTs)) / 1000),
     ...(toolName ? { tool_name: toolName } : {}),
-    ...(sidekickId ? { sidekick_id: sidekickId } : {}),
+    ...(parleyId ? { parley_id: parleyId } : {}),
   };
 }
 

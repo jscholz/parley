@@ -31,7 +31,7 @@ function makeMessages(count, prefix) {
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `${body} (msg ${i + 1})`,
       message_id: `${prefix.toLowerCase()}-grow-${i + 1}`,
-      sidekick_id: `${prefix.toLowerCase()}-grow-${i + 1}`,
+      parley_id: `${prefix.toLowerCase()}-grow-${i + 1}`,
       timestamp: Date.now() / 1000 - (count - i) * 60,
     });
   }
@@ -41,13 +41,13 @@ function makeMessages(count, prefix) {
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — at-bottom grows while away',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(40, 'A'),
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B — sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(8, 'B'),
     lastActiveAt: Date.now() - 30_000,
   });
@@ -103,7 +103,7 @@ export default async function run({ page, log }) {
         role: i % 2 === 0 ? 'user' : 'assistant',
         content: `NEW POST-LEAVE MSG ${i + 1} — body padding lorem ipsum dolor sit amet ${'x'.repeat(80)}`,
         message_id: `a-grow-new-${i + 1}`,
-        sidekick_id: `a-grow-new-${i + 1}`,
+        parley_id: `a-grow-new-${i + 1}`,
         timestamp: baseTs + i,
       });
     }

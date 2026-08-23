@@ -54,7 +54,7 @@ export async function handleParleyMessage(req, res) {
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
-      error: 'sidekick_platform_unconfigured',
+      error: 'parley_platform_unconfigured',
       detail: 'Upstream not initialized — proxy boot likely failed.',
     }));
     return;

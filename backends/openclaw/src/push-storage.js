@@ -8,7 +8,7 @@
  *   - push_prefs           (key/value JSON blob store)
  *
  * The proxy used to keep these as JSON files under
- * ~/.sidekick/notifications/; for openclaw the plugin owns them so
+ * ~/.parley/notifications/; for openclaw the plugin owns them so
  * each backend's parley-shaped state is self-contained. See
  * `../docs/parley-supplemental-store-schema.md`
  * for the design discussion.

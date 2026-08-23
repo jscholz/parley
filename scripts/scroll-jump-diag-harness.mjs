@@ -53,7 +53,7 @@ function makeMessages(count) {
       // NO message_id: the mock only emits a numeric firstId pagination
       // cursor when ids are the auto-assigned integers (string ids →
       // firstId null → load-earlier disabled).
-      sidekick_id: `jump-${idx}`,
+      parley_id: `jump-${idx}`,
       timestamp: Date.now() / 1000 - (count - idx) * 60,
     });
   }
@@ -95,7 +95,7 @@ async function main() {
   mock.setHistoryFirstPageLimit(FIRST_PAGE);
   mock.addChat(CHAT_ID, {
     title: 'Scroll jump repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(TOTAL_MSGS),
     lastActiveAt: Date.now() - 1000,
   });

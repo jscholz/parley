@@ -47,7 +47,7 @@ export function MOCK_SETUP(mock) {
   // lighter render path that hides the bug).
   mock.addChat(CHAT_A, {
     title: 'Chat A — multi-session juggle',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'A: old user message #1', timestamp: Date.now() / 1000 - 3600 },
       { role: 'assistant', content: 'A: old agent reply #1', timestamp: Date.now() / 1000 - 3599 },
@@ -56,7 +56,7 @@ export function MOCK_SETUP(mock) {
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B — multi-session juggle',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'B: old user message #1', timestamp: Date.now() / 1000 - 3600 },
       { role: 'assistant', content: 'B: old agent reply #1', timestamp: Date.now() / 1000 - 3599 },

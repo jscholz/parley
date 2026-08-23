@@ -27,21 +27,21 @@ export function MOCK_SETUP(mock) {
   for (let i = 0; i < 8; i++) {
     mock.addChat(`mock-read-${i}`, {
       title: `Read chat ${i}`,
-      messages: [{ role: 'user', content: 'x', sidekick_id: `u_r${i}`, timestamp: now / 1000 - 100 - i }],
+      messages: [{ role: 'user', content: 'x', parley_id: `u_r${i}`, timestamp: now / 1000 - 100 - i }],
       lastActiveAt: now - 10_000 - i * 1000,
     });
   }
   // …an UNREAD chat parked at the very BOTTOM of the recency order…
   mock.addChat('mock-unread-old', {
     title: 'Old unread chat',
-    messages: [{ role: 'user', content: 'y', sidekick_id: 'u_old', timestamp: now / 1000 - 9999 }],
+    messages: [{ role: 'user', content: 'y', parley_id: 'u_old', timestamp: now / 1000 - 9999 }],
     lastActiveAt: now - 9_000_000,
   });
   mock.setUnread('mock-unread-old', 1);
   // …and a MARKED-unread chat with zero new messages.
   mock.addChat('mock-marked', {
     title: 'Marked chat',
-    messages: [{ role: 'user', content: 'z', sidekick_id: 'u_m', timestamp: now / 1000 - 5000 }],
+    messages: [{ role: 'user', content: 'z', parley_id: 'u_m', timestamp: now / 1000 - 5000 }],
     lastActiveAt: now - 5_000_000,
   });
   mock.setMarkedUnread('mock-marked', true);

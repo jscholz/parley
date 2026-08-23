@@ -42,8 +42,8 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 600;
   const messages = [];
   for (let i = 1; i <= 4; i++) {
-    messages.push({ role: 'user', content: `Turn ${i} ${MARKER}`, sidekick_id: `u_slb_${i}`, timestamp: t0 + i * 2 });
-    messages.push({ role: 'assistant', content: `Reply ${i} ${MARKER}`, sidekick_id: `m_slb_${i}`, timestamp: t0 + i * 2 + 1 });
+    messages.push({ role: 'user', content: `Turn ${i} ${MARKER}`, parley_id: `u_slb_${i}`, timestamp: t0 + i * 2 });
+    messages.push({ role: 'assistant', content: `Reply ${i} ${MARKER}`, parley_id: `m_slb_${i}`, timestamp: t0 + i * 2 + 1 });
   }
   mock.addChat(CHAT_ID, { title: 'Slow-link boot chat', messages, lastActiveAt: Date.now() });
 }

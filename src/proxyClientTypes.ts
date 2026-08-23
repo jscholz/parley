@@ -337,7 +337,7 @@ export interface SearchOpts {
  *   contiguous run can persist + grow the IDB cache.
  * @property {(id: string, target: string, limit?: number) => Promise<{ messages: SessionMessage[], firstId?: number|null, hasMore?: boolean, lastId?: number|null, hasMoreNewer?: boolean, targetFound: boolean, inflight?: any[] }>} [fetchMessagesAround]
  *   One-shot deep-drill: return a bounded window (context above + below)
- *   of transcript centered on `target` (a sidekick_id or state.db id) in
+ *   of transcript centered on `target` (a parley_id or state.db id) in
  *   a single round trip instead of N serial loadEarlier pages. The window
  *   payload is O(limit), independent of how deep the target is.
  *   `targetFound===false` (empty list) when the target is missing — caller

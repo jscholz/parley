@@ -22,7 +22,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(CHAT_ID, {
     title: 'Outage chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_cap_outage', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_cap_outage', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

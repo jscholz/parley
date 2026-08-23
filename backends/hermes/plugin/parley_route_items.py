@@ -34,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
 
 
 # Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
@@ -196,8 +196,8 @@ def _resolve_source_for_chat_id(adapter, chat_id: str) -> Optional[str]:
     sources = [r[0] for r in rows if r and r[0]]
     if not sources:
         return None
-    if SIDEKICK_SOURCE in sources:
-        return SIDEKICK_SOURCE
+    if PARLEY_SOURCE in sources:
+        return PARLEY_SOURCE
     return sources[0]
 
 
@@ -239,10 +239,10 @@ def _items_by_user_id(
         )
         SELECT m.id, m.session_id, sr.is_compaction_child, m.role, m.content, m.tool_name,
                m.tool_call_id, m.tool_calls, m.timestamp,
-               sml.sidekick_id, sml.kind
+               sml.parley_id, sml.kind
         FROM messages m
         JOIN session_root sr ON m.session_id = sr.id
-        LEFT JOIN sidekick_msg_links sml ON sml.state_db_id = m.id
+        LEFT JOIN parley_msg_links sml ON sml.state_db_id = m.id
     """
     params: list = [chat_id, source]
     if before_id is not None:
@@ -298,7 +298,7 @@ def _items_by_user_id(
                 compaction_head_end_per_session[session_id] = row_id
 
     items = []
-    for row_id, session_id, _is_compaction_child, role, content, tool_name, tool_call_id, tool_calls, ts, sidekick_id, kind in rows:
+    for row_id, session_id, _is_compaction_child, role, content, tool_name, tool_call_id, tool_calls, ts, parley_id, kind in rows:
         text = (content or "")
         # Drop marker rows everywhere; drop the synthesized-history
         # seed block only for compaction child sessions. Root sessions
@@ -344,10 +344,10 @@ def _items_by_user_id(
         # _persist_notification) that recorded its link. Absent
         # for legacy messages, messages from other channels, and
         # tool/system rows.
-        if sidekick_id:
-            item["sidekick_id"] = sidekick_id
+        if parley_id:
+            item["parley_id"] = parley_id
         # Notification kind (cron / reminder / approval / etc.).
-        # Plumbed through from sidekick_msg_links.kind — only set
+        # Plumbed through from parley_msg_links.kind — only set
         # on rows _persist_notification wrote. The PWA reads this
         # to discriminate notification rows from regular assistant
         # replies for rendering purposes.
@@ -440,7 +440,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         except ValueError:
             return web.Response(status=400, text="invalid before cursor")
 
-    # `around=<sidekick_id|int id>` — deep-target drill. Returns a single
+    # `around=<parley_id|int id>` — deep-target drill. Returns a single
     # BOUNDED window centered on the target (context above + below, capped
     # at `limit`) instead of making the PWA page backward N times to reach
     # it. Mutually exclusive with `before` (a cursor page); if both are
@@ -475,7 +475,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         _trace("source-resolve-end", f"source={source}")
         state_db_knows_chat = source is not None
         if source is None:
-            source = "sidekick"  # assume parley for the reconcile/query below
+            source = "parley"  # assume parley for the reconcile/query below
 
     from . import parley_state as _sstate
     from . import parley_perf_trace as _perf  # noqa: WPS433 (worker semaphore)
@@ -496,7 +496,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         _trace("reconcile-bg", "spawned")
 
     # B2 / v2 read path: state.db is the canonical body store;
-    # parley.db.msg_links surfaces sidekick_id + kind as annotations.
+    # parley.db.msg_links surfaces parley_id + kind as annotations.
     # ON by default 2026-05-29 (v2 ship — paired with the deterministic
     # link shim in reconcile_from_state_db Pass 1.b). Set
     # PARLEY_ITEMS_READ_FROM_STATE_DB=0 to fall back to the legacy v1

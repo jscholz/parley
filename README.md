@@ -2,7 +2,7 @@
 
 **A voice-first portal to your agent — bring your own backend.**
 
-*Formerly Sidekick — same stack, new name; old env vars, routes, and state migrate automatically.*
+*Formerly Sidekick — same stack, new name.*
 
 Hands-free chat with any agent that speaks the OpenAI Responses API. A *parley* is a conference between two parties — and yes, pirates held that the right to one could not be refused; your agent grants the same. Configurable STT + TTS (Deepgram, ElevenLabs, OpenAI Whisper — easy to add others), lockscreen-friendly background audio for in-pocket use, WhatsApp-style voice memos, streaming voice keyboard, and full hands-free calling via WebRTC. Installable PWA shell that runs on anything from a Raspberry Pi to a cloud server.
 
@@ -69,12 +69,12 @@ directly via `PARLEY_HTTPS_CERT_FILE` / `PARLEY_HTTPS_KEY_FILE`.
 
 ### Upgrading from Sidekick
 
-Nothing to do beyond pulling the new code. `PARLEY_*` env vars are
-primary but every legacy `SIDEKICK_*` spelling keeps working, the
-proxy answers on `/api/parley/*` and the deprecated `/api/sidekick/*`
-alike, `sidekick.config.yaml` / `~/.sidekick/` / `sidekick.db` are
-picked up (the DB file is renamed in place on first boot), and the PWA
-migrates its local state on first load.
+The 2026-08 releases completed the rename: everything is `PARLEY_*` /
+`/api/parley/*` / `parley.config.yaml` / `~/.parley/` / `parley.db`,
+and legacy `SIDEKICK_*` spellings are no longer read. Coming from a
+Sidekick-era install, rename your env vars, config file, and data dir
+to the new names before starting (one-time, mechanical), or start
+fresh.
 
 ## What's different
 
@@ -109,7 +109,7 @@ Most chat UIs treat voice as a bolt-on. Parley is voice-first:
 Two surfaces:
 
 - **`.env`** — secrets (Deepgram, optional API keys). See [`.env.example`](.env.example).
-- **`parley.config.yaml`** — non-secret deployment tuning (branding, theme, preferred-models filter, server ports). See [`example.parley.config.yaml`](example.parley.config.yaml). Point parley at it via `PARLEY_CONFIG=/path/to/file`. (A legacy `sidekick.config.yaml` is still honored.)
+- **`parley.config.yaml`** — non-secret deployment tuning (branding, theme, preferred-models filter, server ports). See [`example.parley.config.yaml`](example.parley.config.yaml). Point parley at it via `PARLEY_CONFIG=/path/to/file`.
 
 The Settings panel inside the app handles per-user preferences (theme, mic device, TTS voice, STT keyterms, etc.) live without restart.
 

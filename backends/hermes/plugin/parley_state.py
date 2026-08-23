@@ -657,7 +657,7 @@ def list_messages_for_chat(
     """
     if before_rowid is None:
         sql = (
-            "SELECT rowid AS rowid, id AS sidekick_id, role, content, kind, "
+            "SELECT rowid AS rowid, id AS parley_id, role, content, kind, "
             "       tool_name, tool_call_id, tool_calls, agent_row_id, created_at, status "
             "FROM msg_links WHERE chat_id = ? "
             "ORDER BY created_at ASC, rowid ASC"
@@ -667,7 +667,7 @@ def list_messages_for_chat(
         # `before_rowid` is actually a millis cursor; convert back.
         cursor_ts = before_rowid / 1000.0
         sql = (
-            "SELECT rowid AS rowid, id AS sidekick_id, role, content, kind, "
+            "SELECT rowid AS rowid, id AS parley_id, role, content, kind, "
             "       tool_name, tool_call_id, tool_calls, agent_row_id, created_at, status "
             "FROM msg_links WHERE chat_id = ? AND created_at < ? "
             "ORDER BY created_at ASC, rowid ASC"
@@ -696,7 +696,7 @@ def list_messages_for_chat(
             "role": r["role"],
             "content": r["content"] or "",
             "created_at": int(r["created_at"]) if r["created_at"] else 0,
-            "sidekick_id": r["sidekick_id"],
+            "parley_id": r["parley_id"],
         }
         if r["kind"]:
             item["kind"] = r["kind"]
@@ -778,7 +778,7 @@ def _classify_replay_duplicate_state_ids(state_rows) -> tuple:
         Trade-off: a user/assistant legitimately repeating the exact
         same non-empty text later in a session dedupes against the
         first occurrence here, so the repeat gets no msg_links twin.
-        That costs only the sidekick_id annotation on the v2 read path
+        That costs only the parley_id annotation on the v2 read path
         (the state.db row itself still surfaces) — strictly better
         than the failure mode this guards against.
 
@@ -952,7 +952,7 @@ def list_messages_for_chat_with_state_db_source(
     before_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """B2 read path: state.db is the canonical message body store;
-    parley.db.msg_links surfaces sidekick_id + kind as annotations.
+    parley.db.msg_links surfaces parley_id + kind as annotations.
 
     Replaces the dual-body model that v1 (``list_messages_for_chat``)
     implements. With v1, parley.db.msg_links stored a full copy of
@@ -1029,7 +1029,7 @@ def list_messages_around_for_chat_with_state_db_source(
     context_after: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Deep-target read: return a BOUNDED window of the transcript
-    *centered* on ``target`` (matched by sidekick_id or by the integer
+    *centered* on ``target`` (matched by parley_id or by the integer
     state.db id) — context above AND below it — that does NOT run to the
     live tail.
 
@@ -1066,7 +1066,7 @@ def list_messages_around_for_chat_with_state_db_source(
     target_str = str(target)
     idx = None
     for i, it in enumerate(items):
-        if str(it.get("sidekick_id") or "") == target_str or str(it["id"]) == target_str:
+        if str(it.get("parley_id") or "") == target_str or str(it["id"]) == target_str:
             idx = i
             break
     if idx is None:
@@ -1158,7 +1158,7 @@ def _build_chronological_items(
     fetch_limit: Optional[int] = None,
 ) -> list:
     """Build a chronological item list for a chat from state.db (canonical
-    bodies) merged with parley.db.msg_links (sidekick_id + kind
+    bodies) merged with parley.db.msg_links (parley_id + kind
     annotations + envelope-only rows).
 
     When ``fetch_limit`` is None (the around-target reader) the WHOLE
@@ -1336,7 +1336,7 @@ def _build_chronological_items(
 
     # Fetch parley.db.msg_links rows for these state.db ids in one
     # query, then merge in Python. This is the "JOIN" that gives the
-    # PWA its sidekick_id / kind annotations without the dual-body
+    # PWA its parley_id / kind annotations without the dual-body
     # consistency problem v1 had.
     state_ids = [str(r["id"]) for r in surviving]
     link_by_state_id: Dict[str, Dict[str, Any]] = {}
@@ -1344,7 +1344,7 @@ def _build_chronological_items(
         placeholders = ",".join("?" * len(state_ids))
         try:
             link_rows = parley_db.fetchall(
-                f"SELECT id AS sidekick_id, agent_row_id, kind "
+                f"SELECT id AS parley_id, agent_row_id, kind "
                 f"FROM msg_links "
                 f"WHERE chat_id = ? AND agent_row_id IN ({placeholders})",
                 (chat_id, *state_ids),
@@ -1356,7 +1356,7 @@ def _build_chronological_items(
         except Exception:
             # parley.db unavailable — fall through with empty
             # link map. State.db rows still surface; they just won't
-            # carry sidekick_id annotations.
+            # carry parley_id annotations.
             pass
 
     # Merge into the wire shape.
@@ -1371,7 +1371,7 @@ def _build_chronological_items(
         }
         link = link_by_state_id.get(str(r["id"]))
         if link:
-            item["sidekick_id"] = link["sidekick_id"]
+            item["parley_id"] = link["parley_id"]
             if link["kind"]:
                 item["kind"] = link["kind"]
         if r["tool_name"]:
@@ -1397,7 +1397,7 @@ def _build_chronological_items(
     # state.db row) for this chat and project them into the same wire
     # shape as state.db rows. Their `id` is the created_at millis cursor
     # (same convention v1 used so pagination semantics stay sane); the
-    # sidekick_id (msg_xxx/umsg_xxx/notif_xxx/tc:*/tr:*) drives the PWA
+    # parley_id (msg_xxx/umsg_xxx/notif_xxx/tc:*/tr:*) drives the PWA
     # bubble's data-key.
     try:
         unlinked = parley_db.fetchall(
@@ -1418,7 +1418,7 @@ def _build_chronological_items(
             "role": r["role"],
             "content": r["content"] or "",
             "created_at": int(ts) if ts else 0,
-            "sidekick_id": r["id"],
+            "parley_id": r["id"],
         }
         if r["kind"]:
             item["kind"] = r["kind"]
@@ -1593,7 +1593,7 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
     """
     try:
         rows = parley_db.fetchall(
-            "SELECT id AS sidekick_id, role, content, kind, "
+            "SELECT id AS parley_id, role, content, kind, "
             "       tool_name, tool_call_id, tool_calls, created_at, "
             "       status, agent_row_id "
             "FROM msg_links WHERE chat_id = ? "
@@ -1657,7 +1657,7 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
             "role": r["role"],
             "content": content,
             "created_at": int(ts) if ts else 0,
-            "sidekick_id": r["sidekick_id"],
+            "parley_id": r["parley_id"],
         }
         if r["kind"]:
             item["kind"] = r["kind"]
@@ -1738,7 +1738,7 @@ def list_messages_around_for_chat_v3(
     target_str = str(target)
     idx = None
     for i, it in enumerate(items):
-        if str(it.get("sidekick_id") or "") == target_str or str(it["id"]) == target_str:
+        if str(it.get("parley_id") or "") == target_str or str(it["id"]) == target_str:
             idx = i
             break
     if idx is None:
@@ -1834,7 +1834,7 @@ def insert_legacy_twin(db, chat_id: str, row) -> bool:
 
 
 def reconcile_from_state_db(
-    db, state_db_path, chat_id: str, source: str = "sidekick",
+    db, state_db_path, chat_id: str, source: str = "parley",
     *, force_full: bool = False,
 ) -> int:
     """Bidirectional reconciliation between state.db and parley.db
@@ -2524,9 +2524,9 @@ def record_envelope(db, env: Dict[str, Any]) -> Optional[str]:
         # message_id on the wire; fall back to a synthesized one tied
         # to the timestamp + chat (good enough for dedup since the
         # plugin never re-sends the same notification).
-        row_id = env.get("sidekick_id") or env.get("message_id") or env.get("notif_id") \
+        row_id = env.get("parley_id") or env.get("message_id") or env.get("notif_id") \
             or f"notif_{int(now * 1000)}_{chat_id[:8]}"
-        env["sidekick_id"] = row_id
+        env["parley_id"] = row_id
         upsert_msg_link(
             db, id=row_id, chat_id=chat_id, role="assistant",
             content=env.get("content") or env.get("text") or "",

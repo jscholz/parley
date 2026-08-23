@@ -37,7 +37,7 @@ const SNAPSHOT_KEY = 'current';
 // driven rebuild.
 //
 // History:
-//   2026-05-11 — sidekick_id-keyed dedup + state.db-driven control envelopes.
+//   2026-05-11 — parley_id-keyed dedup + state.db-driven control envelopes.
 //   2026-05-25 — virt-aware snapshot: persist transcriptStore state
 //                (`durable`, `pagination`, `sessionId`) instead of serialized
 //                DOM HTML. Under virt the DOM contains only the visible

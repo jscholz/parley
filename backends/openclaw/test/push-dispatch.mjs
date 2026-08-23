@@ -12,7 +12,7 @@ import { PushDispatcher, EngagementState, ENGAGEMENT_WINDOW_MS, buildPayload, no
 function withDb(fn) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), 'parley-openclaw-push-'));
-    const db = openDb({ path: join(dir, 'sidekick.db') });
+    const db = openDb({ path: join(dir, 'parley.db') });
     try {
       return await fn(db);
     } finally {
@@ -33,24 +33,24 @@ function addSub(db, endpoint = 'https://push.test/openclaw-1') {
 
 test('push payload routes with chat and msg params, not chat_id', () => {
   const payload = buildPayload({
-    chatId: 'agent:dev:sidekick:abc',
+    chatId: 'agent:dev:parley:abc',
     text: 'hello',
     kind: 'reply_final',
     messageId: 'msg_123',
   });
-  assert.equal(payload.chat_id, 'sidekick:abc');
-  assert.equal(payload.url, '/?chat=sidekick%3Aabc&msg=msg_123');
+  assert.equal(payload.chat_id, 'parley:abc');
+  assert.equal(payload.url, '/?chat=parley%3Aabc&msg=msg_123');
   assert.equal(payload.url.includes('chat_id='), false);
 });
 
 test('engagement normalizes OpenClaw agent session keys', () => {
   const engagement = new EngagementState();
-  engagement.markVisible('sidekick:abc');
-  assert.equal(engagement.isEngaged('agent:dev:sidekick:abc'), true);
-  engagement.markHidden('agent:dev:sidekick:abc');
-  assert.equal(engagement.isEngaged('sidekick:abc'), false);
+  engagement.markVisible('parley:abc');
+  assert.equal(engagement.isEngaged('agent:dev:parley:abc'), true);
+  engagement.markHidden('agent:dev:parley:abc');
+  assert.equal(engagement.isEngaged('parley:abc'), false);
   assert.equal(ENGAGEMENT_WINDOW_MS >= 8000, true);
-  assert.equal(normalizeChatId('agent:dev:sidekick:abc'), 'sidekick:abc');
+  assert.equal(normalizeChatId('agent:dev:parley:abc'), 'parley:abc');
 });
 
 test('delivered push creates an Activity item and activity_changed event', withDb(async (db) => {
@@ -62,17 +62,17 @@ test('delivered push creates an Activity item and activity_changed event', withD
   try {
     const dispatcher = new PushDispatcher({ db, eventBus: { pushEnvelope: (env) => pushed.push(env) } });
     const out = await dispatcher.dispatchPush({
-      chatId: 'agent:dev:sidekick:abc',
+      chatId: 'agent:dev:parley:abc',
       text: 'Agent reply body',
       messageId: 'msg_reply_1',
     });
     assert.equal(out.delivered, 1);
-    assert.equal(sent[0].url, '/?chat=sidekick%3Aabc&msg=msg_reply_1');
+    assert.equal(sent[0].url, '/?chat=parley%3Aabc&msg=msg_reply_1');
     const items = listActivityItems(db);
     assert.equal(items.length, 1);
     assert.equal(items[0].id, 'msg_reply_1');
     assert.equal(items[0].messageId, 'msg_reply_1');
-    assert.equal(items[0].chatId, 'sidekick:abc');
+    assert.equal(items[0].chatId, 'parley:abc');
     assert.equal(items[0].kind, 'agent_reply');
     assert.equal(items[0].body, 'Agent reply body');
     assert.equal(items[0].read, false);
@@ -85,9 +85,9 @@ test('delivered push creates an Activity item and activity_changed event', withD
 test('suppressed push does not create Activity item', withDb(async (db) => {
   addSub(db);
   const dispatcher = new PushDispatcher({ db });
-  dispatcher.engagement.markVisible('sidekick:abc');
+  dispatcher.engagement.markVisible('parley:abc');
   const out = await dispatcher.dispatchPush({
-    chatId: 'agent:dev:sidekick:abc',
+    chatId: 'agent:dev:parley:abc',
     text: 'Should not notify',
     messageId: 'msg_suppressed_1',
   });
@@ -97,10 +97,10 @@ test('suppressed push does not create Activity item', withDb(async (db) => {
 
 test('muted normalized chat suppresses push before Activity write', withDb(async (db) => {
   addSub(db);
-  setMute(db, { chatId: 'sidekick:abc', muted: true });
+  setMute(db, { chatId: 'parley:abc', muted: true });
   const dispatcher = new PushDispatcher({ db });
   const out = await dispatcher.dispatchPush({
-    chatId: 'agent:dev:sidekick:abc',
+    chatId: 'agent:dev:parley:abc',
     text: 'Should not notify',
     messageId: 'msg_muted_1',
   });

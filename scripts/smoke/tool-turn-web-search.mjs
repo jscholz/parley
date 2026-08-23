@@ -135,7 +135,7 @@ export default async function run({ page, log, fail }) {
       const recentSessions = await sqlQuery(
         STATE_DB,
         `SELECT id FROM sessions
-         WHERE source = 'sidekick' AND started_at >= ${t0Sec}
+         WHERE source = 'parley' AND started_at >= ${t0Sec}
          ORDER BY started_at DESC LIMIT 5`,
       );
       for (const s of recentSessions) {
@@ -165,7 +165,7 @@ export default async function run({ page, log, fail }) {
       const recentSessions = await sqlQuery(
         STATE_DB,
         `SELECT id, started_at, message_count, tool_call_count FROM sessions
-         WHERE source = 'sidekick' ORDER BY started_at DESC LIMIT 3`,
+         WHERE source = 'parley' ORDER BY started_at DESC LIMIT 3`,
       );
       log(`recent sessions: ${JSON.stringify(recentSessions, null, 2)}`);
     }

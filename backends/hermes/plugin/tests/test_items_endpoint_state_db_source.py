@@ -1,5 +1,5 @@
 """Items endpoint read path: state.db is the canonical body store,
-parley.db.msg_links supplies sidekick_id / kind annotations.
+parley.db.msg_links supplies parley_id / kind annotations.
 
 Exercises ``list_messages_for_chat_with_state_db_source`` — the
 default read path (``PARLEY_ITEMS_READ_FROM_STATE_DB`` defaults to
@@ -34,7 +34,7 @@ CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -72,7 +72,7 @@ def state_db(tmp_path):
     return path
 
 
-def _add_session(state_db, sid, chat_id=CHAT_ID, source="sidekick",
+def _add_session(state_db, sid, chat_id=CHAT_ID, source="parley",
                  system_prompt=None, parent_session_id=None):
     conn = sqlite3.connect(str(state_db))
     conn.execute(
@@ -112,15 +112,15 @@ def test_reads_state_db_messages_in_chronological_order(db, state_db):
     _add_msg(state_db, "s1", "user", "third", ts=1002.0)
 
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )
     contents = [i["content"] for i in result["items"]]
     assert contents == ["first", "second", "third"]
     assert result["has_more"] is False
 
 
-def test_surfaces_sidekick_id_when_link_exists(db, state_db):
-    """parley.db.msg_links provides the sidekick_id annotation via
+def test_surfaces_parley_id_when_link_exists(db, state_db):
+    """parley.db.msg_links provides the parley_id annotation via
     its ``agent_row_id`` linkage to state.db.messages.id."""
     _add_session(state_db, "s1")
     state_msg_id = _add_msg(state_db, "s1", "assistant", "linked reply", ts=2000.0)
@@ -130,26 +130,26 @@ def test_surfaces_sidekick_id_when_link_exists(db, state_db):
     )
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     assert len(items) == 1
-    assert items[0]["sidekick_id"] == "msg_real_xyz"
+    assert items[0]["parley_id"] == "msg_real_xyz"
     assert items[0]["content"] == "linked reply"
 
 
 def test_handles_legacy_rows_with_no_link(db, state_db):
     """state.db rows without a parley.db.msg_links twin still surface
-    — they just don't carry a sidekick_id. PWA falls back to integer-id
+    — they just don't carry a parley_id. PWA falls back to integer-id
     keying for these (cross-channel / pre-write-through legacy rows)."""
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "legacy q", ts=1000.0)
     _add_msg(state_db, "s1", "assistant", "legacy a", ts=1001.0)
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     assert len(items) == 2
-    assert all("sidekick_id" not in i for i in items)
+    assert all("parley_id" not in i for i in items)
     assert items[0]["content"] == "legacy q"
     assert items[1]["content"] == "legacy a"
 
@@ -176,13 +176,13 @@ def test_no_duplicate_rows_even_when_msg_links_has_extra_entries(db, state_db):
     )
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     assert len(items) == 1, (
         "reading from state.db returns one row per logical "
         f"message; got {len(items)} items: {items}"
     )
-    assert items[0]["sidekick_id"] == "msg_real_xyz"
+    assert items[0]["parley_id"] == "msg_real_xyz"
 
 
 # ── tool calls (must surface from state.db side) ─────────────────────
@@ -200,7 +200,7 @@ def test_surfaces_tool_calls_from_state_db(db, state_db):
     _add_msg(state_db, "s1", "tool", "result data", ts=1001.0, tool_call_id="call_x")
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     assert len(items) == 2
     assistant = [i for i in items if i["role"] == "assistant"][0]
@@ -226,11 +226,11 @@ def test_surfaces_kind_from_msg_links(db, state_db):
     )
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     assert len(items) == 1
     assert items[0]["kind"] == "cron"
-    assert items[0]["sidekick_id"] == "notif_cron_1"
+    assert items[0]["parley_id"] == "notif_cron_1"
 
 
 # ── pagination ──────────────────────────────────────────────────────
@@ -245,7 +245,7 @@ def test_pagination_limit_returns_recent_window_with_has_more(db, state_db):
         _add_msg(state_db, "s1", "user", f"msg-{i}", ts=1000.0 + i)
 
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", limit=5
+        db, state_db, CHAT_ID, "parley", limit=5
     )
     assert len(result["items"]) == 5
     assert result["has_more"] is True
@@ -262,7 +262,7 @@ def test_pagination_before_cursor_returns_older_window(db, state_db):
     # Page through older history: cursor at msg-10's id.
     cursor = msg_ids[10]
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", limit=5, before_id=cursor
+        db, state_db, CHAT_ID, "parley", limit=5, before_id=cursor
     )
     contents = [i["content"] for i in result["items"]]
     # Older than msg-10 → msg-5..msg-9 (5 most recent BEFORE the cursor).
@@ -288,7 +288,7 @@ def test_rolls_up_compacted_child_session_messages(db, state_db):
     _add_msg(state_db, "child_s", "assistant", "new reply in child", ts=2001.0)
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     contents = [i["content"] for i in items]
     assert contents == [
@@ -317,7 +317,7 @@ def test_drops_compaction_seed_block(db, state_db):
     _add_msg(state_db, "child_s", "user", "next real prompt", ts=2000.0)
 
     items = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )["items"]
     contents = [i["content"] for i in items]
     assert contents == ["real prompt", "real reply", "next real prompt"]
@@ -341,7 +341,7 @@ def test_bounded_tail_skips_old_compaction_seed(db, state_db):
         _add_msg(state_db, "child_s", "user", f"real-{i}", ts=2000.0 + i)
 
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", limit=10
+        db, state_db, CHAT_ID, "parley", limit=10
     )
     contents = [i["content"] for i in result["items"]]
     assert contents == [f"real-{n}" for n in range(70, 80)]
@@ -366,7 +366,7 @@ def test_bounded_before_elides_seed_across_boundary(db, state_db):
             for i in range(10)]
 
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", limit=20, before_id=cont[5]
+        db, state_db, CHAT_ID, "parley", limit=20, before_id=cont[5]
     )
     contents = [i["content"] for i in result["items"]]
     assert contents == [f"real-{n}" for n in range(5)]
@@ -382,7 +382,7 @@ def test_returns_empty_for_unknown_chat(db, state_db):
     Caller (route handler) turns this into a 404 when combined with
     no inflight envelopes."""
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, "unknown-chat-id", "sidekick"
+        db, state_db, "unknown-chat-id", "parley"
     )
     assert result == {"items": [], "first_id": None, "has_more": False}
 
@@ -416,10 +416,10 @@ def test_envelope_only_chat_still_surfaces_msg_links_rows(db, state_db):
         "message_id": "msg_fresh_2", "text": "Done — answer is 42.",
     })
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick",
+        db, state_db, CHAT_ID, "parley",
     )
     contents = [it["content"] for it in result["items"]]
-    sks = [it.get("sidekick_id") for it in result["items"]]
+    sks = [it.get("parley_id") for it in result["items"]]
     assert "kick off" in contents, \
         "envelope-only user message must surface even when state.db has nothing"
     assert "Checking." in contents
@@ -434,7 +434,7 @@ def test_returns_empty_when_state_db_missing(db, tmp_path):
     Must return empty without raising."""
     missing = tmp_path / "does-not-exist.db"
     result = state.list_messages_for_chat_with_state_db_source(
-        db, missing, CHAT_ID, "sidekick"
+        db, missing, CHAT_ID, "parley"
     )
     assert result == {"items": [], "first_id": None, "has_more": False}
 
@@ -454,7 +454,7 @@ def test_around_returns_bounded_window_centered_on_target(db, state_db):
     # Target idx 150, limit=60 → ctx_before=max(20,40)=40,
     # ctx_after=max(10,20)=20 → window=[110:171] = m110..m170.
     result = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target=str(msg_ids[150]), limit=60
+        db, state_db, CHAT_ID, "parley", target=str(msg_ids[150]), limit=60
     )
     assert result["target_found"] is True
     contents = [i["content"] for i in result["items"]]
@@ -480,7 +480,7 @@ def test_around_deep_target_payload_is_bounded_not_tail_contiguous(db, state_db)
 
     # Target idx 1500 (deep middle), limit=60 → window ~61 rows, NOT ~1500.
     result = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target=str(msg_ids[1500]), limit=60
+        db, state_db, CHAT_ID, "parley", target=str(msg_ids[1500]), limit=60
     )
     assert result["target_found"] is True
     assert len(result["items"]) <= 61     # bounded, not O(distance-to-tail)
@@ -490,8 +490,8 @@ def test_around_deep_target_payload_is_bounded_not_tail_contiguous(db, state_db)
     assert result["has_more_newer"] is True
 
 
-def test_around_matches_target_by_sidekick_id(db, state_db):
-    """Pins/activity address messages by sidekick_id (msg_xxx), not the
+def test_around_matches_target_by_parley_id(db, state_db):
+    """Pins/activity address messages by parley_id (msg_xxx), not the
     integer state.db id — the around lookup must match either."""
     _add_session(state_db, "s1")
     msg_ids = [_add_msg(state_db, "s1", "user", f"msg-{i}", ts=1000.0 + i)
@@ -504,7 +504,7 @@ def test_around_matches_target_by_sidekick_id(db, state_db):
     # limit=50 → ctx_before=max(20,33)=33, ctx_after=max(10,16)=16.
     # start=max(0,7-33)=0, end=min(30,7+16+1)=24 → window=[0:24].
     result = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target="msg_target_abc", limit=50
+        db, state_db, CHAT_ID, "parley", target="msg_target_abc", limit=50
     )
     assert result["target_found"] is True
     contents = [i["content"] for i in result["items"]]
@@ -523,7 +523,7 @@ def test_around_small_chat_fits_whole_window(db, state_db):
     msg_ids = [_add_msg(state_db, "s1", "user", f"m{i}", ts=1000.0 + i)
                for i in range(10)]
     result = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target=str(msg_ids[5]), limit=50
+        db, state_db, CHAT_ID, "parley", target=str(msg_ids[5]), limit=50
     )
     assert result["target_found"] is True
     assert [i["content"] for i in result["items"]] == [f"m{i}" for i in range(10)]
@@ -541,7 +541,7 @@ def test_around_target_not_found_returns_flag_false(db, state_db):
         _add_msg(state_db, "s1", "user", f"msg-{i}", ts=1000.0 + i)
 
     result = state.list_messages_around_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", target="msg_does_not_exist", limit=20
+        db, state_db, CHAT_ID, "parley", target="msg_does_not_exist", limit=20
     )
     assert result["target_found"] is False
     assert result["items"] == []
@@ -561,7 +561,7 @@ def test_after_returns_newer_page_bounded(db, state_db):
 
     # After idx 40, limit=20 → m41..m60, more remain (m61..m99).
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=msg_ids[40], limit=20
+        db, state_db, CHAT_ID, "parley", after_id=msg_ids[40], limit=20
     )
     contents = [i["content"] for i in result["items"]]
     assert contents[0] == "m41"
@@ -578,7 +578,7 @@ def test_after_reaching_tail_closes_boundary(db, state_db):
     msg_ids = [_add_msg(state_db, "s1", "user", f"m{i}", ts=1000.0 + i)
                for i in range(50)]
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=msg_ids[40], limit=20
+        db, state_db, CHAT_ID, "parley", after_id=msg_ids[40], limit=20
     )
     contents = [i["content"] for i in result["items"]]
     assert contents[0] == "m41"
@@ -598,7 +598,7 @@ def test_after_result_carries_has_more_key(db, state_db):
     msg_ids = [_add_msg(state_db, "s1", "user", f"m{i}", ts=1000.0 + i)
                for i in range(60)]
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=msg_ids[40], limit=20
+        db, state_db, CHAT_ID, "parley", after_id=msg_ids[40], limit=20
     )
     assert "has_more" in result, "after-result must carry has_more (route reads it)"
     assert result["has_more"] is False
@@ -645,7 +645,7 @@ def test_after_cursor_on_envelope_row_still_returns_new_durable_rows(db, state_d
                       BASE_TS + 300.0)
 
     page = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick"
+        db, state_db, CHAT_ID, "parley"
     )
     epoch_cursor = int((BASE_TS + 300.0) * 1000)
     assert page["items"][-1]["id"] == epoch_cursor, \
@@ -655,7 +655,7 @@ def test_after_cursor_on_envelope_row_still_returns_new_durable_rows(db, state_d
     a2 = _add_msg(state_db, "s1", "assistant", "a2", ts=BASE_TS + 500.0)
 
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=epoch_cursor
+        db, state_db, CHAT_ID, "parley", after_id=epoch_cursor
     )
     got = [(it["id"], it["content"]) for it in result["items"]]
     assert got == [(q2, "q2"), (a2, "a2")], \
@@ -674,7 +674,7 @@ def test_before_cursor_on_envelope_row_pages_older_not_newer(db, state_db):
     _add_msg(state_db, "s1", "user", "q2", ts=BASE_TS + 400.0)
 
     result = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", before_id=int((BASE_TS + 300.0) * 1000)
+        db, state_db, CHAT_ID, "parley", before_id=int((BASE_TS + 300.0) * 1000)
     )
     got = [(it["id"], it["content"]) for it in result["items"]]
     assert got == [(q1, "q1"), (lr, "long reply")], \
@@ -689,12 +689,12 @@ def test_after_state_cursor_pages_through_same_second_batch(db, state_db):
     ids = [_add_msg(state_db, "s1", "assistant", f"m{i}", ts=2000.0)
            for i in range(6)]
     first = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=ids[1], limit=2
+        db, state_db, CHAT_ID, "parley", after_id=ids[1], limit=2
     )
     assert [it["id"] for it in first["items"]] == [ids[2], ids[3]]
     assert first["has_more_newer"] is True
     second = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=first["last_id"], limit=2
+        db, state_db, CHAT_ID, "parley", after_id=first["last_id"], limit=2
     )
     assert [it["id"] for it in second["items"]] == [ids[4], ids[5]]
 
@@ -707,9 +707,9 @@ def test_after_state_cursor_includes_same_second_envelope_rows(db, state_db):
     _add_envelope_row(db, "umsg_live", "user", "live send", BASE_TS + 0.5)
 
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=a1
+        db, state_db, CHAT_ID, "parley", after_id=a1
     )
-    assert [it.get("sidekick_id") for it in result["items"]] == ["umsg_live"]
+    assert [it.get("parley_id") for it in result["items"]] == ["umsg_live"]
 
 
 def test_after_cursor_row_deleted_falls_back_to_id_compare(db, state_db):
@@ -724,6 +724,6 @@ def test_after_cursor_row_deleted_falls_back_to_id_compare(db, state_db):
     conn.commit()
     conn.close()
     result = state.list_messages_after_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick", after_id=a
+        db, state_db, CHAT_ID, "parley", after_id=a
     )
     assert [it["id"] for it in result["items"]] == [b]

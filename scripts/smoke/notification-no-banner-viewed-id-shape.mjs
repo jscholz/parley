@@ -4,20 +4,20 @@
 //
 // Root cause (backendEvents.ts handleNotification): the off-screen test
 // was a raw `chatId !== switchCtl.focusedId()` compare. Post-v0.383
-// chat_ids are prefixed `sidekick:<uuid>`, but the viewed id can be the
+// chat_ids are prefixed `parley:<uuid>`, but the viewed id can be the
 // bare uuid (and vice versa). A prefixed env.chat_id never string-equals
 // the bare viewed id, so a notification for the on-screen chat took the
 // OFF-SCREEN branch: badge bump + banner. inAppBanner.ts even strips
-// `^sidekick:` for display, confirming notifications arrive prefixed.
+// `^parley:` for display, confirming notifications arrive prefixed.
 //
-// FIX: normalize the `^sidekick:` prefix on both sides of the
+// FIX: normalize the `^parley:` prefix on both sides of the
 // `chatId !== focusedId()` compare. (We deliberately keep comparing
 // against focusedId() — during an in-flight switch the chat you LEFT
 // should still accrue a badge/banner; that off-screen behavior is pinned
 // by notification-during-session-switch-unread.)
 //
 // Repro: view a chat whose drawer id is the BARE form; push a notification
-// whose chat_id is the SAME chat but `sidekick:`-prefixed. Assert no
+// whose chat_id is the SAME chat but `parley:`-prefixed. Assert no
 // banner appears (the on-screen .system row path is fine and expected).
 
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
@@ -28,16 +28,16 @@ export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
 const VIEWED_BARE = 'mock-234-viewed';
-const NOTIF_PREFIXED = `sidekick:${VIEWED_BARE}`;
+const NOTIF_PREFIXED = `parley:${VIEWED_BARE}`;
 const BANNER_MARKER = 'background-result-marker-234';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(VIEWED_BARE, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Viewed chat (bare id)',
     messages: [
       { role: 'user', content: '/background do a thing',
-        sidekick_id: 'umsg_234_seed', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'umsg_234_seed', timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
@@ -62,7 +62,7 @@ export default async function run({ page, log, mock }) {
     chat_id: NOTIF_PREFIXED,
     kind: 'cron',
     content: `Cronjob Response: background task\n(job_id: mock-234)\n---\n\n${BANNER_MARKER} — your background task finished.`,
-    sidekick_id: 'notif_234_1',
+    parley_id: 'notif_234_1',
   });
   log('pushed prefixed-id notification for the viewed chat');
 

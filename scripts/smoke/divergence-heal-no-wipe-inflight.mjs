@@ -29,7 +29,7 @@ export function MOCK_SETUP(mock) {
   // Pre-existing state.db content — short transcript.
   mock.addChat(CHAT_A, {
     title: 'Chat A — divergence heal test',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'A: state.db user msg #1', timestamp: Date.now() / 1000 - 3600 },
       { role: 'assistant', content: 'A: state.db agent msg #1', timestamp: Date.now() / 1000 - 3599 },

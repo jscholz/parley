@@ -118,7 +118,7 @@ export interface ConversationItem {
   content: string;
   /** Parley wire-shape id (umsg_… / msg_…). Optional; older plugin
    *  rows or legacy adapters omit it and we fall back to `id`. */
-  sidekick_id?: string;
+  parley_id?: string;
   /** State.db extensions on assistant rows that issued tool calls. */
   tool_calls?: string;   // JSON array of {id, type:'function', function: {name, arguments}}
   tool_call_id?: string; // on role='tool' rows — links back to the call
@@ -153,7 +153,7 @@ export type ParleyEnvelope =
   | { type: 'tool_result'; chat_id: string; call_id: string; tool_name: string; result: unknown; duration_ms?: number }
   | { type: 'typing'; chat_id: string }
   | { type: 'image'; chat_id: string; url: string; caption?: string }
-  | { type: 'notification'; chat_id: string; kind: string; content: string; sidekick_id?: string }
+  | { type: 'notification'; chat_id: string; kind: string; content: string; parley_id?: string }
   | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
   | { type: 'user_message'; chat_id: string; message_id: string; text: string }
   | { type: 'error'; chat_id: string; message: string };
@@ -226,7 +226,7 @@ export interface GapBubbleSpec {
 export interface UserBubbleSpec {
   kind: 'user';
   /** Stable reconcile key. message_id from the user_message envelope
-   *  or sidekick_id from a durable row. */
+   *  or parley_id from a durable row. */
   key: string;
   text: string;
   /** Wall-clock; ms. */

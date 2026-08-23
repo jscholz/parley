@@ -48,7 +48,7 @@ from .. import parley_state as state
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -298,31 +298,21 @@ def test_expand_kinds_drops_unknown_kind_names():
 
 def test_guard_blocks_live_state_dirs(tmp_path, monkeypatch):
     """With the guard env set (conftest sets it for the whole suite),
-    opening a DB under ~/.hermes (or ~/.parley, ~/.sidekick,
+    opening a DB under ~/.hermes (or ~/.parley, ~/.parley,
     ~/.openclaw-sk-integ)
     raises before anything touches disk. HOME is faked so the test is
     safe even if the guard were broken."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    for dirname in (".hermes", ".parley", ".sidekick", ".openclaw-sk-integ"):
+    for dirname in (".hermes", ".parley", ".openclaw-sk-integ"):
         live_path = tmp_path / dirname / "parley.db"
         with pytest.raises(RuntimeError, match="TEST_GUARD"):
             ParleyDB(live_path)
         assert not live_path.parent.exists()  # raised before mkdir
 
 
-def test_guard_blocks_live_state_dirs_under_legacy_env_spelling(tmp_path, monkeypatch):
-    """The pytest command line historically sets SIDEKICK_TEST_GUARD=1
-    (legacy spelling); the tripwire must keep honoring it post-rename."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
-    monkeypatch.setenv("SIDEKICK_TEST_GUARD", "1")
-    with pytest.raises(RuntimeError, match="TEST_GUARD"):
-        ParleyDB(tmp_path / ".hermes" / "parley.db")
-
-
 def test_guard_allows_tmp_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    db = ParleyDB(tmp_path / "elsewhere" / "sidekick.db")
+    db = ParleyDB(tmp_path / "elsewhere" / "parley.db")
     db.close()
 
 
@@ -331,6 +321,5 @@ def test_guard_disabled_without_env(tmp_path, monkeypatch):
     gateway itself must not be blocked)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("PARLEY_TEST_GUARD", raising=False)
-    monkeypatch.delenv("SIDEKICK_TEST_GUARD", raising=False)
     db = ParleyDB(tmp_path / ".hermes" / "parley.db")
     db.close()

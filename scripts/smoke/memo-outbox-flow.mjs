@@ -36,7 +36,7 @@ const CHAT_ID = 'mock-memo-outbox';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Memo outbox chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_memo_seed', timestamp: Date.now() / 1000 - 60 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_memo_seed', timestamp: Date.now() / 1000 - 60 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

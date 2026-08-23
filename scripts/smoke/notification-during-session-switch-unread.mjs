@@ -20,14 +20,14 @@ export function MOCK_SETUP(mock) {
   mock.addChat(OLD_CHAT, {
     title: 'Old cron chat',
     messages: [
-      { role: 'user', content: 'old chat seed', sidekick_id: 'umsg_notif_switch_old', timestamp: Date.now() / 1000 - 60 },
+      { role: 'user', content: 'old chat seed', parley_id: 'umsg_notif_switch_old', timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(NEW_CHAT, {
     title: 'New target chat',
     messages: [
-      { role: 'user', content: 'new chat seed', sidekick_id: 'umsg_notif_switch_new', timestamp: Date.now() / 1000 - 120 },
+      { role: 'user', content: 'new chat seed', parley_id: 'umsg_notif_switch_new', timestamp: Date.now() / 1000 - 120 },
     ],
     lastActiveAt: Date.now() - 5000,
   });

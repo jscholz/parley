@@ -174,7 +174,7 @@ def main() -> int:
     args = ap.parse_args()
 
     chat_id = str(uuid.uuid4())
-    print(f"=== sidekick smoke flow — chat_id={chat_id} ===")
+    print(f"=== parley smoke flow — chat_id={chat_id} ===")
     print(f"persistent stream: http://{args.host}:{args.port}/api/parley/stream")
     print()
 

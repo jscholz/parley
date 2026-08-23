@@ -47,7 +47,7 @@ try:
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
-from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
 
 
 logger = logging.getLogger(__name__)
@@ -347,7 +347,7 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     # adapter. Bare ids (no prefix) are accepted for backward compat
     # with un-prefixed callers.
     parsed_source, chat_id = _parse_gateway_id(conversation)
-    if parsed_source is not None and parsed_source != SIDEKICK_SOURCE:
+    if parsed_source is not None and parsed_source != PARLEY_SOURCE:
         return web.json_response(
             {"error": {"type": "invalid_request_error",
                        "message": (f"`conversation` source `{parsed_source}` "

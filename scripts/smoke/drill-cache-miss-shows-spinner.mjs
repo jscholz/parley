@@ -44,13 +44,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role,
       content: role === 'user' ? `user marker ${idx}` : `agent reply ${idx}`,
-      sidekick_id: `drillspin-msg-${idx}`,
+      parley_id: `drillspin-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Drill spinner test',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });

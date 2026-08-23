@@ -8,7 +8,7 @@ reader is covered in test_items_endpoint_state_db_source.py.
 
 Pins down:
   - list_messages_for_chat returns the wire shape (id, role, content,
-    created_at, sidekick_id, kind/tool_name/tool_call_id when set)
+    created_at, parley_id, kind/tool_name/tool_call_id when set)
   - Pagination by rowid (before cursor + first_id)
   - reconcile_from_state_db pulls state.db rows missing from
     parley.db, idempotent on second call
@@ -39,7 +39,7 @@ CHAT_ID = "c0a01ab1-2b3c-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -77,7 +77,7 @@ def state_db(tmp_path):
     return path
 
 
-def _add_session(state_db, sid, chat_id=CHAT_ID, source="sidekick"):
+def _add_session(state_db, sid, chat_id=CHAT_ID, source="parley"):
     conn = sqlite3.connect(str(state_db))
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?, ?, ?, ?)",
@@ -113,7 +113,7 @@ def test_reconcile_propagates_tool_calls_from_state_db(db, state_db):
     _add_msg(state_db, "s1", "user", "search please", 1000.0)
     _add_msg(state_db, "s1", "assistant", "", 1001.0, tool_calls=tcalls)
     _add_msg(state_db, "s1", "tool", "results: [...]", 1002.0, tool_call_id="call_x")
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     assistant_items = [i for i in items if i["role"] == "assistant"]
     assert len(assistant_items) == 1
@@ -143,7 +143,7 @@ def test_tool_calls_heal_for_already_reconciled_legacy_rows(db, state_db):
         db, id="legacy:1", chat_id=CHAT_ID, role="assistant",
         content="", agent_row_id="1",
     )
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick", force_full=True)
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley", force_full=True)
     row = db.fetchone(
         "SELECT tool_calls FROM msg_links WHERE id='legacy:1'"
     )
@@ -167,14 +167,14 @@ def test_list_messages_for_chat_returns_wire_shape(db):
     items = result["items"]
     assert len(items) == 2
     # User bubble
-    assert items[0]["sidekick_id"] == "umsg_1"
+    assert items[0]["parley_id"] == "umsg_1"
     assert items[0]["role"] == "user"
     assert items[0]["content"] == "hi"
     assert items[0]["object"] == "message"
     assert isinstance(items[0]["id"], int)  # rowid cursor
     assert items[0]["created_at"] > 0
     # Assistant bubble
-    assert items[1]["sidekick_id"] == "msg_1"
+    assert items[1]["parley_id"] == "msg_1"
     assert items[1]["role"] == "assistant"
     assert items[1]["content"] == "hello back"
 
@@ -238,7 +238,7 @@ def test_recent_envelope_not_hidden_behind_legacy_backfill(db, state_db):
     base_ts = 1779000000.0
     for i in range(250):
         _add_msg(state_db, "s1", "user", f"historic msg {i}", base_ts + i)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
 
     # Now: parley.db has 251 rows. The fresh row's rowid is LOW
     # (inserted first), the historic rows' rowids are HIGH.
@@ -253,11 +253,11 @@ def test_recent_envelope_not_hidden_behind_legacy_backfill(db, state_db):
     # Step 3: items endpoint behavior. Pagination by created_at
     # means the fresh row (timestamp = today) is in the recent window.
     result = state.list_messages_for_chat(db, CHAT_ID, limit=100)
-    sks = [i["sidekick_id"] for i in result["items"]]
+    sks = [i["parley_id"] for i in result["items"]]
     assert "umsg_fresh" in sks, \
         f"Fresh envelope row missing from recent window. Got: {sks[:5]}..."
     # It should be the LAST item (most recent by created_at).
-    assert result["items"][-1]["sidekick_id"] == "umsg_fresh"
+    assert result["items"][-1]["parley_id"] == "umsg_fresh"
 
 
 def test_pagination_first_page(db):
@@ -270,7 +270,7 @@ def test_pagination_first_page(db):
     # First page (before=None) returns most-recent `limit` items.
     assert len(result["items"]) == 3
     assert result["has_more"] is True
-    sks = [i["sidekick_id"] for i in result["items"]]
+    sks = [i["parley_id"] for i in result["items"]]
     assert sks == ["umsg_2", "umsg_3", "umsg_4"]
     assert result["first_id"] == result["items"][0]["id"]
 
@@ -284,7 +284,7 @@ def test_pagination_load_earlier(db):
     first_page = state.list_messages_for_chat(db, CHAT_ID, limit=3)
     cursor = first_page["first_id"]
     earlier = state.list_messages_for_chat(db, CHAT_ID, limit=10, before_rowid=cursor)
-    sks = [i["sidekick_id"] for i in earlier["items"]]
+    sks = [i["parley_id"] for i in earlier["items"]]
     assert sks == ["umsg_0", "umsg_1"]
     assert earlier["has_more"] is False
 
@@ -296,10 +296,10 @@ def test_reconcile_pulls_state_db_rows_missing_from_parley_db(db, state_db):
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "from state.db", 1000.0)
     _add_msg(state_db, "s1", "assistant", "reply from state.db", 1001.0)
-    n = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    n = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert n == 2
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
-    sks = [i["sidekick_id"] for i in items]
+    sks = [i["parley_id"] for i in items]
     assert all(s.startswith("legacy:") for s in sks)
     contents = [i["content"] for i in items]
     assert "from state.db" in contents
@@ -309,9 +309,9 @@ def test_reconcile_pulls_state_db_rows_missing_from_parley_db(db, state_db):
 def test_reconcile_is_idempotent(db, state_db):
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "msg", 1000.0)
-    first = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    first = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert first == 1
-    second = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    second = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert second == 0
 
 
@@ -324,11 +324,11 @@ def test_reconcile_skips_rows_already_linked(db, state_db):
         db, id="umsg_real", chat_id=CHAT_ID, role="user",
         content="hello", agent_row_id="1",
     )
-    n = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    n = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert n == 0
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     assert len(items) == 1
-    assert items[0]["sidekick_id"] == "umsg_real"
+    assert items[0]["parley_id"] == "umsg_real"
 
 
 def test_reconcile_drops_compaction_seed_rows(db, state_db):
@@ -338,7 +338,7 @@ def test_reconcile_drops_compaction_seed_rows(db, state_db):
     _add_msg(state_db, "s1", "user", "real prompt", 1000.0)
     _add_msg(state_db, "s1", "system", "[CONTEXT COMPACTION] internal seed", 1001.0)
     _add_msg(state_db, "s1", "assistant", "real reply", 1002.0)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     contents = [i["content"] for i in items]
     assert "real prompt" in contents
@@ -349,7 +349,7 @@ def test_reconcile_drops_compaction_seed_rows(db, state_db):
 def test_reconcile_when_state_db_missing_is_noop(db, tmp_path):
     """Missing state.db file → reconcile returns 0, doesn't raise."""
     fake = tmp_path / "nonexistent.db"
-    n = state.reconcile_from_state_db(db, fake, CHAT_ID, "sidekick")
+    n = state.reconcile_from_state_db(db, fake, CHAT_ID, "parley")
     assert n == 0
 
 
@@ -374,7 +374,7 @@ def test_linker_attaches_agent_row_id_by_content_match(db, state_db):
     # Before reconcile: agent_row_id NULL on both.
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     assert all(r["agentRowId"] is None for r in rows)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     # Both rows now have agent_row_id pointing at their state.db twin.
     by_id = {r["id"]: r["agentRowId"] for r in rows}
@@ -392,8 +392,8 @@ def test_linker_idempotent_no_extra_changes_on_second_call(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_idem", "text": "ping",
     })
-    first = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
-    second = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    first = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
+    second = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert first == 1  # one link
     assert second == 0
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
@@ -418,7 +418,7 @@ def test_linker_handles_duplicate_content_in_order(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_b", "text": "ok",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = {r["id"]: r["agentRowId"] for r in state.list_msg_links_for_chat(db, CHAT_ID)}
     # umsg_a (recorded first) → state.db row 1 (first "ok")
     # umsg_b (recorded second) → state.db row 3 (second "ok")
@@ -434,7 +434,7 @@ def test_linker_leaves_unmatched_row_null(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_orphan", "text": "no twin in state.db",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     assert len(rows) == 1
     assert rows[0]["agentRowId"] is None
@@ -451,7 +451,7 @@ def test_linker_order_fallback_under_content_drift(db, state_db):
     _add_session(state_db, "s1")
     # State.db has hermes' normalized content (trailing newline stripped
     # vs envelope's accumulated streaming text + a literal whitespace
-    # divergence). Each envelope still has a unique sidekick_id.
+    # divergence). Each envelope still has a unique parley_id.
     _add_msg(state_db, "s1", "user", "kick off the job", 1000.0)
     _add_msg(state_db, "s1", "assistant", "On it.\nWill report back.", 1001.0)
     _add_msg(state_db, "s1", "user", "great", 1002.0)
@@ -474,7 +474,7 @@ def test_linker_order_fallback_under_content_drift(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_drift_2", "text": "Done!",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     by_id = {r["id"]: r["agentRowId"] for r in state.list_msg_links_for_chat(db, CHAT_ID)}
     # All four envelopes link via order-fallback (append-only sequence
     # within role). No parallel `legacy:` rows.
@@ -504,7 +504,7 @@ def test_linker_order_fallback_preserves_role_separation(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_role", "text": "Y-drift",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     by_id = {r["id"]: r["agentRowId"] for r in state.list_msg_links_for_chat(db, CHAT_ID)}
     assert by_id["umsg_role"] == "1"     # user envelope → user state.db row
     assert by_id["msg_role"] == "2"      # assistant envelope → assistant state.db row
@@ -526,7 +526,7 @@ def test_linker_order_fallback_skips_tool_rows(db, state_db):
         "type": "tool_call", "chat_id": CHAT_ID,
         "call_id": "call_zz", "tool_name": "t", "args": {},
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     by_id = {r["id"]: r["agentRowId"] for r in state.list_msg_links_for_chat(db, CHAT_ID)}
     # tc:* row must NOT be linked by order-fallback (would be wrong;
     # state.db row is the tool RESULT, not the call). Pass 2 inserts
@@ -550,7 +550,7 @@ def test_linker_skips_state_db_row_already_claimed(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_dup", "text": "shared text",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = {r["id"]: r["agentRowId"] for r in state.list_msg_links_for_chat(db, CHAT_ID)}
     assert rows["umsg_already_linked"] == "1"
     # umsg_dup couldn't claim id=1 (already claimed); no other state.db
@@ -588,13 +588,13 @@ def test_fast_path_skips_full_scan_on_no_drift(db, state_db):
     import time as _t
     t0 = _t.monotonic()
     n_forced = state.reconcile_from_state_db(
-        db, state_db, CHAT_ID, "sidekick", force_full=True,
+        db, state_db, CHAT_ID, "parley", force_full=True,
     )
     dt_full = _t.monotonic() - t0
     assert n_forced == 0
     # Second reconcile: same no-drift state, but with the fast-path.
     t0 = _t.monotonic()
-    n_fast = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    n_fast = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     dt_fast = _t.monotonic() - t0
     assert n_fast == 0
     # Fast-path must be DRAMATICALLY faster than the full pass. We
@@ -616,7 +616,7 @@ def test_orphan_drop_when_state_db_session_deleted(db, state_db):
         "message_id": "umsg_predel", "text": "before delete",
     })
     # First reconcile: linker attaches agent_row_id=1.
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert state.list_msg_links_for_chat(db, CHAT_ID)[0]["agentRowId"] == "1"
     # Simulate hermes-side session delete: row 1 gone from state.db.
     conn = sqlite3.connect(str(state_db))
@@ -624,7 +624,7 @@ def test_orphan_drop_when_state_db_session_deleted(db, state_db):
     conn.commit()
     conn.close()
     # Reconcile again: orphan dropped.
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     assert rows == []
 
@@ -644,7 +644,7 @@ def test_orphan_drop_handles_retry_rewrite(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_retry", "text": "original reply",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     # Simulate /retry: state.db DELETE+REINSERT replaces both rows.
     conn = sqlite3.connect(str(state_db))
     conn.execute("DELETE FROM messages WHERE session_id = 's1'")
@@ -658,11 +658,11 @@ def test_orphan_drop_handles_retry_rewrite(db, state_db):
     )
     conn.commit()
     conn.close()
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     contents = [i["content"] for i in items]
     assert contents == ["retried prompt", "retried reply"]
-    sks = [i["sidekick_id"] for i in items]
+    sks = [i["parley_id"] for i in items]
     assert all(s.startswith("legacy:") for s in sks)
 
 
@@ -676,7 +676,7 @@ def test_orphan_drop_preserves_unlinked_envelope_rows(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_inflight", "text": "just sent",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     assert len(rows) == 1
     assert rows[0]["id"] == "umsg_inflight"
@@ -692,7 +692,7 @@ def test_orphan_drop_skipped_when_state_db_unreachable(db, tmp_path):
         content="not gone", agent_row_id="42",
     )
     fake = tmp_path / "missing.db"
-    n = state.reconcile_from_state_db(db, fake, CHAT_ID, "sidekick")
+    n = state.reconcile_from_state_db(db, fake, CHAT_ID, "parley")
     assert n == 0
     rows = state.list_msg_links_for_chat(db, CHAT_ID)
     # Row preserved despite reconcile not being able to confirm
@@ -706,14 +706,14 @@ def test_orphan_drop_partial_session_mutation(db, state_db):
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "user", "kept row", 1000.0)
     _add_msg(state_db, "s1", "user", "to be deleted", 1001.0)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert len(state.list_msg_links_for_chat(db, CHAT_ID)) == 2
     # Delete row id=2 only.
     conn = sqlite3.connect(str(state_db))
     conn.execute("DELETE FROM messages WHERE id = 2")
     conn.commit()
     conn.close()
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     assert len(items) == 1
     assert items[0]["content"] == "kept row"
@@ -728,18 +728,18 @@ def test_reconcile_walks_compaction_child_sessions(db, state_db):
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, system_prompt, parent_session_id, started_at) "
         "VALUES (?, ?, ?, ?, NULL, ?)",
-        ("root", "sidekick", CHAT_ID, long_prompt, 1000.0),
+        ("root", "parley", CHAT_ID, long_prompt, 1000.0),
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, system_prompt, parent_session_id, started_at) "
         "VALUES (?, ?, NULL, ?, ?, ?)",
-        ("child", "sidekick", long_prompt, "root", 1100.0),
+        ("child", "parley", long_prompt, "root", 1100.0),
     )
     conn.commit()
     conn.close()
     _add_msg(state_db, "root", "user", "before compaction", 1000.0)
     _add_msg(state_db, "child", "user", "after compaction", 1100.0)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     items = state.list_messages_for_chat(db, CHAT_ID)["items"]
     contents = [i["content"] for i in items]
     assert "before compaction" in contents

@@ -44,12 +44,12 @@ export function MOCK_SETUP(mock) {
   // Chat B — somewhere to switch TO while the bg reply lands.
   mock.addChat(CHAT_B_ID, {
     title: 'Anchor chat for bg-reply repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'anchor-user',
-        sidekick_id: 'umsg_anchor_b_bg', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'umsg_anchor_b_bg', timestamp: Date.now() / 1000 - 30 },
       { role: 'assistant', content: 'anchor-reply',
-        sidekick_id: 'msg_anchor_b_bg', timestamp: Date.now() / 1000 - 29 },
+        parley_id: 'msg_anchor_b_bg', timestamp: Date.now() / 1000 - 29 },
     ],
     lastActiveAt: Date.now() - 5000,
   });

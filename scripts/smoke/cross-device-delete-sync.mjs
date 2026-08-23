@@ -30,14 +30,14 @@ export function MOCK_SETUP(mock) {
     title: 'Keep me',
     messages: [
       { role: 'user', content: 'keep-seed',
-        sidekick_id: 'umsg_delete_keep', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'umsg_delete_keep', timestamp: Date.now() / 1000 - 60 },
     ],
   });
   mock.addChat(CHAT_REMOTE_DELETED, {
     title: 'Remote-delete me',
     messages: [
       { role: 'user', content: 'remote-delete-seed',
-        sidekick_id: 'umsg_delete_remote', timestamp: Date.now() / 1000 - 120 },
+        parley_id: 'umsg_delete_remote', timestamp: Date.now() / 1000 - 120 },
     ],
   });
 }
@@ -122,7 +122,7 @@ export default async function run({ page, log, mock }) {
   mock.pushEnvelope({
     type: 'conversation_deleted',
     chat_id: CHAT_REMOTE_DELETED,
-    source: 'sidekick',
+    source: 'parley',
   });
   log('pushed conversation_deleted envelope simulating remote DELETE');
 

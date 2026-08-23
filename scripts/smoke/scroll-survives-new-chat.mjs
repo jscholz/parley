@@ -29,7 +29,7 @@ function makeMessages(count, prefix) {
   for (let i = 0; i < count; i++) {
     out.push({
       id: i + 1,
-      sidekick_id: `${prefix.toLowerCase()}-nc-${i + 1}`,
+      parley_id: `${prefix.toLowerCase()}-nc-${i + 1}`,
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `${body} (msg ${i})`,
       timestamp: Date.now() / 1000 - (count - i) * 60,
@@ -41,7 +41,7 @@ function makeMessages(count, prefix) {
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — long',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(80, 'A'),
     lastActiveAt: Date.now() - 60_000,
   });

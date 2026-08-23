@@ -31,7 +31,7 @@ export interface SegmentBackend {
 
 // ── IndexedDB backend (production) ─────────────────────────────────────
 
-const DB_NAME = 'parley-capture'; // migrated from sidekick-capture (renameMigration.ts)
+const DB_NAME = 'parley-capture';
 const STORE = 'segments';
 
 function reqP<T>(req: IDBRequest<T>): Promise<T> {

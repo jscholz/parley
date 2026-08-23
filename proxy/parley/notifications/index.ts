@@ -15,7 +15,7 @@
 // presents the toggle as "configure VAPID keys on the server first".
 //
 // Storage: JSON file at `<dataDir>/push-subscriptions.json`. Default
-// dataDir is `~/.sidekick/notifications/` (XDG-ish; host-scoped, not in
+// dataDir is `~/.parley/notifications/` (XDG-ish; host-scoped, not in
 // cwd). Override via PARLEY_NOTIFICATIONS_DIR env var if needed.
 //
 // Not in this file:

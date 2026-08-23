@@ -17,7 +17,7 @@
 // Post-v0.383 unification (current shape):
 //   - IDB schema v2 clears the store on upgrade; bare-id rows can
 //     no longer exist locally.
-//   - mintChatId stamps `sidekick:`; cross-device hydrate carries the
+//   - mintChatId stamps `parley:`; cross-device hydrate carries the
 //     gateway prefix. Local + server use the SAME id format.
 //   - Merge dedup collapsed to direct key-equality — no prefix
 //     arithmetic.
@@ -44,15 +44,15 @@ export const BACKEND = 'mocked';
 // (cross-device hydrate scenario). The merge collapses on direct
 // key-equality.
 const NATIVE_CHAT_ID = 'a4705789-9c40-4c09-a3c1-8a7c0acba35c';
-const PREFIXED_ID = `sidekick:${NATIVE_CHAT_ID}`;
-const OTHER_CHAT = 'sidekick:188ebca3-105c-45e9-b130-4fa63d7d6055';
+const PREFIXED_ID = `parley:${NATIVE_CHAT_ID}`;
+const OTHER_CHAT = 'parley:188ebca3-105c-45e9-b130-4fa63d7d6055';
 
 export function MOCK_SETUP(mock) {
   // Server-side row with content — same shape the post-patch gateway
-  // returns. Source intentionally "sidekick" to mirror the bug repro.
+  // returns. Source intentionally "parley" to mirror the bug repro.
   mock.addChat(PREFIXED_ID, {
     title: 'Populating Notion Pitch Deck Page',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'real-server-msg-1', timestamp: Date.now() / 1000 - 120 },
       { role: 'assistant', content: 'real-server-reply-1', timestamp: Date.now() / 1000 - 119 },
@@ -62,7 +62,7 @@ export function MOCK_SETUP(mock) {
   // Second real chat to navigate TO (the trigger for cleanupAbandonedChat).
   mock.addChat(OTHER_CHAT, {
     title: 'Reconnecting After a Connection Loss',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'other-msg', timestamp: Date.now() / 1000 - 60 },
       { role: 'assistant', content: 'other-reply', timestamp: Date.now() / 1000 - 59 },

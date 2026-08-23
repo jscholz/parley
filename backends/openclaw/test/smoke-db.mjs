@@ -12,7 +12,7 @@ import {
 } from '../src/messages.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'parley-db-smoke-'));
-const dbPath = join(dir, 'sidekick.db');
+const dbPath = join(dir, 'parley.db');
 let pass = 0, fail = 0;
 const assert = (cond, msg) => {
   if (cond) { pass++; console.log('  ✓', msg); }

@@ -195,14 +195,14 @@ export function upsertNotification(args: {
   chatId: string | null;
   kind: string;
   content: string;
-  sidekickId?: string | null;
+  parleyId?: string | null;
   urgent?: boolean;
   chatLabel?: string | null;
 }): ActivityItem | null {
   store.hydrate();
   const kind = normalizeKind(args.kind);
   if (kind !== 'approval' && kind !== 'cron' && kind !== 'agent_reply') return null;
-  const id = args.sidekickId || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const id = args.parleyId || `${kind}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const prev = store.items.get(id);
   const item: ActivityItem = {
     id,
@@ -213,7 +213,7 @@ export function upsertNotification(args: {
     createdAt: prev?.createdAt || Date.now(),
     urgent: args.urgent === true || kind === 'approval',
     read: prev?.read ?? false,
-    messageId: args.sidekickId || prev?.messageId || null,
+    messageId: args.parleyId || prev?.messageId || null,
     resolved: prev?.resolved,
   };
   store.items.set(id, item);

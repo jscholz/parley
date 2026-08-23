@@ -37,7 +37,7 @@ const CHAT_ID = 'mock-vis-hasfocus';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Visibility focus-trap chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_vh_seed', timestamp: Date.now() / 1000 - 60 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_vh_seed', timestamp: Date.now() / 1000 - 60 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

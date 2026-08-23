@@ -50,22 +50,22 @@ const MARKER_Y = 'YANKEE cold marker';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_X, {
     title: 'Chat X — currently viewed',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: MARKER_X, message_id: 'x-1', sidekick_id: 'x-1',
+      { role: 'user', content: MARKER_X, message_id: 'x-1', parley_id: 'x-1',
         timestamp: Date.now() / 1000 - 120 },
-      { role: 'assistant', content: MARKER_X + ' reply', message_id: 'x-2', sidekick_id: 'x-2',
+      { role: 'assistant', content: MARKER_X + ' reply', message_id: 'x-2', parley_id: 'x-2',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 10_000,  // most-recent → boot lands here
   });
   mock.addChat(CHAT_Y, {
     title: 'Chat Y — cold + slow',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: MARKER_Y, message_id: 'y-1', sidekick_id: 'y-1',
+      { role: 'user', content: MARKER_Y, message_id: 'y-1', parley_id: 'y-1',
         timestamp: Date.now() / 1000 - 300 },
-      { role: 'assistant', content: MARKER_Y + ' reply', message_id: 'y-2', sidekick_id: 'y-2',
+      { role: 'assistant', content: MARKER_Y + ' reply', message_id: 'y-2', parley_id: 'y-2',
         timestamp: Date.now() / 1000 - 240 },
     ],
     lastActiveAt: Date.now() - 600_000,

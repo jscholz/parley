@@ -39,11 +39,11 @@ export function MOCK_SETUP(mock) {
   // Most-recently-active: this is sessions[0], the pre-fix fall-through
   // landing. The agent's busy thread in the field.
   mock.addChat(BUSY_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Busy agent chat',
     messages: [
-      { role: 'user', content: BUSY_MARKER, sidekick_id: 'm239-b-1', timestamp: Date.now() / 1000 - 30 },
-      { role: 'assistant', content: 'agent streaming away', sidekick_id: 'm239-b-2', timestamp: Date.now() / 1000 - 20 },
+      { role: 'user', content: BUSY_MARKER, parley_id: 'm239-b-1', timestamp: Date.now() / 1000 - 30 },
+      { role: 'assistant', content: 'agent streaming away', parley_id: 'm239-b-2', timestamp: Date.now() / 1000 - 20 },
     ],
     lastActiveAt: Date.now() - 20_000,
   });
@@ -51,7 +51,7 @@ export function MOCK_SETUP(mock) {
   // [] and bootRendered stays false (the residual-bug trigger). Older
   // lastActiveAt so it is NOT sessions[0].
   mock.addChat(RESTORED_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Chat user was reading',
     messages: [],
     lastActiveAt: Date.now() - 3600_000,

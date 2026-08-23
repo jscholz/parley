@@ -4,7 +4,7 @@
  * the 5-10s it was taking to round-trip through the server + SQL.
  *
  * Design:
- *   - One DB (sidekick-sessions), two stores:
+ *   - One DB (parley-sessions), two stores:
  *     - 'list'     : keyed by 'current'      { sessions: SessionInfo[], updatedAt, schemaVersion }
  *     - 'messages' : keyed by conversation name { id, messages, updatedAt, schemaVersion }
  *   - sessionDrawer.refresh() reads the cached list first (instant render),

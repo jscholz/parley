@@ -71,7 +71,7 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role: 'user',
       content: `Turn ${turn.idx} prompt`,
-      sidekick_id: `u_t${turn.idx}`,
+      parley_id: `u_t${turn.idx}`,
       timestamp: ts++,
     });
     // Assistant with N tool_calls (single row, all calls on it).
@@ -103,7 +103,7 @@ export function MOCK_SETUP(mock) {
       messages.push({
         role: 'assistant',
         content: `Turn ${turn.idx} reply — used ${turn.toolCount} tools.`,
-        sidekick_id: `m_t${turn.idx}`,
+        parley_id: `m_t${turn.idx}`,
         timestamp: ts++,
       });
     }

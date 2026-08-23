@@ -25,7 +25,7 @@ export function MOCK_SETUP(mock) {
     title: 'On-screen notification target',
     messages: [
       { role: 'user', content: 'seed msg',
-        sidekick_id: 'umsg_notif_onscreen_seed',
+        parley_id: 'umsg_notif_onscreen_seed',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,

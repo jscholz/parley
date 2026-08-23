@@ -8,8 +8,8 @@ mkdirSync(OUT, { recursive: true });
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
 const browser = await chromium.launch({ executablePath: exec, headless: true });
 
-const SETTINGS_KEY = 'sidekick.settings.v2';
-const SIDEBAR_KEY = 'sidekick.sidebar.expanded';
+const SETTINGS_KEY = 'parley.settings.v2';
+const SIDEBAR_KEY = 'parley.sidebar.expanded';
 
 /**
  * Prep a context: pre-set parley localStorage so the first paint has

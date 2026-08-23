@@ -20,14 +20,14 @@ export function MOCK_SETUP(mock) {
   mock.addChat(VIEWED_CHAT, {
     title: 'Viewed chat',
     messages: [
-      { role: 'user', content: 'viewed seed', sidekick_id: 'umsg_replay_viewed_seed', timestamp: t0 },
+      { role: 'user', content: 'viewed seed', parley_id: 'umsg_replay_viewed_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(BG_CHAT, {
     title: 'Replay approval source',
     messages: [
-      { role: 'user', content: 'background seed', sidekick_id: 'umsg_replay_bg_seed', timestamp: t0 },
+      { role: 'user', content: 'background seed', parley_id: 'umsg_replay_bg_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 5000,
   });
@@ -43,7 +43,7 @@ export function MOCK_SETUP(mock) {
       'sh -lc "sleep 8; printf stale-replay"\n\n' +
       'Reason: stale replay smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: 'notif_replay_approval_1',
+    parley_id: 'notif_replay_approval_1',
     urgent: true,
   });
   // The mock helper mirrors server unread side effects for live pushes.

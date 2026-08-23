@@ -31,15 +31,15 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role: 'user',
       content: `Q${i}. ${'short question here. '.repeat(2)}`,
-      sidekick_id: `umsg_rj_${i}`, timestamp: t0 + i * 2,
+      parley_id: `umsg_rj_${i}`, timestamp: t0 + i * 2,
     });
     messages.push({
       role: 'assistant',
       content: `A${i}.\n\n${'This assistant reply wraps over several lines so its rendered height exceeds the per-kind estimate. '.repeat(3)}`,
-      sidekick_id: `msg_rj_${i}`, timestamp: t0 + i * 2 + 1,
+      parley_id: `msg_rj_${i}`, timestamp: t0 + i * 2 + 1,
     });
   }
-  mock.addChat(CHAT_ID, { title: 'Re-measure jump chat', source: 'sidekick', messages, lastActiveAt: Date.now() });
+  mock.addChat(CHAT_ID, { title: 'Re-measure jump chat', source: 'parley', messages, lastActiveAt: Date.now() });
   mock.setAutoReplyEnabled(false);
 }
 

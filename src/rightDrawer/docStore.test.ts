@@ -100,20 +100,6 @@ test('persists across module reload (hydrateDocs)', async () => {
   assert.equal(s2.currentDoc()?.title, 'Notes');
 });
 
-test('migrates the v1 single-slot key once', async () => {
-  backing.set('sidekick.doc.current', JSON.stringify({
-    title: 'Legacy', content: 'old', format: 'markdown', path: '/w/legacy.md',
-    receivedAt: 123,
-  }));
-  const s = await freshStore();
-  s.hydrateDocs();
-  assert.equal(s.docCount(), 1);
-  assert.equal(s.currentDoc()?.title, 'Legacy');
-  assert.equal(s.currentDoc()?.receivedAt, 123);
-  assert.equal(backing.has('sidekick.doc.current'), false, 'legacy key removed');
-  assert.ok(backing.has('parley.docs.v2'), 'migrated to v2 key');
-});
-
 test('char budget evicts oldest non-active from PERSISTENCE', async () => {
   const s1 = await freshStore();
   const big = 'x'.repeat(900_000);

@@ -41,7 +41,7 @@ import { GatewayClient } from './src/gateway-client.js';
 import { AgentEventBus } from './src/event-bus.js';
 import { makeResponsesHandler } from './src/responses-handler.js';
 import { makeEventsHandler } from './src/events-handler.js';
-import { openDb, migrateLegacyDbFile } from './src/db.js';
+import { openDb } from './src/db.js';
 import { upsertMessage, listMessagesForChat } from './src/messages.js';
 import { PushDispatcher } from './src/push-dispatch.js';
 import { registerPushRoutes } from './src/push-routes.js';
@@ -65,23 +65,20 @@ function parseQuery(req) {
 }
 
 export default definePluginEntry({
-  // id stays 'sidekick' — legacy name, predates the Parley rename;
+  // id stays 'parley' — legacy name, predates the Parley rename;
   // installed openclaw configs reference this plugin key.
-  id: 'sidekick',
+  id: 'parley',
   name: 'Parley',
   description: 'Parley PWA backend — exposes /v1/* OpenAI-Responses contract.',
   register(api) {
     // ── Supplemental store (parley.db) ────────────────────────────
     // Maps our plugin-minted SSE-shape ids (msg_*) to openclaw's
     // native __openclaw.id values so /v1/conversations/{id}/items can
-    // surface sidekick_id — which the PWA uses to dedup the inflight
+    // surface parley_id — which the PWA uses to dedup the inflight
     // cache against the history replay (without it, every reply
     // duplicates on reload). Schema is created lazily on first open.
     const stateDir = resolveStateDir({ profile: PROFILE });
-    // parley.db (formerly sidekick.db) — legacy file renamed in place
-    // on first open (see migrateLegacyDbFile).
     const dbPath = join(stateDir, 'parley.db');
-    migrateLegacyDbFile(dbPath, join(stateDir, 'sidekick.db'));
     const db = openDb({ path: dbPath });
 
     // ── Gateway WS client + event bus (shared across handlers) ─────
@@ -161,7 +158,7 @@ export default definePluginEntry({
     // → OAI Responses-API SSE shape the parley proxy expects.
     // After lifecycle:end the handler writes a (chat_id, msg_id,
     // openclaw_row_id) mapping into the supplemental DB so the
-    // /v1/conversations/{id}/items handler can surface sidekick_id
+    // /v1/conversations/{id}/items handler can surface parley_id
     // and the PWA can dedup live bubbles against the reload replay.
     api.registerHttpRoute({
       path: '/v1/responses',
@@ -229,8 +226,8 @@ export default definePluginEntry({
           // DELETE / PATCH /v1/conversations/{id} (no /items suffix).
           const bareMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/?$/);
           if (bareMatch && (req.method === 'DELETE' || req.method === 'PATCH')) {
-            // Incoming id may be PWA-form (sidekick:abc) or canonical
-            // (agent:dev:sidekick:abc). Normalize to canonical for the
+            // Incoming id may be PWA-form (parley:abc) or canonical
+            // (agent:dev:parley:abc). Normalize to canonical for the
             // openclaw call.
             const incomingId = decodeURIComponent(bareMatch[1]);
             const sessionKey = prefixChatId(incomingId, AGENT_ID);
@@ -267,8 +264,8 @@ export default definePluginEntry({
           // GET /v1/conversations/{id}/items (transcript replay).
           const m = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/items\/?$/);
           if (!m) return false;  // not us — let other handlers (or 404) handle
-          // PWA may send either stripped (`sidekick:abc`) or canonical
-          // (`agent:dev:sidekick:abc`) — normalize before store lookup.
+          // PWA may send either stripped (`parley:abc`) or canonical
+          // (`agent:dev:parley:abc`) — normalize before store lookup.
           const incomingId = decodeURIComponent(m[1]);
           const sessionKey = prefixChatId(incomingId, AGENT_ID);
 
@@ -285,13 +282,13 @@ export default definePluginEntry({
           const before = beforeRaw ? parseInt(beforeRaw, 10) : null;
 
           const raw = readSessionMessages({ stateDir, agentId: AGENT_ID, sessionId: entry.sessionId });
-          // Build openclaw_row_id → sidekick_id lookup from supplemental
+          // Build openclaw_row_id → parley_id lookup from supplemental
           // store. Empty for chats with no linked rows (first-load case);
           // the items handler still serves correctly, just without dedup.
           const links = listMessagesForChat(db, { chat_id: incomingId, limit: 500 });
-          const sidekickIdLookup = new Map();
+          const parleyIdLookup = new Map();
           for (const row of links.items) {
-            if (row.agent_row_id) sidekickIdLookup.set(row.agent_row_id, row.id);
+            if (row.agent_row_id) parleyIdLookup.set(row.agent_row_id, row.id);
           }
 
           // Structural narration drop. Openclaw's `message` tool
@@ -339,7 +336,7 @@ export default definePluginEntry({
             const msg = raw[idx];
             if (isDeliveryMirror(msg)) continue;
             if (dropNarrationIdxs.has(idx)) continue;
-            const item = toConversationItem({ msg, seq, sidekickIdLookup });
+            const item = toConversationItem({ msg, seq, parleyIdLookup });
             seq++;
             if (!item) continue;
             if (before != null && item.created_at >= before) continue;
@@ -356,7 +353,7 @@ export default definePluginEntry({
           //
           // (Crack C of the 2026-05-17 turn-taking audit. Previously
           // we folded `renderItems` output into the durable `items`
-          // array; that produced finalized rows without `sidekick_id`
+          // array; that produced finalized rows without `parley_id`
           // on the in-flight assistant, causing visible double-renders
           // once live deltas resumed.)
           let inflightEnvelopes = [];

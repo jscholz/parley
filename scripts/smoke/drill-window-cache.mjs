@@ -44,20 +44,20 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role,
       content: role === 'user' ? `user marker ${idx}` : `agent reply ${idx}`,
-      sidekick_id: `dwc-msg-${idx}`,
+      parley_id: `dwc-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Drill window cache',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(OTHER_ID, {
     title: 'Other chat',
-    source: 'sidekick',
-    messages: [{ role: 'user', content: 'hello other', sidekick_id: 'other-1', timestamp: Date.now() / 1000 }],
+    source: 'parley',
+    messages: [{ role: 'user', content: 'hello other', parley_id: 'other-1', timestamp: Date.now() / 1000 }],
     lastActiveAt: Date.now() - 500,
   });
 }
@@ -164,7 +164,7 @@ export default async function run({ page, log, mock }) {
     const wc = await import('/build/drillWindowCache.mjs');
     for (let i = 0; i < 35; i++) {
       await wc.putWindow(chatId, `lru-anchor-${i}`,
-        [{ role: 'user', content: `x${i}`, sidekick_id: `lru-anchor-${i}`, id: i + 1 }],
+        [{ role: 'user', content: `x${i}`, parley_id: `lru-anchor-${i}`, id: i + 1 }],
         { firstId: i + 1, hasMore: false, lastId: i + 1, hasMoreNewer: true });
     }
     return {

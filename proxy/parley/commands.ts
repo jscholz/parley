@@ -22,7 +22,7 @@ export async function handleParleyCommands(_req, res) {
   const upstream = getUpstream();
   if (!upstream) {
     res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'sidekick_platform_unconfigured' }));
+    res.end(JSON.stringify({ error: 'parley_platform_unconfigured' }));
     return;
   }
   let commands;

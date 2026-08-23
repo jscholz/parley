@@ -43,22 +43,22 @@ export function MOCK_SETUP(mock) {
         ? `rough cut ready ![The X edit](${MEDIA_PATH})`
         : `${body} (${idx})`,
       message_id: `media-msg-${idx}`,
-      sidekick_id: `media-msg-${idx}`,
+      parley_id: `media-msg-${idx}`,
       timestamp: Date.now() / 1000 - (10 - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Media reload',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(OTHER_ID, {
     title: 'Other chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'hello there other chat', message_id: 'other-1', sidekick_id: 'other-1', timestamp: Date.now() / 1000 - 120 },
-      { role: 'assistant', content: 'plain reply no media at all here', message_id: 'other-2', sidekick_id: 'other-2', timestamp: Date.now() / 1000 - 110 },
+      { role: 'user', content: 'hello there other chat', message_id: 'other-1', parley_id: 'other-1', timestamp: Date.now() / 1000 - 120 },
+      { role: 'assistant', content: 'plain reply no media at all here', message_id: 'other-2', parley_id: 'other-2', timestamp: Date.now() / 1000 - 110 },
     ],
     lastActiveAt: Date.now() - 120_000,
   });

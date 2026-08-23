@@ -31,7 +31,7 @@ const FAIL_MARKER = 'test-fail-marker';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(SK_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Atomic-bubble test chat',
     messages: [
       { role: 'user', content: 'seed', timestamp: Date.now() / 1000 - 60 },

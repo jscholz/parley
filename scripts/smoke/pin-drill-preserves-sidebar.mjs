@@ -23,9 +23,9 @@ const CHAT_B = 'mock-chat-b-preserve';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
     title: 'Other chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'unrelated B', message_id: 'b-1', sidekick_id: 'b-1', timestamp: Date.now() / 1000 - 100 },
+      { role: 'user', content: 'unrelated B', message_id: 'b-1', parley_id: 'b-1', timestamp: Date.now() / 1000 - 100 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });

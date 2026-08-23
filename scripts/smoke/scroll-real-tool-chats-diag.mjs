@@ -39,8 +39,8 @@ export const STATUS = 'install-only';
 export const BACKEND = 'real';
 const OFFSET_TOLERANCE_PX = 50;
 
-const CHAT_PITCH = 'sidekick:ae6435b5-53aa-4819-b594-d21652c89397';  // [pitch deck], 335 msgs, 160 tools
-const CHAT_JOAM = 'sidekick:4a26d7f6-1902-42af-a348-649e9c5a0bc4';   // [JOAM], 99 msgs
+const CHAT_PITCH = 'parley:ae6435b5-53aa-4819-b594-d21652c89397';  // [pitch deck], 335 msgs, 160 tools
+const CHAT_JOAM = 'parley:4a26d7f6-1902-42af-a348-649e9c5a0bc4';   // [JOAM], 99 msgs
 
 async function snap(page) {
   return page.evaluate(() => {

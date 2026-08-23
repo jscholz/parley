@@ -27,7 +27,7 @@ export function MOCK_SETUP(mock) {
       {
         role: 'user',
         content: 'notification category seed',
-        sidekick_id: 'umsg_notification_categories_seed',
+        parley_id: 'umsg_notification_categories_seed',
         timestamp: Date.now() / 1000 - 60,
       },
     ],

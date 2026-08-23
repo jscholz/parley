@@ -16,7 +16,7 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Tool Title Result Fallback',
     messages: [
-      { role: 'user', content: 'show tool title fallback', sidekick_id: 'umsg_tool_title_fallback', timestamp: t0 },
+      { role: 'user', content: 'show tool title fallback', parley_id: 'umsg_tool_title_fallback', timestamp: t0 },
       {
         role: 'tool',
         content: JSON.stringify({

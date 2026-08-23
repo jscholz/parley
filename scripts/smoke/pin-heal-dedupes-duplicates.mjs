@@ -6,7 +6,7 @@
 // pinned bubbles from stale-removal used a `:not(.pinned)` selector
 // that ALSO excluded them from the orphan-dedup loop. When some earlier
 // render path produced multiple DOM bubbles for the same msgId (IDB
-// snapshot drift across schema versions, integer-id vs sidekick_id
+// snapshot drift across schema versions, integer-id vs parley_id
 // divergence, or any future regression), heal never even SAW the dupes.
 //
 // This smoke gates that exact regression: inject two bubbles with
@@ -39,20 +39,20 @@ export function MOCK_SETUP(mock) {
       role: 'user',
       content: 'pinned target — only one copy expected after heal',
       message_id: PINNED_MSG_ID,
-      sidekick_id: PINNED_MSG_ID,
+      parley_id: PINNED_MSG_ID,
       timestamp: t0,
     },
     {
       role: 'assistant',
       content: 'reply unrelated',
       message_id: 'reply-1',
-      sidekick_id: 'reply-1',
+      parley_id: 'reply-1',
       timestamp: t0 + 1,
     },
   ];
   mock.addChat(CHAT_ID, {
     title: 'Pin dedup chat',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
@@ -88,7 +88,7 @@ export default async function run({ page, log }) {
 
   // Inject a duplicate bubble for the SAME msgId, also marked .pinned.
   // This simulates the field-bug condition where some earlier render
-  // path (IDB snapshot from a prior session, integer-id vs sidekick_id
+  // path (IDB snapshot from a prior session, integer-id vs parley_id
   // drift, etc.) ended up with multiple DOM bubbles for one logical
   // message. Under virt the bubbles live inside .transcript-slot;
   // append there so the reconciler sees the dupe on its next pass.

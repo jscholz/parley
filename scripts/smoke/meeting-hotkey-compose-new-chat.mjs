@@ -20,7 +20,7 @@ export function MOCK_SETUP(mock) {
   // guard doesn't swallow the Cmd+Shift+O press.
   mock.addChat(CHAT_SEED, {
     title: 'Seed chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_mc_seed', timestamp: Date.now() / 1000 - 60 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_mc_seed', timestamp: Date.now() / 1000 - 60 }],
     lastActiveAt: Date.now() - 2000,
   });
 }
@@ -54,7 +54,7 @@ export default async function run({ page, log, mock }) {
     `capture must link the minted chat (${minted}), got: ${caps[0].linked_chat}`,
   );
   assert(
-    !String(caps[0].linked_chat || '').startsWith('sidekick:mock-capture-'),
+    !String(caps[0].linked_chat || '').startsWith('parley:mock-capture-'),
     'capture fell through to the app-level mint path (linked a capture-minted session)',
   );
   log(`Cmd+Shift+M recorded into the minted chat (${caps[0].id})`);

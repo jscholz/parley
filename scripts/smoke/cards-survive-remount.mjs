@@ -28,13 +28,13 @@ export function MOCK_SETUP(mock) {
       role: isUser ? 'user' : 'assistant',
       content: `${body} (${idx})`,
       message_id: `cards-msg-${idx}`,
-      sidekick_id: `cards-msg-${idx}`,
+      parley_id: `cards-msg-${idx}`,
       timestamp: Date.now() / 1000 - (60 - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Cards remount',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });

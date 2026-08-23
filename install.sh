@@ -29,8 +29,8 @@
 
 set -euo pipefail
 
-# PARLEY_INSTALL_DIR primary; legacy SIDEKICK_INSTALL_DIR honored.
-INSTALL_DIR="${PARLEY_INSTALL_DIR:-${SIDEKICK_INSTALL_DIR:-$(pwd)/parley}}"
+# PARLEY_INSTALL_DIR overrides the default.
+INSTALL_DIR="${PARLEY_INSTALL_DIR:-$(pwd)/parley}"
 REPO_URL="https://github.com/jscholz/parley.git"
 USE_EXISTING_CHECKOUT=0
 
@@ -38,11 +38,11 @@ USE_EXISTING_CHECKOUT=0
 # rather than `curl | bash`), use that checkout as the target instead
 # of cloning a sibling. The user is presumably driving their own
 # branch, so we skip the auto-pull too. Env override still wins.
-if [ -z "${PARLEY_INSTALL_DIR:-}" ] && [ -z "${SIDEKICK_INSTALL_DIR:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+if [ -z "${PARLEY_INSTALL_DIR:-}" ] && [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   if [ -d "$SCRIPT_DIR/.git" ] \
      && [ -f "$SCRIPT_DIR/package.json" ] \
-     && grep -qE '"name": *"(parleyvoo|sidekick-portal)"' "$SCRIPT_DIR/package.json"; then
+     && grep -qE '"name": *"parleyvoo"' "$SCRIPT_DIR/package.json"; then
     INSTALL_DIR="$SCRIPT_DIR"
     USE_EXISTING_CHECKOUT=1
   fi

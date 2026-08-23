@@ -51,7 +51,7 @@ export function MOCK_SETUP(mock) {
     {
       role: 'user',
       content: 'walk me through the project',
-      sidekick_id: 'umsg_th_user',
+      parley_id: 'umsg_th_user',
       timestamp: t0,
     },
   ];
@@ -76,7 +76,7 @@ export function MOCK_SETUP(mock) {
   messages.push({
     role: 'assistant',
     content: 'Done — surveyed 4 dirs.',
-    sidekick_id: 'msg_th_final',
+    parley_id: 'msg_th_final',
     timestamp: t0 + 100,
   });
   mock.addChat(CHAT_ID, {

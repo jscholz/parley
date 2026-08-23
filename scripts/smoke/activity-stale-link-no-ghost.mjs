@@ -13,14 +13,14 @@ export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
 const VIEWED_CHAT = 'mock-chat-activity-stale-viewed';
-const STALE_CHAT = 'sidekick:mock-chat-activity-stale-missing';
+const STALE_CHAT = 'parley:mock-chat-activity-stale-missing';
 
 export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(VIEWED_CHAT, {
     title: 'Activity Stale Viewed',
     messages: [
-      { role: 'user', content: 'viewed seed', sidekick_id: 'umsg_activity_stale_viewed', timestamp: t0 },
+      { role: 'user', content: 'viewed seed', parley_id: 'umsg_activity_stale_viewed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
@@ -41,7 +41,7 @@ export default async function run({ page, log, mock }) {
     chat_id: STALE_CHAT,
     kind: 'cron',
     content: 'Cronjob Response: Deleted smoke\n(job_id: stale)\n---\nSTALE_ACTIVITY_MARKER',
-    sidekick_id: 'notif_activity_stale_missing_1',
+    parley_id: 'notif_activity_stale_missing_1',
   });
 
   await page.waitForFunction(

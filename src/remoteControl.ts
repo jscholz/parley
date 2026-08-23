@@ -70,9 +70,9 @@ export function init(): void {
 
   // Cap surface — AppDelegate posts these.
   // Both spellings: the iOS native shell (AppDelegate.swift) dispatches
-  // the legacy 'sidekick:remote-control' event; installed shells keep
+  // 'parley:remote-control' events; the native shell (AppDelegate)
   // doing so until rebuilt. New code dispatches 'parley:remote-control'.
-  for (const evName of ['parley:remote-control', 'sidekick:remote-control']) {
+  for (const evName of ['parley:remote-control']) {
     window.addEventListener(evName, (e: Event) => {
       const ce = e as CustomEvent<{ action?: string }>;
       const action = ce.detail?.action;

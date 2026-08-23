@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Parley</string>
     <string name="title_activity_main">Parley</string>
-    <string name="package_name">com.reimaginerobotics.sidekick</string>
-    <string name="custom_url_scheme">com.reimaginerobotics.sidekick</string>
+    <string name="package_name">com.jscholz.parley</string>
+    <string name="custom_url_scheme">com.jscholz.parley</string>
 </resources>

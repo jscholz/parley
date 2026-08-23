@@ -26,7 +26,7 @@ from ..parley_unread import invalidate_unread_cache
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -74,7 +74,7 @@ def _seed_chat(state_db, sid: str, chat_id: str, ts: float) -> None:
     conn = sqlite3.connect(str(state_db))
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?,?,?,?)",
-        (sid, "sidekick", chat_id, ts),
+        (sid, "parley", chat_id, ts),
     )
     conn.execute(
         "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
@@ -100,17 +100,17 @@ def test_unread_chat_beyond_limit_is_force_included(db, state_db):
     # old chat: last_read_at BEFORE its assistant reply → unread=1.
     db.exec(
         "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) VALUES (?,?,0)",
-        ("sidekick:chat-old", 1000.5),
+        ("parley:chat-old", 1000.5),
     )
     # mid + new: fully read.
     for cid in ("chat-mid", "chat-new"):
         db.exec(
             "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) VALUES (?,?,0)",
-            (f"sidekick:{cid}", 9999.0),
+            (f"parley:{cid}", 9999.0),
         )
 
     adapter = FakeAdapter(db, state_db)
-    rows = _rows_with_unread_included(adapter, ("sidekick",), 2)
+    rows = _rows_with_unread_included(adapter, ("parley",), 2)
     ids = [r[0] for r in rows]
     assert "chat-old" in ids, f"unread chat hidden by the window: {ids}"
     # Recency order preserved after the merge.
@@ -126,10 +126,10 @@ def test_no_unread_means_plain_window(db, state_db):
     for cid in ("chat-a", "chat-b", "chat-c"):
         db.exec(
             "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) VALUES (?,?,0)",
-            (f"sidekick:{cid}", 9999.0),
+            (f"parley:{cid}", 9999.0),
         )
     adapter = FakeAdapter(db, state_db)
-    rows = _rows_with_unread_included(adapter, ("sidekick",), 2)
+    rows = _rows_with_unread_included(adapter, ("parley",), 2)
     assert [r[0] for r in rows] == ["chat-c", "chat-b"]
 
 
@@ -142,13 +142,13 @@ def test_marked_unread_also_force_included(db, state_db):
     _seed_chat(state_db, "s-new", "chat-new", 3000.0)
     db.exec(
         "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) VALUES (?,?,1)",
-        ("sidekick:chat-old", 9999.0),
+        ("parley:chat-old", 9999.0),
     )
     for cid in ("chat-mid", "chat-new"):
         db.exec(
             "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) VALUES (?,?,0)",
-            (f"sidekick:{cid}", 9999.0),
+            (f"parley:{cid}", 9999.0),
         )
     adapter = FakeAdapter(db, state_db)
-    rows = _rows_with_unread_included(adapter, ("sidekick",), 2)
+    rows = _rows_with_unread_included(adapter, ("parley",), 2)
     assert "chat-old" in [r[0] for r in rows]

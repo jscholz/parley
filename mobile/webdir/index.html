@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-<title>Sidekick — Server</title>
+<title>Parley — Server</title>
 <style>
   /* Self-contained — no shared CSS, no JS framework. The bundled
      bootstrap should boot fast and not depend on the real app's
@@ -110,10 +110,10 @@
 <body>
 
 <div id="form-view">
-  <div class="logo">sidekick</div>
+  <div class="logo">parley</div>
   <h1>Connect to your server</h1>
   <p>
-    Enter the URL where your <code>sidekick</code> proxy is reachable.
+    Enter the URL where your <code>parley</code> proxy is reachable.
     Your hermes-agent backend (and the proxy in front of it) runs this URL.
   </p>
 
@@ -145,7 +145,6 @@
   'use strict';
 
   const STORAGE_KEY = 'parley_server_url';
-  const LEGACY_STORAGE_KEY = 'sidekick_server_url'; // predates Parley rename
   const QS = new URLSearchParams(location.search);
   const FORCE_CONFIG = QS.get('config') === '1';
 
@@ -187,7 +186,7 @@
     //   - a 200 from <url>/health
     //   - the proxy's Access-Control-Allow-Origin:* header (so this
     //     capacitor://localhost origin can read the body cross-origin)
-    //   - an {app:'sidekick'} sentinel in the body
+    //   - an {app:'parley'} sentinel in the body
     // A host that isn't running THIS stack lacks the endpoint/headers, so
     // the fetch throws or !ok → treated as unreachable → we show the form
     // instead of stranding the user. (Every host you point at must run a
@@ -205,9 +204,9 @@
       if (!r.ok) return { ok: false, err: 'health ' + r.status };
       let body = null;
       try { body = await r.json(); } catch (_) { /* not JSON */ }
-      // Accept both sentinels: old proxies say app:'sidekick', post-
-      // rename proxies keep that legacy value and add product:'parley'.
-      if (!body || (body.app !== 'sidekick' && body.app !== 'parley' && body.product !== 'parley')) {
+      // Post-purge proxies say app:'parley' (product:'parley' kept for
+      // bootstraps that predate the app-value flip).
+      if (!body || (body.app !== 'parley' && body.product !== 'parley')) {
         return { ok: false, err: 'not a parley host' };
       }
       return { ok: true };
@@ -232,7 +231,7 @@
 
   async function commit(url) {
     // First-run / reconfigure: probe to validate the typed URL (catch
-    // typos + confirm it's a sidekick host) BEFORE saving and booting the
+    // typos + confirm it's a parley host) BEFORE saving and booting the
     // local app.
     setStatus('Checking ' + url + ' …', null);
     $btn.disabled = true;
@@ -274,7 +273,7 @@
     // shell keeps its saved host (renameMigration.ts copies it forward
     // once the app boots).
     try {
-      return localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+      return localStorage.getItem(STORAGE_KEY);
     } catch (_) { return null; }
   })();
 

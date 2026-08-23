@@ -31,20 +31,20 @@ const CHAT_B = 'mock-inflight-survive-b';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — has in-flight reply',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'durable msg 1', message_id: 'a-dur-1', sidekick_id: 'a-dur-1',
+      { role: 'user', content: 'durable msg 1', message_id: 'a-dur-1', parley_id: 'a-dur-1',
         timestamp: Date.now() / 1000 - 120 },
-      { role: 'assistant', content: 'durable reply 1', message_id: 'a-dur-2', sidekick_id: 'a-dur-2',
+      { role: 'assistant', content: 'durable reply 1', message_id: 'a-dur-2', parley_id: 'a-dur-2',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B — sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'b durable 1', message_id: 'b-dur-1', sidekick_id: 'b-dur-1',
+      { role: 'user', content: 'b durable 1', message_id: 'b-dur-1', parley_id: 'b-dur-1',
         timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 30_000,
@@ -73,7 +73,7 @@ export default async function run({ page, log }) {
     mod.appendInflight(chatId, {
       type: 'user_message',
       message_id: 'a-inflight-user',
-      sidekick_id: 'a-inflight-user',
+      parley_id: 'a-inflight-user',
       text: 'IN-FLIGHT USER MARKER',
       conversation: chatId,
       timestamp: Date.now() / 1000,
@@ -81,7 +81,7 @@ export default async function run({ page, log }) {
     mod.appendInflight(chatId, {
       type: 'reply_delta',
       message_id: 'a-inflight-reply',
-      sidekick_id: 'a-inflight-reply',
+      parley_id: 'a-inflight-reply',
       conversation: chatId,
       text: 'IN-FLIGHT AGENT MARKER (streaming…)',
       edit: true,

@@ -11,7 +11,7 @@ and the durable ``chat_migrations`` marker Phase 3's read flip
 The state.db rig mirrors tests/test_turn_linker.py (live hermes 0.18
 shape). Mislink fixtures are synthesized to the forensic shape
 (role=assistant, empty content, tool_calls present, tool_call_id NULL)
-— the preserved field dump ``~/.sidekick/missing-bubble-repro-*.json``
+— the preserved field dump ``~/.parley/missing-bubble-repro-*.json``
 is a home-dir artifact tests can't depend on.
 """
 
@@ -32,12 +32,12 @@ from .. import parley_turn_linker as linker
 
 CHAT_ID = "b3e11a02-migration-test"
 SESSION = "20260728_000000_test"
-SRC = "sidekick"
+SRC = "parley"
 
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 

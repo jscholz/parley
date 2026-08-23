@@ -22,7 +22,7 @@
 //
 // Test plan (mocked):
 //   1. Seed a chat with turn 1: user '/reasoning' + its reply,
-//      3 minutes ago, both annotated (sidekick_id present) — the
+//      3 minutes ago, both annotated (parley_id present) — the
 //      state after the first invocation was persisted.
 //   2. Click into the chat, then send '/reasoning' again. The mock's
 //      auto-reply echoes `[mock] echo: <text>` — byte-identical to
@@ -52,13 +52,13 @@ export function MOCK_SETUP(mock) {
     title: 'Slash repeat repro',
     messages: [
       // Turn 1 — the first /reasoning invocation, persisted 3 min ago.
-      // Both rows annotated (sidekick_id present), mirroring a healthy
+      // Both rows annotated (parley_id present), mirroring a healthy
       // write-through turn. 3 min >> the projection's 30s dedup
       // cluster window, so the repeat is a legitimate separate turn.
       { role: 'user', content: SLASH_TEXT, message_id: 'umsg_seed_reasoning',
-        sidekick_id: 'umsg_seed_reasoning', timestamp: now - 180 },
+        parley_id: 'umsg_seed_reasoning', timestamp: now - 180 },
       { role: 'assistant', content: REPLY_TEXT, message_id: 'msg_seed_reasoning',
-        sidekick_id: 'msg_seed_reasoning', timestamp: now - 179 },
+        parley_id: 'msg_seed_reasoning', timestamp: now - 179 },
     ],
     lastActiveAt: Date.now() - 180_000,
   });

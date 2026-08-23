@@ -46,7 +46,7 @@ except ImportError:  # pragma: no cover
 
 from .parley_ids import (
     GATEWAY_DRAWER_SOURCES,
-    SIDEKICK_SOURCE,
+    PARLEY_SOURCE,
     _format_gateway_id,
     _parse_gateway_id,
 )
@@ -60,8 +60,8 @@ SESSION_TITLE_MAX_LEN = 200
 
 # Parley-namespaced sessions.json key prefix. Matches
 # ``build_session_key(SessionSource(platform=PARLEY, chat_id=X,
-# chat_type='dm'))`` — ``agent:main:sidekick:dm:<chat_id>``.
-SESSION_KEY_PREFIX = "agent:main:sidekick:dm:"
+# chat_type='dm'))`` — ``agent:main:parley:dm:<chat_id>``.
+SESSION_KEY_PREFIX = "agent:main:parley:dm:"
 
 
 # ── TTL cache for _summaries_by_user_id ─────────────────────────────
@@ -120,7 +120,7 @@ def _summaries_by_user_id(
 
     ``sources`` is the platform allow-list — any non-empty
     ``sessions.source`` is included if its value is in this tuple.
-    Pass ``("sidekick",)`` for the channel-only drawer; pass the
+    Pass ``("parley",)`` for the channel-only drawer; pass the
     full set (parley, telegram, slack, whatsapp, …) for the
     cross-platform gateway drawer.
 
@@ -306,14 +306,14 @@ def _rows_with_unread_included(adapter, sources, limit: int) -> list:
         unread = compute_unread(
             db=adapter._parley_db,
             state_db_path=adapter._state_db_path,
-            source=SIDEKICK_SOURCE,
+            source=PARLEY_SOURCE,
         )
         # compute_unread emits the PWA-facing prefixed form
         # (`parley:<chat>`) while summary rows carry the bare
         # state.db user_id — normalize to bare before intersecting or
         # nothing ever matches (the exact trap this helper's first
         # draft fell into).
-        prefix = f"{SIDEKICK_SOURCE}:"
+        prefix = f"{PARLEY_SOURCE}:"
         wanted = set()
         for c in unread.get("chats", []):
             if not (c.get("unread_count", 0) > 0 or c.get("marked_unread")):
@@ -348,7 +348,7 @@ async def handle_list(adapter, request: "web.Request") -> "web.Response":
     ``/v1/gateway/conversations``. Single-channel agents (stub,
     third-party OAI-compat agents that aren't gateways) implement
     only this. The proxy probes the gateway endpoint first and
-    falls back here on 404, stamping ``source: 'sidekick'``."""
+    falls back here on 404, stamping ``source: 'parley'``."""
     if not adapter._check_http_auth(request):
         return web.Response(status=401, text="invalid token")
     try:
@@ -358,7 +358,7 @@ async def handle_list(adapter, request: "web.Request") -> "web.Response":
 
     from . import parley_perf_trace as _perf  # noqa: WPS433
     rows = await _perf.run_in_parley_worker(
-        _rows_with_unread_included, adapter, (SIDEKICK_SOURCE,), limit,
+        _rows_with_unread_included, adapter, (PARLEY_SOURCE,), limit,
     )
     data = [
         {
@@ -472,10 +472,10 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
         return web.Response(status=401, text="invalid token")
     raw_id = request.match_info["id"]
     # Source-aware delete — without the prefix we'd default to
-    # SIDEKICK_SOURCE and silently scrub the wrong session when
+    # PARLEY_SOURCE and silently scrub the wrong session when
     # chat_ids collide across platforms.
     parsed_source, chat_id = _parse_gateway_id(raw_id)
-    source = parsed_source if parsed_source is not None else SIDEKICK_SOURCE
+    source = parsed_source if parsed_source is not None else PARLEY_SOURCE
     if parsed_source is None:
         # Surfaces any caller still using bare-id DELETE so we can
         # tighten this fallback (eventually 400) once all callers
@@ -571,8 +571,8 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
         return web.Response(status=401, text="invalid token")
     raw_id = request.match_info["id"]
     parsed_source, chat_id = _parse_gateway_id(raw_id)
-    source = parsed_source if parsed_source is not None else SIDEKICK_SOURCE
-    if source != SIDEKICK_SOURCE:
+    source = parsed_source if parsed_source is not None else PARLEY_SOURCE
+    if source != PARLEY_SOURCE:
         # Cross-source rename has no defined semantics yet — refuse
         # rather than silently mutate a non-parley session row.
         return web.json_response(
@@ -670,7 +670,7 @@ def is_chat_deleted(adapter, chat_id: str) -> bool:
 
 
 def delete_conversation_sync(
-    adapter, chat_id: str, source: str = SIDEKICK_SOURCE,
+    adapter, chat_id: str, source: str = PARLEY_SOURCE,
 ) -> str:
     """Synchronous cascade delete. Returns 'ok', 'not_found', or
     'error'. Worker-thread safe.
@@ -775,7 +775,7 @@ def delete_conversation_sync(
     # adapter and isn't ours to scrub here. Skip when source isn't
     # parley — hermes-agent's other adapters own their own keys.
     # jsonl + hindsight cascades below still run for any source.
-    if source == SIDEKICK_SOURCE:
+    if source == PARLEY_SOURCE:
         sessions_index = adapter._state_db_path.parent / "sessions" / "sessions.json"
         try:
             if sessions_index.exists():

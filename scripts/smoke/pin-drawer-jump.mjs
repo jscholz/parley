@@ -24,9 +24,9 @@ const CHAT_B = 'mock-chat-b-for-jump';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
     title: 'Second chat (no pins)',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'unrelated', message_id: 'b-user-1', sidekick_id: 'b-user-1', timestamp: Date.now() / 1000 - 100 },
+      { role: 'user', content: 'unrelated', message_id: 'b-user-1', parley_id: 'b-user-1', timestamp: Date.now() / 1000 - 100 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });

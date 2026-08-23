@@ -70,7 +70,7 @@ async function backdateManifest(id: string, ageMs: number): Promise<void> {
 
 test('create → pending; no activation side-effect fires', async () => {
   const events = hookRecorder();
-  const m = await createCapture({ title: 'Standup', linkedChat: 'sidekick:abc' });
+  const m = await createCapture({ title: 'Standup', linkedChat: 'parley:abc' });
   assert.equal(m.status, 'pending');
   assert.equal(activatedCount(events), 0);
   // onCreated still fires (extension seam) but is NOT the announce hook.

@@ -3,7 +3,7 @@
  * `/v1/*` agent contract.
  *
  * Three interchangeable backends each re-implement the same HTTP+SSE
- * contract and the same `sidekick.db` schema: the in-tree **stub**
+ * contract and the same `parley.db` schema: the in-tree **stub**
  * (`backends/stub`), the Python **hermes** plugin, and the JS
  * **openclaw** plugin. Today that parity is only asserted by prose —
  * "Mirrors the X plugin" comments scattered across the three trees.

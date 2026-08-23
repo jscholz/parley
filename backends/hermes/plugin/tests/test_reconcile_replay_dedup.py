@@ -59,7 +59,7 @@ TOOL_CALLS_JSON = (
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -94,7 +94,7 @@ def state_db(tmp_path):
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?, ?, ?, ?)",
-        (SESSION, "sidekick", CHAT_ID, time.time()),
+        (SESSION, "parley", CHAT_ID, time.time()),
     )
     conn.commit()
     conn.close()
@@ -223,7 +223,7 @@ def test_replay_flush_does_not_mint_duplicate_or_crosslinked_rows(db, state_db):
       * not insert any legacy: row for a replay duplicate.
     """
     ids = _seed_field_shape(db, state_db)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
 
     healthy = _links_by_id(db)
     # Sanity: real envelopes linked to originals; slash cmds unlinked.
@@ -235,7 +235,7 @@ def test_replay_flush_does_not_mint_duplicate_or_crosslinked_rows(db, state_db):
     assert healthy["umsg_1784147968690_q8u0wfse"] is None
 
     dup = _flush_compaction_replay(state_db)
-    changed = state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    changed = state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
 
     after = _links_by_id(db)
     dup_ids = {str(v) for v in dup.values()}
@@ -256,10 +256,10 @@ def test_replay_flush_does_not_mint_duplicate_or_crosslinked_rows(db, state_db):
                    for k in after), \
         f"no legacy: rows for replay duplicates; got {sorted(after)}"
     # (d) Idempotent on a second pass.
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert _links_by_id(db) == after
     assert changed == state.reconcile_from_state_db(
-        db, state_db, CHAT_ID, "sidekick", force_full=True) or True
+        db, state_db, CHAT_ID, "parley", force_full=True) or True
 
 
 def test_replay_flush_on_fresh_parley_db_backfills_once(db, state_db):
@@ -282,7 +282,7 @@ def test_replay_flush_on_fresh_parley_db_backfills_once(db, state_db):
     ids["u_approve"] = _add_msg(
         state_db, "user", "> There seems to be nothing to approve", 2095.0)
     dup = _flush_compaction_replay(state_db)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     dup_ids = {str(v) for v in dup.values()}
     linked_targets = {v for v in links.values() if v is not None}
@@ -306,7 +306,7 @@ def test_order_fallback_refuses_incompatible_content(db, state_db):
         "message_id": "umsg_slash", "text": "/start",
     })
     rid = _add_msg(state_db, "user", "did this turn die?", 2000.0)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["umsg_slash"] is None
     assert links.get(f"legacy:{rid}") == str(rid)
@@ -331,7 +331,7 @@ def test_order_fallback_still_links_under_benign_drift(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_empty", "text": "",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["umsg_ws"] == str(u1)
     assert links["msg_ws"] == str(a1)
@@ -350,7 +350,7 @@ def test_order_fallback_skips_ahead_past_incompatible_state_rows(db, state_db):
         "type": "user_message", "chat_id": CHAT_ID,
         "message_id": "umsg_real", "text": "deploy the fix please!",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["umsg_cmd"] is None
     assert links["umsg_real"] == str(rid)
@@ -376,7 +376,7 @@ def test_status_bubble_never_zipped_onto_orchestration_row(db, state_db):
         "message_id": "msg_status",
         "text": "⏳ Working — 3 min — iteration 3/60, terminal",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["msg_status"] is None, \
         "status bubble must not zip onto the orchestration row"
@@ -412,7 +412,7 @@ def test_empty_state_content_requires_empty_envelope(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_hb", "text": "💾 Self-improvement review — 2 files",
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["msg_hb"] is None
     assert links.get(f"legacy:{e}") == str(e)
@@ -438,7 +438,7 @@ def test_tool_rows_link_by_exact_call_id_not_content(db, state_db):
         "type": "tool_result", "chat_id": CHAT_ID, "call_id": "call_A",
         "tool_name": "search", "result": '{"total_count": 0}',
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["tr:call_A"] == str(a)
     assert links["tr:call_B"] == str(b)
@@ -453,7 +453,7 @@ def test_tr_envelope_with_absent_call_id_stays_unlinked(db, state_db):
         "type": "tool_result", "chat_id": CHAT_ID, "call_id": "call_absent",
         "tool_name": "search", "result": '{"total_count": 0}',
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     assert _links_by_id(db)["tr:call_absent"] is None
 
 
@@ -467,7 +467,7 @@ def test_tc_envelope_never_content_matches_tool_row(db, state_db):
         "type": "tool_call", "chat_id": CHAT_ID, "call_id": "call_Y",
         "tool_name": "search", "args": {"query": "foo"},
     })
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert links["tc:call_Y"] is None
     assert links.get(f"legacy:{t}") == str(t)
@@ -480,11 +480,11 @@ def test_prior_context_header_is_filtered_from_reconcile_and_read(db, state_db):
     _add_msg(state_db, "user", "hello", 1000.0)
     _add_msg(state_db, "assistant", PRIOR_CONTEXT_HEADER, 1001.0)
     _add_msg(state_db, "user", COMPACTION_MARKER, 1002.0)
-    state.reconcile_from_state_db(db, state_db, CHAT_ID, "sidekick")
+    state.reconcile_from_state_db(db, state_db, CHAT_ID, "parley")
     links = _links_by_id(db)
     assert "legacy:1" in links
     assert len(links) == 1, f"compaction machinery rows must not backfill: {links}"
     out = state.list_messages_for_chat_with_state_db_source(
-        db, state_db, CHAT_ID, "sidekick")
+        db, state_db, CHAT_ID, "parley")
     contents = [it["content"] for it in out["items"]]
     assert contents == ["hello"], contents

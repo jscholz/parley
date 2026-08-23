@@ -50,13 +50,13 @@ export function MOCK_SETUP(mock) {
   // digit-shaped ids (state.db id space, cache schema v4).
   mock.addChat(CHAT_A, {
     title: 'Delta chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: stamp(BASE_MESSAGES),
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Other chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: stamp([
       { role: 'user', content: 'hi' },
       { role: 'assistant', content: 'hello!' },
@@ -95,7 +95,7 @@ export default async function run({ page, log, mock }) {
   // ── Server gains 2 new rows + an in-flight turn while we're away ──
   mock.addChat(CHAT_A, {
     title: 'Delta chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: stamp([
       ...BASE_MESSAGES,
       { role: 'user',      content: NEW_USER_TEXT },   // id 1006

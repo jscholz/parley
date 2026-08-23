@@ -73,7 +73,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from .parley_ids import SIDEKICK_SOURCE
+from .parley_ids import PARLEY_SOURCE
 from .parley_state import (
     _classify_replay_duplicate_state_ids,
     _is_compaction_seed,
@@ -245,7 +245,7 @@ def _fingerprint(snap: Dict[str, Any]) -> str:
 
 
 def sweep_chat_sync(
-    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+    db, state_db_path, chat_id: str, source: str = PARLEY_SOURCE,
     *, now: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """One monitor sweep for a MARKED chat (worker thread only —
@@ -349,7 +349,7 @@ def build_transcript_health(db=None) -> Dict[str, Any]:
 
 
 def adopt_orphans_sync(
-    db, state_db_path, chat_id: str, source: str = SIDEKICK_SOURCE,
+    db, state_db_path, chat_id: str, source: str = PARLEY_SOURCE,
     *, confirm: bool = False, now: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Orphan-adopt repair (assisted, explicit — NEVER automatic): for

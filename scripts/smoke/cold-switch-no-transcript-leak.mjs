@@ -63,8 +63,8 @@ export function MOCK_SETUP(mock) {
   mock.addChat(BUSY_CHAT, {
     title: 'Bravo (busy)',
     messages: [
-      { role: 'user', content: `seed question ${BUSY_SEED}`, sidekick_id: 'umsg_cold_busy', timestamp: t0 },
-      { role: 'assistant', content: `seed answer ${BUSY_SEED}`, sidekick_id: 'msg_cold_busy', timestamp: t0 + 1 },
+      { role: 'user', content: `seed question ${BUSY_SEED}`, parley_id: 'umsg_cold_busy', timestamp: t0 },
+      { role: 'assistant', content: `seed answer ${BUSY_SEED}`, parley_id: 'msg_cold_busy', timestamp: t0 + 1 },
     ],
     lastActiveAt: now - 1_000,
   });
@@ -75,7 +75,7 @@ export function MOCK_SETUP(mock) {
     mock.addChat(`mock-cold-leak-filler-${i}`, {
       title: `Filler ${i}`,
       messages: [
-        { role: 'user', content: `filler ${i} msg`, sidekick_id: `umsg_filler_${i}`, timestamp: t0 - 10 - i },
+        { role: 'user', content: `filler ${i} msg`, parley_id: `umsg_filler_${i}`, timestamp: t0 - 10 - i },
       ],
       lastActiveAt: now - 2_000 - i * 1_000,
     });
@@ -85,8 +85,8 @@ export function MOCK_SETUP(mock) {
   mock.addChat(COMMS_CHAT, {
     title: 'Comms (pinned)',
     messages: [
-      { role: 'user', content: `seed question ${COMMS_SEED}`, sidekick_id: 'umsg_cold_comms', timestamp: t0 - 600 },
-      { role: 'assistant', content: `seed answer ${COMMS_SEED}`, sidekick_id: 'msg_cold_comms', timestamp: t0 - 599 },
+      { role: 'user', content: `seed question ${COMMS_SEED}`, parley_id: 'umsg_cold_comms', timestamp: t0 - 600 },
+      { role: 'assistant', content: `seed answer ${COMMS_SEED}`, parley_id: 'msg_cold_comms', timestamp: t0 - 599 },
     ],
     lastActiveAt: now - 60_000,
   });

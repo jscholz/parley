@@ -25,9 +25,9 @@ const QUERY = 'cmdk should drill';
 // The mock-backend assigns integer ids 1000+i. The target message is
 // the 21st (0-indexed 20) so its id is 1020. cmdk's rebuildVisibleHits
 // passes message_ids through parseInt — they must round-trip as
-// integers. Bubbles whose source row has no sidekick_id use the
+// integers. Bubbles whose source row has no parley_id use the
 // integer id as data-message-id; for parity with the cmdk hit we omit
-// sidekick_id on the target row.
+// parley_id on the target row.
 const TARGET_INTEGER_ID = 1020;
 
 export function MOCK_SETUP(mock) {
@@ -38,10 +38,10 @@ export function MOCK_SETUP(mock) {
       ...Array.from({ length: 20 }, (_, i) => ({
         role: 'user',
         content: `filler msg ${i + 1}`,
-        sidekick_id: `umsg_filler_${i + 1}`,
+        parley_id: `umsg_filler_${i + 1}`,
         timestamp: Date.now() / 1000 - (60 - i),
       })),
-      // Target — index 20, integer id 1020. No sidekick_id so the
+      // Target — index 20, integer id 1020. No parley_id so the
       // bubble's data-message-id matches the cmdk hit's parseInt'd id.
       {
         role: 'user',
@@ -51,7 +51,7 @@ export function MOCK_SETUP(mock) {
       ...Array.from({ length: 15 }, (_, i) => ({
         role: 'user',
         content: `more filler ${i + 1}`,
-        sidekick_id: `umsg_more_${i + 1}`,
+        parley_id: `umsg_more_${i + 1}`,
         timestamp: Date.now() / 1000 - (25 - i),
       })),
     ],
@@ -61,7 +61,7 @@ export function MOCK_SETUP(mock) {
 
 export default async function run({ page, log }) {
   // Mock /api/parley/search — return a single message-hit pointing
-  // at the target chat + sidekick_id. Shape matches what
+  // at the target chat + parley_id. Shape matches what
   // proxyClient.search expects: { sessions: [], hits: [...] } with
   // each hit carrying session_id (the prefixed gateway id) + message_id.
   await page.route('**/api/parley/search*', async (route) => {
@@ -78,7 +78,7 @@ export default async function run({ page, log }) {
           snippet: TARGET_TEXT.slice(0, 80),
           timestamp: Date.now() / 1000 - 30,
           session_title: 'Drill-target test',
-          session_source: 'sidekick',
+          session_source: 'parley',
         }],
       }),
     });

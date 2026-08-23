@@ -78,9 +78,9 @@ export default async function run({ N = DEFAULT_RUNS, log = console.log } = {}) 
             r.onsuccess = r.onerror = r.onblocked = () => res();
           });
           await Promise.all([
-            drop('sidekick-sessions'),
-            drop('sidekick-chat'),
-            drop('sidekick-windows'),
+            drop('parley-sessions'),
+            drop('parley-chat'),
+            drop('parley-windows'),
           ]);
         });
         await page.reload({ waitUntil: 'domcontentloaded' });

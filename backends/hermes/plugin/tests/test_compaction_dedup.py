@@ -45,7 +45,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            PARLEY = "sidekick"
+            PARLEY = "parley"
 
         class _PlatformConfig:
             pass
@@ -125,9 +125,9 @@ CREATE TABLE messages (
     timestamp REAL NOT NULL
 );
 CREATE INDEX idx_messages_session ON messages(session_id, timestamp);
-CREATE TABLE sidekick_msg_links (
+CREATE TABLE parley_msg_links (
     state_db_id INTEGER PRIMARY KEY,
-    sidekick_id TEXT NOT NULL,
+    parley_id TEXT NOT NULL,
     kind TEXT
 );
 """
@@ -193,7 +193,7 @@ def test_compaction_injection_block_filtered(plugin, state_db):
     and return ONLY the parent-real rows + child-real rows."""
     chat = "chat-with-compaction"
     t0 = 1_700_000_000.0  # arbitrary base epoch
-    _ins_session(state_db, "parent", "sidekick", chat, t0)
+    _ins_session(state_db, "parent", "parley", chat, t0)
     # Parent session: real user prompt + real agent reply + tools.
     _ins_msg(state_db, "parent", "user",
              "Hey. I had a conversation with Oleg yesterday…", t0 + 1)
@@ -207,7 +207,7 @@ def test_compaction_injection_block_filtered(plugin, state_db):
     # injection rows share a single millisecond timestamp (hermes
     # writes them in one transaction).
     t_compact = t0 + 100.0
-    _ins_session(state_db, "child", "sidekick", None, t_compact,
+    _ins_session(state_db, "child", "parley", None, t_compact,
                  parent="parent")
     # Injection seed block: verbatim user-prompt dupe + replayed
     # assistant + replayed tools + marker.
@@ -240,7 +240,7 @@ def test_compaction_injection_block_filtered(plugin, state_db):
 
     adapter = _make_adapter(plugin, state_db)
     result = plugin.parley_route_items._items_by_user_id(
-        adapter, chat, "sidekick", 200, None,
+        adapter, chat, "parley", 200, None,
     )
     assert result is not None
     items, _first_id, _has_more = result
@@ -284,20 +284,20 @@ def test_no_compaction_marker_means_no_filtering(plugin, state_db):
     test guards the compaction filter from over-firing."""
     chat = "chat-no-compaction"
     t0 = 1_700_000_000.0
-    _ins_session(state_db, "parent2", "sidekick", chat, t0)
+    _ins_session(state_db, "parent2", "parley", chat, t0)
     _ins_msg(state_db, "parent2", "user", "first parent message", t0 + 1)
     _ins_msg(state_db, "parent2", "assistant", "first parent reply", t0 + 2)
 
     # Child WITHOUT a [CONTEXT COMPACTION] marker — should be
     # treated as a normal continuation.
-    _ins_session(state_db, "child2", "sidekick", None, t0 + 10,
+    _ins_session(state_db, "child2", "parley", None, t0 + 10,
                  parent="parent2")
     _ins_msg(state_db, "child2", "user", "real new user msg", t0 + 11)
     _ins_msg(state_db, "child2", "assistant", "real new reply", t0 + 12)
 
     adapter = _make_adapter(plugin, state_db)
     result = plugin.parley_route_items._items_by_user_id(
-        adapter, chat, "sidekick", 200, None,
+        adapter, chat, "parley", 200, None,
     )
     assert result is not None
     items, _first_id, _has_more = result
@@ -315,12 +315,12 @@ def test_multiple_compaction_events_filter_each(plugin, state_db):
     must filter each child's seed block independently."""
     chat = "chat-double-compaction"
     t0 = 1_700_000_000.0
-    _ins_session(state_db, "p", "sidekick", chat, t0)
+    _ins_session(state_db, "p", "parley", chat, t0)
     _ins_msg(state_db, "p", "user", "real-1 from parent", t0 + 1)
     _ins_msg(state_db, "p", "assistant", "real-A from parent", t0 + 2)
 
     # First child + its compaction block.
-    _ins_session(state_db, "c1", "sidekick", None, t0 + 100, parent="p")
+    _ins_session(state_db, "c1", "parley", None, t0 + 100, parent="p")
     _ins_msg(state_db, "c1", "user", "real-1 from parent", t0 + 100.001)  # dupe
     _ins_msg(state_db, "c1", "assistant", "real-A from parent", t0 + 100.002)
     _ins_msg(state_db, "c1", "user",
@@ -330,7 +330,7 @@ def test_multiple_compaction_events_filter_each(plugin, state_db):
     _ins_msg(state_db, "c1", "assistant", "real-B from c1", t0 + 100.6)
 
     # Second child compaction off c1.
-    _ins_session(state_db, "c2", "sidekick", None, t0 + 200, parent="c1")
+    _ins_session(state_db, "c2", "parley", None, t0 + 200, parent="c1")
     _ins_msg(state_db, "c2", "user", "real-2 from c1", t0 + 200.001)  # dupe
     _ins_msg(state_db, "c2", "assistant", "real-B from c1", t0 + 200.002)
     _ins_msg(state_db, "c2", "user",
@@ -341,7 +341,7 @@ def test_multiple_compaction_events_filter_each(plugin, state_db):
 
     adapter = _make_adapter(plugin, state_db)
     result = plugin.parley_route_items._items_by_user_id(
-        adapter, chat, "sidekick", 200, None,
+        adapter, chat, "parley", 200, None,
     )
     assert result is not None
     items, _first_id, _has_more = result

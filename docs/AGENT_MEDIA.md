@@ -42,7 +42,7 @@ browser PWA and the Capacitor iOS shell.
 - **Known media extensions only**: mp4 m4v mov webm m4a mp3 wav ogg
   jpg jpeg png gif webp. This is a media lane, not a file server.
 - **Files must outlive the chat message.** The registry persists across
-  server restarts (`~/.sidekick/media-registry.json`), but if the file
+  server restarts (`~/.parley/media-registry.json`), but if the file
   itself vanishes (e.g. `/tmp` cleared on reboot) the link answers
   `410 Gone`. Park anything worth keeping somewhere durable — just
   remember the user may not want large binaries inside auto-committed
