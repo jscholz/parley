@@ -30,7 +30,7 @@ npm start     # proxy on :3001, stub on :4001
 | `AGENT_LLM` | `echo` | `echo` / `gemini` / `ollama` |
 | `GEMINI_API_KEY` | — | required when `AGENT_LLM=gemini` |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | when `AGENT_LLM=ollama` |
-| `BEARER_TOKEN` | — | optional auth gate; matches parley's `SIDEKICK_PLATFORM_TOKEN` |
+| `BEARER_TOKEN` | — | optional auth gate; matches parley's `PARLEY_PLATFORM_TOKEN` |
 
 ## Contract pieces implemented
 

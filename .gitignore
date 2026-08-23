@@ -19,7 +19,7 @@ backends/stub/data/
 /data/
 parley.config.yaml
 # legacy name, predates Parley rename
-sidekick.config.yaml
+parley.config.yaml
 config.yaml
 .DS_Store
 __pycache__/

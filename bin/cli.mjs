@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * `npx parleyvoo` / `parleyvoo` — one-command front door. (`parleyvoo`
- * because npm's `parley` is taken; the legacy `sidekick-portal` bin
+ * because npm's `parley` is taken; a legacy `sidekick-portal` bin alias
  * still points here.)
  *
  * Boots the whole trial stack (proxy + in-tree stub agent) from wherever
@@ -14,10 +14,10 @@
  *   1. Friendly Node >= 22 check (strip-types + loadEnvFile need it).
  *   2. Picks a DATA HOME for user state. Inside a git checkout that's the
  *      repo itself (unchanged dev behavior). From an npx cache / global
- *      install — both ephemeral or read-only — it's ~/.sidekick:
- *        ~/.sidekick/.env                  secrets (seeded from .env.example)
- *        ~/.sidekick/parley.config.yaml  optional deployment tuning
- *        ~/.sidekick/data/                 stub-agent conversation store
+ *      install — both ephemeral or read-only — it's ~/.parley:
+ *        ~/.parley/.env                  secrets (seeded from .env.example)
+ *        ~/.parley/parley.config.yaml  optional deployment tuning
+ *        ~/.parley/data/                 stub-agent conversation store
  *      Wired through the env contracts the stack already honors:
  *      PARLEY_ENV_FILE (start-all), PARLEY_CONFIG (server.ts),
  *      AGENT_DATA_DIR (backends/stub).
@@ -50,7 +50,7 @@ if (major < 22) {
 // A git checkout is a developer working copy: keep every existing path
 // convention (.env at repo root, stub data in backends/stub/data).
 // Anything else (npx cache, global node_modules) gets the data home:
-// ~/.parley for new installs, an existing ~/.sidekick honored in place
+// ~/.parley (PARLEY_HOME overrides)
 // (see proxy/dataHome.mjs).
 const isCheckout = fs.existsSync(path.join(PKG_ROOT, '.git'));
 const env = { ...process.env };
@@ -70,7 +70,7 @@ if (!isCheckout) {
   env.AGENT_DATA_DIR ??= path.join(home, 'data');
 
   // Deployment tuning file — new name preferred, legacy honored.
-  for (const name of ['parley.config.yaml', 'sidekick.config.yaml']) {
+  for (const name of ['parley.config.yaml']) {
     const cfgFile = path.join(home, name);
     if (fs.existsSync(cfgFile)) { setDefaultEnv(env, 'PARLEY_CONFIG', cfgFile); break; }
   }

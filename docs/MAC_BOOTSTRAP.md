@@ -94,7 +94,7 @@ Xcode's left sidebar → click `App` (the blue project icon at the top)
   Apple-ID signin in prereqs). If the dropdown's empty, you didn't
   finish the Apple-ID step.
 - **Bundle Identifier** — Personal Teams require a globally-unique
-  bundle ID. The default is `com.reimaginerobotics.sidekick`; change
+  bundle ID. The default is `com.jscholz.parley`; change
   it to something with your own prefix, e.g.
   `com.<your-handle>.parley.dev`. Xcode will warn-then-let-you save.
 

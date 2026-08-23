@@ -20,7 +20,7 @@ import type { AgentSdk, SdkMcpServerConfig, SdkCallToolResult } from './sdkTypes
 import type { ClaudeCodeEnvelope } from './envelopes.ts';
 import { docIdFor } from './envelopes.ts';
 
-export const DOC_SERVER_NAME = 'sidekick';
+export const DOC_SERVER_NAME = 'parley';
 export const DISPLAY_DOC_TOOL = 'display_doc';
 
 /** Mirror of the hermes plugin's cap — doc_show carries the full body

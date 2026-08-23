@@ -280,7 +280,7 @@ drawer with per-row source badges.
 
 The extension is **strictly optional**. Single-channel agents leave
 it unimplemented; parley probes, gets 404, and falls back to
-`GET /v1/conversations` with `source: "sidekick"` stamped on each
+`GET /v1/conversations` with `source: "parley"` stamped on each
 row. Other failure codes propagate (transient outages must not
 silently degrade the drawer to channel-only).
 
@@ -319,7 +319,7 @@ Cross-platform drawer list. Same OAI row shape as
 ```
 
 **Required `metadata` fields:** `source` (lowercase string —
-`sidekick`, `telegram`, `slack`, `whatsapp`, etc.), `chat_type`
+`parley`, `telegram`, `slack`, `whatsapp`, etc.), `chat_type`
 (`dm`, `group`, agent-defined). All other fields match
 `/v1/conversations`.
 
@@ -327,7 +327,7 @@ Cross-platform drawer list. Same OAI row shape as
 ordering required.
 
 **Cross-platform send is NOT part of this extension.** Parley's
-composer goes read-only when `source !== 'sidekick'`. Agents that
+composer goes read-only when `source !== 'parley'`. Agents that
 want bidirectional cross-platform messaging would extend further
 (future: `POST /v1/gateway/responses?source=...`).
 

@@ -36,7 +36,7 @@ telegram, slack, whatsapp etc. live behind the same state.db.
 Inbound dispatch goes through ``/v1/responses`` which calls
 ``self.handle_message(MessageEvent(...))``. The gateway resolves the
 session via the standard
-``build_session_key(SessionSource(platform=Platform.SIDEKICK, chat_id=...))``
+``build_session_key(SessionSource(platform=Platform.PARLEY, chat_id=...))``
 DM path — ``agent:main:parley:dm:<chat_id>``.
 
 Outbound envelope shapes (see ParleyEnvelope in
@@ -87,7 +87,7 @@ repo for design notes.
 Install
 -------
 This adapter requires a hermes patch that registers
-``Platform.SIDEKICK`` and the adapter-factory branch. See
+the Platform entry and the adapter-factory branch. See
 ``0001-add-parley-platform.patch`` and ``README.md`` next to this file.
 
 Plugin shape note
@@ -330,7 +330,7 @@ def check_parley_requirements() -> bool:
 
     Required: aiohttp (already a hermes core dep — webhook adapter uses it).
 
-    Note: ``Platform.SIDEKICK`` is created on demand by ``Platform._missing_``
+    Note: ``Platform.PARLEY`` is created on demand by ``Platform._missing_``
     once this plugin's ``register(ctx)`` has called ``ctx.register_platform``,
     so we no longer have to verify the enum entry by hand. The
     ``PARLEY_PLATFORM_TOKEN`` gate lives in the auth path on the WS
@@ -2902,7 +2902,7 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         )
     except AttributeError:
         # Older hermes-agent without ctx.register_platform — fall back to
-        # the patch-driven path (Platform.SIDEKICK + _create_adapter
+        # the patch-driven path (a hardcoded Platform entry + _create_adapter
         # branch). If both are missing, the adapter just won't load and
         # the gateway logs will say so. We don't crash the plugin.
         logger.warning(

@@ -19,7 +19,7 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
     os.environ.setdefault("VAPID_PRIVATE_KEY", "test-private-key")
     # Live-DB tripwire (push-prefs corruption incident, 2026-07-25):
     # with this set, the plugin DB layer refuses to open any DB under the
-    # real state dirs (~/.hermes, ~/.parley, ~/.sidekick,
+    # real state dirs (~/.hermes, ~/.parley,
     # ~/.openclaw-sk-integ). Every test must use tmp paths; a fixture that
     # accidentally resolves to the live store fails at open instead of
     # writing production state. Legacy PARLEY_TEST_GUARD spelling is
@@ -32,7 +32,7 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
         cfg = types.ModuleType("gateway.config")
 
         class Platform:
-            PARLEY = "sidekick"
+            PARLEY = "parley"
 
         class PlatformConfig:
             pass

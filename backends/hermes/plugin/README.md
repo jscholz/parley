@@ -27,7 +27,7 @@ modifying the plugin.
   bubble immediately. PWA's pre-minted `user_message_id` is the
   dedup key for the originating tab.
 - Persists agent-declared settings (`/v1/settings/*`) back to
-  `~/.hermes/config.yaml` under the `sidekick:` namespace so changes
+  `~/.hermes/config.yaml` under the `parley:` namespace so changes
   survive restarts and agree across CLI + PWA.
 - Slash-command catalog (`/v1/commands`) wraps the hermes-cli
   registry; categories `cli_only` are filtered out (PWA can't
@@ -108,7 +108,7 @@ commands, etc — not platform registration). Until upstream issue
 [hermes-agent#3823](https://github.com/.../issues/3823) lands, the
 adapter must be registered by patching the gateway directly. The plugin
 files still load through the normal plugin loader; only the
-`Platform.SIDEKICK` enum + `_create_adapter` factory branch live in the
+`Platform` entry + `_create_adapter` factory branch live in the
 patch.
 
 ```bash
@@ -127,13 +127,13 @@ ln -s <path-to-this-dir> ~/.hermes/plugins/parley
 #        - parley
 
 # 4. Auth token + (optional) port in ~/.hermes/.env:
-echo "SIDEKICK_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
+echo "PARLEY_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 # echo 'PARLEY_PLATFORM_PORT=8645' >> ~/.hermes/.env  # default
 
 # 5. Restart the gateway.
 ```
 
-The same `SIDEKICK_PLATFORM_TOKEN` value goes into the parley proxy
+The same `PARLEY_PLATFORM_TOKEN` value goes into the parley proxy
 config so the proxy's WebSocket client can authenticate.
 
 ## Smoke test
@@ -141,7 +141,7 @@ config so the proxy's WebSocket client can authenticate.
 With the plugin running, in another terminal:
 
 ```bash
-SIDEKICK_PLATFORM_TOKEN=<the-token> python3 wscat-test.py \
+PARLEY_PLATFORM_TOKEN=<the-token> python3 wscat-test.py \
     --chat-id test-conv-1 \
     --text "count to 5"
 ```
@@ -156,9 +156,9 @@ HTTP+SSE on `:8645` (default; configurable via
 [`README.md`](../../../README.md) endpoint inventory; full details
 in the module docstring at the top of `__init__.py`.
 
-Auth: `Authorization: Bearer <SIDEKICK_PLATFORM_TOKEN>` on every
+Auth: `Authorization: Bearer <PARLEY_PLATFORM_TOKEN>` on every
 request. Same token goes into the parley proxy's
-`SIDEKICK_PLATFORM_TOKEN` env so the proxy can authenticate as a
+`PARLEY_PLATFORM_TOKEN` env so the proxy can authenticate as a
 client.
 
 ## Known limitations

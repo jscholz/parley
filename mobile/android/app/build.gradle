@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.reimaginerobotics.sidekick"
+    namespace = "com.jscholz.parley"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.reimaginerobotics.sidekick"
+        applicationId "com.jscholz.parley"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

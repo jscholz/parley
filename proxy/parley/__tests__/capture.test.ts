@@ -23,7 +23,7 @@ import {
 let dir = '';
 
 beforeEach(async () => {
-  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidekick-capture-test-'));
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'parley-capture-test-'));
   initCapture({ dir });
 });
 

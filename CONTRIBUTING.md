@@ -105,7 +105,7 @@ curl http://127.0.0.1:3001/api/parley/sessions | jq
 
 # state.db ground truth
 sqlite3 ~/.hermes/state.db \
-  "SELECT id, title, message_count FROM sessions WHERE source='sidekick' ORDER BY started_at DESC LIMIT 20"
+  "SELECT id, title, message_count FROM sessions WHERE source='parley' ORDER BY started_at DESC LIMIT 20"
 
 # Drive a turn from CLI (no PWA needed)
 curl -X POST http://127.0.0.1:3001/api/parley/messages \

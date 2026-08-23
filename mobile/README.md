@@ -11,7 +11,7 @@ JS bundle the browser does, served over the network from the proxy
 (see [Loading model](#loading-model) below). Cap-specific behavior is
 quarantined under `mobile/ios/App/App/`; shared `src/` stays
 platform-neutral and emits / consumes platform-agnostic events
-(`sidekick:remote-control`, etc.).
+(`parley:remote-control`, etc.).
 
 ## Layout
 
@@ -85,7 +85,7 @@ some of the functionality.
   Phase 2 shipped 2026-05-10) — registers play / pause /
   togglePlayPause / stop callbacks. Each fires
   `webView.evaluateJavaScript('window.dispatchEvent(new
-  CustomEvent("sidekick:remote-control", ...))')` to forward the
+  CustomEvent("parley:remote-control", ...))')` to forward the
   action to JS. Surface = iOS lockscreen, Control Center music
   widget, AirPods / BT headset transport buttons.
 - **MPNowPlayingInfoCenter** (`CallControls.setActive`) — populates
@@ -159,7 +159,7 @@ Workflow:
    - **App lifecycle, audio session, system widgets** → `AppDelegate.swift`
    - **WebView-scoped behavior, JS↔native bridges** → `WebViewDelegate.swift`
 2. Wire the native↔JS bridge via either:
-   - **Native → JS:** `webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('sidekick:<name>', { detail: ... }))")`
+   - **Native → JS:** `webView.evaluateJavaScript("window.dispatchEvent(new CustomEvent('parley:<name>', { detail: ... }))")`
    - **JS → Native:** Cap plugin or `WKScriptMessageHandler`
 3. Surface the event in JS via a thin module under `src/` (e.g.
    `src/remoteControl.ts`). Keep the JS module unaware of iOS specifics

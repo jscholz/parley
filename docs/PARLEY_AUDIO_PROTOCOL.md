@@ -336,7 +336,7 @@ parley platform adapter** (Python, in-process inside hermes-gateway,
 port 8645 by default). The adapter is a peer of telegram/slack/signal
 in hermes-agent's gateway/platforms/* — not an audio thing.
 
-Reference implementation of the adapter: `backends/hermes/plugin/sidekick_platform.py`.
+Reference implementation of the adapter: `backends/hermes/plugin/__init__.py`.
 
 ### Connection
 
@@ -346,7 +346,7 @@ Reference implementation of the adapter: `backends/hermes/plugin/sidekick_platfo
   the `PARLEY_PLATFORM_URL` env var on the proxy or
   `PARLEY_PLATFORM_PORT` on the adapter.
 - Auth: shared-secret bearer token in the WS upgrade `Authorization`
-  header — `Authorization: Bearer <SIDEKICK_PLATFORM_TOKEN>`. Both
+  header — `Authorization: Bearer <PARLEY_PLATFORM_TOKEN>`. Both
   sides read the same env var name; the adapter rejects upgrades
   without it (constant-time compare).
 - Reconnect: proxy-side exponential backoff capped at 30s
@@ -371,7 +371,7 @@ multiplexing.
 
 `message` / `command` / `voice_dispatch` all dispatch to the gateway's
 standard `handle_message(MessageEvent)` path. The gateway resolves
-`(Platform.SIDEKICK, chat_id)` to a session_id internally and persists
+`(Platform.PARLEY, chat_id)` to a session_id internally and persists
 history per chat_id — there is no `previous_response_id` plumbing
 because the gateway owns conversation state.
 
@@ -422,7 +422,7 @@ the existing fetch+EventSource code path applies unchanged:
 
 The adapter detects compression by polling `state.db.sessions` for
 known chat_ids — see the `session_changed envelope` section in
-`backends/hermes/plugin/sidekick_platform.py` for cadence + envelope shape.
+`backends/hermes/plugin/__init__.py` for cadence + envelope shape.
 Trade-off: ~1s lag on title refresh after compression, no hermes-core
 patch required.
 

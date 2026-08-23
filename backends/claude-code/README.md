@@ -140,7 +140,7 @@ new ClaudeCodeUpstream({
     model: 'claude-sonnet-5',            // optional; omit = account default
     approvals: 'remote',                 // 'remote' (canUseTool→PWA) | 'auto' (permissionMode)
     permissionMode: 'acceptEdits',       // used when approvals === 'auto'
-    persistPath: '~/.sidekick/claude-code-sessions.json', // chat→session map
+    persistPath: '~/.parley/claude-code-sessions.json', // chat→session map
     maxTurns: 80,                        // optional safety valve
   },
 });

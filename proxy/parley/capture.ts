@@ -1,7 +1,7 @@
 /**
  * Capture store + HTTP surface — the server half of meeting capture
  * (design: workspace/documents/agent-development/
- * sidekick-capture-design-and-plan-2026-07-07.md §3.1/§3.3).
+ * the 2026-07-07 capture design doc §3.1/§3.3 (hermes-agent-private)).
  *
  * PROXY-owned by design (not the hermes plugin): capture must work on
  * every backend — hermes, Claude Code, even the npx stub with only a

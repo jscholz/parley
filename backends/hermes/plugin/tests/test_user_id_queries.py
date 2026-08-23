@@ -817,7 +817,7 @@ def test_delete_conversation_sync_source_aware(plugin, state_db):
 
 def test_delete_conversation_sync_default_source_back_compat(plugin, state_db):
     """Calling _delete_conversation_sync without a source still defaults
-    to SIDEKICK_SOURCE — preserves behavior for any legacy un-prefixed
+    to PARLEY_SOURCE — preserves behavior for any legacy un-prefixed
     delete callers."""
     _insert_session(state_db, "sk", "parley", "u", 1000.0, title="SK")
     _insert_message(state_db, "sk", "user", "hi", 1001.0)
