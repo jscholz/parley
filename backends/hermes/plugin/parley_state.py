@@ -654,6 +654,24 @@ def list_messages_for_chat(
     Cursor (`before_rowid`, kept named for wire-back-compat) is the
     millisecond-precision timestamp of the cursor item:
     ``int(created_at * 1000)``. PWA treats it as an opaque integer.
+
+    Paging compares in that same millisecond space, tie-broken by
+    ``rowid``, rather than against the raw float ``created_at``. A plain
+    ``created_at < before_rowid / 1000`` silently DROPS every row that
+    shares the boundary row's millisecond but was not itself on the
+    previous page: the cursor truncates the boundary timestamp downward,
+    so the tied rows fail the comparison, and having been below the
+    previous page's window they are never served again either — a
+    permanent hole in scroll-back. Rows written inside one millisecond
+    are routine (a tool-heavy turn flushes several), which is why the
+    pagination test for this was a ~60%-of-runs flake on a fast host and
+    passed on a slower one.
+
+    The boundary is the HIGHEST rowid sharing the cursor millisecond.
+    Millis alone cannot say which of several tied rows actually opened
+    the previous page, so this errs toward re-serving a tied row the
+    client already has: the PWA dedups by parley_id, so overlap is
+    invisible, whereas a hole is silent history loss.
     """
     if before_rowid is None:
         sql = (
@@ -664,27 +682,49 @@ def list_messages_for_chat(
         )
         params: tuple = (chat_id,)
     else:
-        # `before_rowid` is actually a millis cursor; convert back.
-        cursor_ts = before_rowid / 1000.0
-        sql = (
-            "SELECT rowid AS rowid, id AS parley_id, role, content, kind, "
-            "       tool_name, tool_call_id, tool_calls, agent_row_id, created_at, status "
-            "FROM msg_links WHERE chat_id = ? AND created_at < ? "
-            "ORDER BY created_at ASC, rowid ASC"
+        # CAST(... AS INTEGER) truncates toward zero, matching the
+        # int(created_at * 1000) the cursor was minted with.
+        boundary = db.fetchall(
+            "SELECT MAX(rowid) AS rowid FROM msg_links "
+            "WHERE chat_id = ? AND CAST(created_at * 1000 AS INTEGER) = ?",
+            (chat_id, before_rowid),
         )
-        params = (chat_id, cursor_ts)
+        boundary_rowid = dict(boundary[0])["rowid"] if boundary else None
+        if boundary_rowid is None:
+            # Cursor matches no live row (its message was deleted since
+            # the page was served). Nothing to tie-break against, so take
+            # every strictly-older millisecond.
+            sql = (
+                "SELECT rowid AS rowid, id AS parley_id, role, content, kind, "
+                "       tool_name, tool_call_id, tool_calls, agent_row_id, created_at, status "
+                "FROM msg_links WHERE chat_id = ? "
+                "  AND CAST(created_at * 1000 AS INTEGER) < ? "
+                "ORDER BY created_at ASC, rowid ASC"
+            )
+            params = (chat_id, before_rowid)
+        else:
+            sql = (
+                "SELECT rowid AS rowid, id AS parley_id, role, content, kind, "
+                "       tool_name, tool_call_id, tool_calls, agent_row_id, created_at, status "
+                "FROM msg_links WHERE chat_id = ? "
+                "  AND (CAST(created_at * 1000 AS INTEGER) < ? "
+                "       OR (CAST(created_at * 1000 AS INTEGER) = ? AND rowid < ?)) "
+                "ORDER BY created_at ASC, rowid ASC"
+            )
+            params = (chat_id, before_rowid, before_rowid, boundary_rowid)
     rows = db.fetchall(sql, params)
     rows_list = [dict(r) for r in rows]
     first_id: Optional[int] = None
     has_more = False
-    if before_rowid is None:
-        if len(rows_list) > limit:
-            rows_list = rows_list[-limit:]
-            has_more = True
-    else:
-        if len(rows_list) >= limit:
-            rows_list = rows_list[:limit]
-            has_more = True
+    # Both directions keep the rows NEAREST the cursor, i.e. the tail of
+    # the ascending window. Slicing head-side on a load-earlier page
+    # (rows_list[:limit]) returned the oldest rows in the chat instead of
+    # the ones just above the cursor, so paging up a long transcript
+    # re-served the same earliest page forever and never closed the gap
+    # — the bug v2/v3 call out in list_messages_for_chat_with_state_db_source.
+    if len(rows_list) > limit:
+        rows_list = rows_list[-limit:]
+        has_more = True
     if rows_list:
         first_id = int(float(rows_list[0]["created_at"]) * 1000)
     items = []

@@ -275,18 +275,90 @@ def test_pagination_first_page(db):
     assert result["first_id"] == result["items"][0]["id"]
 
 
-def test_pagination_load_earlier(db):
-    for i in range(5):
+_BASE_TS = 1_700_000_000.0
+
+
+def _write_messages(db, count):
+    for i in range(count):
         state.record_envelope(db, {
             "type": "user_message", "chat_id": CHAT_ID,
             "message_id": f"umsg_{i}", "text": f"msg {i}",
         })
+
+
+def _pin_created_at(db, second_offsets):
+    """Force exact ``created_at`` values on msg_links, in insert order.
+
+    ``record_envelope`` stamps created_at from the wallclock, so rows
+    written by one loop land in however many distinct milliseconds the
+    host was fast or slow enough to produce. Pagination is millisecond-
+    keyed, so that made these tests pass or fail by machine speed
+    (test_pagination_load_earlier failed ~7 runs in 12 on galatea and
+    passed on fontbrain). Offsets are whole seconds so ``created_at *
+    1000`` is exact in double precision; repeat an offset to put two
+    rows in the same millisecond deliberately.
+    """
+    rows = db.fetchall(
+        "SELECT rowid FROM msg_links WHERE chat_id = ? ORDER BY rowid ASC",
+        (CHAT_ID,),
+    )
+    assert len(rows) == len(second_offsets)
+    for row, offset in zip(rows, second_offsets):
+        db.exec(
+            "UPDATE msg_links SET created_at = ? WHERE rowid = ?",
+            (_BASE_TS + offset, row["rowid"]),
+        )
+
+
+def test_pagination_load_earlier(db):
+    _write_messages(db, 5)
+    _pin_created_at(db, [0, 1, 2, 3, 4])
     first_page = state.list_messages_for_chat(db, CHAT_ID, limit=3)
     cursor = first_page["first_id"]
     earlier = state.list_messages_for_chat(db, CHAT_ID, limit=10, before_rowid=cursor)
     sks = [i["parley_id"] for i in earlier["items"]]
     assert sks == ["umsg_0", "umsg_1"]
     assert earlier["has_more"] is False
+
+
+def test_pagination_load_earlier_keeps_rows_tied_on_cursor_millisecond(db):
+    """A row sharing the boundary row's millisecond must still be served.
+
+    umsg_1 and umsg_2 land in the same millisecond; the first page (limit
+    3) starts at umsg_2, so the cursor's millisecond is theirs. Comparing
+    the raw float against the truncated cursor excluded BOTH of them,
+    and umsg_1 was below the first page's window too — it became
+    unreachable, a permanent hole in scroll-back rather than a visible
+    error.
+    """
+    _write_messages(db, 5)
+    _pin_created_at(db, [0, 1, 1, 2, 3])
+    first_page = state.list_messages_for_chat(db, CHAT_ID, limit=3)
+    assert [i["parley_id"] for i in first_page["items"]] == [
+        "umsg_2", "umsg_3", "umsg_4",
+    ]
+    earlier = state.list_messages_for_chat(
+        db, CHAT_ID, limit=10, before_rowid=first_page["first_id"],
+    )
+    assert [i["parley_id"] for i in earlier["items"]] == ["umsg_0", "umsg_1"]
+
+
+def test_pagination_load_earlier_returns_rows_nearest_cursor(db):
+    """Load-earlier serves the page just above the cursor, not the oldest.
+
+    Slicing the head of the ascending window returned the chat's oldest
+    rows on every load-earlier call, so paging up a transcript longer
+    than one page re-served page one forever and never closed the gap.
+    """
+    _write_messages(db, 6)
+    _pin_created_at(db, [0, 1, 2, 3, 4, 5])
+    first_page = state.list_messages_for_chat(db, CHAT_ID, limit=2)
+    assert [i["parley_id"] for i in first_page["items"]] == ["umsg_4", "umsg_5"]
+    earlier = state.list_messages_for_chat(
+        db, CHAT_ID, limit=2, before_rowid=first_page["first_id"],
+    )
+    assert [i["parley_id"] for i in earlier["items"]] == ["umsg_2", "umsg_3"]
+    assert earlier["has_more"] is True
 
 
 # ── reconciliation ────────────────────────────────────────────────────
