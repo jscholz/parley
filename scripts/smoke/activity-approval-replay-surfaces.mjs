@@ -30,12 +30,12 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(VIEWED_CHAT, {
     title: 'Viewed',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_rp_view_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_rp_view_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(APPROVAL_CHAT, {
     title: 'Replay approval source',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_rp_app_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_rp_app_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 5000,
   });
 }
@@ -62,7 +62,7 @@ export default async function run({ page, log, mock }) {
       'printf parley-replay-approval\n\n' +
       'Reason: replayed approval must surface\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: approvalId,
+    parley_id: approvalId,
     urgent: true,
     _replay: true,
   });

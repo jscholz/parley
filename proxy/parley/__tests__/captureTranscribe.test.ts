@@ -82,7 +82,7 @@ test('segments → ordered transcript with marks; stop claims, drains, completes
   const { fn } = fakeBridge((seq) => `words of segment ${seq}.`);
   const sent = wire(fn);
 
-  const m = await createCapture({ title: 'Standup', linkedChat: 'sidekick:mtg', diarize: false });
+  const m = await createCapture({ title: 'Standup', linkedChat: 'parley:mtg', diarize: false });
   // NO start-message at create (2026-08-18 postmortem): a pending
   // capture is not a recording — announcing here is the exact false
   // success that hid a 21-minute dead mic.
@@ -254,7 +254,7 @@ test('diarize=true: stitched audio → speaker-turn transcript REPLACES transcri
       return out;
     },
   });
-  const m = await createCapture({ title: 'Diarized', linkedChat: 'sidekick:d', diarize: true });
+  const m = await createCapture({ title: 'Diarized', linkedChat: 'parley:d', diarize: true });
   await seg(m.id, 0, 0);
   await seg(m.id, 1, 45_000);
   await addMark(m.id, 5_000);
@@ -344,12 +344,12 @@ test('titling: minted session gets the placeholder start-title', async () => {
   const { fn } = fakeBridge(() => 'hi.');
   const { renames } = titledWire(fn);
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:minted-1',
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:minted-1',
     mintedSession: true, diarize: false,
   });
   await activateCapture(m.id);   // start-title fires on activation, not create
   await waitFor(async () => renames.length >= 1);
-  assert.deepEqual(renames[0], { chatId: 'sidekick:minted-1', title: 'Meeting 2026-08-10' });
+  assert.deepEqual(renames[0], { chatId: 'parley:minted-1', title: 'Meeting 2026-08-10' });
   await stopCapture(m.id);
 });
 
@@ -357,7 +357,7 @@ test('titling: existing session is NOT touched at start', async () => {
   const { fn } = fakeBridge(() => 'hi.');
   const { renames } = titledWire(fn);
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:existing-1', diarize: false,
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:existing-1', diarize: false,
   });
   // Give a would-be start rename ample time to fire, then assert none did.
   await new Promise((r) => setTimeout(r, 50));
@@ -382,14 +382,14 @@ test('titling: finalize re-titles topically from the transcript, before the inge
     },
   });
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:topical-1', diarize: false,
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:topical-1', diarize: false,
   });
   await seg(m.id, 0, 0);
   await seg(m.id, 1, 45_000);
   await stopCapture(m.id);
   await waitFor(async () => order.includes('ingest'));
   assert.equal(renames.length, 1, 'exactly one end-of-meeting rename');
-  assert.equal(renames[0].chatId, 'sidekick:topical-1');
+  assert.equal(renames[0].chatId, 'parley:topical-1');
   assert.match(renames[0].title, /^Meeting: /);
   assert.match(renames[0].title, /transcript migration/i);
   // Rename must land BEFORE the ingest dispatch so the agent sees the
@@ -403,7 +403,7 @@ test('titling: never clobbers a user-set title (marker seam)', async () => {
     isUserTitledFn: async () => true,
   });
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:usernamed-1', diarize: false,
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:usernamed-1', diarize: false,
   });
   await seg(m.id, 0, 0);
   await stopCapture(m.id);
@@ -415,7 +415,7 @@ test('titling: near-empty transcript keeps the placeholder (no re-title)', async
   const { fn } = fakeBridge(() => 'okay thanks.');
   const { renames, sent } = titledWire(fn);
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:tiny-1', diarize: false,
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:tiny-1', diarize: false,
   });
   await seg(m.id, 0, 0);
   await stopCapture(m.id);
@@ -436,7 +436,7 @@ test('titling: transient rename failure retries and lands', async () => {
     renameMaxAttempts: 4,
   });
   const m = await createCapture({
-    title: 'Meeting 2026-08-10', linkedChat: 'sidekick:retry-1',
+    title: 'Meeting 2026-08-10', linkedChat: 'parley:retry-1',
     mintedSession: true, diarize: false,
   });
   await activateCapture(m.id);   // start-title fires on activation

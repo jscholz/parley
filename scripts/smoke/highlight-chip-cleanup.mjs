@@ -25,16 +25,16 @@ export function MOCK_SETUP(mock) {
     title: 'Chat A',
     messages: [
       { role: 'user', content: 'first bubble in A',
-        sidekick_id: 'umsg_hi_a1', timestamp: Date.now() / 1000 - 90 },
+        parley_id: 'umsg_hi_a1', timestamp: Date.now() / 1000 - 90 },
       { role: 'assistant', content: 'agent reply in A',
-        sidekick_id: 'msg_hi_a2', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'msg_hi_a2', timestamp: Date.now() / 1000 - 60 },
     ],
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B',
     messages: [
       { role: 'user', content: 'first bubble in B',
-        sidekick_id: 'umsg_hi_b1', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'umsg_hi_b1', timestamp: Date.now() / 1000 - 30 },
     ],
   });
 }

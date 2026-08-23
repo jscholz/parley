@@ -25,7 +25,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 120;
   mock.addChat(CHAT, {
     title: 'Island chat',
-    messages: [{ role: 'user', content: 'ISL-SEED', sidekick_id: 'umsg_isl', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'ISL-SEED', parley_id: 'umsg_isl', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

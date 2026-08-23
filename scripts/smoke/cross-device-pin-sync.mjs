@@ -31,8 +31,8 @@ export const DESCRIPTION = 'pins_changed envelope from "another device" → PWA 
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const CHAT_A = 'sidekick:cross-device-pin-A';
-const CHAT_B = 'sidekick:cross-device-pin-B';
+const CHAT_A = 'parley:cross-device-pin-A';
+const CHAT_B = 'parley:cross-device-pin-B';
 
 export function MOCK_SETUP(mock) {
   // Pre-seed one pin server-side so initial hydrate sees it.
@@ -44,11 +44,11 @@ export function MOCK_SETUP(mock) {
   // Seed both chats so the drawer can resolve labels.
   mock.addChat(CHAT_A, { title: 'Chat A', messages: [
     { role: 'user', content: 'pinned-on-device-1',
-      sidekick_id: 'msg-1', timestamp: Date.now() / 1000 - 60 },
+      parley_id: 'msg-1', timestamp: Date.now() / 1000 - 60 },
   ]});
   mock.addChat(CHAT_B, { title: 'Chat B', messages: [
     { role: 'user', content: 'second-pin-text',
-      sidekick_id: 'msg-2', timestamp: Date.now() / 1000 - 30 },
+      parley_id: 'msg-2', timestamp: Date.now() / 1000 - 30 },
   ]});
 }
 
@@ -127,7 +127,7 @@ export default async function run({ page, log, mock }) {
   mock.getPinState().delete(`${CHAT_A}|msg-1`);  // direct mutation
   // Re-seed without msg-1 by clearing + re-adding. Simpler: just
   // mutate the map directly via the helper-exposed surface.
-  await page.evaluate(() => fetch(`/api/parley/pins/${encodeURIComponent('sidekick:cross-device-pin-A')}/msg-1`, { method: 'DELETE' }));
+  await page.evaluate(() => fetch(`/api/parley/pins/${encodeURIComponent('parley:cross-device-pin-A')}/msg-1`, { method: 'DELETE' }));
   mock.pushEnvelope({
     type: 'pins_changed',
     chat_id: CHAT_A,

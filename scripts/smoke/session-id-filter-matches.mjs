@@ -3,7 +3,7 @@
 //   1. the drawer's "Filter sessions" box (client-side, instant), and
 //   2. the cmd+K palette's sessions section (cached paint + server repaint).
 //
-// Field bug 2026-06-11: a row's own id is the `sidekick:<uuid>` chat id, so
+// Field bug 2026-06-11: a row's own id is the `parley:<uuid>` chat id, so
 // searching for the agent-reported session id `20260611_223425_98bd2b`
 // matched nothing anywhere. Fix plumbs `session_ids` (space-joined raw ids,
 // GROUP_CONCAT over the chat's session tree incl. rotated/compacted
@@ -21,8 +21,8 @@ export const DESCRIPTION = 'raw hermes session ids (and fragments) match in the 
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const TARGET = 'sidekick:mock-sid-root';
-const OTHER = 'sidekick:mock-sid-other';
+const TARGET = 'parley:mock-sid-root';
+const OTHER = 'parley:mock-sid-other';
 const TITLE = 'Investor Call Notes';
 const FULL_ID = '20260611_223425_98bd2b';
 const FRAGMENT = '98bd2b';
@@ -31,23 +31,23 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 500;
   mock.addChat(TARGET, {
     title: TITLE,
-    source: 'sidekick',
+    source: 'parley',
     lastActiveAt: Date.now(),
     // Root session + a rotated child — the child id is the one the agent
     // reports and the user pastes.
     sessionIds: `20260601_120000_aaaaaa ${FULL_ID}`,
     messages: [
-      { role: 'user', content: 'prep the investor call', sidekick_id: 'umsg_s0', timestamp: t0 },
-      { role: 'assistant', content: 'on it', sidekick_id: 'msg_s0', timestamp: t0 + 1 },
+      { role: 'user', content: 'prep the investor call', parley_id: 'umsg_s0', timestamp: t0 },
+      { role: 'assistant', content: 'on it', parley_id: 'msg_s0', timestamp: t0 + 1 },
     ],
   });
   mock.addChat(OTHER, {
     title: 'Unrelated Chat',
-    source: 'sidekick',
+    source: 'parley',
     lastActiveAt: Date.now() - 60_000,
     messages: [
-      { role: 'user', content: 'something else', sidekick_id: 'umsg_s1', timestamp: t0 - 100 },
-      { role: 'assistant', content: 'sure', sidekick_id: 'msg_s1', timestamp: t0 - 99 },
+      { role: 'user', content: 'something else', parley_id: 'umsg_s1', timestamp: t0 - 100 },
+      { role: 'assistant', content: 'sure', parley_id: 'msg_s1', timestamp: t0 - 99 },
     ],
   });
   mock.setAutoReplyEnabled(false);
@@ -76,7 +76,7 @@ export default async function run({ page, log }) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        sessions: [{ id: TARGET, source: 'sidekick', title: '', snippet: '' }],
+        sessions: [{ id: TARGET, source: 'parley', title: '', snippet: '' }],
         hits: [],
       }),
     });

@@ -178,7 +178,7 @@ export interface ConversationItem {
   // history endpoint so reload-time dedup keys off the same id the
   // IDB cache stored. Absent for legacy rows, other-channel rows,
   // and tool / system rows.
-  sidekick_id?: string;
+  parley_id?: string;
   /** Parley extension: notification kind ('cron', 'reminder',
    *  'approval', etc.) when the row was persisted by the cron
    *  scheduler / background-task path. Plumbed through from

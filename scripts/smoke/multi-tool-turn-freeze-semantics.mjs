@@ -59,7 +59,7 @@ export function MOCK_SETUP(mock) {
     {
       role: 'user',
       content: 'first user prompt — please run two tools',
-      sidekick_id: 'umsg_turn1_user',
+      parley_id: 'umsg_turn1_user',
       timestamp: t0,
     },
     {
@@ -89,14 +89,14 @@ export function MOCK_SETUP(mock) {
     {
       role: 'assistant',
       content: 'Turn 1 reply — surveyed two files.',
-      sidekick_id: 'msg_turn1_final',
+      parley_id: 'msg_turn1_final',
       timestamp: t0 + 5,
     },
     // ── Turn 2 (separated by interleaved user message) ──────────────
     {
       role: 'user',
       content: 'second user prompt — now do one more',
-      sidekick_id: 'umsg_turn2_user',
+      parley_id: 'umsg_turn2_user',
       timestamp: t0 + 10,
     },
     {
@@ -114,7 +114,7 @@ export function MOCK_SETUP(mock) {
     {
       role: 'assistant',
       content: 'Turn 2 reply — surveyed one more dir.',
-      sidekick_id: 'msg_turn2_final',
+      parley_id: 'msg_turn2_final',
       timestamp: t0 + 13,
     },
   ];

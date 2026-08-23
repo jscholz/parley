@@ -52,7 +52,7 @@ disagrees with state.db) is mitigated by:
    missing rows pulled from state.db into parley.db; orphan rows
    (parley.db has, state.db doesn't, agent_row_id NOT NULL) removed.
    Logs on every heal event so write-path bugs surface in production.
-3. **Admin audit command** (``sidekick-audit``) for deep dives.
+3. **Admin audit command** (``parley-audit``) for deep dives.
 
 The duplicated-content design has STRICTLY BETTER bug surface than
 the alternative JOIN-based hybrid (state.db owns content, parley.db
@@ -71,7 +71,7 @@ aren't read yet. Smokes assert the write path is sound.
 **Phase 2 — Items endpoint switch.** Rewrite
 ``parley_route_items.handle_get_items`` to read from parley.db
 instead of state.db. Rename ``msg_links`` → ``messages``. Delete
-the legacy ``sidekick_msg_links`` table on state.db plus
+the legacy ``parley_msg_links`` table on state.db plus
 ``_write_msg_links_after_turn`` + ``_capture_msg_high_water_mark``.
 
 **Phase 3 — Linker.** Content-fingerprint match of parley.db rows
@@ -321,14 +321,14 @@ CREATE TABLE IF NOT EXISTS user_settings (
 # Field incident 2026-07: live push_prefs rows were corrupted during a
 # dev/test session running against the production instance — days of
 # silently-dropped pushes. Belt-and-braces: any process that sets
-# PARLEY_TEST_GUARD (legacy PARLEY_TEST_GUARD honored; the pytest
+# PARLEY_TEST_GUARD (the pytest
 # conftest sets it unconditionally)
 # refuses to open a parley DB inside the real state directories.
 # Tests operate on tmp paths exclusively; a fixture or helper that
 # accidentally resolves to ~/.hermes fails LOUDLY at open, before any
 # write can land.
 
-_GUARDED_STATE_DIRS = (".hermes", ".parley", ".sidekick", ".openclaw-sk-integ")
+_GUARDED_STATE_DIRS = (".hermes", ".parley", ".openclaw-sk-integ")
 
 
 def _assert_not_live_db_under_test_guard(path: Path) -> None:
@@ -343,7 +343,7 @@ def _assert_not_live_db_under_test_guard(path: Path) -> None:
         guarded = home / name
         if resolved == guarded or guarded in resolved.parents:
             raise RuntimeError(
-                f"PARLEY_TEST_GUARD/SIDEKICK_TEST_GUARD is set but DB path {resolved} "
+                f"PARLEY_TEST_GUARD is set but DB path {resolved} "
                 f"resolves inside the live state dir {guarded}. Tests must "
                 "use tmp paths — refusing to open the production DB."
             )
@@ -395,43 +395,13 @@ class ParleyDB:
             self._conn.close()
 
 
-def migrate_legacy_db_file(new_path: Path, legacy_path: Path) -> bool:
-    """One-time file rename ``sidekick.db`` → ``parley.db`` (2026-08).
-
-    Same-directory ``os.rename`` is atomic. Sidecar ``-wal``/``-shm``
-    files (left by a crash mid-WAL) move along with the main file so a
-    checkpoint replay isn't orphaned. Strictly no-op when the new file
-    already exists — once ``parley.db`` is live, a stale legacy file
-    must NEVER be re-adopted as fresh truth — or when there is nothing
-    to migrate. Idempotent; returns True when a rename happened.
-
-    Removal condition: delete once no deployment still has a
-    ``sidekick.db`` on disk.
-    """
-    if new_path.exists() or not legacy_path.exists():
-        return False
-    for suffix in ("", "-wal", "-shm"):
-        src = Path(str(legacy_path) + suffix)
-        dst = Path(str(new_path) + suffix)
-        if src.exists() and not dst.exists():
-            os.rename(src, dst)
-    logging.getLogger("hermes.parley.db").info(
-        "[parley] migrated legacy DB file %s -> %s", legacy_path, new_path
-    )
-    return True
-
-
 def open_parley_db(state_dir: str | None = None) -> ParleyDB:
-    """Open (or create) the parley supplemental DB (parley.db,
-    formerly parley.db — renamed in place on first open).
+    """Open (or create) the parley supplemental DB (parley.db).
 
     `state_dir` defaults to ``$HERMES_STATE_DIR`` or ``~/.hermes``.
     """
     if not state_dir:
         state_dir = os.environ.get("HERMES_STATE_DIR") or os.path.expanduser("~/.hermes")
     path = Path(state_dir) / "parley.db"
-    # Guard BEFORE the legacy-file rename so a test pointing at a live
-    # state dir can't move the production DB.
     _assert_not_live_db_under_test_guard(path)
-    migrate_legacy_db_file(path, Path(state_dir) / "sidekick.db")
     return ParleyDB(path)

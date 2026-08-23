@@ -50,19 +50,19 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 600;
   mock.addChat(CHAT_A, {
     title: 'Working chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user',      content: 'hello',               sidekick_id: 'm1', message_id: 'm1', timestamp: t0 + 0 },
-      { role: 'assistant', content: 'hi! how can I help?', sidekick_id: 'm2', message_id: 'm2', timestamp: t0 + 1 },
-      { role: 'user',      content: 'what time is it',     sidekick_id: 'm3', message_id: 'm3', timestamp: t0 + 2 },
-      { role: 'assistant', content: 'morning',             sidekick_id: 'm4', message_id: 'm4', timestamp: t0 + 3 },
+      { role: 'user',      content: 'hello',               parley_id: 'm1', message_id: 'm1', timestamp: t0 + 0 },
+      { role: 'assistant', content: 'hi! how can I help?', parley_id: 'm2', message_id: 'm2', timestamp: t0 + 1 },
+      { role: 'user',      content: 'what time is it',     parley_id: 'm3', message_id: 'm3', timestamp: t0 + 2 },
+      { role: 'assistant', content: 'morning',             parley_id: 'm4', message_id: 'm4', timestamp: t0 + 3 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });
   // Chat B — somewhere to switch TO so the away-and-back path runs.
   mock.addChat(CHAT_B, {
     title: 'Other chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'hi', timestamp: Date.now() / 1000 - 200 },
       { role: 'assistant', content: 'hello!', timestamp: Date.now() / 1000 - 199 },

@@ -43,7 +43,7 @@ from .. import parley_turn_linker as linker
 
 CHAT_ID = "c4d22b13-phase45-test"
 SESSION = "20260730_000000_p45"
-SRC = "sidekick"
+SRC = "parley"
 # Epoch-scale base (matches the v3 read-path rig) — far enough in the
 # past that every seeded row is outside the monitor's recency grace
 # when swept at NOW.
@@ -53,7 +53,7 @@ NOW = BASE + 100_000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -624,7 +624,7 @@ def test_v3_read_serves_linker_stamped_fresh_turn(db, state_db):
     _mint_marker(db, state_db)
     ids = _run_turn(db, state_db, 1, BASE)
     items = state.list_messages_for_chat_v3(db, state_db, CHAT_ID)["items"]
-    by_sk = {it.get("sidekick_id"): it for it in items}
+    by_sk = {it.get("parley_id"): it for it in items}
     assert by_sk["umsg_1"]["id"] == ids["user"]
     assert by_sk["tr:call_1"]["id"] == ids["tool"]
     assert by_sk["msg_1"]["id"] == ids["final"]

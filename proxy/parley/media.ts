@@ -25,7 +25,7 @@
  *   - only known media extensions get served — this is a media lane,
  *     not a general file server.
  *
- * Registry persists to ~/.sidekick/media-registry.json so links in old
+ * Registry persists to ~/.parley/media-registry.json so links in old
  * chat transcripts survive a server restart. Entries whose file has
  * vanished answer 410 (the registry intentionally keeps the tombstone —
  * a re-produced file gets a fresh id, never a silent content swap).
@@ -128,7 +128,7 @@ export async function registerMedia(rawPath: string): Promise<{ id: string; entr
   if (!roots.some((r) => real === r || real.startsWith(r + path.sep))) {
     throw new MediaError(403, `path outside allowed roots (${roots.join(', ')})`);
   }
-  // No dotfile path components: keeps ~/.ssh, ~/.hermes, ~/.sidekick &
+  // No dotfile path components: keeps ~/.ssh, ~/.hermes, ~/.parley &
   // co. unreachable even though $HOME is an allowed root. Checked on
   // the RESOLVED path so a symlink can't launder one in.
   if (real.split(path.sep).some((seg) => seg.startsWith('.') && seg !== '.' && seg !== '..')) {

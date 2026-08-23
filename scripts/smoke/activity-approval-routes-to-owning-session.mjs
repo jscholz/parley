@@ -32,14 +32,14 @@ export function MOCK_SETUP(mock) {
   mock.addChat(VIEWED_CHAT, {
     title: 'Route Viewed',
     messages: [
-      { role: 'user', content: 'viewed seed', sidekick_id: 'umsg_route_viewed_seed', timestamp: t0 },
+      { role: 'user', content: 'viewed seed', parley_id: 'umsg_route_viewed_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(APPROVAL_CHAT, {
     title: 'Route Approval Source',
     messages: [
-      { role: 'user', content: 'approval seed', sidekick_id: 'umsg_route_approval_seed', timestamp: t0 },
+      { role: 'user', content: 'approval seed', parley_id: 'umsg_route_approval_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 5000,
   });
@@ -77,7 +77,7 @@ export default async function run({ page, log, mock }) {
       'printf parley-approve-routing\n\n' +
       'Reason: approve routing smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: 'notif_route_approval_1',
+    parley_id: 'notif_route_approval_1',
     urgent: true,
   });
   await page.click('#btn-activity-drawer-rail');

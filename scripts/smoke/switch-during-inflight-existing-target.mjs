@@ -55,7 +55,7 @@ export function MOCK_SETUP(mock) {
   // Pre-seeded existing chat so step 3 has a switch target.
   mock.addChat(CHAT_B, {
     title: 'Existing Chat With Content',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'hi there', timestamp: Date.now() / 1000 - 120 },
       { role: 'assistant', content: 'hello!', timestamp: Date.now() / 1000 - 119 },

@@ -19,7 +19,7 @@ export const DESCRIPTION = 'cmd+K message hits render the hit timestamp as date+
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const CHAT_ID = 'sidekick:mock-hit-ts';
+const CHAT_ID = 'parley:mock-hit-ts';
 // Yesterday — guaranteed same calendar year as the browser clock, so the
 // expected format has no year component.
 const HIT_TS = Math.floor(Date.now() / 1000) - 86_400;
@@ -28,11 +28,11 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 500;
   mock.addChat(CHAT_ID, {
     title: 'Timestamp Probe',
-    source: 'sidekick',
+    source: 'parley',
     lastActiveAt: Date.now(),
     messages: [
-      { role: 'user', content: 'what time was that?', sidekick_id: 'umsg_t0', timestamp: t0 },
-      { role: 'assistant', content: 'late', sidekick_id: 'msg_t0', timestamp: t0 + 1 },
+      { role: 'user', content: 'what time was that?', parley_id: 'umsg_t0', timestamp: t0 },
+      { role: 'assistant', content: 'late', parley_id: 'msg_t0', timestamp: t0 + 1 },
     ],
   });
   mock.setAutoReplyEnabled(false);
@@ -53,12 +53,12 @@ export default async function run({ page, log }) {
           {
             session_id: CHAT_ID, message_id: 'hit-with-ts', role: 'user',
             snippet: 'needle in the evening', timestamp: HIT_TS,
-            session_title: 'Timestamp Probe', session_source: 'sidekick',
+            session_title: 'Timestamp Probe', session_source: 'parley',
           },
           {
             session_id: CHAT_ID, message_id: 'hit-no-ts', role: 'assistant',
             snippet: 'needle without a clock', timestamp: 0,
-            session_title: 'Timestamp Probe', session_source: 'sidekick',
+            session_title: 'Timestamp Probe', session_source: 'parley',
           },
         ],
       }),

@@ -40,19 +40,19 @@ const CHAT_B = 'mock-touch-pin-b';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Touch chat A',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'touch marker a', message_id: 'tp-a-1',
-        sidekick_id: 'tp-a-1', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'tp-a-1', timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Touch chat B',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'touch marker b', message_id: 'tp-b-1',
-        sidekick_id: 'tp-b-1', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'tp-b-1', timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

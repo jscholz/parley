@@ -30,13 +30,13 @@ export const BACKEND = 'real';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Fixture filename stays legacy: the WAV is a RECORDING of the spoken
-// word "sidekick" (see EXPECT_SUBSTRING below). Renaming the file would
+// word "parley" (see EXPECT_SUBSTRING below). Renaming the file would
 // make the name lie about its audio content — same invariant as the
 // persisted-form fixtures in d1b1fef.
 const FIXTURE = path.join(__dirname, 'fixtures', 'hello-sidekick.wav');
 /** Substring match — Deepgram normalizes (capitalizes, may add a
  *  period). Assert on the unique noun rather than exact equality. */
-const EXPECT_SUBSTRING = 'sidekick';
+const EXPECT_SUBSTRING = 'parley';
 
 export default async function run({ url, log }) {
   const bytes = await readFile(FIXTURE);

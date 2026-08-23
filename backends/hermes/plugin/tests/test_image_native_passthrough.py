@@ -42,7 +42,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            PARLEY = "sidekick"
+            PARLEY = "parley"
 
         class _PlatformConfig:
             pass

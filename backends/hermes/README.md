@@ -100,7 +100,7 @@ with thread-safe locking; CRUD lives in `plugin/parley_state.py`.
 
 | Table | Key columns | Purpose |
 |---|---|---|
-| `msg_links` | `(chat_id, sidekick_id)` → `agent_row_id`, `kind` | Bridges PWA-minted `msg_*` ids to hermes state.db integer rows. `kind` column discriminates `cron` / `reminder` / `approval` / etc. so the PWA renders notification bubbles correctly on reload. |
+| `msg_links` | `(chat_id, parley_id)` → `agent_row_id`, `kind` | Bridges PWA-minted `msg_*` ids to hermes state.db integer rows. `kind` column discriminates `cron` / `reminder` / `approval` / etc. so the PWA renders notification bubbles correctly on reload. |
 | `pins` | `(chat_id, msg_id)` → role, text, timestamps | Pinned messages per chat. Routes: `/v1/pins`. |
 | `unread_state` | `chat_id` → `last_read_at`, `marked_unread` | Read pointer + sticky-unread flag. The SSOT for badge + push eligibility. |
 | `push_subscriptions` | `endpoint` → p256dh, auth, userAgent, timestamps | WebPush endpoints. |

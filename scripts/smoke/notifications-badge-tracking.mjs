@@ -41,7 +41,7 @@ export function MOCK_SETUP(mock) {
     title: 'Viewed chat',
     messages: [
       { role: 'user', content: 'viewed seed',
-        sidekick_id: 'umsg_badge_viewed', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'umsg_badge_viewed', timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
@@ -49,7 +49,7 @@ export function MOCK_SETUP(mock) {
     title: 'Background A',
     messages: [
       { role: 'user', content: 'bg A seed',
-        sidekick_id: 'umsg_badge_bg_a', timestamp: Date.now() / 1000 - 90 },
+        parley_id: 'umsg_badge_bg_a', timestamp: Date.now() / 1000 - 90 },
     ],
     lastActiveAt: Date.now() - 5000,
   });
@@ -57,7 +57,7 @@ export function MOCK_SETUP(mock) {
     title: 'Background B',
     messages: [
       { role: 'user', content: 'bg B seed',
-        sidekick_id: 'umsg_badge_bg_b', timestamp: Date.now() / 1000 - 120 },
+        parley_id: 'umsg_badge_bg_b', timestamp: Date.now() / 1000 - 120 },
     ],
     lastActiveAt: Date.now() - 8000,
   });

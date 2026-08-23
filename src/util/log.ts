@@ -11,7 +11,7 @@
  *
  * Enable diag:
  *   • URL ?debug=1             (one-off, any page load)
- *   • localStorage.sidekick_debug = '1'  (persistent across sessions)
+ *   • localStorage.parley_debug = '1'  (persistent across sessions)
  *
  * ── Disk relay ────────────────────────────────────────────────────────
  *
@@ -46,7 +46,7 @@ const debugOn = (() => {
     const qs = new URLSearchParams(location.search);
     if (qs.get('debug') === '1') return true;
     // legacy name, predates Parley rename — dev toggle, not worth migrating
-    return localStorage.getItem('sidekick_debug') === '1';
+    return localStorage.getItem('parley_debug') === '1';
   } catch { return false; }
 })();
 

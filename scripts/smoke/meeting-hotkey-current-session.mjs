@@ -18,12 +18,12 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 120;
   mock.addChat(CHAT_OLD, {
     title: 'Older chat',
-    messages: [{ role: 'user', content: 'seed old', sidekick_id: 'umsg_mh_old', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed old', parley_id: 'umsg_mh_old', timestamp: t0 }],
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_ACTIVE, {
     title: 'Active chat',
-    messages: [{ role: 'user', content: 'seed active', sidekick_id: 'umsg_mh_act', timestamp: t0 + 10 }],
+    messages: [{ role: 'user', content: 'seed active', parley_id: 'umsg_mh_act', timestamp: t0 + 10 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

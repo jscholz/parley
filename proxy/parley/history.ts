@@ -36,7 +36,7 @@ export async function handleParleySessionMessages(req, res, chatId: string) {
   const limit = Math.max(1, Math.min(500, parseInt(url.searchParams.get('limit') || '200', 10)));
   const beforeRaw = url.searchParams.get('before');
   const before = beforeRaw && /^\d+$/.test(beforeRaw) ? parseInt(beforeRaw, 10) : null;
-  // `around=<sidekick_id|state.db id>` requests the deep-target window in
+  // `around=<parley_id|state.db id>` requests the deep-target window in
   // one round trip (the tail-contiguous slice containing the target),
   // instead of N serial `before=` pages. The plugin returns target_found
   // false (empty list) when the target is missing or too deep for the
@@ -98,7 +98,7 @@ async function handleSessionMessagesViaUpstream(
       // prefers this over the integer id as the dedup key so reload
       // bubbles match the IDB-cached SSE-shape ones. Absent for
       // legacy rows / other-channel rows / tool+system rows.
-      ...(it.sidekick_id ? { sidekick_id: it.sidekick_id } : {}),
+      ...(it.parley_id ? { parley_id: it.parley_id } : {}),
       // Notification kind ('cron', 'reminder', etc.) — plumbed
       // through for role='notification' rows so the PWA's renderer
       // can show the appropriate emoji + label.

@@ -18,17 +18,17 @@ export function MOCK_SETUP(mock) {
   const base = Date.now() - 120_000;
   mock.addChat(CHAT_A, {
     title: 'Delete me',
-    messages: [{ role: 'user', content: 'DEL-A-SEED', sidekick_id: 'umsg_del_a', timestamp: base / 1000 }],
+    messages: [{ role: 'user', content: 'DEL-A-SEED', parley_id: 'umsg_del_a', timestamp: base / 1000 }],
     lastActiveAt: base,
   });
   mock.addChat(CHAT_B, {
     title: 'Keep me',
-    messages: [{ role: 'user', content: 'DEL-B-SEED', sidekick_id: 'umsg_del_b', timestamp: (base + 10_000) / 1000 }],
+    messages: [{ role: 'user', content: 'DEL-B-SEED', parley_id: 'umsg_del_b', timestamp: (base + 10_000) / 1000 }],
     lastActiveAt: base + 10_000,
   });
   mock.addChat(CHAT_C, {
     title: 'Viewed then deleted',
-    messages: [{ role: 'user', content: 'DEL-C-SEED', sidekick_id: 'umsg_del_c', timestamp: (base + 20_000) / 1000 }],
+    messages: [{ role: 'user', content: 'DEL-C-SEED', parley_id: 'umsg_del_c', timestamp: (base + 20_000) / 1000 }],
     lastActiveAt: base + 20_000,
   });
 }

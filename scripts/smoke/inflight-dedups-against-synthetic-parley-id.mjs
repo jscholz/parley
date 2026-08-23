@@ -1,5 +1,5 @@
 // Regression guard: every short turn renders TWICE. State.db's
-// assistant row has `sidekick_id="sk-<unix>-<seq>"` (synthetic shape,
+// assistant row has `parley_id="sk-<unix>-<seq>"` (synthetic shape,
 // minted by the plugin's `_next_message_id()` at __init__.py:1432
 // when the envelope had no message_id). Live SSE envelopes for the
 // same logical turn carry an envelope-shape `message_id` (e.g.
@@ -7,23 +7,23 @@
 // dedup sees them as different rows, both render.
 //
 // This is the SAME failure CLASS as the earlier inflight-vs-no-link-
-// durable dupe but a different SHAPE: there, durable's sidekick_id
+// durable dupe but a different SHAPE: there, durable's parley_id
 // was missing; here it's present but doesn't equal the envelope's
 // message_id. The projection content-match fallback I added earlier
-// only fires when sidekick_id is absent, so it doesn't catch this.
+// only fires when parley_id is absent, so it doesn't catch this.
 //
-// What this smoke pins: when (durable.sidekick_id != inflight.message_id)
+// What this smoke pins: when (durable.parley_id != inflight.message_id)
 // but content matches, projection must still render ONE bubble.
 //
 // Test plan (mocked):
-//   1. Pre-seed chat with: user_a, assistant_a (sidekick_id="sk-X-1"),
+//   1. Pre-seed chat with: user_a, assistant_a (parley_id="sk-X-1"),
 //      then a NEW user message ready to be sent live.
 //   2. Click into chat → assert 2 durable bubbles render.
 //   3. Send a NEW user message.
 //   4. Mock auto-replies via SSE with envelope-shape message_id and
 //      same content as the SECOND assistant turn we'll add to durable.
 //   5. Simulate the state.db catching up: add the assistant row to
-//      durable with sidekick_id="sk-Y-2" (synthetic shape, NOT the
+//      durable with parley_id="sk-Y-2" (synthetic shape, NOT the
 //      envelope message_id).
 //   6. Force a /messages refresh by switching away + back.
 //   7. Assert: exactly ONE assistant bubble for the new turn.
@@ -33,7 +33,7 @@ import {
 } from './lib.mjs';
 
 export const NAME = 'inflight-dedups-against-synthetic-parley-id';
-export const DESCRIPTION = 'Projection dedups inflight reply against durable row whose sidekick_id has synthetic sk-<unix>-<seq> shape';
+export const DESCRIPTION = 'Projection dedups inflight reply against durable row whose parley_id has synthetic sk-<unix>-<seq> shape';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -46,13 +46,13 @@ const SYNTHETIC_SID = `sk-${Math.floor(Date.now() / 1000)}-1`;
 
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
-    title: 'Synthetic sidekick_id dupe repro',
-    source: 'sidekick',
+    title: 'Synthetic parley_id dupe repro',
+    source: 'parley',
     messages: [
       // pre-existing turn so the chat isn't empty.
-      { role: 'user', content: 'earlier msg', sidekick_id: 'umsg_earlier',
+      { role: 'user', content: 'earlier msg', parley_id: 'umsg_earlier',
         timestamp: Date.now() / 1000 - 60 },
-      { role: 'assistant', content: 'earlier reply', sidekick_id: 'msg_earlier',
+      { role: 'assistant', content: 'earlier reply', parley_id: 'msg_earlier',
         timestamp: Date.now() / 1000 - 59 },
     ],
     lastActiveAt: Date.now() - 5000,
@@ -60,11 +60,11 @@ export function MOCK_SETUP(mock) {
   // Anchor to force a /messages refetch on switch-back.
   mock.addChat(ANCHOR_CHAT, {
     title: 'Anchor',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'a', sidekick_id: 'umsg_anchor_synth',
+      { role: 'user', content: 'a', parley_id: 'umsg_anchor_synth',
         timestamp: Date.now() / 1000 - 30 },
-      { role: 'assistant', content: 'b', sidekick_id: 'msg_anchor_synth',
+      { role: 'assistant', content: 'b', parley_id: 'msg_anchor_synth',
         timestamp: Date.now() / 1000 - 29 },
     ],
     lastActiveAt: Date.now() - 10000,
@@ -133,23 +133,23 @@ export default async function run({ page, log, mock }) {
 
   // Now simulate state.db catching up: re-seed the chat with the new
   // turn's assistant row, BUT with the synthetic sk-<unix>-<seq>
-  // sidekick_id (NOT the envelope's message_id). Mirrors what the
+  // parley_id (NOT the envelope's message_id). Mirrors what the
   // plugin currently does when envelope handler doesn't carry a
   // message_id by the time _persist_response writes through.
   mock.addChat(CHAT_ID, {
-    title: 'Synthetic sidekick_id dupe repro',
-    source: 'sidekick',
+    title: 'Synthetic parley_id dupe repro',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'earlier msg', sidekick_id: 'umsg_earlier',
+      { role: 'user', content: 'earlier msg', parley_id: 'umsg_earlier',
         timestamp: Date.now() / 1000 - 60 },
-      { role: 'assistant', content: 'earlier reply', sidekick_id: 'msg_earlier',
+      { role: 'assistant', content: 'earlier reply', parley_id: 'msg_earlier',
         timestamp: Date.now() / 1000 - 59 },
-      { role: 'user', content: PROMPT, sidekick_id: 'umsg_new',
+      { role: 'user', content: PROMPT, parley_id: 'umsg_new',
         timestamp: Date.now() / 1000 - 2 },
-      // THIS is the bug shape: synthetic sidekick_id, NOT the envelope's
+      // THIS is the bug shape: synthetic parley_id, NOT the envelope's
       // message_id. The projection has no way to know this row IS the
       // inflight reply by key alone.
-      { role: 'assistant', content: REPLY, sidekick_id: SYNTHETIC_SID,
+      { role: 'assistant', content: REPLY, parley_id: SYNTHETIC_SID,
         timestamp: Date.now() / 1000 - 1 },
     ],
     lastActiveAt: Date.now(),
@@ -179,6 +179,6 @@ export default async function run({ page, log, mock }) {
   log(`  dump: ${JSON.stringify(dump)}`);
   assert(
     count === 1,
-    `expected exactly 1 bubble with "${REPLY}" (synthetic sidekick_id vs envelope message_id should still dedup); got ${count}. dump: ${JSON.stringify(dump)}`,
+    `expected exactly 1 bubble with "${REPLY}" (synthetic parley_id vs envelope message_id should still dedup); got ${count}. dump: ${JSON.stringify(dump)}`,
   );
 }

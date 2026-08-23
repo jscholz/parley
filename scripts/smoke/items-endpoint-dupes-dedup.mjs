@@ -9,7 +9,7 @@
 // post-processed the assistant content slightly, or the link was
 // raced — Pass 2 inserts a `legacy:<state_id>` row alongside the
 // existing `msg_xyz` row. The items endpoint then returns BOTH
-// rows; PWA projection keys them by their (different) sidekick_ids
+// rows; PWA projection keys them by their (different) parley_ids
 // and renders BOTH bubbles.
 //
 // This is a parley.db.msg_links integrity bug; the proper fix is
@@ -21,7 +21,7 @@
 //
 // Test plan (mocked):
 //   1. Pre-seed a chat whose /messages response contains TWO assistant
-//      rows with identical content, different sidekick_ids, and one
+//      rows with identical content, different parley_ids, and one
 //      has timestamp=0 (the bug shape).
 //   2. Click into the chat.
 //   3. Assert exactly ONE .line.agent in transcript; the surviving
@@ -40,19 +40,19 @@ const REPLY_TEXT = 'Hey — received.';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Items endpoint dupe repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'hey test message', sidekick_id: 'umsg_user_q',
+      { role: 'user', content: 'hey test message', parley_id: 'umsg_user_q',
         timestamp: Date.now() / 1000 - 10 },
-      // BAD duplicate row — timestamp=0, fake legacy sidekick_id.
+      // BAD duplicate row — timestamp=0, fake legacy parley_id.
       // Mirrors `reconcile_from_state_db` Pass 2 inserting a
       // `legacy:<state_id>` row when Pass 1's content-link match
       // failed.
-      { role: 'assistant', content: REPLY_TEXT, sidekick_id: 'legacy:101',
+      { role: 'assistant', content: REPLY_TEXT, parley_id: 'legacy:101',
         message_id: 'legacy:101', timestamp: 0 },
-      // GOOD row — real timestamp, SSE-shape sidekick_id (what
+      // GOOD row — real timestamp, SSE-shape parley_id (what
       // write-through originally wrote).
-      { role: 'assistant', content: REPLY_TEXT, sidekick_id: 'msg_xyz_real',
+      { role: 'assistant', content: REPLY_TEXT, parley_id: 'msg_xyz_real',
         message_id: 'msg_xyz_real', timestamp: Date.now() / 1000 - 5 },
     ],
     lastActiveAt: Date.now() - 1000,
@@ -100,7 +100,7 @@ export default async function run({ page, log }) {
   );
 
   // The surviving bubble should be the one with the real timestamp.
-  // Its data-key (sidekick_id) is `msg_xyz_real`; the bad timestamp=0
+  // Its data-key (parley_id) is `msg_xyz_real`; the bad timestamp=0
   // row (`legacy:101`) should be absent from the DOM.
   const survivorKey = await page.evaluate((needle) => {
     const el = Array.from(document.querySelectorAll('#transcript .line.agent'))

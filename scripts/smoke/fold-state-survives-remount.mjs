@@ -29,13 +29,13 @@ export function MOCK_SETUP(mock) {
       role: isUser ? 'user' : 'assistant',
       content: isUser ? `${longBody} (user ${idx})` : `short reply ${idx}`,
       message_id: `fold-msg-${idx}`,
-      sidekick_id: `fold-msg-${idx}`,
+      parley_id: `fold-msg-${idx}`,
       timestamp: Date.now() / 1000 - (60 - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Fold remount',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });

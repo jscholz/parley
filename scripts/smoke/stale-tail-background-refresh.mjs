@@ -45,7 +45,7 @@ function bMessages(count) {
     messages.push({
       role,
       content: role === 'user' ? `user b ${idx}` : `agent b ${idx}`,
-      sidekick_id: `tfcb-msg-${idx}`,
+      parley_id: `tfcb-msg-${idx}`,
       timestamp: (base - (count - idx) * 60_000) / 1000,
     });
   }
@@ -55,15 +55,15 @@ function bMessages(count) {
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'TFC-B viewed chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'hello from A', sidekick_id: 'tfcb-a-1', timestamp: Date.now() / 1000 },
+      { role: 'user', content: 'hello from A', parley_id: 'tfcb-a-1', timestamp: Date.now() / 1000 },
     ],
     lastActiveAt: Date.now(),
   });
   mock.addChat(CHAT_B, {
     title: 'TFC-B stale chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: bMessages(B_MSGS),
     lastActiveAt: Date.now() - 10 * 60_000,
   });
@@ -78,7 +78,7 @@ const clickChat = (page, cid) => page.evaluate((c) => {
 const cacheHasMsg = (page, chatId, sid) => page.evaluate(async ({ c, s }) => {
   const sc = await import('/build/sessionCache.mjs');
   const rec = await sc.getMessagesCache(c);
-  return !!rec?.messages?.some((m) => m?.sidekick_id === s);
+  return !!rec?.messages?.some((m) => m?.parley_id === s);
 }, { c: chatId, s: sid });
 
 export default async function run({ page, log, mock }) {
@@ -103,11 +103,11 @@ export default async function run({ page, log, mock }) {
   // 3. B advances server-side, silently (no SSE envelope).
   mock.addChat(CHAT_B, {
     title: 'TFC-B stale chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [...bMessages(B_MSGS), {
       role: 'assistant',
       content: 'new reply from another device',
-      sidekick_id: NEW_MSG_ID,
+      parley_id: NEW_MSG_ID,
       timestamp: Date.now() / 1000,
     }],
     lastActiveAt: Date.now(),
@@ -124,7 +124,7 @@ export default async function run({ page, log, mock }) {
   await pollUntil(page, async ({ c, s }) => {
     const sc = await import('/build/sessionCache.mjs');
     const rec = await sc.getMessagesCache(c);
-    return !!rec?.messages?.some((m) => m?.sidekick_id === s);
+    return !!rec?.messages?.some((m) => m?.parley_id === s);
   }, { c: CHAT_B, s: NEW_MSG_ID }, { timeout: 12_000, polling: 200, label: `TFC-B sweep never merged ${NEW_MSG_ID} into B's cache` });
   assert(await cacheHasMsg(page, CHAT_B, 'tfcb-msg-1'),
     'sweep must MERGE the newest page — older cached history preserved');

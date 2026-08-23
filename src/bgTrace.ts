@@ -9,7 +9,7 @@
  *
  * Enable via either:
  *   - URL ?bg_trace=1
- *   - localStorage.sidekick_bg_trace = '1'  (persists across PWA lifecycle)
+ *   - localStorage.parley_bg_trace = '1'  (persists across PWA lifecycle)
  *
  * When enabled, call `install({ getStream, getAudioCtx, getKeepaliveEl })`
  * once on boot. The getters are lazy — we don't want to force eager
@@ -91,7 +91,7 @@ export function install(g: Getters) {
       const qs = new URLSearchParams(location.search);
       if (qs.get('bg_trace') === '1') return true;
       // legacy name, predates Parley rename — dev toggle, not worth migrating
-      return localStorage.getItem('sidekick_bg_trace') === '1';
+      return localStorage.getItem('parley_bg_trace') === '1';
     } catch { return false; }
   })();
   if (!enabled) return;

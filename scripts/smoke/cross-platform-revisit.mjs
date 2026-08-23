@@ -27,7 +27,7 @@ const WA_MARKER = 'whatsapp-marker-revisit';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(SK_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Parley chat',
     messages: [
       { role: 'user', content: SK_MARKER, timestamp: Date.now() / 1000 - 60 },

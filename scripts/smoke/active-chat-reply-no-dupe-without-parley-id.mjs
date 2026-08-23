@@ -4,7 +4,7 @@
 //
 // Repro shape: when the plugin mirrors the assistant row into
 // state.db / parley.db but the link write doesn't include a
-// sidekick_id (whether because the link table write failed, raced,
+// parley_id (whether because the link table write failed, raced,
 // or hasn't run yet), the projection sees TWO rows for the same
 // message:
 //   - durable assistant row keyed by integer id (e.g. "101")
@@ -14,12 +14,12 @@
 //
 // This is the regression from the earlier "background-reply-first-
 // switch-shows-content" fix (commit 71fcb54). That fix preserved
-// inflight on switch-in when sidekick_id was missing, which fixed
+// inflight on switch-in when parley_id was missing, which fixed
 // the blank-content bug but reopened the original ghost-tail
 // duplication scenario for active-chat sends.
 //
 // The proper fix layers a content-match fallback in the projection:
-// if a durable assistant row has no sidekick_id but its content
+// if a durable assistant row has no parley_id but its content
 // matches an inflight assistant spec's text, drop the inflight
 // spec. Durable owns the bubble.
 //
@@ -27,11 +27,11 @@
 //   1. Click new chat.
 //   2. Send a user message; mock receives + adds user row to durable.
 //   3. Suppress the mock auto-reply so we can drive the reply
-//      envelopes ourselves AND seed durable WITHOUT sidekick_id
+//      envelopes ourselves AND seed durable WITHOUT parley_id
 //      (the bug shape).
 //   4. Push reply_delta + reply_final envelopes for a fresh SSE
 //      message_id, AND append a durable assistant row with the
-//      same content but NO sidekick_id.
+//      same content but NO parley_id.
 //   5. Trigger a /messages fetch (switch away + back, or wait for
 //      the proxy's regular fetch).
 //   6. Assert: exactly ONE .line.agent in transcript.
@@ -42,7 +42,7 @@ import {
 } from './lib.mjs';
 
 export const NAME = 'active-chat-reply-no-dupe-without-parley-id';
-export const DESCRIPTION = 'Assistant reply renders ONCE even when durable mirror lacks sidekick_id';
+export const DESCRIPTION = 'Assistant reply renders ONCE even when durable mirror lacks parley_id';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -54,11 +54,11 @@ const REPLY_MSG_ID = `msg_${Math.random().toString(36).slice(2, 8)}`;
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B_ID, {
     title: 'Anchor chat (forces /messages refetch on switch)',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'anchor-user', sidekick_id: 'umsg_anchor_dupe',
+      { role: 'user', content: 'anchor-user', parley_id: 'umsg_anchor_dupe',
         timestamp: Date.now() / 1000 - 30 },
-      { role: 'assistant', content: 'anchor-reply', sidekick_id: 'msg_anchor_dupe',
+      { role: 'assistant', content: 'anchor-reply', parley_id: 'msg_anchor_dupe',
         timestamp: Date.now() / 1000 - 29 },
     ],
     lastActiveAt: Date.now() - 5000,
@@ -105,7 +105,7 @@ export default async function run({ page, log, mock }) {
   log(`user bubble visible`);
 
   // ── Fire the assistant reply via SSE (inflight) AND seed durable.
-  // The trick: the durable assistant row has NO sidekick_id, so the
+  // The trick: the durable assistant row has NO parley_id, so the
   // projection's key-based dedup can't match it against the inflight
   // envelope's message_id. Without the content-match fallback, both
   // render → dupe.
@@ -122,15 +122,15 @@ export default async function run({ page, log, mock }) {
   });
   // Re-call addChat to overwrite the in-memory chat record with the
   // full message set — durable assistant row included, but WITHOUT
-  // sidekick_id. Mirrors what state.db / parley.db would look like
+  // parley_id. Mirrors what state.db / parley.db would look like
   // if the plugin's link write skipped this row.
   mock.addChat(chatA, {
     title: 'Chat A',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: USER_MARKER, sidekick_id: `umsg_${USER_MARKER}`,
+      { role: 'user', content: USER_MARKER, parley_id: `umsg_${USER_MARKER}`,
         timestamp: Date.now() / 1000 - 2 },
-      { role: 'assistant', content: REPLY_TEXT, // NO sidekick_id — the bug shape.
+      { role: 'assistant', content: REPLY_TEXT, // NO parley_id — the bug shape.
         timestamp: Date.now() / 1000 - 1 },
     ],
     lastActiveAt: Date.now(),

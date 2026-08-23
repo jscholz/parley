@@ -44,7 +44,7 @@ from ..parley_unread import _compute_unread_uncached
 
 
 CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
-CHAT_PREFIXED = f"sidekick:{CHAT_ID}"
+CHAT_PREFIXED = f"parley:{CHAT_ID}"
 GHOST_CHAT = "upgrade-probe-1783926444"
 
 # A 13-digit epoch-ms mint like the plugin embeds in notif_* ids.
@@ -54,7 +54,7 @@ MINT_S = MINT_MS / 1000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -91,7 +91,7 @@ def state_db(tmp_path):
     return path
 
 
-def _add_session(state_db, sid, chat_id=CHAT_ID, source="sidekick"):
+def _add_session(state_db, sid, chat_id=CHAT_ID, source="parley"):
     conn = sqlite3.connect(str(state_db))
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, system_prompt, "
@@ -202,7 +202,7 @@ def _persist_notification(adapter, *, item_id, kind="cron", chat_id=CHAT_ID):
         "type": "notification",
         "kind": kind,
         "chat_id": chat_id,
-        "sidekick_id": item_id,
+        "parley_id": item_id,
         "title": "Cron notification",
         "content": "tick",
     }
@@ -296,7 +296,7 @@ def test_unread_seen_marks_chat_pane_items_read(db):
         title="Cron", body="tick", created_at=1000.0,
     )
     state.upsert_activity_item(
-        db, id="n2", chat_id="sidekick:other-chat", kind="cron",
+        db, id="n2", chat_id="parley:other-chat", kind="cron",
         title="Cron", body="tock", created_at=1000.0,
     )
     ctx = _run_unread_seen(db, CHAT_PREFIXED)
@@ -360,9 +360,9 @@ def test_ghost_chat_absent_from_conversations_universe_contributes_zero(db, stat
         "type": "reply_final", "chat_id": GHOST_CHAT,
         "message_id": "msg_ghost_1", "text": "probe reply",
     })
-    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="sidekick")
+    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
     chat_ids = [c["chat_id"] for c in unread["chats"]]
-    assert f"sidekick:{GHOST_CHAT}" not in chat_ids, (
+    assert f"parley:{GHOST_CHAT}" not in chat_ids, (
         f"ghost chat still counted: {unread}"
     )
     assert unread["total"] == 1
@@ -374,8 +374,8 @@ def test_ghost_chat_with_sticky_mark_contributes_zero(db, state_db):
     route can't serve must not badge either — the user has no row to
     click to clear it."""
     _add_session(state_db, "s1")
-    state.set_marked(db, f"sidekick:{GHOST_CHAT}", True)
-    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="sidekick")
+    state.set_marked(db, f"parley:{GHOST_CHAT}", True)
+    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
     assert unread["total"] == 0, f"sticky ghost badged: {unread}"
 
 
@@ -388,7 +388,7 @@ def test_envelope_only_rows_still_count_for_live_chats(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_pre_flush", "text": "Checking.",
     })
-    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="sidekick")
+    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
     assert unread["total"] >= 1
     assert [c["chat_id"] for c in unread["chats"]] == [CHAT_PREFIXED]
 
@@ -401,12 +401,12 @@ def test_stale_unread_state_for_ghost_chat_is_purged(db, state_db):
     _add_session(state_db, "s1")
     now = time.time()
     state.mark_seen(db, CHAT_PREFIXED, now=now - 7200.0)          # live chat — keep
-    state.mark_seen(db, "sidekick:ghost-old", now=now - 7200.0)   # stale ghost — purge
-    state.mark_seen(db, "sidekick:ghost-fresh", now=now)          # fresh — keep (grace)
-    _compute_unread_uncached(db=db, state_db_path=state_db, source="sidekick")
+    state.mark_seen(db, "parley:ghost-old", now=now - 7200.0)   # stale ghost — purge
+    state.mark_seen(db, "parley:ghost-fresh", now=now)          # fresh — keep (grace)
+    _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
     remaining = {r["chatId"] for r in state.list_unread_state(db)}
-    assert "sidekick:ghost-old" not in remaining, "stale ghost row survived"
+    assert "parley:ghost-old" not in remaining, "stale ghost row survived"
     assert CHAT_PREFIXED in remaining, "live chat's unread_state was purged"
-    assert "sidekick:ghost-fresh" in remaining, (
+    assert "parley:ghost-fresh" in remaining, (
         "fresh row purged — breaks the new-chat pre-flush race guard"
     )

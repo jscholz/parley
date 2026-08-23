@@ -43,7 +43,7 @@ export const BACKEND = 'real';
 // ae6435b5 = "Visual Trajectories Pitch Strategy" with 5425 msgs.
 // Override via env when running against a different account.
 const TARGET_CHAT_ID = process.env.SMOKE_SCROLL_CHAT
-  || 'sidekick:ae6435b5-53aa-4819-b594-d21652c89397';
+  || 'parley:ae6435b5-53aa-4819-b594-d21652c89397';
 
 // Gateway HTTP port + token for the blob-load reference. We hit the
 // gateway directly (bypassing the proxy) so the reference number is

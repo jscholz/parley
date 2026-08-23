@@ -1,8 +1,8 @@
 // Unit tests for data-home resolution (proxy/dataHome.mjs).
 //
-// Contract (Parley rename): PARLEY_HOME/SIDEKICK_HOME env wins, then an
-// existing ~/.parley, then an existing ~/.sidekick (live installs keep
-// being read in place — never moved), then ~/.parley for fresh installs.
+// Contract: PARLEY_HOME env wins, else ~/.parley. (The ~/.sidekick
+// fallback was removed by the 2026-08 identity purge; the live dir was
+// moved to ~/.parley in the same cutover.)
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,30 +15,20 @@ function tmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'parley-datahome-'));
 }
 
-test('env override wins (new name)', () => {
+test('env override wins', () => {
   const home = tmpHome();
   assert.equal(dataHome({ PARLEY_HOME: '/explicit/new' }, home), '/explicit/new');
 });
 
-test('env override wins (legacy SIDEKICK_HOME honored)', () => {
+test('defaults to ~/.parley whether or not it exists yet', () => {
   const home = tmpHome();
-  assert.equal(dataHome({ SIDEKICK_HOME: '/explicit/old' }, home), '/explicit/old');
-});
-
-test('existing ~/.parley preferred', () => {
-  const home = tmpHome();
+  assert.equal(dataHome({}, home), path.join(home, '.parley'));
   fs.mkdirSync(path.join(home, '.parley'));
-  fs.mkdirSync(path.join(home, '.sidekick'));
   assert.equal(dataHome({}, home), path.join(home, '.parley'));
 });
 
-test('falls back to existing ~/.sidekick when ~/.parley missing', () => {
+test('an old ~/.sidekick dir is ignored', () => {
   const home = tmpHome();
   fs.mkdirSync(path.join(home, '.sidekick'));
-  assert.equal(dataHome({}, home), path.join(home, '.sidekick'));
-});
-
-test('fresh install (neither dir) gets ~/.parley', () => {
-  const home = tmpHome();
   assert.equal(dataHome({}, home), path.join(home, '.parley'));
 });

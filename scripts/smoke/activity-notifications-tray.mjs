@@ -27,7 +27,7 @@ export function MOCK_SETUP(mock) {
     mock.addChat(id, {
       title,
       messages: [
-        { role: 'user', content: `${title} seed`, sidekick_id: `umsg_${id}_seed`, timestamp: t0 },
+        { role: 'user', content: `${title} seed`, parley_id: `umsg_${id}_seed`, timestamp: t0 },
       ],
       lastActiveAt: Date.now() - 1000,
     });
@@ -82,7 +82,7 @@ export default async function run({ page, log, mock }) {
       '--------------------------\n' +
       'Your tea timer fired.\n\n' +
       'To stop or manage this job, open Parley.',
-    sidekick_id: 'notif_activity_cron_1',
+    parley_id: 'notif_activity_cron_1',
   });
   await waitForActivityDot(page, true);
   log('cron notification keeps the Activity dot lit ✓');

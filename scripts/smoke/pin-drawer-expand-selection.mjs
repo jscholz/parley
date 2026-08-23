@@ -11,8 +11,8 @@ export const DESCRIPTION = 'pin body expands without stealing text selection; me
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const PIN_CHAT = 'sidekick:pin-expand-selection-source';
-const OTHER_CHAT = 'sidekick:pin-expand-selection-other';
+const PIN_CHAT = 'parley:pin-expand-selection-source';
+const OTHER_CHAT = 'parley:pin-expand-selection-other';
 const MSG_ID = 'msg-pin-expand-selection';
 
 export function MOCK_SETUP(mock) {
@@ -20,13 +20,13 @@ export function MOCK_SETUP(mock) {
   mock.addChat(PIN_CHAT, {
     title: 'Pinned Source',
     messages: [
-      { role: 'assistant', content: 'Selectable pin text line one.\nSelectable pin text line two.\nSelectable pin text line three.\nSelectable pin text line four.', message_id: MSG_ID, sidekick_id: MSG_ID, timestamp: nowSec - 120 },
+      { role: 'assistant', content: 'Selectable pin text line one.\nSelectable pin text line two.\nSelectable pin text line three.\nSelectable pin text line four.', message_id: MSG_ID, parley_id: MSG_ID, timestamp: nowSec - 120 },
     ],
     lastActiveAt: Date.now() - 120_000,
   });
   mock.addChat(OTHER_CHAT, {
     title: 'Other Chat',
-    messages: [{ role: 'user', content: 'other chat seed', sidekick_id: 'other-seed', timestamp: nowSec - 60 }],
+    messages: [{ role: 'user', content: 'other chat seed', parley_id: 'other-seed', timestamp: nowSec - 60 }],
     lastActiveAt: Date.now() - 60_000,
   });
   mock.seedPin(PIN_CHAT, MSG_ID, {

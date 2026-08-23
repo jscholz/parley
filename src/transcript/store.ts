@@ -79,7 +79,7 @@ export function getState(chatId: string): ChatState {
  *  the local envelopes were only useful for the streaming window.
  *
  *  Why: when the plugin's `_write_msg_links_after_turn` fails to link a
- *  state.db row to its SSE-shape sidekick_id, the projection sees two
+ *  state.db row to its SSE-shape parley_id, the projection sees two
  *  keys for the same message — durable's integer-id key and inflight's
  *  umsg_ / msg_ key — and can't dedup them. Result: an "orphan tail"
  *  of duplicate ghost turns at the bottom of the transcript with
@@ -106,7 +106,7 @@ export function setDurable(
 }
 
 /** Walk an envelope array and drop completed-turn envelopes whose
- *  reply_final's message_id is present in durable as a `sidekick_id`.
+ *  reply_final's message_id is present in durable as a `parley_id`.
  *  "Completed" = reply_final has fired; "present in durable" = the
  *  server-side mirror caught up and the projection can dedup off
  *  durable. When the mirror hasn't caught up (e.g. background-chat
@@ -116,11 +116,11 @@ export function setDurable(
  *  background-reply-first-switch-shows-content.mjs).
  *
  *  Original motivation (commit 4d2f7dd): plugin's link-table write
- *  silently failed → durable had assistant rows with sidekick_id
+ *  silently failed → durable had assistant rows with parley_id
  *  NULL → projection couldn't dedup integer-id durable keys against
  *  SSE-shape inflight keys → ghost-tail of the just-finished turn.
  *  With phase-3 self-heal landed in supplemental store, the NULL
- *  sidekick_id case is rare; when it still occurs the inflight
+ *  parley_id case is rare; when it still occurs the inflight
  *  envelope stays and the projection's own dedup (text match by
  *  key) handles it.
  */
@@ -131,7 +131,7 @@ function dropCompletedTurnEnvelopes(
   if (envs.length === 0) return envs;
   const durableParleyIds = new Set<string>();
   for (const d of durable) {
-    if (d.sidekick_id) durableParleyIds.add(d.sidekick_id);
+    if (d.parley_id) durableParleyIds.add(d.parley_id);
   }
   // Walk from end; find the most recent reply_final whose message_id
   // IS present in durable. Only completed turns whose mirror has
@@ -361,7 +361,7 @@ export function fillGap(
   } else {
     const lastFetched = fresh[fresh.length - 1];
     if (lastFetched) {
-      gap.gap_older_id = String(lastFetched.sidekick_id || lastFetched.id);
+      gap.gap_older_id = String(lastFetched.parley_id || lastFetched.id);
       gap.gap_after_id = Number(lastFetched.id);
       gap.id = `gapmark_${gap.gap_older_id}_${gap.gap_newer_id ?? ''}`;
     }
@@ -380,8 +380,8 @@ function fullPagination(p: PaginationInput): ChatState['pagination'] {
 }
 
 function makeGap(olderRow: ConversationItem, newerRow: ConversationItem): ConversationItem {
-  const olderId = String(olderRow.sidekick_id || olderRow.id);
-  const newerId = String(newerRow.sidekick_id || newerRow.id);
+  const olderId = String(olderRow.parley_id || olderRow.id);
+  const newerId = String(newerRow.parley_id || newerRow.id);
   const mid = (normTs(olderRow) + normTs(newerRow)) / 2;
   return {
     id: `gapmark_${olderId}_${newerId}`,
@@ -398,14 +398,14 @@ function itemIdSet(items: ConversationItem[]): Set<string> {
   const set = new Set<string>();
   for (const it of items) {
     set.add(String(it.id));
-    if (it.sidekick_id) set.add(it.sidekick_id);
+    if (it.parley_id) set.add(it.parley_id);
   }
   return set;
 }
 
 function isDup(it: ConversationItem, ids: Set<string>): boolean {
   if (ids.has(String(it.id))) return true;
-  if (it.sidekick_id && ids.has(it.sidekick_id)) return true;
+  if (it.parley_id && ids.has(it.parley_id)) return true;
   return false;
 }
 

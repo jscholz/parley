@@ -45,7 +45,7 @@ function bMessages(count, { base = Date.now() - 10 * 60_000, startIdx = 1 } = {}
     messages.push({
       role,
       content: role === 'user' ? `user b ${idx}` : `agent b ${idx}`,
-      sidekick_id: `tfcb2-msg-${idx}`,
+      parley_id: `tfcb2-msg-${idx}`,
       timestamp: (base - (count - 1 - i) * 60_000) / 1000,
     });
   }
@@ -55,15 +55,15 @@ function bMessages(count, { base = Date.now() - 10 * 60_000, startIdx = 1 } = {}
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'TFC-B2 viewed chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'hello from A', sidekick_id: 'tfcb2-a-1', timestamp: Date.now() / 1000 },
+      { role: 'user', content: 'hello from A', parley_id: 'tfcb2-a-1', timestamp: Date.now() / 1000 },
     ],
     lastActiveAt: Date.now(),
   });
   mock.addChat(CHAT_B, {
     title: 'TFC-B2 stale chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: bMessages(B_MSGS),
     lastActiveAt: Date.now() - 10 * 60_000,
   });
@@ -78,7 +78,7 @@ const clickChat = (page, cid) => page.evaluate((c) => {
 const cacheHasMsg = (page, chatId, sid) => page.evaluate(async ({ c, s }) => {
   const sc = await import('/build/sessionCache.mjs');
   const rec = await sc.getMessagesCache(c);
-  return !!rec?.messages?.some((m) => m?.sidekick_id === s);
+  return !!rec?.messages?.some((m) => m?.parley_id === s);
 }, { c: chatId, s: sid });
 
 export default async function run({ page, log, mock }) {
@@ -100,7 +100,7 @@ export default async function run({ page, log, mock }) {
   // 3. B advances by 15 messages server-side, silently (no SSE).
   mock.addChat(CHAT_B, {
     title: 'TFC-B2 stale chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       ...bMessages(B_MSGS),
       ...bMessages(NEW_MSGS, { base: Date.now(), startIdx: B_MSGS + 1 }),
@@ -120,7 +120,7 @@ export default async function run({ page, log, mock }) {
   await pollUntil(page, async ({ c, s }) => {
     const sc = await import('/build/sessionCache.mjs');
     const rec = await sc.getMessagesCache(c);
-    return !!rec?.messages?.some((m) => m?.sidekick_id === s);
+    return !!rec?.messages?.some((m) => m?.parley_id === s);
   }, { c: CHAT_B, s: WINDOW_TAIL_ID }, { timeout: 8_000, polling: 200, label: `sweep never merged ${WINDOW_TAIL_ID} into B's cache` });
   log('sweep refreshed B cache with the no-overlap window ✓');
 

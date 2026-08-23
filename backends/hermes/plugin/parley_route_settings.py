@@ -79,7 +79,7 @@ def read_preferred_models(cfg: Dict[str, Any]) -> List[str]:
     list of glob strings). Falls back to PARLEY_PREFERRED_MODELS
     env (comma-separated) for env-only deployments. Empty result
     = no filter (full catalog)."""
-    sk = cfg.get("sidekick") if isinstance(cfg.get("sidekick"), dict) else {}
+    sk = cfg.get("parley") if isinstance(cfg.get("parley"), dict) else {}
     raw = sk.get("preferred_models")
     if isinstance(raw, list):
         out = [str(g).strip() for g in raw if isinstance(g, str) and str(g).strip()]
@@ -189,7 +189,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
 
     # Pull EVERY other authenticated provider's curated model list
     # (Codex OAuth, Copilot OAuth, Anthropic API key, etc.).
-    sk_cfg = cfg.get("sidekick", {}) if isinstance(cfg.get("sidekick"), dict) else {}
+    sk_cfg = cfg.get("parley", {}) if isinstance(cfg.get("parley"), dict) else {}
     exclude_providers = set()
     for p in (sk_cfg.get("exclude_providers") or []):
         if isinstance(p, str):
@@ -319,10 +319,10 @@ def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
         if cfg_path.exists():
             with open(cfg_path, encoding="utf-8") as f:
                 cfg = yaml.safe_load(f) or {}
-        sk = cfg.get("sidekick")
+        sk = cfg.get("parley")
         if not isinstance(sk, dict):
             sk = {}
-            cfg["sidekick"] = sk
+            cfg["parley"] = sk
         sk["preferred_models"] = cleaned
         from hermes_cli.config import save_config
         save_config(cfg)

@@ -33,7 +33,7 @@ export function MOCK_SETUP(mock) {
     title: 'Newline preservation test',
     messages: [
       { role: 'user', content: 'seed',
-        sidekick_id: 'umsg_newline_seed',
+        parley_id: 'umsg_newline_seed',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 1000,

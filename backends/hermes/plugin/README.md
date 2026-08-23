@@ -97,7 +97,7 @@ view. They're kept in sync by:
 | 3 | 2026-05-19 | Content-fingerprint linker (replaces `_write_msg_links_after_turn`) |
 | 4 | 2026-05-19 | Bidirectional self-heal on every reconcile |
 | Cleanup | 2026-05-19 | Legacy `_write_msg_links_after_turn`, `_capture_msg_high_water_mark` callers removed |
-| Cleanup-2 | 2026-05-19 | Legacy method bodies deleted, `sidekick_msg_links` state.db side-table CREATE removed. Rollback target: git history at `a7d6c17`. |
+| Cleanup-2 | 2026-05-19 | Legacy method bodies deleted, `parley_msg_links` state.db side-table CREATE removed. Rollback target: git history at `a7d6c17`. |
 | 5 (pending) | TBD | Openclaw parity — port self-heal pattern to openclaw's jsonl substrate |
 
 ## Install

@@ -34,20 +34,20 @@ const CHAT_B = 'mock-switchback-mem-b';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — revisited',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'AAA distinctive marker one', message_id: 'a-1', sidekick_id: 'a-1',
+      { role: 'user', content: 'AAA distinctive marker one', message_id: 'a-1', parley_id: 'a-1',
         timestamp: Date.now() / 1000 - 120 },
-      { role: 'assistant', content: 'AAA distinctive marker two', message_id: 'a-2', sidekick_id: 'a-2',
+      { role: 'assistant', content: 'AAA distinctive marker two', message_id: 'a-2', parley_id: 'a-2',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B — sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: 'BBB sibling marker', message_id: 'b-1', sidekick_id: 'b-1',
+      { role: 'user', content: 'BBB sibling marker', message_id: 'b-1', parley_id: 'b-1',
         timestamp: Date.now() / 1000 - 30 },
     ],
     lastActiveAt: Date.now() - 30_000,

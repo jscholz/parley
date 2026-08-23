@@ -16,7 +16,7 @@ CHAT_ID = "c0a01ab1-bee2-4d5e-6f70-8090a0b0c0d0"
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -53,7 +53,7 @@ def state_db(tmp_path):
     return path
 
 
-def _add_session(state_db, sid, chat_id=CHAT_ID, source="sidekick"):
+def _add_session(state_db, sid, chat_id=CHAT_ID, source="parley"):
     conn = sqlite3.connect(str(state_db))
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, system_prompt, "
@@ -109,11 +109,11 @@ def test_unread_counts_envelope_only_reply_before_state_db_flush(db, state_db):
         "type": "reply_final", "chat_id": CHAT_ID,
         "message_id": "msg_pre_flush", "text": "Checking.",
     })
-    unread = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    unread = compute_unread(db=db, state_db_path=state_db, source="parley")
     chat_ids = [c["chat_id"] for c in unread["chats"]]
-    assert f"sidekick:{CHAT_ID}" in chat_ids, \
+    assert f"parley:{CHAT_ID}" in chat_ids, \
         f"envelope-only chat must surface in unread set; got {chat_ids}"
-    target = next(c for c in unread["chats"] if c["chat_id"] == f"sidekick:{CHAT_ID}")
+    target = next(c for c in unread["chats"] if c["chat_id"] == f"parley:{CHAT_ID}")
     assert target["unread_count"] >= 1, \
         f"unread_count should be ≥1 for envelope-only reply, got {target['unread_count']}"
     assert unread["total"] >= 1
@@ -132,11 +132,11 @@ def test_unread_counts_final_replies_not_tool_call_activity(db, state_db):
     _add_msg(state_db, "s1", "tool", "result 3", ts=1004.0, tool_call_id="call_3")
     _add_msg(state_db, "s1", "assistant", "final answer", ts=1005.0)
 
-    unread = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    unread = compute_unread(db=db, state_db_path=state_db, source="parley")
 
     assert unread == {
         "chats": [{
-            "chat_id": f"sidekick:{CHAT_ID}",
+            "chat_id": f"parley:{CHAT_ID}",
             "unread_count": 1,
             "marked_unread": False,
             "last_read_at": None,
@@ -239,11 +239,11 @@ def test_compute_unread_ttl_cache_collapses_repeat_calls(db, state_db):
                  f"m{i}", ts=1000.0 + i)
     # First call — uncached, runs the full CTE+scan.
     t0 = _t.monotonic()
-    first = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    first = compute_unread(db=db, state_db_path=state_db, source="parley")
     dt_uncached = _t.monotonic() - t0
     # Second call — should hit the TTL cache.
     t0 = _t.monotonic()
-    second = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    second = compute_unread(db=db, state_db_path=state_db, source="parley")
     dt_cached = _t.monotonic() - t0
     # Same result either way.
     assert first == second
@@ -278,7 +278,7 @@ def test_compute_unread_batches_state_queries(db, state_db):
         _add_msg(state_db, sid, "assistant", f"reply-{i}", ts=1000.0 + i)
     import time as _t
     t0 = _t.monotonic()
-    result = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    result = compute_unread(db=db, state_db_path=state_db, source="parley")
     dt = _t.monotonic() - t0
     # Correctness: each chat has 1 unread assistant row → total 50.
     assert result["total"] == 50, (
@@ -304,18 +304,18 @@ def test_compute_unread_cache_invalidation_after_mark_seen(db, state_db):
     that doesn't clear when they click into a chat.
     """
     from ..parley_unread import invalidate_unread_cache
-    chat_id_prefixed = f"sidekick:{CHAT_ID}"
+    chat_id_prefixed = f"parley:{CHAT_ID}"
     _add_session(state_db, "s1")
     _add_msg(state_db, "s1", "assistant", "unread reply", ts=1000.0)
     # Prime the cache with an "unread > 0" snapshot.
-    first = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    first = compute_unread(db=db, state_db_path=state_db, source="parley")
     assert first["total"] >= 1
     # Mark seen + invalidate (mirrors what handle_unread_seen does).
     state.mark_seen(db, chat_id_prefixed, now=2000.0)
     invalidate_unread_cache()
     # Next compute_unread must reflect the mark_seen (not return the
     # stale "unread > 0" snapshot from the cache).
-    second = compute_unread(db=db, state_db_path=state_db, source="sidekick")
+    second = compute_unread(db=db, state_db_path=state_db, source="parley")
     assert second["total"] == 0, (
         f"cache wasn't invalidated after mark_seen — still seeing "
         f"stale unread total={second['total']}"

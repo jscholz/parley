@@ -5,7 +5,7 @@ same role: bridge the gap between POST receipt (user message known)
 and state.db persistence (rows written, link table updated by
 ``_write_msg_links_after_turn`` at ``reply_final``). During that
 window, ``/v1/conversations/{id}/items`` would return rows without
-``sidekick_id`` (link table hasn't written), so the PWA can't dedup
+``parley_id`` (link table hasn't written), so the PWA can't dedup
 the live SSE bubble against the items replay. Merging the buffer
 fills the gap.
 
@@ -153,7 +153,7 @@ class TurnBuffer:
 
         Replaces the older ``render_items`` items-merge approach, which
         produced finalized-shape rows that didn't dedup against subsequent
-        live deltas (no ``sidekick_id`` on the in-flight assistant),
+        live deltas (no ``parley_id`` on the in-flight assistant),
         causing a visible double-render on mid-turn reload."""
         out: List[Dict[str, Any]] = []
         # User message — drives the user bubble on a reconnected client.
@@ -223,7 +223,7 @@ class TurnBuffer:
             "role": "user",
             "content": entry.user_message,
             "created_at": entry.started_at,
-            "sidekick_id": entry.user_message_id,
+            "parley_id": entry.user_message_id,
         })
         seq += 1
         # Interleave tool calls + results by timestamp.

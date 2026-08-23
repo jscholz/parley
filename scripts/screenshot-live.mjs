@@ -12,7 +12,7 @@ const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const PROMPT = "give me directions from my office to the nearest tesco";
-const SETTINGS_KEY = 'sidekick.settings.v2';
+const SETTINGS_KEY = 'parley.settings.v2';
 
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
 const browser = await chromium.launch({ executablePath: exec, headless: true });

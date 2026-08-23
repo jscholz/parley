@@ -28,7 +28,7 @@ const TG_CHAT = '99999';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(SK_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Parley chat',
     messages: [
       { role: 'user', content: 'hello', timestamp: Date.now() / 1000 - 60 },

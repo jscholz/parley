@@ -8,7 +8,7 @@ mkdirSync(OUT, { recursive: true });
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
 const browser = await chromium.launch({ executablePath: exec, headless: true });
 
-const SETTINGS_KEY = 'sidekick.settings.v2';
+const SETTINGS_KEY = 'parley.settings.v2';
 
 for (const theme of ['dark', 'light']) {
   const ctx = await browser.newContext({

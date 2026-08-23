@@ -47,7 +47,7 @@ from typing import Optional, Tuple
 # platform-adapter migration; if hermes adds a new platform, drop it
 # in here.
 GATEWAY_DRAWER_SOURCES: Tuple[str, ...] = (
-    "sidekick",
+    "parley",
     "telegram",
     "whatsapp",
     "slack",
@@ -61,11 +61,9 @@ GATEWAY_DRAWER_SOURCES: Tuple[str, ...] = (
 # endpoint and by tool-event hook resolution (which only cares about
 # parley sessions; non-parley tool calls never make it past the
 # adapter's filter).
-# Legacy name + value, predates the Parley rename: "sidekick" is the
-# source stamped on every existing row in the live DBs and embedded in
-# session keys (agent:main:sidekick:dm:<chat_id>) — renaming the VALUE
-# orphans all history. Keep constant name and value together.
-SIDEKICK_SOURCE: str = "sidekick"
+# Value was "sidekick" until the 2026-08 identity purge rewrote every
+# stored row + session key (scripts/migrate-sidekick-to-parley.sh).
+PARLEY_SOURCE: str = "parley"
 
 _GATEWAY_ID_SEP = ":"
 

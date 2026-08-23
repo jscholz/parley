@@ -30,10 +30,10 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 1000;
   const messages = [];
   for (let i = 0; i < 14; i++) {
-    messages.push({ role: 'user', content: `Question number ${i} — ${'lorem ipsum '.repeat(6)}`, sidekick_id: `umsg_bu_${i}`, timestamp: t0 + i * 2 });
-    messages.push({ role: 'assistant', content: `Answer number ${i} — ${'dolor sit amet '.repeat(6)}`, sidekick_id: `msg_bu_${i}`, timestamp: t0 + i * 2 + 1 });
+    messages.push({ role: 'user', content: `Question number ${i} — ${'lorem ipsum '.repeat(6)}`, parley_id: `umsg_bu_${i}`, timestamp: t0 + i * 2 });
+    messages.push({ role: 'assistant', content: `Answer number ${i} — ${'dolor sit amet '.repeat(6)}`, parley_id: `msg_bu_${i}`, timestamp: t0 + i * 2 + 1 });
   }
-  mock.addChat(CHAT_ID, { title: 'Badge unreads chat', source: 'sidekick', messages, lastActiveAt: Date.now() });
+  mock.addChat(CHAT_ID, { title: 'Badge unreads chat', source: 'parley', messages, lastActiveAt: Date.now() });
   mock.setAutoReplyEnabled(false);
 }
 

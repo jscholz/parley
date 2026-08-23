@@ -26,7 +26,6 @@ import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
 import { resolveConfigPath } from './proxy/configPath.mjs';
-import { rewriteLegacyApiPath } from './proxy/legacyPaths.mjs';
 import * as parley from './proxy/parley/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/parley/setup.ts';
 import {
@@ -96,9 +95,7 @@ function reloadConfigIfChanged(): boolean {
   }
 }
 /** Resolve a value by precedence: env var → config file → fallback.
- *  `cfgPath` may be an array of dotted paths tried in order — used to
- *  honor legacy `backend.sidekick_platform.*` keys still present in
- *  deployed config files after the Parley rename (new key wins). */
+ *  `cfgPath` may be an array of dotted paths tried in order. */
 function cfgVal<T>(envName: string, cfgPath: string | string[], fallback: T): T {
   const env = readEnv(envName);
   if (env != null && env !== '') return env as unknown as T;
@@ -1020,15 +1017,13 @@ const HOME = os.homedir();
 // backends/hermes/plugin is the typical upstream; the stub agent under
 // `agent/` is a hermes-free reference. With no token configured,
 // `/api/parley/*` endpoints return 503.
-// Legacy config key `backend.sidekick_platform.*` still present in
-// deployed yaml files is honored as a fallback (new key wins).
 const PARLEY_UPSTREAM_URL = cfgVal('PARLEY_PLATFORM_URL',
-  ['backend.parley_platform.url', 'backend.sidekick_platform.url'],
+  ['backend.parley_platform.url'],
   'http://127.0.0.1:8645') as string;
 parley.init({
   token: readEnv('PARLEY_PLATFORM_TOKEN')
     || (cfgVal('PARLEY_PLATFORM_TOKEN',
-      ['backend.parley_platform.token', 'backend.sidekick_platform.token'], '') as string),
+      ['backend.parley_platform.token'], '') as string),
   url: PARLEY_UPSTREAM_URL,
   // Backend switch (claude-code wiring 2026-07-14): `backend: claude-code`
   // in parley.config.yaml (or PARLEY_BACKEND env, which wins inside
@@ -1168,10 +1163,6 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
 }
 
 const requestHandler: http.RequestListener = async (req, res) => {
-  // Deprecated alias (Parley rename): installed PWA/CAP clients still
-  // call /api/parley/* until rebuilt — same handlers serve both
-  // prefixes. See proxy/legacyPaths.mjs for the removal condition.
-  if (req.url) req.url = rewriteLegacyApiPath(req.url);
   applyCors(req, res);
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
@@ -1197,13 +1188,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-store',
     });
-    // `app` keeps the legacy 'sidekick' sentinel — every INSTALLED CAP
-    // bootstrap on a phone hard-checks body.app === 'sidekick' and
-    // treats anything else as "not our host" (white-screen guard).
-    // New bootstraps accept either value; flip this to 'parley' only
-    // once no installed shell predates the rename. `product` carries
-    // the real name.
-    res.end(JSON.stringify({ ok: true, app: 'sidekick', product: 'parley' }));
+    // Sentinel for the CAP bootstrap's host probe. Installed shells
+    // since the 2026-08 rename accept app:'parley' (and independently
+    // match product:'parley'), so the legacy app:'sidekick' value was
+    // dropped in the identity purge.
+    res.end(JSON.stringify({ ok: true, app: 'parley', product: 'parley' }));
     return;
   }
   // WebRTC voice signaling proxy → /v1/rtc/* on hermes upstream.

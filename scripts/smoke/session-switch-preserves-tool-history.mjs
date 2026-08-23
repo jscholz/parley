@@ -59,7 +59,7 @@ export function MOCK_SETUP(mock) {
     {
       role: 'user',
       content: 'survey the project',
-      sidekick_id: 'umsg_switch_user_a',
+      parley_id: 'umsg_switch_user_a',
       timestamp: t0,
     },
   ];
@@ -81,7 +81,7 @@ export function MOCK_SETUP(mock) {
   aMessages.push({
     role: 'assistant',
     content: 'A-DONE — surveyed 5 dirs.',
-    sidekick_id: 'msg_switch_final_a',
+    parley_id: 'msg_switch_final_a',
     timestamp: t0 + 100,
   });
   mock.addChat(CHAT_A, {
@@ -94,8 +94,8 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
     title: 'B — no tools',
     messages: [
-      { role: 'user', content: 'hi B', sidekick_id: 'umsg_b', timestamp: t0 + 200 },
-      { role: 'assistant', content: 'B-REPLY', sidekick_id: 'msg_b', timestamp: t0 + 201 },
+      { role: 'user', content: 'hi B', parley_id: 'umsg_b', timestamp: t0 + 200 },
+      { role: 'assistant', content: 'B-REPLY', parley_id: 'msg_b', timestamp: t0 + 201 },
     ],
     lastActiveAt: Date.now() - 60_000,
   });

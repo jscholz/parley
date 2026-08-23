@@ -23,17 +23,17 @@ const toolCallJson = (callId, name, args) => JSON.stringify([{
 
 export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 600;
-  const messages = [{ role: 'user', content: 'survey the dirs', sidekick_id: 'umsg_tc_user', timestamp: t0 }];
+  const messages = [{ role: 'user', content: 'survey the dirs', parley_id: 'umsg_tc_user', timestamp: t0 }];
   for (let i = 0; i < 3; i++) {
     const callId = `call_tc_${i}`;
     messages.push({ role: 'assistant', content: '', tool_calls: toolCallJson(callId, 'list_files', { path: `/d/${i}` }), timestamp: t0 + 1 + i });
     messages.push({ role: 'tool', content: JSON.stringify({ output: `r${i}`, exit_code: 0 }), tool_call_id: callId, timestamp: t0 + 1.5 + i });
   }
-  messages.push({ role: 'assistant', content: 'Done — surveyed 3 dirs.', sidekick_id: 'msg_tc_final', timestamp: t0 + 100 });
+  messages.push({ role: 'assistant', content: 'Done — surveyed 3 dirs.', parley_id: 'msg_tc_final', timestamp: t0 + 100 });
   mock.addChat(CHAT_A, { title: 'Tool collapse A', messages, lastActiveAt: Date.now() });
   mock.addChat(CHAT_B, { title: 'Plain chat B', messages: [
-    { role: 'user', content: 'hi', sidekick_id: 'umsg_b', timestamp: t0 + 5 },
-    { role: 'assistant', content: 'hello', sidekick_id: 'msg_b', timestamp: t0 + 6 },
+    { role: 'user', content: 'hi', parley_id: 'umsg_b', timestamp: t0 + 5 },
+    { role: 'assistant', content: 'hello', parley_id: 'msg_b', timestamp: t0 + 6 },
   ], lastActiveAt: Date.now() - 1000 });
 }
 

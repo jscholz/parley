@@ -160,7 +160,7 @@ const dictateDebugOn = (() => {
     if (qs.get('debug') === '1') return true;
     if (qs.get('debug-relay') === '1') return true;
     if (localStorage.getItem('dictate_debug') === '1') return true;
-    if (localStorage.getItem('sidekick_debug') === '1') return true;
+    if (localStorage.getItem('parley_debug') === '1') return true;
     if (localStorage.getItem('dev_mode') === '1') return true;
   } catch { /* ignore */ }
   return false;

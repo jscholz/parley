@@ -26,7 +26,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 120;
   mock.addChat(CHAT_A, {
     title: 'IDB A',
-    messages: [{ role: 'user', content: 'IDB-A-SEED', sidekick_id: 'umsg_idb_a', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'IDB-A-SEED', parley_id: 'umsg_idb_a', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

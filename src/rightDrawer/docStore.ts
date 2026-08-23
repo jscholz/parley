@@ -11,7 +11,7 @@
 // re-push = refresh; the workspace file is the source of truth), while
 // different paths coexist. Mirrors CANVAS.md `replaces` semantics.
 //
-// Persistence: localStorage `sidekick.docs.v2` with a one-time
+// Persistence: localStorage `parley.docs.v2` with a one-time
 // migration from the v1 single-slot key. Cap: MAX_DOCS entries and
 // ~MAX_PERSIST_CHARS total serialized — LRU-evict oldest non-active
 // (quota is shared with transcript snapshots).
@@ -48,8 +48,7 @@ export interface DocState extends DocPayload {
   updatedAt: number;
 }
 
-const LS_KEY = 'parley.docs.v2'; // migrated from sidekick.docs.v2
-const LEGACY_LS_KEY = 'sidekick.doc.current';
+const LS_KEY = 'parley.docs.v2';
 const MAX_DOCS = 7;
 // The SHELF budget that matters for localStorage (shared quota with
 // transcript snapshots; same reasoning as v1's single-doc guard).
@@ -112,24 +111,6 @@ export function hydrateDocs(): void {
         if (docs.length) notify(false);
         return;
       }
-    }
-    // One-time migration from the v1 single-slot key.
-    const legacy = localStorage.getItem(LEGACY_LS_KEY);
-    if (legacy) {
-      const parsed = JSON.parse(legacy);
-      if (parsed && typeof parsed.content === 'string' && typeof parsed.title === 'string') {
-        const id = docIdFor(parsed.path, parsed.title);
-        docs = [{
-          ...parsed,
-          id,
-          receivedAt: parsed.receivedAt || Date.now(),
-          updatedAt: parsed.receivedAt || Date.now(),
-        }];
-        activeId = id;
-        persist();
-        notify(false);
-      }
-      try { localStorage.removeItem(LEGACY_LS_KEY); } catch { /* ignore */ }
     }
   } catch { /* corrupt snapshot → start empty */ }
 }

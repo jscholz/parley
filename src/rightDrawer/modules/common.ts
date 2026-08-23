@@ -1,5 +1,5 @@
 export function chatLabelFor(chatId: string): string {
-  const stripped = chatId.replace(/^sidekick:/, '');
+  const stripped = chatId.replace(/^parley:/, '');
   return stripped.length > 12 ? stripped.slice(0, 12) + '…' : stripped;
 }
 

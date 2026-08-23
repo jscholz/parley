@@ -43,7 +43,7 @@ export function MOCK_SETUP(mock) {
   for (let turn = 1; turn <= TURN_COUNT; turn++) {
     messages.push({
       role: 'user', content: `Turn ${turn} prompt`,
-      sidekick_id: `u_${turn}`, timestamp: ts++,
+      parley_id: `u_${turn}`, timestamp: ts++,
     });
     messages.push({
       role: 'assistant', content: '',
@@ -63,7 +63,7 @@ export function MOCK_SETUP(mock) {
     });
     messages.push({
       role: 'assistant', content: `Turn ${turn} reply.`,
-      sidekick_id: `m_${turn}`, timestamp: ts++,
+      parley_id: `m_${turn}`, timestamp: ts++,
     });
   }
   mock.addChat(CHAT_ID, {

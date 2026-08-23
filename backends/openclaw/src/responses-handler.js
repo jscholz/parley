@@ -112,7 +112,7 @@ function buildCompletedEnvelope({ responseId, messageId, createdAt, assembled })
 /** Persist the link between our plugin-emitted SSE-shape msg_* id and
  *  openclaw's __openclaw.id for the assistant message that just landed.
  *
- *  Without this, /v1/conversations/{id}/items has no `sidekick_id` to
+ *  Without this, /v1/conversations/{id}/items has no `parley_id` to
  *  surface, the PWA's inflight-cache bubble (keyed by msg_*) can't
  *  dedup against the reload-replay bubble (keyed by integer seq), and
  *  every reload shows duplicated assistant bubbles.
@@ -123,7 +123,7 @@ function buildCompletedEnvelope({ responseId, messageId, createdAt, assembled })
  *  corrupt data). */
 /** Find the user-row that landed in the jsonl for this turn and link
  *  it to the userMessageId the plugin/PWA pre-minted. Lets /items
- *  emit `sidekick_id` for the durable user row → PWA dedups the
+ *  emit `parley_id` for the durable user row → PWA dedups the
  *  optimistic bubble (msg_id=umsg_X) against the durable replay. */
 function persistUserMessageLink({ db, sessionKey, chatId, userMessageId, dispatchedAt, logger }) {
   if (!userMessageId) return;
@@ -162,7 +162,7 @@ function persistUserMessageLink({ db, sessionKey, chatId, userMessageId, dispatc
 function persistMessageLink({ db, sessionKey, chatId, messageId, dispatchedAt, logger }) {
   try {
     const stateDir = resolveStateDir({ profile: PROFILE });
-    // sessionKey is the canonical form (agent:dev:sidekick:abc); we
+    // sessionKey is the canonical form (agent:dev:parley:abc); we
     // need the sessionId (uuid) to find the jsonl.
     const sessions = listSessions({ stateDir, agentId: AGENT_ID });
     const entry = sessions[sessionKey];
@@ -270,8 +270,8 @@ export function makeResponsesHandler({ gatewayClient, eventBus, db, turnBuffer, 
 
     // Dispatch the turn. chat.send returns { runId, status:"started" }.
     let runId;
-    // PWA mints `sidekick:<uuid>`; openclaw stores under
-    // `agent:{agentId}:sidekick:<uuid>`. Normalize incoming chat ids
+    // PWA mints `parley:<uuid>`; openclaw stores under
+    // `agent:{agentId}:parley:<uuid>`. Normalize incoming chat ids
     // to canonical form before chat.send to keep the per-chat session
     // store consistent (so subsequent /v1/responses on the same chat
     // hit the same openclaw session, not a fresh one).
@@ -466,13 +466,13 @@ export function makeResponsesHandler({ gatewayClient, eventBus, db, turnBuffer, 
           // BEFORE emitting response.completed. Proxy turns that into
           // reply_final which the PWA acts on immediately — if persist
           // ran after, the PWA could reload (via next test step or user
-          // action) and miss the sidekick_id for this turn's bubble.
+          // action) and miss the parley_id for this turn's bubble.
           if (db) {
             persistMessageLink({
               db, sessionKey, chatId: parsed.sessionKey,
               messageId, dispatchedAt: createdAt * 1000, logger,
             });
-            // ALSO link the user row so /items emits sidekick_id for
+            // ALSO link the user row so /items emits parley_id for
             // it — PWA's optimistic bubble (keyed by the pre-minted
             // userMessageId) then dedups against the durable replay.
             // Without this, reload after the turn shows TWO user

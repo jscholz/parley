@@ -73,7 +73,7 @@ export function MOCK_SETUP(mock) {
       content: role === 'user'
         ? `Question ${idx}: how does slide ${idx} land?`
         : fatMarkdown(idx),
-      sidekick_id: `nlt-msg-${idx}`,
+      parley_id: `nlt-msg-${idx}`,
       message_id: `nlt-msg-${idx}`,
       timestamp: Date.now() / 1000 - (N_MSGS - idx) * 60,
     });
@@ -81,22 +81,22 @@ export function MOCK_SETUP(mock) {
   messages.push({
     role: 'user',
     content: 'NLT-TAIL-MARKER final question',
-    sidekick_id: 'nlt-msg-tail',
+    parley_id: 'nlt-msg-tail',
     message_id: 'nlt-msg-tail',
     timestamp: Date.now() / 1000 - 30,
   });
   mock.addChat(HUGE, {
     title: 'Pitch deck (no-long-task)',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(SMALL, {
     title: 'Small sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'NLT-SMALL-MARKER hello', message_id: 'nlt-small-1',
-        sidekick_id: 'nlt-small-1', timestamp: Date.now() / 1000 - 40 },
+        parley_id: 'nlt-small-1', timestamp: Date.now() / 1000 - 40 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

@@ -37,13 +37,13 @@ const FETCH_DELAY_MS = 4_000;
 export function MOCK_SETUP(mock) {
   const now = Date.now();
   mock.addChat(CHAT_A, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Landing chat',
     messages: [{ role: 'user', content: 'landing', timestamp: now / 1000 - 30 }],
     lastActiveAt: now - 30_000,
   });
   mock.addChat(CHAT_B, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Cold unread chat',
     messages: [
       { role: 'user', content: 'ping', timestamp: now / 1000 - 600 },

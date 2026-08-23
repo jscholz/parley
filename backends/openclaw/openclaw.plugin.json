@@ -1,7 +1,7 @@
 {
-  "id": "sidekick",
+  "id": "parley",
   "name": "Parley",
-  "description": "Parley (formerly Sidekick) PWA backend \u2014 exposes the /v1/* OpenAI-Responses contract the parley proxy expects against any openclaw runtime. Plugin id stays 'sidekick' (legacy registration key referenced by installed openclaw configs).",
+  "description": "Parley (formerly Sidekick) PWA backend \u2014 exposes the /v1/* OpenAI-Responses contract the parley proxy expects against any openclaw runtime. Plugin id stays 'parley' (legacy registration key referenced by installed openclaw configs).",
   "activation": {
     "onStartup": true
   },

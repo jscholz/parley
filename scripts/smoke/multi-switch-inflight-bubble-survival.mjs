@@ -36,7 +36,7 @@ export function MOCK_SETUP(mock) {
   // exercises the heavy resumeSession path (not a fresh empty chat).
   mock.addChat(CHAT_B, {
     title: 'Other chat',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'hi', timestamp: Date.now() / 1000 - 200 },
       { role: 'assistant', content: 'hello!', timestamp: Date.now() / 1000 - 199 },

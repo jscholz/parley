@@ -35,13 +35,13 @@ const STALE_HOLD_MS = 4_000;
 export function MOCK_SETUP(mock) {
   const now = Date.now();
   mock.addChat(CHAT_A, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Landing chat',
     messages: [{ role: 'user', content: 'landing', timestamp: now / 1000 - 30 }],
     lastActiveAt: now - 30_000,
   });
   mock.addChat(CHAT_B, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Background chat',
     messages: [{ role: 'user', content: 'background', timestamp: now / 1000 - 600 }],
     lastActiveAt: now - 600_000,

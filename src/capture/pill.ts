@@ -129,7 +129,7 @@ async function startFromUi(linkedChat?: string): Promise<void> {
     // and disclosure to participants is the human's obligation. Say it
     // once, ever.
     try {
-      const KEY = 'parley.capture.consentHintShown'; // migrated from sidekick.capture.consentHintShown
+      const KEY = 'parley.capture.consentHintShown';
       if (!localStorage.getItem(KEY)) {
         localStorage.setItem(KEY, '1');
         toast('Recording started. Heads up: letting participants know is on you.');

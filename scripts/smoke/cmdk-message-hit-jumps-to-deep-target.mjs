@@ -38,7 +38,7 @@ export const DESCRIPTION = 'cmd+K message hit that points below the initial tail
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const CHAT_ID = 'sidekick:mock-cmdk-deep-target';
+const CHAT_ID = 'parley:mock-cmdk-deep-target';
 const TAIL_LIMIT = 40; // matches the proxy default for /messages
 // Total messages = TAIL + DEEP_GAP, so target sits below the tail's
 // reach. The around-window fetch is required to surface it.
@@ -54,7 +54,7 @@ export function MOCK_SETUP(mock) {
   messages.push({
     role: 'user',
     content: 'I keep thinking about the pareto frontier',
-    sidekick_id: 'msg_deep_target',
+    parley_id: 'msg_deep_target',
     timestamp: now - (TAIL_LIMIT + DEEP_GAP) * 60,
   });
   // Filler messages between target and tail.
@@ -62,13 +62,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `filler-${i}`,
-      sidekick_id: `msg_filler_${i}`,
+      parley_id: `msg_filler_${i}`,
       timestamp: now - (TAIL_LIMIT + DEEP_GAP - 1 - i) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Deep target chat',
-    source: 'sidekick',
+    source: 'parley',
     lastActiveAt: Date.now(),
     messages,
   });
@@ -93,7 +93,7 @@ export default async function run({ page, log }) {
           snippet: 'pareto frontier',
           timestamp: Math.floor(Date.now() / 1000) - 86_400,
           session_title: 'Deep target chat',
-          session_source: 'sidekick',
+          session_source: 'parley',
         }],
       }),
     });

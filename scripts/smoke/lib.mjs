@@ -460,7 +460,7 @@ export function captureNextChatId(page, { timeoutMs = 5000 } = {}) {
     );
     const handler = (msg) => {
       // Post-v0.383 unification: chat_ids are now prefixed
-      // (`sidekick:<uuid>`). Regex accepts BOTH the prefixed shape
+      // (`parley:<uuid>`). Regex accepts BOTH the prefixed shape
       // and the legacy bare-uuid shape so this helper stays
       // forward-and-back-compat with any old log line that might
       // surface during a partial deploy.

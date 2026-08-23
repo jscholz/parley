@@ -12,7 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { envelopeToPayload, isProgressHeartbeat } from './dispatch.ts';
 
-const CID = 'sidekick:ae6435b5-pitch-deck';
+const CID = 'parley:ae6435b5-pitch-deck';
 
 test('approval and reply pushes for the same chat use different tags', () => {
   const approval = envelopeToPayload({

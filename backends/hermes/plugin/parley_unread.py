@@ -119,7 +119,7 @@ def compute_unread(
     *,
     db,
     state_db_path: Path,
-    source: str = "sidekick",
+    source: str = "parley",
 ) -> Dict:
     """Public entry point — TTL-cached wrapper. The heavy lifting lives
     in ``_compute_unread_uncached``; see its docstring for the SQL
@@ -155,7 +155,7 @@ def _compute_unread_uncached(
     *,
     db,
     state_db_path: Path,
-    source: str = "sidekick",
+    source: str = "parley",
 ) -> Dict:
     """Return the same shape openclaw's compute_unread returns:
     ``{chats: [{chat_id, unread_count, marked_unread, last_read_at}],

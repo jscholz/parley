@@ -35,12 +35,12 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Date headers',
     messages: [
-      { role: 'user', content: 'first day, first message', sidekick_id: 'u_d2_1', timestamp: day2 },
-      { role: 'assistant', content: 'first day reply', sidekick_id: 'a_d2_1', timestamp: day2 + 60 },
-      { role: 'user', content: 'second day, first message', sidekick_id: 'u_d1_1', timestamp: day1 },
-      { role: 'assistant', content: 'second day reply', sidekick_id: 'a_d1_1', timestamp: day1 + 60 },
-      { role: 'user', content: 'today, first message', sidekick_id: 'u_d0_1', timestamp: day0 },
-      { role: 'assistant', content: 'today reply — the most recent message', sidekick_id: 'a_d0_1', timestamp: day0 + 60 },
+      { role: 'user', content: 'first day, first message', parley_id: 'u_d2_1', timestamp: day2 },
+      { role: 'assistant', content: 'first day reply', parley_id: 'a_d2_1', timestamp: day2 + 60 },
+      { role: 'user', content: 'second day, first message', parley_id: 'u_d1_1', timestamp: day1 },
+      { role: 'assistant', content: 'second day reply', parley_id: 'a_d1_1', timestamp: day1 + 60 },
+      { role: 'user', content: 'today, first message', parley_id: 'u_d0_1', timestamp: day0 },
+      { role: 'assistant', content: 'today reply — the most recent message', parley_id: 'a_d0_1', timestamp: day0 + 60 },
     ],
     lastActiveAt: Date.now(),
   });

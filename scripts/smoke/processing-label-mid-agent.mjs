@@ -32,8 +32,8 @@ export const DESCRIPTION = 'Untitled chat with messageCount>0 but no snippet ren
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const RACING_ID = 'sidekick:racing-mid-agent-aaaa-000000000001';
-const EMPTY_ID = 'sidekick:truly-empty-orphan-bbbb-000000000002';
+const RACING_ID = 'parley:racing-mid-agent-aaaa-000000000001';
+const EMPTY_ID = 'parley:truly-empty-orphan-bbbb-000000000002';
 
 export function MOCK_SETUP(mock) {
   // Racing chat: assistant-only messages give messageCount>0 with NO
@@ -43,7 +43,7 @@ export function MOCK_SETUP(mock) {
   // turn hasn't been enriched into the sessions row yet.
   mock.addChat(RACING_ID, {
     title: '',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'assistant', content: 'tool_call sent', timestamp: Date.now() / 1000 - 30 },
       { role: 'assistant', content: 'tool_result received', timestamp: Date.now() / 1000 - 25 },
@@ -58,7 +58,7 @@ export function MOCK_SETUP(mock) {
   // cleanup paths key off.
   mock.addChat(EMPTY_ID, {
     title: '',
-    source: 'sidekick',
+    source: 'parley',
     messages: [],
     lastActiveAt: Date.now() - 60_000,
   });

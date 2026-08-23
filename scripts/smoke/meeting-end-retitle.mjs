@@ -24,7 +24,7 @@ const TOPICAL_TITLE = 'Meeting: Transcript Migration, Rollout';
 export function MOCK_SETUP(mock) {
   mock.addChat('mock-retitle-prior', {
     title: 'Prior chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_rt_seed', timestamp: Date.now() / 1000 - 60 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_rt_seed', timestamp: Date.now() / 1000 - 60 }],
     lastActiveAt: Date.now() - 2000,
   });
 }
@@ -48,7 +48,7 @@ export default async function run({ page, log, mock }) {
   const cap = mock.getCaptures()[0];
   const minted = cap.linked_chat;
   assert(
-    String(minted || '').startsWith('sidekick:mock-capture-'),
+    String(minted || '').startsWith('parley:mock-capture-'),
     `app-level start should mint a session, got: ${minted}`,
   );
   log(`capture ${cap.id} recording into minted session ${minted}`);
@@ -61,7 +61,7 @@ export default async function run({ page, log, mock }) {
     messages: [{
       role: 'user',
       content: '📼 Recording started. Live transcript: /tmp/transcript.md',
-      sidekick_id: 'umsg_rt_start',
+      parley_id: 'umsg_rt_start',
       timestamp: Date.now() / 1000,
     }],
     lastActiveAt: Date.now(),

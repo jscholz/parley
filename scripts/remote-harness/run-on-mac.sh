@@ -3,24 +3,24 @@
 #
 # The Mac sits far from fontbrain/London, so the real network latency that
 # surfaces the drill race is in play. Chrome + playwright-core@1.59.1 are
-# already installed in ~/sidekick-harness on the Mac. Node is only on PATH
+# already installed in ~/parley-harness on the Mac. Node is only on PATH
 # under a login shell, so we invoke via `bash -lc`.
 #
 # Usage: scripts/remote-harness/run-on-mac.sh [PIN_INDEX] [REPEATS]
-#   env passthrough: SIDEKICK_URL VERBOSE DRILL_TIMEOUT
+#   env passthrough: PARLEY_URL VERBOSE DRILL_TIMEOUT
 set -euo pipefail
 
 HOST="${HARNESS_HOST:-jons-macbook-air}"
-REMOTE_DIR="\$HOME/sidekick-harness"
+REMOTE_DIR="\$HOME/parley-harness"
 LOCAL="$(cd "$(dirname "$0")" && pwd)/open-in-chat-trace.mjs"
 PIN_INDEX="${1:-0}"
 REPEATS="${2:-2}"
 
 # Ship the scenario (overwrite each run so edits propagate).
-scp -q "$LOCAL" "$HOST:sidekick-harness/open-in-chat-trace.mjs"
+scp -q "$LOCAL" "$HOST:parley-harness/open-in-chat-trace.mjs"
 
 ENVS="PIN_INDEX=$PIN_INDEX REPEATS=$REPEATS"
-[ -n "${SIDEKICK_URL:-}" ]  && ENVS="$ENVS SIDEKICK_URL=$SIDEKICK_URL"
+[ -n "${PARLEY_URL:-}" ]  && ENVS="$ENVS PARLEY_URL=$PARLEY_URL"
 [ -n "${DRILL_TIMEOUT:-}" ] && ENVS="$ENVS DRILL_TIMEOUT=$DRILL_TIMEOUT"
 [ -n "${VERBOSE:-}" ]       && ENVS="$ENVS VERBOSE=$VERBOSE"
 

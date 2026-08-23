@@ -21,14 +21,14 @@ export function MOCK_SETUP(mock) {
   mock.addChat(VIEWED_CHAT, {
     title: 'Activity Viewed',
     messages: [
-      { role: 'user', content: 'viewed seed', sidekick_id: 'umsg_activity_viewed_seed', timestamp: t0 },
+      { role: 'user', content: 'viewed seed', parley_id: 'umsg_activity_viewed_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 1000,
   });
   mock.addChat(APPROVAL_CHAT, {
     title: 'Approval Source',
     messages: [
-      { role: 'user', content: 'approval seed', sidekick_id: 'umsg_activity_approval_seed', timestamp: t0 },
+      { role: 'user', content: 'approval seed', parley_id: 'umsg_activity_approval_seed', timestamp: t0 },
     ],
     lastActiveAt: Date.now() - 5000,
   });
@@ -53,7 +53,7 @@ export default async function run({ page, log, mock }) {
       'printf parley-activity-approval\n\n' +
       'Reason: activity tray smoke\n' +
       'Reply /approve to execute, /approve session to approve this pattern for the session, or /deny to cancel.',
-    sidekick_id: 'notif_activity_approval_1',
+    parley_id: 'notif_activity_approval_1',
     urgent: true,
   });
 

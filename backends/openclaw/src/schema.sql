@@ -1,4 +1,4 @@
--- Sidekick supplemental store schema.
+-- Parley supplemental store schema.
 --
 -- Implements the design signed off 2026-05-15 in
 -- ../docs/parley-supplemental-store-schema.md.

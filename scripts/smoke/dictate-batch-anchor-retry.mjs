@@ -28,7 +28,7 @@ const CHAT_ID = 'mock-dictate-anchor';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Dictate anchor chat',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_dictate_anchor_seed', timestamp: Date.now() / 1000 - 60 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_dictate_anchor_seed', timestamp: Date.now() / 1000 - 60 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

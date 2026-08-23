@@ -77,7 +77,7 @@ export function MOCK_SETUP(mock) {
       content: role === 'user'
         ? `Question ${idx}: how does slide ${idx} land?`
         : fatMarkdown(idx),
-      sidekick_id: `huge-msg-${idx}`,
+      parley_id: `huge-msg-${idx}`,
       message_id: `huge-msg-${idx}`,
       timestamp: Date.now() / 1000 - (N_MSGS - idx) * 60,
     });
@@ -87,22 +87,22 @@ export function MOCK_SETUP(mock) {
   messages.push({
     role: 'user',
     content: 'HUGE-TAIL-MARKER final question',
-    sidekick_id: 'huge-msg-tail',
+    parley_id: 'huge-msg-tail',
     message_id: 'huge-msg-tail',
     timestamp: Date.now() / 1000 - 30,
   });
   mock.addChat(HUGE, {
     title: 'Pitch deck (huge)',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(SMALL, {
     title: 'Small sibling',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       { role: 'user', content: 'SMALL-MARKER hello', message_id: 'small-1',
-        sidekick_id: 'small-1', timestamp: Date.now() / 1000 - 40 },
+        parley_id: 'small-1', timestamp: Date.now() / 1000 - 40 },
     ],
     lastActiveAt: Date.now() - 30_000,
   });

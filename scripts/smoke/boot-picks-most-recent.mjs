@@ -24,7 +24,7 @@ const RECENT_MARKER = 'recent-conversation-marker';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(OLD_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Old chat',
     messages: [
       { role: 'user', content: OLD_MARKER, timestamp: Date.now() / 1000 - 3600 },
@@ -33,7 +33,7 @@ export function MOCK_SETUP(mock) {
     lastActiveAt: Date.now() - 3600 * 1000,  // 1 hour ago
   });
   mock.addChat(RECENT_CHAT, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Recent chat',
     messages: [
       { role: 'user', content: RECENT_MARKER, timestamp: Date.now() / 1000 - 60 },

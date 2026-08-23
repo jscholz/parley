@@ -1,41 +1,44 @@
-# NOTE (Parley rename, 2026-08): `name` stays "sidekick" — it is the
-# registration key the deployed hermes.config.yaml references AND the
-# Platform value embedded in live state.db session keys
-# (agent:main:sidekick:dm:<chat_id>). Renaming it orphans every existing
-# session. Display metadata below carries the new product name.
-name: sidekick
+# Registration key AND platform id. Was "sidekick" until the 2026-08
+# identity purge, which rewrote every persisted occurrence (state.db
+# session keys, gateway_routing, parley.db chat-id prefixes, hindsight
+# metadata) in the same cutover — see
+# hermes-agent-private scripts/migrate-sidekick-to-parley.sh.
+name: parley
 label: Parley
 kind: platform
-version: 0.3.0
+version: 0.4.0
 description: |
   Parley (formerly Sidekick) PWA platform adapter. Runs an aiohttp
   WebSocket server bound to localhost so the parley proxy (Node.js) can
   dispatch user messages and receive streaming agent responses + push
   notifications. Peer of telegram/slack/signal adapters.
 
-  v0.3.0 — product renamed Sidekick → Parley. Registration name and
-  platform id deliberately stay "sidekick" (persisted in live session
-  keys); env vars are PARLEY_* with SIDEKICK_* honored as fallback.
+  v0.4.0 — identity purge: registration name / platform id flipped to
+  "parley" together with a one-time rewrite of all persisted keys; the
+  SIDEKICK_* env fallback met its documented removal condition and is
+  gone (every deployment surface now exports PARLEY_*).
+
+  v0.3.0 — product renamed Sidekick → Parley (display metadata only).
 
   v0.2.0 — migrated to upstream's plugin-driven platform registration
   (gateway/platform_registry.py). No longer requires a hermes-agent
-  patch to add Platform.SIDEKICK or wire the adapter factory.
+  patch to add the platform or wire the adapter factory.
 author: Reimagine Robotics
 provides_hooks:
   - pre_tool_call
   - post_tool_call
 provides_tools: []
 requires_env:
-  - name: SIDEKICK_PLATFORM_TOKEN
-    description: "Bearer token the parley proxy uses on every WS message + HTTP call to this plugin (PARLEY_PLATFORM_TOKEN is the primary spelling; this legacy name is what deployed env files still set)"
+  - name: PARLEY_PLATFORM_TOKEN
+    description: "Bearer token the parley proxy uses on every WS message + HTTP call to this plugin"
     prompt: "Parley platform token (will also be set on the proxy side)"
     password: true
 optional_env:
-  - name: SIDEKICK_PLATFORM_ALLOWED_USERS
-    description: "Comma-separated user ids allowed to talk to the agent through parley (legacy spelling; PARLEY_PLATFORM_ALLOWED_USERS also honored)"
+  - name: PARLEY_PLATFORM_ALLOWED_USERS
+    description: "Comma-separated user ids allowed to talk to the agent through parley"
     prompt: "Allowed user ids (comma-separated)"
     password: false
-  - name: SIDEKICK_PLATFORM_ALLOW_ALL_USERS
-    description: "Allow any parley client through (single-user PWA installs only; legacy spelling)"
+  - name: PARLEY_PLATFORM_ALLOW_ALL_USERS
+    description: "Allow any parley client through (single-user PWA installs only)"
     prompt: "Allow all users? (true/false)"
     password: false

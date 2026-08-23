@@ -74,7 +74,7 @@ function mount(selectedIds: string[]): void {
   );
   const sources: Record<string, number> = {};
   for (const s of selected) {
-    const src = s.source || 'sidekick';
+    const src = s.source || 'parley';
     sources[src] = (sources[src] || 0) + 1;
   }
   panel.innerHTML = `

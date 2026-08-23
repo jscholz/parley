@@ -230,14 +230,14 @@ describe('dictate — late final after user-driven reset', () => {
     await dictate.stop();
     provider = new MockSTTProvider();
     await dictate.start({
-      sessionId: 'sidekick:test-chat',
-      chatId: 'sidekick:test-chat',
+      sessionId: 'parley:test-chat',
+      chatId: 'parley:test-chat',
       initialCursor: 0,
       provider,
     });
     assert.deepEqual(provider.startOpts, {
-      sessionId: 'sidekick:test-chat',
-      chatId: 'sidekick:test-chat',
+      sessionId: 'parley:test-chat',
+      chatId: 'parley:test-chat',
     });
   });
 

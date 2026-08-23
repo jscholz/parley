@@ -36,7 +36,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 300;
   mock.addChat(CHAT, {
     title: 'Old Title',
-    messages: [{ role: 'user', content: 'seed', sidekick_id: 'umsg_ren_1', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_ren_1', timestamp: t0 }],
     lastActiveAt: Date.now() - 5000,
   });
 }
@@ -72,7 +72,7 @@ export default async function run({ page, log, mock }) {
   mock.setSessionsDelay(2500);
   await page.evaluate(() => {
     document.getElementById('sb-refresh')?.click();
-    window.dispatchEvent(new Event('sidekick:force-drawer-refresh'));
+    window.dispatchEvent(new Event('parley:force-drawer-refresh'));
   });
   // Small beat so the slow fetch is actually in flight before renaming.
   await new Promise((r) => setTimeout(r, 300));

@@ -21,7 +21,7 @@ from .. import parley_state as state
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -153,11 +153,11 @@ def test_notification_writes_row_with_kind(db):
     assert r["kind"] == "cron"
 
 
-def test_notification_prefers_and_preserves_sidekick_id(db):
+def test_notification_prefers_and_preserves_parley_id(db):
     env = {
         "type": "notification",
         "chat_id": CHAT_ID,
-        "sidekick_id": "notif_state_1",
+        "parley_id": "notif_state_1",
         "message_id": "notif_other_1",
         "kind": "background",
         "content": "Background done",
@@ -166,7 +166,7 @@ def test_notification_prefers_and_preserves_sidekick_id(db):
     rid = state.record_envelope(db, env)
 
     assert rid == "notif_state_1"
-    assert env["sidekick_id"] == "notif_state_1"
+    assert env["parley_id"] == "notif_state_1"
     rows = _rows(db)
     assert len(rows) == 1
     assert rows[0]["id"] == "notif_state_1"
@@ -183,7 +183,7 @@ def test_notification_without_message_id_mints_synthesized_id(db):
     rid = state.record_envelope(db, env)
     assert rid is not None
     assert rid.startswith("notif_")
-    assert env["sidekick_id"] == rid
+    assert env["parley_id"] == rid
     rows = _rows(db)
     assert len(rows) == 1
     assert rows[0]["id"] == rid
@@ -227,13 +227,13 @@ def test_missing_chat_id_skipped(db):
 
 
 def test_chat_id_source_prefix_stripped(db):
-    """PWA-supplied `sidekick:<uuid>` ids and bare UUIDs land in the
+    """PWA-supplied `parley:<uuid>` ids and bare UUIDs land in the
     same chat. The dispatcher path strips the prefix; record_envelope
     mirrors that so a turn that came in prefixed doesn't fork into a
     second chat row."""
     state.record_envelope(db, {
         "type": "user_message",
-        "chat_id": f"sidekick:{CHAT_ID}",
+        "chat_id": f"parley:{CHAT_ID}",
         "message_id": "umsg_pfx",
         "text": "prefixed",
     })

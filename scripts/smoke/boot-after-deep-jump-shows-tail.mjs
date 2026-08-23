@@ -48,13 +48,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role,
       content: role === 'user' ? `user marker ${idx}` : `agent reply ${idx}`,
-      sidekick_id: `tailsnap-msg-${idx}`,
+      parley_id: `tailsnap-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Tail snapshot invariant test',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });

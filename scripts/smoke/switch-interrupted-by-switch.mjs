@@ -30,17 +30,17 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 300;
   mock.addChat(CHAT_A, {
     title: 'SIS A',
-    messages: [{ role: 'user', content: 'SIS-A-SEED', sidekick_id: 'umsg_sis_a', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'SIS-A-SEED', parley_id: 'umsg_sis_a', timestamp: t0 }],
     lastActiveAt: Date.now() - 3000,
   });
   mock.addChat(CHAT_B, {
     title: 'SIS B',
-    messages: [{ role: 'user', content: 'SIS-B-SEED', sidekick_id: 'umsg_sis_b', timestamp: t0 + 10 }],
+    messages: [{ role: 'user', content: 'SIS-B-SEED', parley_id: 'umsg_sis_b', timestamp: t0 + 10 }],
     lastActiveAt: Date.now() - 2000,
   });
   mock.addChat(CHAT_C, {
     title: 'SIS C',
-    messages: [{ role: 'user', content: 'SIS-C-SEED', sidekick_id: 'umsg_sis_c', timestamp: t0 + 20 }],
+    messages: [{ role: 'user', content: 'SIS-C-SEED', parley_id: 'umsg_sis_c', timestamp: t0 + 20 }],
     lastActiveAt: Date.now() - 1000,
   });
 }

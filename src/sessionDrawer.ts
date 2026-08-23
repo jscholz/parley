@@ -1056,15 +1056,15 @@ export function getCachedSessions(): any[] {
 }
 
 /** Look up the platform source for a chat_id from the cached session
- *  list. Returns 'sidekick' if not found (sane default — parley is
+ *  list. Returns 'parley' if not found (sane default — parley is
  *  the primary platform; non-parley rows must come from server data
  *  that's already been fetched). Used by the composer-read-only path
- *  in main.ts: when source !== 'sidekick', composer is disabled
+ *  in main.ts: when source !== 'parley', composer is disabled
  *  because cross-platform send isn't supported. */
 export function getSourceForChat(id: string | null | undefined): string {
-  if (!id) return 'sidekick';
+  if (!id) return 'parley';
   const row = cachedSessions.find(s => s.id === id);
-  return row?.source || 'sidekick';
+  return row?.source || 'parley';
 }
 
 /** Look up the display title for a chat_id from the cached session
@@ -1506,7 +1506,7 @@ function renderRow(s: any, activeId: string, pinned = false): HTMLLIElement {
   // No "· current" text — the border highlight from li.active communicates
   // the same thing without adding a 4th meta item that would overflow +
   // wrap the row (changing bubble height when selected).
-  const sourceBadge = s.source && s.source !== 'sidekick' && s.source !== 'api_server'
+  const sourceBadge = s.source && s.source !== 'parley' && s.source !== 'api_server'
     ? `<span style="text-transform:uppercase;font-size:10px;letter-spacing:0.05em;opacity:0.7">${s.source}</span>`
     : '';
   // Prefer the turns/tools split when both fields are present (newer

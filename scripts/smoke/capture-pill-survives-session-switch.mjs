@@ -27,12 +27,12 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 120;
   mock.addChat(CHAT_A, {
     title: 'Chat A',
-    messages: [{ role: 'user', content: 'seed a', sidekick_id: 'umsg_cap_a', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed a', parley_id: 'umsg_cap_a', timestamp: t0 }],
     lastActiveAt: Date.now() - 2000,
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B',
-    messages: [{ role: 'user', content: 'seed b', sidekick_id: 'umsg_cap_b', timestamp: t0 + 10 }],
+    messages: [{ role: 'user', content: 'seed b', parley_id: 'umsg_cap_b', timestamp: t0 + 10 }],
     lastActiveAt: Date.now() - 1000,
   });
 }
@@ -64,7 +64,7 @@ export default async function run({ page, log, mock }) {
   // Placement semantics (field UX 2026-07-09): the COMPOSER menu item
   // records into the ACTIVE session, not a freshly minted one.
   const linked = mock.getCaptures()[0]?.linked_chat || '';
-  if (linked.startsWith('sidekick:mock-capture-')) {
+  if (linked.startsWith('parley:mock-capture-')) {
     throw new Error(`composer-menu start must link the ACTIVE chat, got minted session: ${linked}`);
   }
   if (!linked) throw new Error('composer-menu start produced no linked_chat');
@@ -130,7 +130,7 @@ export default async function run({ page, log, mock }) {
     focused: document.activeElement?.id || document.activeElement?.tagName,
   }));
   const linked2 = mock.getCaptures()[1]?.linked_chat || '';
-  if (!linked2.startsWith('sidekick:mock-capture-')) {
+  if (!linked2.startsWith('parley:mock-capture-')) {
     throw new Error(`app-level start must mint a new session, got: ${linked2}`);
   }
   if (landing.spinner) throw new Error('optimistic landing must not show the switch spinner');

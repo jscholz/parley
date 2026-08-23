@@ -76,7 +76,7 @@ test('sessions list — gateway endpoint surfaces multi-source rows', async () =
           message_count: 3,
           last_active_at: 1700000060,
           first_user_message: 'hi',
-          source: 'sidekick',
+          source: 'parley',
           chat_type: 'dm',
         },
       },
@@ -99,7 +99,7 @@ test('sessions list — gateway endpoint surfaces multi-source rows', async () =
     const body = await r.json();
     assert.equal(body.sessions.length, 2);
     const sources = body.sessions.map((s: any) => s.source).sort();
-    assert.deepEqual(sources, ['sidekick', 'telegram']);
+    assert.deepEqual(sources, ['parley', 'telegram']);
 
     // ISO timestamp formatting at the proxy boundary (plugin returns
     // unix seconds; proxy reformats for parity with legacy wire shape).
@@ -129,7 +129,7 @@ test('sessions list — forwards turn_count + tool_count split through to PWA', 
           tool_count: 22,
           last_active_at: 1700000060,
           first_user_message: 'count split test',
-          source: 'sidekick',
+          source: 'parley',
           chat_type: 'dm',
         },
       },
@@ -159,7 +159,7 @@ test('sessions list — omits turn_count/tool_count when plugin does not emit th
           message_count: 7,
           last_active_at: 1700000060,
           first_user_message: null,
-          source: 'sidekick',
+          source: 'parley',
           chat_type: 'dm',
         },
       },
@@ -196,9 +196,9 @@ test('sessions list — falls back to channel endpoint on gateway 404', async ()
     assert.equal(r.status, 200);
     const body = await r.json();
     assert.equal(body.sessions.length, 1);
-    // Channel-only fallback stamps source='sidekick' so the composer
+    // Channel-only fallback stamps source='parley' so the composer
     // stays editable in the drawer (main.ts:setComposerReadOnly).
-    assert.equal(body.sessions[0].source, 'sidekick');
+    assert.equal(body.sessions[0].source, 'parley');
     assert.equal(body.sessions[0].chat_id, 'stub-chat-1');
   } finally {
     await rig.stop();

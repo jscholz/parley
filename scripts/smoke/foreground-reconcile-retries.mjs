@@ -32,8 +32,8 @@ const FRESH_ID = 'umsg_reconcile_fresh';
 const FRESH_TEXT = 'message missed while the stream channel was dead';
 
 const BASE_MESSAGES = [
-  { role: 'user', content: 'reconcile seed question', sidekick_id: 'umsg_reconcile_1', timestamp: Date.now() / 1000 - 120 },
-  { role: 'assistant', content: 'reconcile seed answer', sidekick_id: 'umsg_reconcile_2', timestamp: Date.now() / 1000 - 110 },
+  { role: 'user', content: 'reconcile seed question', parley_id: 'umsg_reconcile_1', timestamp: Date.now() / 1000 - 120 },
+  { role: 'assistant', content: 'reconcile seed answer', parley_id: 'umsg_reconcile_2', timestamp: Date.now() / 1000 - 110 },
 ];
 
 export function MOCK_SETUP(mock) {
@@ -72,7 +72,7 @@ export default async function run({ page, log, mock }) {
     title: 'Reconcile Retry',
     messages: [
       ...BASE_MESSAGES,
-      { role: 'assistant', content: FRESH_TEXT, sidekick_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
+      { role: 'assistant', content: FRESH_TEXT, parley_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
     ],
     lastActiveAt: Date.now(),
   });

@@ -28,13 +28,13 @@ from aiohttp import web
 from . import parley_state as state
 from .parley_unread import compute_unread, invalidate_unread_cache
 from .parley_state import vapid_public_key_b64url, ensure_vapid_keys
-from .parley_ids import SIDEKICK_SOURCE, _parse_gateway_id
+from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
 
 
 def _strip_source_prefix(chat_id: Any) -> str:
     """Normalize a chat_id to the form the plugin's envelope handlers
     use internally (no `<source>:` prefix). PWA-facing routes accept
-    either shape — the parley proxy passes the FULL `sidekick:<uuid>`
+    either shape — the parley proxy passes the FULL `parley:<uuid>`
     form, but the plugin's _safe_send_envelope downstream uses the
     stripped UUID. Without this normalization,
     EngagementState.mark_visible records under the prefixed key while
@@ -180,7 +180,7 @@ async def handle_transcript_repair(ctx, request: web.Request) -> web.Response:
         return _json({"error": "invalid_request", "message": "chat_id required"},
                      status=400)
     result = await run_in_parley_worker(
-        repair_chat_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
+        repair_chat_sync, ctx.db, ctx.state_db_path, chat_id, PARLEY_SOURCE,
     )
     return _json({
         "ok": bool(result and result.get("migrated")),
@@ -205,7 +205,7 @@ async def handle_transcript_adopt(ctx, request: web.Request) -> web.Response:
         return _json({"error": "invalid_request", "message": "chat_id required"},
                      status=400)
     result = await run_in_parley_worker(
-        adopt_orphans_sync, ctx.db, ctx.state_db_path, chat_id, SIDEKICK_SOURCE,
+        adopt_orphans_sync, ctx.db, ctx.state_db_path, chat_id, PARLEY_SOURCE,
         confirm=body.get("confirm") is True,
     )
     if not result.get("ok"):
@@ -324,7 +324,7 @@ async def handle_unread(ctx, request: web.Request) -> web.Response:
     from . import parley_perf_trace as _perf  # noqa: WPS433
     data = await _perf.run_in_parley_worker(
         compute_unread,
-        db=ctx.db, state_db_path=ctx.state_db_path, source="sidekick",
+        db=ctx.db, state_db_path=ctx.state_db_path, source="parley",
     )
     return _json(data)
 
@@ -347,7 +347,7 @@ async def handle_unread_seen(ctx, request: web.Request) -> web.Response:
     id_forms = {chat_id}
     if stripped:
         id_forms.add(stripped)
-        id_forms.add(f"{parsed_source or SIDEKICK_SOURCE}:{stripped}")
+        id_forms.add(f"{parsed_source or PARLEY_SOURCE}:{stripped}")
     activity_updated = 0
     for id_form in id_forms:
         activity_updated += state.mark_activity_seen(

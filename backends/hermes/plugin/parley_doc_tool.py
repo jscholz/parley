@@ -207,9 +207,9 @@ def _check_display_doc() -> bool:
     mis-listed call still fails gracefully on the chat-id guard.)"""
     try:
         from gateway.session_context import get_session_env
-        return get_session_env("HERMES_SESSION_PLATFORM", "") == "sidekick"
+        return get_session_env("HERMES_SESSION_PLATFORM", "") == "parley"
     except Exception:
-        return os.getenv("HERMES_SESSION_PLATFORM", "") == "sidekick"
+        return os.getenv("HERMES_SESSION_PLATFORM", "") == "parley"
 
 
 def register_display_doc_tool(get_adapter: Callable[[], Any]) -> bool:
@@ -233,7 +233,7 @@ def register_display_doc_tool(get_adapter: Callable[[], Any]) -> bool:
             # docstring: a registered toolset named hermes-parley shadows
             # the auto-generated core-tools composite and strips file/
             # terminal/web from every parley session.
-            toolset="sidekick",
+            toolset="parley",
             schema=DISPLAY_DOC_SCHEMA,
             handler=_make_display_doc_handler(get_adapter),
             check_fn=_check_display_doc,

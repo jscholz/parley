@@ -4,7 +4,7 @@
  * obvious place to drop future cmdk-related persisted state (recent
  * searches etc., when those land).
  *
- * Namespace: `sidekick.cmdk` (DB), with key `filter` for the drawer's
+ * Namespace: `parley.cmdk` (DB), with key `filter` for the drawer's
  * inline value. Sibling DB to the main chat snapshot store so a malformed
  * write here can never corrupt the chat transcript.
  */

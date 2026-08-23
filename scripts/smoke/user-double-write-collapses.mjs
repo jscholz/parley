@@ -8,7 +8,7 @@
 // Fix: pickUserDuplicateLosers() — time-windowed (30s) user dedup.
 //
 // Test plan (mocked): seed a chat whose durable history contains (a) two
-// identical user rows ~4s apart with different sidekick_ids, and (b) two
+// identical user rows ~4s apart with different parley_ids, and (b) two
 // identical user rows ~2min apart. Open it; assert the close pair collapses
 // to 1 bubble and the far pair stays 2.
 
@@ -27,15 +27,15 @@ const now = Date.now() / 1000;
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Double-write repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       // (a) backend double-write: same content, 4s apart, different ids.
-      { role: 'user', content: DUP, sidekick_id: 'umsg_native_1', timestamp: now - 300 },
-      { role: 'user', content: DUP, sidekick_id: 'legacy:44461',  timestamp: now - 296 },
-      { role: 'assistant', content: 'On it.', sidekick_id: 'msg_a1', timestamp: now - 295 },
+      { role: 'user', content: DUP, parley_id: 'umsg_native_1', timestamp: now - 300 },
+      { role: 'user', content: DUP, parley_id: 'legacy:44461',  timestamp: now - 296 },
+      { role: 'assistant', content: 'On it.', parley_id: 'msg_a1', timestamp: now - 295 },
       // (b) legit verbatim repeat: same content, 2 min apart.
-      { role: 'user', content: REPEAT, sidekick_id: 'umsg_rep_1', timestamp: now - 200 },
-      { role: 'user', content: REPEAT, sidekick_id: 'umsg_rep_2', timestamp: now - 80 },
+      { role: 'user', content: REPEAT, parley_id: 'umsg_rep_1', timestamp: now - 200 },
+      { role: 'user', content: REPEAT, parley_id: 'umsg_rep_2', timestamp: now - 80 },
     ],
     lastActiveAt: Date.now(),
   });

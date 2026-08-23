@@ -29,7 +29,7 @@ const DRAFT_MSG = 'offline-draft-msg';
 
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_B, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Offline send seed',
     messages: [
       { role: 'user', content: SEED, timestamp: Date.now() / 1000 - 60 },

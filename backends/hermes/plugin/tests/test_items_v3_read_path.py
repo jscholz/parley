@@ -22,7 +22,7 @@ consulting state.db only THROUGH links as a liveness oracle:
 Parity: on a healthy migrated chat the v3 output must byte-match the
 v2 read (state.db bodies + annotations) — same items, same field
 order, same pagination contracts — so the PWA is untouched by the
-flip. The 07-15 field dump (~/.sidekick/missing-bubble-repro-*.json)
+flip. The 07-15 field dump (~/.parley/missing-bubble-repro-*.json)
 was consulted for the live shapes (wrong-call-id tr: mislink,
 orchestration rows, tool result content) but is a home-dir artifact
 tests can't depend on — fixtures here synthesize the same shapes
@@ -48,7 +48,7 @@ from ..parley_turn_buffer import TurnBuffer
 
 CHAT_ID = "f3a10c77-v3-read-path-test"
 SESSION = "20260730_000000_test"
-SRC = "sidekick"
+SRC = "parley"
 # Epoch-scale base so envelope-only ids land in the epoch-millis cursor
 # space (>= state._ENVELOPE_CURSOR_THRESHOLD), like production rows.
 BASE = 1_784_500_000.0
@@ -56,7 +56,7 @@ BASE = 1_784_500_000.0
 
 @pytest.fixture
 def db(tmp_path):
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -241,7 +241,7 @@ def test_v3_matches_v2_byte_for_byte_on_healthy_chat(db, state_db):
     assert v3["has_more"] == v2["has_more"]
     # Sanity on the compared content: both turns + notification + the
     # bubble + session_meta made it through; tc:* never serves.
-    sks = [it.get("sidekick_id") for it in v3["items"]]
+    sks = [it.get("parley_id") for it in v3["items"]]
     assert "umsg_1" in sks and "msg_2" in sks
     assert "sk-1784500022-1" in sks
     assert "notif_1784500021000_test" in sks
@@ -295,7 +295,7 @@ def test_v3_after_cursor_on_since_linked_envelope_row(db, state_db):
     epoch_cursor = int((BASE + 13.0) * 1000)
     result = state.list_messages_after_for_chat_v3(
         db, state_db, CHAT_ID, after_id=epoch_cursor)
-    got = [it.get("sidekick_id") for it in result["items"]]
+    got = [it.get("parley_id") for it in result["items"]]
     assert got == [f"legacy:{ids['meta']}", "notif_1784500021000_test",
                    "sk-1784500022-1"], got
 
@@ -379,7 +379,7 @@ def test_retry_retracts_orphans_and_serves_relinked_turn(db, state_db):
         assert old[key] not in served_ids
     # The old turn's envelope rows must NOT resurface as envelope-only
     # rows (their links orphaned; they were not unlinked).
-    sks = [it.get("sidekick_id") for it in items]
+    sks = [it.get("parley_id") for it in items]
     assert "umsg_2" not in sks and "msg_2" not in sks
     assert new_u in served_ids and new_f in served_ids
     assert "answer 2 (regenerated)" in [it["content"] for it in items]
@@ -421,7 +421,7 @@ def test_streaming_and_cancelled_envelope_rows_never_serve(db, state_db):
         "message_id": "msg_aborted", "text": "partial strea",
     })
     _pin(db, "msg_aborted", BASE + 60.0)
-    sks = [it.get("sidekick_id") for it in _v3_tail(db, state_db)["items"]]
+    sks = [it.get("parley_id") for it in _v3_tail(db, state_db)["items"]]
     assert "msg_aborted" not in sks
     assert not any(str(s).startswith("tc:") for s in sks)
 
@@ -437,7 +437,7 @@ def test_fresh_chat_envelope_only_rows_serve_before_flush(db, state_db):
     })
     _pin(db, "umsg_live", BASE + 70.0)
     items = _v3_tail(db, state_db)["items"]
-    assert items[-1].get("sidekick_id") == "umsg_live"
+    assert items[-1].get("parley_id") == "umsg_live"
     assert items[-1]["id"] == int((BASE + 70.0) * 1000)
 
 
@@ -463,7 +463,7 @@ def test_healed_status_bubble_serves_once_envelope_only(db, state_db):
     assert bubbles[0]["id"] == int((BASE + 5.0) * 1000)  # envelope-only id
     orch_items = [it for it in items if it["id"] == t1["orch"]]
     assert len(orch_items) == 1
-    assert orch_items[0]["sidekick_id"] == f"legacy:{t1['orch']}"
+    assert orch_items[0]["parley_id"] == f"legacy:{t1['orch']}"
 
 
 # ── route gating (flag × marker) + inflight composition ──────────────

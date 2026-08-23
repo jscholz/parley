@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 from .parley_ids import (
-    SIDEKICK_SOURCE,
+    PARLEY_SOURCE,
     _GATEWAY_ID_SEP,
     _format_gateway_id,
 )
@@ -69,7 +69,7 @@ def publish_out_of_turn(adapter, env: Dict[str, Any]) -> bool:
     """
     chat_id = env.get("chat_id")
     if isinstance(chat_id, str) and chat_id and _GATEWAY_ID_SEP not in chat_id:
-        env = {**env, "chat_id": _format_gateway_id(SIDEKICK_SOURCE, chat_id)}
+        env = {**env, "chat_id": _format_gateway_id(PARLEY_SOURCE, chat_id)}
     adapter._event_id_counter += 1
     eid = adapter._event_id_counter
     adapter._event_replay_ring.append((eid, env))

@@ -1,6 +1,6 @@
 // Contract: when searching in cmd+K, a session the
 // user has RENAMED must keep showing that name — not flash the real name
-// and then, ~300ms later, get replaced with the raw `sidekick:<uuid>` id.
+// and then, ~300ms later, get replaced with the raw `parley:<uuid>` id.
 //
 // Why it regressed: the renamed title lives in parley.db
 // (conversation_titles, client-cached via the drawer). The hermes FTS
@@ -23,18 +23,18 @@ export const DESCRIPTION = 'cmd+K search keeps a user-renamed session title inst
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const CHAT_ID = 'sidekick:mock-rename-7f3a';
+const CHAT_ID = 'parley:mock-rename-7f3a';
 const RENAMED = 'Zephyr Pipeline Notes';
 
 export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 500;
   mock.addChat(CHAT_ID, {
     title: RENAMED,
-    source: 'sidekick',
+    source: 'parley',
     lastActiveAt: Date.now(),
     messages: [
-      { role: 'user', content: 'kick off the zephyr pipeline', sidekick_id: 'umsg_z0', timestamp: t0 },
-      { role: 'assistant', content: 'done', sidekick_id: 'msg_z0', timestamp: t0 + 1 },
+      { role: 'user', content: 'kick off the zephyr pipeline', parley_id: 'umsg_z0', timestamp: t0 },
+      { role: 'assistant', content: 'done', parley_id: 'msg_z0', timestamp: t0 + 1 },
     ],
   });
   mock.setAutoReplyEnabled(false);
@@ -62,7 +62,7 @@ export default async function run({ page, log }) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        sessions: [{ id: CHAT_ID, source: 'sidekick', title: '', snippet: '' }],
+        sessions: [{ id: CHAT_ID, source: 'parley', title: '', snippet: '' }],
         hits: [],
       }),
     });

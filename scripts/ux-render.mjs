@@ -13,7 +13,7 @@ mkdirSync(OUT, { recursive: true });
 const CHAT = 'ux-demo';
 const tSec = Date.now() / 1000;
 const MESSAGES = [
-  { role: 'user', content: 'Can you summarize the plan for the launch and flag anything risky?', message_id: 'm1', sidekick_id: 'm1', timestamp: tSec - 600 },
+  { role: 'user', content: 'Can you summarize the plan for the launch and flag anything risky?', message_id: 'm1', parley_id: 'm1', timestamp: tSec - 600 },
   { role: 'assistant', content: `Here's the shape of it.
 
 **Launch plan — three phases**
@@ -29,21 +29,21 @@ const funnel = ['video', 'demo', 'show-hn'];
 funnel.forEach(step => track(step));
 \`\`\`
 
-Want me to draft the Show HN copy?`, message_id: 'm2', sidekick_id: 'm2', timestamp: tSec - 580 },
-  { role: 'user', content: 'Yes — keep it short and honest.', message_id: 'm3', sidekick_id: 'm3', timestamp: tSec - 120 },
+Want me to draft the Show HN copy?`, message_id: 'm2', parley_id: 'm2', timestamp: tSec - 580 },
+  { role: 'user', content: 'Yes — keep it short and honest.', message_id: 'm3', parley_id: 'm3', timestamp: tSec - 120 },
   { role: 'assistant', content: `Draft:
 
 > **Show HN: A voice-first phone client for self-hosted agents (Hermes, OpenClaw, Claude Code)**
 >
 > I got tired of only reaching my agent from a terminal, so I built a client I can talk to from my pocket — streaming dictation, real calls with barge-in, meeting capture. Backend-agnostic. Demo you can call from your phone in the link.
 
-Short, leads with the wedge, names the backends. I can tune the tone if it reads too casual.`, message_id: 'm4', sidekick_id: 'm4', timestamp: tSec - 100 },
+Short, leads with the wedge, names the backends. I can tune the tone if it reads too casual.`, message_id: 'm4', parley_id: 'm4', timestamp: tSec - 100 },
 ];
 
 function seed(mock) {
-  mock.addChat(CHAT, { title: 'Launch plan', source: 'sidekick', messages: MESSAGES, lastActiveAt: Date.now() });
-  mock.addChat('ux-2', { title: 'Investor pitch intro refinement', source: 'sidekick', messages: [{ role: 'user', content: 'hi', message_id: 'x', timestamp: tSec - 9000 }], lastActiveAt: Date.now() - 3_600_000 });
-  mock.addChat('ux-3', { title: 'Dust exposure health concerns', source: 'sidekick', messages: [{ role: 'user', content: 'hi', message_id: 'y', timestamp: tSec - 90000 }], lastActiveAt: Date.now() - 86_400_000 });
+  mock.addChat(CHAT, { title: 'Launch plan', source: 'parley', messages: MESSAGES, lastActiveAt: Date.now() });
+  mock.addChat('ux-2', { title: 'Investor pitch intro refinement', source: 'parley', messages: [{ role: 'user', content: 'hi', message_id: 'x', timestamp: tSec - 9000 }], lastActiveAt: Date.now() - 3_600_000 });
+  mock.addChat('ux-3', { title: 'Dust exposure health concerns', source: 'parley', messages: [{ role: 'user', content: 'hi', message_id: 'y', timestamp: tSec - 90000 }], lastActiveAt: Date.now() - 86_400_000 });
 }
 
 async function shoot(browser, { mobile, theme }) {

@@ -118,7 +118,7 @@ const postFinalRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const postFinalRefreshSeq = new Map<string, number>();
 
 function durableIdentity(row: any): string {
-  return `${row?.sidekick_id || ''}:${String(row?.id ?? '')}`;
+  return `${row?.parley_id || ''}:${String(row?.id ?? '')}`;
 }
 
 function durableHasReply(
@@ -129,7 +129,7 @@ function durableHasReply(
 ): boolean {
   for (const row of rows) {
     if (row?.role !== 'assistant') continue;
-    if (messageId && row.sidekick_id === messageId) return true;
+    if (messageId && row.parley_id === messageId) return true;
     if (
       finalText &&
       row.content === finalText &&
@@ -312,7 +312,7 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
         chatId: conversation,
         kind: 'agent_reply',
         content: finalText || '',
-        sidekickId: typeof messageId === 'string' ? messageId : null,
+        parleyId: typeof messageId === 'string' ? messageId : null,
         chatLabel: sessionDrawer.getTitleForChat?.(conversation) || null,
       });
       badge.incrementUnread(conversation);

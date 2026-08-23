@@ -49,13 +49,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role,
       content: role === 'user' ? `msg-${idx} user marker` : `msg-${idx} agent reply`,
-      sidekick_id: `les-msg-${idx}`,
+      parley_id: `les-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Loaded-earlier survives reply',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });
@@ -159,7 +159,7 @@ export default async function run({ page, log, mock }) {
   // up in the newest page the reconcile will fetch.
   mock.pushEnvelope({ type: 'reply_delta', chat_id: CHAT_ID, message_id: REPLY_ID, text: REPLY_TEXT });
   mock.getChat(CHAT_ID).messages.push({
-    role: 'assistant', content: REPLY_TEXT, sidekick_id: REPLY_ID, timestamp: Date.now() / 1000,
+    role: 'assistant', content: REPLY_TEXT, parley_id: REPLY_ID, timestamp: Date.now() / 1000,
   });
   mock.pushEnvelope({ type: 'reply_final', chat_id: CHAT_ID, message_id: REPLY_ID, text: REPLY_TEXT });
   await transcriptHas(page, REPLY_TEXT);

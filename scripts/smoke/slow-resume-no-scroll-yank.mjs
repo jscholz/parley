@@ -55,7 +55,7 @@ function baseMessages() {
     messages.push({
       role,
       content: `bubble-${idx} ${role}: ${LONG}`,
-      sidekick_id: `umsg_yank_${idx}`,
+      parley_id: `umsg_yank_${idx}`,
       timestamp: Date.now() / 1000 - (40 - idx) * 60,
     });
   }
@@ -110,7 +110,7 @@ export default async function run({ page, log, mock }) {
     title: 'Slow Resume Yank',
     messages: [
       ...baseMessages(),
-      { role: 'assistant', content: FRESH_TEXT, sidekick_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
+      { role: 'assistant', content: FRESH_TEXT, parley_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
     ],
     lastActiveAt: Date.now(),
   });

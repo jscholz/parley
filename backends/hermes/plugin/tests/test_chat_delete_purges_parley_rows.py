@@ -41,11 +41,11 @@ def _state_db(tmp_path):
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?,?,?,?)",
-        ("s-del", "sidekick", CHAT, time.time()),
+        ("s-del", "parley", CHAT, time.time()),
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?,?,?,?)",
-        ("s-keep", "sidekick", OTHER, time.time()),
+        ("s-keep", "parley", OTHER, time.time()),
     )
     conn.execute(
         "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?,?,?,?)",
@@ -80,7 +80,7 @@ def _seed_parley_rows(db, chat_id, tag):
     )
     db.exec(
         "INSERT INTO conversation_titles (source, chat_id, title, updated_at) "
-        "VALUES ('sidekick',?,?,?)",
+        "VALUES ('parley',?,?,?)",
         (chat_id, f"title-{tag}", now),
     )
 
@@ -96,7 +96,7 @@ def test_delete_conversation_purges_parley_rows(plugin, tmp_path):
     from backends.hermes.plugin.parley_db import ParleyDB
 
     state_path = _state_db(tmp_path)
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     try:
         _seed_parley_rows(db, CHAT, "del")
         _seed_parley_rows(db, OTHER, "keep")

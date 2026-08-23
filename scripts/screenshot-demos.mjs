@@ -6,7 +6,7 @@ const OUT = '/tmp/parley-shots';
 mkdirSync(OUT, { recursive: true });
 
 const CHAT_ID = readFileSync('/tmp/demo-d', 'utf-8').trim().split(/\s+/)[1];
-const SETTINGS_KEY = 'sidekick.settings.v2';
+const SETTINGS_KEY = 'parley.settings.v2';
 
 const exec = process.env.PLAYWRIGHT_CHROMIUM || '/usr/bin/chromium';
 const browser = await chromium.launch({ executablePath: exec, headless: true });
@@ -35,7 +35,7 @@ for (const theme of ['light', 'dark']) {
   await page.locator('#sb-toggle-mobile').click().catch(() => {});
   await page.waitForTimeout(400);
   // Click the row whose data-chat-id matches our demo session.
-  const fullId = `sidekick:${CHAT_ID}`;
+  const fullId = `parley:${CHAT_ID}`;
   const clicked = await page.evaluate((id) => {
     const rows = Array.from(document.querySelectorAll('[data-chat-id], [data-id]'));
     const row = rows.find(r => r.getAttribute('data-chat-id') === id || r.getAttribute('data-id') === id);

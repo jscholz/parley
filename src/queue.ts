@@ -3,7 +3,7 @@
  * Stores text messages and audio blobs, flushes in order when connected.
  */
 
-const DB_NAME = 'parley-outbox'; // migrated from sidekick-outbox (renameMigration.ts)
+const DB_NAME = 'parley-outbox';
 const STORE = 'messages';
 const DB_VERSION = 1;
 

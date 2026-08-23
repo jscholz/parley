@@ -19,13 +19,13 @@ const TS = Math.floor(Date.now() / 1000) - 60;
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Same-second durable order',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       {
         id: 1,
         role: 'user',
         content: 'Going via a skill is a good idea',
-        sidekick_id: 'umsg_skill_good_idea',
+        parley_id: 'umsg_skill_good_idea',
         timestamp: TS - 20,
       },
       {
@@ -40,14 +40,14 @@ export function MOCK_SETUP(mock) {
         id: 3,
         role: 'assistant',
         content: 'Done. Split is live.',
-        sidekick_id: 'msg_done_split_live',
+        parley_id: 'msg_done_split_live',
         timestamp: TS,
       },
       {
         id: 4,
         role: 'user',
         content: '> I preserved the old monolithic skill here',
-        sidekick_id: 'umsg_preserved_monolith',
+        parley_id: 'umsg_preserved_monolith',
         timestamp: TS,
       },
       {
@@ -62,7 +62,7 @@ export function MOCK_SETUP(mock) {
         id: 6,
         role: 'assistant',
         content: 'Good push. You were right.',
-        sidekick_id: 'msg_good_push',
+        parley_id: 'msg_good_push',
         timestamp: TS,
       },
     ],

@@ -52,13 +52,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role,
       content: role === 'user' ? `user marker ${idx}` : `agent reply ${idx}`,
-      sidekick_id: `ppwsa-msg-${idx}`,
+      parley_id: `ppwsa-msg-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Pin window prewarm (server arrival)',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });

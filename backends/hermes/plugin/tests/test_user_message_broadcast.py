@@ -46,7 +46,7 @@ def _install_hermes_stubs() -> None:
         cfg = types.ModuleType("gateway.config")
 
         class _Platform:
-            PARLEY = "sidekick"
+            PARLEY = "parley"
 
         class _PlatformConfig:
             pass
@@ -305,7 +305,7 @@ def test_response_route_reuses_same_assistant_message_id_for_parley_envelopes(pl
     minted ``msg_*`` for SSE frames, but ``ParleyAdapter.send()``
     independently minted ``sk-<unix>-<seq>`` for the Parley envelope
     and parley.db write-through row. History replay then surfaced
-    durable rows with the ``sk-*`` sidekick_id while the live/inflight
+    durable rows with the ``sk-*`` parley_id while the live/inflight
     bubble was keyed by ``msg_*``.
     """
     route_resp = plugin.parley_route_responses
@@ -360,7 +360,7 @@ def test_send_classifies_background_cron_delivery_as_notification(plugin):
 
     async def capture_envelope(env):
         if env.get("type") == "notification":
-            env["sidekick_id"] = "notif_test_cron"
+            env["parley_id"] = "notif_test_cron"
         sent.append(dict(env))
         return True
 
@@ -381,7 +381,7 @@ def test_send_classifies_background_cron_delivery_as_notification(plugin):
         "kind": "cron",
         "content": content,
         "text": content,
-        "sidekick_id": "notif_test_cron",
+        "parley_id": "notif_test_cron",
     }]
 
 
@@ -419,7 +419,7 @@ def test_send_classifies_approval_prompt_as_urgent_notification(plugin):
 
     async def capture_envelope(env):
         if env.get("type") == "notification":
-            env["sidekick_id"] = "notif_test_approval"
+            env["parley_id"] = "notif_test_approval"
         sent.append(dict(env))
         return True
 
@@ -453,12 +453,12 @@ def test_send_classifies_approval_prompt_as_urgent_notification(plugin):
         "content": content,
         "text": content,
         "urgent": True,
-        "sidekick_id": "notif_test_approval",
+        "parley_id": "notif_test_approval",
     }
 
 
 def _make_current_schema_state_db(path: Path, *, chat_id: str) -> Path:
-    """Create the post-cleanup state.db subset without sidekick_msg_links."""
+    """Create the post-cleanup state.db subset without parley_msg_links."""
     conn = sqlite3.connect(path)
     conn.executescript(
         """
@@ -484,7 +484,7 @@ def _make_current_schema_state_db(path: Path, *, chat_id: str) -> Path:
     )
     conn.execute(
         "INSERT INTO sessions (id, source, user_id, started_at) VALUES (?, ?, ?, ?)",
-        ("session-current-schema", "sidekick", chat_id, time.time()),
+        ("session-current-schema", "parley", chat_id, time.time()),
     )
     conn.commit()
     conn.close()
@@ -505,7 +505,7 @@ def test_approval_persists_and_surfaces_without_retired_state_side_table(
     adapter._state_db_path = _make_current_schema_state_db(
         tmp_path / "state.db", chat_id=chat_id,
     )
-    adapter._parley_db = db_mod.ParleyDB(tmp_path / "sidekick.db")
+    adapter._parley_db = db_mod.ParleyDB(tmp_path / "parley.db")
     subscriber = asyncio.Queue()
     adapter._event_subscribers.add(subscriber)
 
@@ -541,15 +541,15 @@ def test_approval_persists_and_surfaces_without_retired_state_side_table(
     replayed = [env for _event_id, env in adapter._event_replay_ring]
     approval_events = [env for env in replayed if env.get("kind") == "approval"]
     assert len(approval_events) == 1
-    assert approval_events[0]["sidekick_id"] == result.message_id
+    assert approval_events[0]["parley_id"] == result.message_id
     _event_id, delivered = subscriber.get_nowait()
-    assert delivered["sidekick_id"] == result.message_id
+    assert delivered["parley_id"] == result.message_id
 
     history = state.list_messages_for_chat_with_state_db_source(
-        adapter._parley_db, adapter._state_db_path, chat_id, "sidekick",
+        adapter._parley_db, adapter._state_db_path, chat_id, "parley",
     )
     assert len(history["items"]) == 1
-    assert history["items"][0]["sidekick_id"] == result.message_id
+    assert history["items"][0]["parley_id"] == result.message_id
     assert history["items"][0]["kind"] == "approval"
 
     adapter._parley_db.close()
@@ -571,7 +571,7 @@ def test_failure_event_reaches_out_of_turn_replay_ring(plugin):
     assert replayed == [{
         **env,
         "should_push": False,
-        "chat_id": "sidekick:failure-chat",
+        "chat_id": "parley:failure-chat",
     }]
 
 
@@ -611,7 +611,7 @@ def _make_push_activity_adapter(plugin, tmp_path, monkeypatch, *, delivered=1):
     ParleyDB = db_mod.ParleyDB
 
     adapter = _make_envelope_routing_adapter(plugin)
-    adapter._parley_db = ParleyDB(tmp_path / "sidekick.db")
+    adapter._parley_db = ParleyDB(tmp_path / "parley.db")
     adapter._push_dispatcher = _FakePushDispatcher(delivered=delivered)
     adapter._state_db_path = None
     monkeypatch.setenv("PARLEY_PUSH_OWNED_BY_PLUGIN", "true")
@@ -632,7 +632,7 @@ def test_delivered_agent_reply_push_creates_activity_item(plugin, tmp_path, monk
     item = items[0]
     assert item["id"] == "msg_activity_1"
     assert item["messageId"] == "msg_activity_1"
-    assert item["chatId"] == "sidekick:chat-activity"
+    assert item["chatId"] == "parley:chat-activity"
     assert item["kind"] == "agent_reply"
     assert item["body"] == "delivered body"
     assert item["read"] is False
@@ -659,7 +659,7 @@ def test_delivered_cron_notification_push_creates_activity_item(plugin, tmp_path
         "type": "notification",
         "chat_id": "cron-chat",
         "kind": "cron",
-        "sidekick_id": "notif_cron_1",
+        "parley_id": "notif_cron_1",
         "content": "Cron output body",
     }))
 
@@ -668,7 +668,7 @@ def test_delivered_cron_notification_push_creates_activity_item(plugin, tmp_path
     item = items[0]
     assert item["id"] == "notif_cron_1"
     assert item["messageId"] == "notif_cron_1"
-    assert item["chatId"] == "sidekick:cron-chat"
+    assert item["chatId"] == "parley:cron-chat"
     assert item["kind"] == "cron"
     assert item["title"] == "Cron notification"
     assert item["body"] == "Cron output body"
@@ -707,7 +707,7 @@ def test_active_turn_tool_events_also_publish_to_persistent_event_stream(plugin,
     eid, published = event_q.get_nowait()
     assert eid == 1
     assert published["type"] == env_type
-    assert published["chat_id"] == "sidekick:live-chat"
+    assert published["chat_id"] == "parley:live-chat"
     assert adapter._event_replay_ring == [(1, published)]
 
 

@@ -36,9 +36,9 @@ export function MOCK_SETUP(mock) {
     title: 'Anchor chat',
     messages: [
       { role: 'user', content: 'anchor-message-on-chat-B',
-        sidekick_id: 'umsg_anchor_b', timestamp: Date.now() / 1000 - 30 },
+        parley_id: 'umsg_anchor_b', timestamp: Date.now() / 1000 - 30 },
       { role: 'assistant', content: 'anchor-reply-on-chat-B',
-        sidekick_id: 'msg_anchor_b', timestamp: Date.now() / 1000 - 29 },
+        parley_id: 'msg_anchor_b', timestamp: Date.now() / 1000 - 29 },
     ],
     lastActiveAt: Date.now() - 5000,
   });

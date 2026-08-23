@@ -15,7 +15,7 @@
 // `messageId` (the live envelope id) MATCHES the in-chat bubble's
 // `data-key` — guaranteed by the plugin's order-fallback link in
 // reconcile_from_state_db Pass 1.b, which links the envelope row to
-// its state.db twin so the durable's `sidekick_id` is the same shape
+// its state.db twin so the durable's `parley_id` is the same shape
 // as the activity's stored id. Pre-v2 the same logical message could
 // surface as TWO rows in msg_links (envelope `msg_xxx` + reconcile
 // `legacy:NNN`) and downstream consumers had to dual-lookup or
@@ -37,7 +37,7 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 60;
   mock.addChat(VIEWED_CHAT, {
     title: 'Viewed chat',
-    messages: [{ role: 'user', content: 'viewed seed', sidekick_id: 'umsg_drill_viewed_seed', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'viewed seed', parley_id: 'umsg_drill_viewed_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
   // Source chat: tail history AFTER the target reply so the drill lands
@@ -51,17 +51,17 @@ export function MOCK_SETUP(mock) {
     tail.push({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `tail line ${i} ${'lorem ipsum dolor sit amet consectetur '.repeat(4)}`,
-      sidekick_id: `umsg_drill_tail_${i}`,
+      parley_id: `umsg_drill_tail_${i}`,
       timestamp: t0 + 2 + i,
     });
   }
   mock.addChat(SOURCE_CHAT, {
     title: 'Source chat',
     messages: [
-      { role: 'user', content: 'kick off the job', sidekick_id: 'umsg_drill_source_seed', timestamp: t0 },
+      { role: 'user', content: 'kick off the job', parley_id: 'umsg_drill_source_seed', timestamp: t0 },
       // Durable assistant row keyed by the envelope id — the v2 happy
       // path where the plugin's link succeeded.
-      { role: 'assistant', content: REPLY_BODY, sidekick_id: REPLY_ID, timestamp: t0 + 1 },
+      { role: 'assistant', content: REPLY_BODY, parley_id: REPLY_ID, timestamp: t0 + 1 },
       ...tail,
     ],
     lastActiveAt: Date.now() - 5000,

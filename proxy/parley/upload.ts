@@ -12,7 +12,6 @@
 // files take the streamed path. See src/attachments.ts toSendPayload.
 
 import { readEnv } from '../env.mjs';
-import { upstreamV1Prefix } from './upstreamRoutePrefix.ts';
 
 const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
 const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
@@ -32,7 +31,7 @@ export async function handleParleyUpload(req, res) {
     // The body is a one-shot stream, so a 404-then-retry is impossible
     // here — resolve the prefix up front (upstreamRoutePrefix.ts covers
     // the new-proxy/pre-rename-plugin window).
-    const upstream = await fetch(`${UPSTREAM_URL}${await upstreamV1Prefix()}/upload`, {
+    const upstream = await fetch(`${UPSTREAM_URL}/v1/parley/upload`, {
       method: 'POST',
       headers,
       body: req,

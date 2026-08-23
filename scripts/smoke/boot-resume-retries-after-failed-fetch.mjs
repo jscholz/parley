@@ -36,8 +36,8 @@ const FRESH_TEXT = 'fresh message added while app was closed';
 const FAILED_BEFORE_RECOVERY = 5;
 
 const BASE_MESSAGES = [
-  { role: 'user', content: 'boot retry seed question', sidekick_id: 'umsg_boot_retry_1', timestamp: Date.now() / 1000 - 120 },
-  { role: 'assistant', content: 'boot retry seed answer', sidekick_id: 'umsg_boot_retry_2', timestamp: Date.now() / 1000 - 110 },
+  { role: 'user', content: 'boot retry seed question', parley_id: 'umsg_boot_retry_1', timestamp: Date.now() / 1000 - 120 },
+  { role: 'assistant', content: 'boot retry seed answer', parley_id: 'umsg_boot_retry_2', timestamp: Date.now() / 1000 - 110 },
 ];
 
 export function MOCK_SETUP(mock) {
@@ -65,7 +65,7 @@ export default async function run({ page, log, mock }) {
     title: 'Boot Retry',
     messages: [
       ...BASE_MESSAGES,
-      { role: 'assistant', content: FRESH_TEXT, sidekick_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
+      { role: 'assistant', content: FRESH_TEXT, parley_id: FRESH_ID, timestamp: Date.now() / 1000 - 5 },
     ],
     lastActiveAt: Date.now(),
   });

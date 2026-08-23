@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Purge test/smoke-pollution sidekick sessions.
+"""Purge test/smoke-pollution parley sessions.
 
 A test session is one whose first user message matches a known
 smoke-test prompt (marker-*, "baseline-content", weather smoke,
@@ -32,7 +32,7 @@ STATE_DB = HERMES_HOME / "state.db"
 SESSIONS_INDEX = HERMES_HOME / "sessions" / "sessions.json"
 SESSIONS_DIR = HERMES_HOME / "sessions"
 PROXY_BASE = "http://127.0.0.1:3001/api/parley"
-SIDEKICK_KEY_PREFIX = "agent:main:sidekick:dm:"
+PARLEY_KEY_PREFIX = "agent:main:parley:dm:"
 
 # First-user-message patterns that indicate a test session.
 TEST_PREFIXES = (
@@ -70,16 +70,16 @@ def is_test_message(content: str | None) -> bool:
     return any(s.startswith(p) for p in TEST_PREFIXES)
 
 
-def load_sidekick_chat_ids() -> dict[str, str]:
-    """Return {chat_id: session_id} from sessions.json for sidekick keys."""
+def load_parley_chat_ids() -> dict[str, str]:
+    """Return {chat_id: session_id} from sessions.json for parley keys."""
     if not SESSIONS_INDEX.exists():
         return {}
     with open(SESSIONS_INDEX) as f:
         idx = json.load(f)
     out = {}
     for k, v in idx.items():
-        if k.startswith(SIDEKICK_KEY_PREFIX) and isinstance(v, dict):
-            chat_id = k[len(SIDEKICK_KEY_PREFIX):]
+        if k.startswith(PARLEY_KEY_PREFIX) and isinstance(v, dict):
+            chat_id = k[len(PARLEY_KEY_PREFIX):]
             sid = v.get("session_id")
             if chat_id and sid:
                 out[chat_id] = sid
@@ -87,11 +87,11 @@ def load_sidekick_chat_ids() -> dict[str, str]:
 
 
 def classify_sessions() -> tuple[list[dict], list[dict]]:
-    """Return (purge, keep) lists of sidekick sessions.
+    """Return (purge, keep) lists of parley sessions.
 
     Each item: {chat_id, session_id, first_user_msg, message_count, started_at}.
     """
-    chat_to_sid = load_sidekick_chat_ids()
+    chat_to_sid = load_parley_chat_ids()
     sid_to_chat = {v: k for k, v in chat_to_sid.items()}
 
     conn = sqlite3.connect(f"file:{STATE_DB}?mode=ro", uri=True)
@@ -101,7 +101,7 @@ def classify_sessions() -> tuple[list[dict], list[dict]]:
                 WHERE m.session_id=s.id AND m.role='user'
                 ORDER BY m.id ASC LIMIT 1) AS first_user
         FROM sessions s
-        WHERE s.source='sidekick'
+        WHERE s.source='parley'
         ORDER BY s.started_at DESC
     """).fetchall()
     conn.close()
@@ -139,7 +139,7 @@ def delete_via_proxy(chat_id: str) -> tuple[bool, str]:
 
 
 def remove_sessions_json_entry(chat_id: str) -> bool:
-    """Remove agent:main:sidekick:dm:<chat_id> from sessions.json."""
+    """Remove agent:main:parley:dm:<chat_id> from sessions.json."""
     if not SESSIONS_INDEX.exists():
         return False
     try:
@@ -147,7 +147,7 @@ def remove_sessions_json_entry(chat_id: str) -> bool:
             idx = json.load(f)
     except Exception:
         return False
-    key = f"{SIDEKICK_KEY_PREFIX}{chat_id}"
+    key = f"{PARLEY_KEY_PREFIX}{chat_id}"
     if key not in idx:
         return False
     del idx[key]
@@ -171,7 +171,7 @@ def main() -> int:
     args = ap.parse_args()
 
     purge, keep = classify_sessions()
-    print(f"Sidekick sessions in state.db: {len(purge) + len(keep)} "
+    print(f"Parley sessions in state.db: {len(purge) + len(keep)} "
           f"({len(purge)} purge, {len(keep)} keep)")
     print()
     print(f"=== {len(keep)} sessions that will be KEPT ===")

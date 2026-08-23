@@ -52,13 +52,13 @@ function makeMessages(count, prefix) {
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — long for scrolling',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(40, 'A'),
     lastActiveAt: Date.now() - 60_000,
   });
   mock.addChat(CHAT_B, {
     title: 'Chat B — short',
-    source: 'sidekick',
+    source: 'parley',
     messages: makeMessages(8, 'B'),
     lastActiveAt: Date.now() - 30_000,
   });

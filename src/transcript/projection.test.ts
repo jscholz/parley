@@ -24,10 +24,10 @@ function state(partial: Partial<ChatState>): ChatState {
 
 const T0 = 1_747_000_000_000;
 function u(id: string, text: string, ts = T0): ConversationItem {
-  return { id, sidekick_id: id, role: 'user', content: text, timestamp: ts };
+  return { id, parley_id: id, role: 'user', content: text, timestamp: ts };
 }
 function a(id: string, text: string, ts = T0, toolCalls?: string): ConversationItem {
-  return { id, sidekick_id: id, role: 'assistant', content: text, timestamp: ts, tool_calls: toolCalls };
+  return { id, parley_id: id, role: 'assistant', content: text, timestamp: ts, tool_calls: toolCalls };
 }
 function tool(id: string, callId: string, name: string, content: string, ts = T0): ConversationItem {
   return { id, role: 'tool', content, tool_call_id: callId, tool_name: name, timestamp: ts };
@@ -73,7 +73,7 @@ describe('project: durable only', () => {
 
   it('hermes unix-seconds timestamps get normalized to ms', () => {
     const sec = 1_747_000_000;  // < 1e12
-    const s = state({ durable: [{ id: 'u1', sidekick_id: 'umsg_1', role: 'user', content: 'x', timestamp: sec }] });
+    const s = state({ durable: [{ id: 'u1', parley_id: 'umsg_1', role: 'user', content: 'x', timestamp: sec }] });
     const out = project(s);
     assert.equal(out[0].timestamp, sec * 1000);
   });
@@ -299,27 +299,27 @@ describe('project: pending sends', () => {
 });
 
 describe('project: dedup keys', () => {
-  it('sidekick_id is preferred over numeric id for user key', () => {
-    const s = state({ durable: [{ id: 42, sidekick_id: 'umsg_x', role: 'user', content: 'q', timestamp: T0 }] });
+  it('parley_id is preferred over numeric id for user key', () => {
+    const s = state({ durable: [{ id: 42, parley_id: 'umsg_x', role: 'user', content: 'q', timestamp: T0 }] });
     const out = project(s);
     assert.equal(out[0].key, 'umsg_x');
   });
 
-  it('numeric id falls back when sidekick_id absent', () => {
+  it('numeric id falls back when parley_id absent', () => {
     const s = state({ durable: [{ id: 42, role: 'user', content: 'q', timestamp: T0 }] });
     const out = project(s);
     assert.equal(out[0].key, '42');
   });
 
-  it('inflight reply_final does NOT duplicate a durable assistant row that arrived without sidekick_id (field bug 2026-05-19)', () => {
+  it('inflight reply_final does NOT duplicate a durable assistant row that arrived without parley_id (field bug 2026-05-19)', () => {
     // Active-chat dupe scenario: user sent a message, plugin mirrored
-    // the assistant row but the link write didn't land (sidekick_id NULL).
+    // the assistant row but the link write didn't land (parley_id NULL).
     // Without content-fallback dedup, durable keyed by integer "101" and
     // inflight keyed by "msg_xyz" rendered as two separate bubbles.
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'umsg_q', role: 'user', content: 'hey test message', timestamp: T0 },
-        // Assistant row arrived without sidekick_id — the bug shape.
+        { id: 100, parley_id: 'umsg_q', role: 'user', content: 'hey test message', timestamp: T0 },
+        // Assistant row arrived without parley_id — the bug shape.
         { id: 101, role: 'assistant', content: 'Hey — received.', timestamp: T0 + 1000 },
       ],
       inflight: [
@@ -343,7 +343,7 @@ describe('project: dedup keys', () => {
     // mirror hasn't caught up), the inflight envelope must render.
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'umsg_q', role: 'user', content: 'hey', timestamp: T0 },
+        { id: 100, parley_id: 'umsg_q', role: 'user', content: 'hey', timestamp: T0 },
       ],
       inflight: [
         { type: 'reply_delta', chat_id: 'c', message_id: 'msg_xyz', text: 'Hi back.' },
@@ -360,19 +360,19 @@ describe('project: dedup keys', () => {
   it('durable-vs-durable: items endpoint returning two assistant rows with same content renders ONE bubble (field bug 2026-05-19)', () => {
     // Server-side bug shape: `parley.db.msg_links` had two rows for
     // the same logical assistant message — one from envelope write-
-    // through (sidekick_id="msg_xyz", real timestamp), one from
-    // reconcile Pass 2 fallback (sidekick_id="legacy:101", timestamp=0
+    // through (parley_id="msg_xyz", real timestamp), one from
+    // reconcile Pass 2 fallback (parley_id="legacy:101", timestamp=0
     // because... still unknown). The items endpoint returned both;
     // projection's key-based dedup saw them as different (different
-    // sidekick_ids); both rendered. Result: one user-visible reply
+    // parley_ids); both rendered. Result: one user-visible reply
     // duplicated, with one copy showing 01:00 BST (= unix 0 → UTC+1).
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'umsg_q', role: 'user', content: 'hey test message', timestamp: T0 },
+        { id: 100, parley_id: 'umsg_q', role: 'user', content: 'hey test message', timestamp: T0 },
         // Bad duplicate row — timestamp=0.
-        { id: 101, sidekick_id: 'legacy:101', role: 'assistant', content: 'Hey — received.', timestamp: 0 },
+        { id: 101, parley_id: 'legacy:101', role: 'assistant', content: 'Hey — received.', timestamp: 0 },
         // Good row — real timestamp.
-        { id: 102, sidekick_id: 'msg_xyz', role: 'assistant', content: 'Hey — received.', timestamp: T0 + 1000 },
+        { id: 102, parley_id: 'msg_xyz', role: 'assistant', content: 'Hey — received.', timestamp: T0 + 1000 },
       ],
     });
     const out = project(s);
@@ -393,8 +393,8 @@ describe('project: dedup keys', () => {
     // twins, field 2026-07-16).
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'msg_a', role: 'assistant', content: 'same text', timestamp: T0 + 1000 },
-        { id: 101, sidekick_id: 'msg_b', role: 'assistant', content: 'same text', timestamp: T0 + 1000 },
+        { id: 100, parley_id: 'msg_a', role: 'assistant', content: 'same text', timestamp: T0 + 1000 },
+        { id: 101, parley_id: 'msg_b', role: 'assistant', content: 'same text', timestamp: T0 + 1000 },
       ],
     });
     const out = project(s);
@@ -407,8 +407,8 @@ describe('project: dedup keys', () => {
   it('durable-vs-durable dedup does NOT collapse genuinely different content', () => {
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'msg_a', role: 'assistant', content: 'first reply', timestamp: T0 + 1000 },
-        { id: 101, sidekick_id: 'msg_b', role: 'assistant', content: 'second reply', timestamp: T0 + 2000 },
+        { id: 100, parley_id: 'msg_a', role: 'assistant', content: 'first reply', timestamp: T0 + 1000 },
+        { id: 101, parley_id: 'msg_b', role: 'assistant', content: 'second reply', timestamp: T0 + 2000 },
       ],
     });
     const out = project(s);
@@ -416,13 +416,13 @@ describe('project: dedup keys', () => {
     assert.equal(assistantBubbles.length, 2);
   });
 
-  it('inflight reply_final preserved when durable has DIFFERENT-content assistant row without sidekick_id', () => {
+  it('inflight reply_final preserved when durable has DIFFERENT-content assistant row without parley_id', () => {
     // Defensive: the content match must be exact. A no-link durable row
     // with text "old reply" must not steal the inflight bubble for
     // "new reply".
     const s = state({
       durable: [
-        { id: 100, sidekick_id: 'umsg_q', role: 'user', content: 'q', timestamp: T0 },
+        { id: 100, parley_id: 'umsg_q', role: 'user', content: 'q', timestamp: T0 },
         { id: 101, role: 'assistant', content: 'old reply', timestamp: T0 + 1000 },
       ],
       inflight: [
@@ -436,13 +436,13 @@ describe('project: dedup keys', () => {
     assert.deepEqual(assistantBubbles.map(b => b.key).sort(), ['101', 'msg_new']);
   });
 
-  it('notification with matching sidekick_id renders once when durable and inflight both contain it', () => {
+  it('notification with matching parley_id renders once when durable and inflight both contain it', () => {
     const s = state({
       durable: [
-        { id: 101, sidekick_id: 'notif_1', role: 'assistant', kind: 'cron', content: 'Cron done', timestamp: T0 },
+        { id: 101, parley_id: 'notif_1', role: 'assistant', kind: 'cron', content: 'Cron done', timestamp: T0 },
       ],
       inflight: [
-        { type: 'notification', chat_id: 'c', kind: 'cron', content: 'Cron done', sidekick_id: 'notif_1' },
+        { type: 'notification', chat_id: 'c', kind: 'cron', content: 'Cron done', parley_id: 'notif_1' },
       ],
     });
     const out = project(s);
@@ -537,14 +537,14 @@ describe('project: user double-write dedup (time-windowed)', () => {
 describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
   it('drops the unannotated state.db twin of a umsg_ envelope copy (turn-length skew)', () => {
     // Field 2026-07-04: user sent at 11:47:54 (envelope-only copy with a
-    // umsg_* sidekick_id + epoch-ms id), state.db row batch-written at
+    // umsg_* parley_id + epoch-ms id), state.db row batch-written at
     // turn END 11:49:25 — 91s apart, far beyond the 30s double-write
     // window below. Until the background reconcile links them, the items
     // endpoint serves BOTH → two user bubbles with different timestamps.
     const sent = T0;
     const turnEnd = T0 + 91_000;
     const s = state({ durable: [
-      { id: String(sent), sidekick_id: 'umsg_1783162074267_x', role: 'user', content: 'single hand the boat?', timestamp: sent },
+      { id: String(sent), parley_id: 'umsg_1783162074267_x', role: 'user', content: 'single hand the boat?', timestamp: sent },
       { id: '67182', role: 'user', content: 'single hand the boat?', timestamp: turnEnd },
     ]});
     const userSpecs = project(s).filter(x => x.kind === 'user');
@@ -559,8 +559,8 @@ describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
     // shadow pass must drop only the second send's twin, not fold the
     // repeat into one bubble.
     const s = state({ durable: [
-      { id: '67100', sidekick_id: 'umsg_first', role: 'user', content: 'ok', timestamp: T0 },
-      { id: String(T0 + 120_000), sidekick_id: 'umsg_second', role: 'user', content: 'ok', timestamp: T0 + 120_000 },
+      { id: '67100', parley_id: 'umsg_first', role: 'user', content: 'ok', timestamp: T0 },
+      { id: String(T0 + 120_000), parley_id: 'umsg_second', role: 'user', content: 'ok', timestamp: T0 + 120_000 },
       { id: '67200', role: 'user', content: 'ok', timestamp: T0 + 180_000 },
     ]});
     const userSpecs = project(s).filter(x => x.kind === 'user');
@@ -571,7 +571,7 @@ describe('project: envelope-shadowed user twin (reconcile-lag window)', () => {
     // An ancient envelope copy must never swallow a fresh identical send —
     // beyond the bound they are independent messages.
     const s = state({ durable: [
-      { id: String(T0), sidekick_id: 'umsg_old', role: 'user', content: 'hi', timestamp: T0 },
+      { id: String(T0), parley_id: 'umsg_old', role: 'user', content: 'hi', timestamp: T0 },
       { id: '67300', role: 'user', content: 'hi', timestamp: T0 + 45 * 60_000 },
     ]});
     const userSpecs = project(s).filter(x => x.kind === 'user');
@@ -594,8 +594,8 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
   const HEAL_KEY = 'umsg_1784147961892_hfg8d15d';       // row 74532 (heal mint, predates send)
   const TEXT = 'can you delete pls?';
   const dupPair = (): ConversationItem[] => [
-    { id: 74399, sidekick_id: CLIENT_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
-    { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+    { id: 74399, parley_id: CLIENT_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+    { id: 74532, parley_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
   ];
 
   it('inflight echo keyed by the dropped duplicate does NOT re-add a ghost bubble', () => {
@@ -628,10 +628,10 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
     // send's optimistic row hadn't cleared.
     const s = state({
       durable: [
-        { id: 74397, sidekick_id: 'umsg_1784147977585_8ed1ppse', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
-        { id: 74530, sidekick_id: 'umsg_1784147959469_mqcjttgj', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
+        { id: 74397, parley_id: 'umsg_1784147977585_8ed1ppse', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
+        { id: 74530, parley_id: 'umsg_1784147959469_mqcjttgj', role: 'user', content: 'did this turn die?', timestamp: 1_784_147_977 },
         ...dupPair(),
-        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
+        { id: 74402, parley_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
       ],
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147977585_8ed1ppse', text: 'did this turn die?' },
@@ -656,8 +656,8 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
     // genuinely new send (durable not caught up) still renders.
     const s = state({
       durable: [
-        { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
-        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
+        { id: 74532, parley_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+        { id: 74402, parley_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'Deleted and verified all four are gone. 🧹', timestamp: 1_784_148_044 },
       ],
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: CLIENT_KEY, text: TEXT },
@@ -675,8 +675,8 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
     // must render alongside the durable bubble of the OLD one.
     const s = state({
       durable: [
-        { id: 74532, sidekick_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
-        { id: 74402, sidekick_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'ok done', timestamp: 1_784_148_044 },
+        { id: 74532, parley_id: HEAL_KEY, role: 'user', content: TEXT, timestamp: SENT_SEC },
+        { id: 74402, parley_id: 'msg_ab2a043662146c9ebbdf', role: 'assistant', content: 'ok done', timestamp: 1_784_148_044 },
       ],
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784148200000_fresh', text: TEXT },
@@ -692,10 +692,10 @@ describe('project: heal-rekeyed user twin vs live client state (field 2026-07-15
     // durable twins so the content-shadow never collapses the repeat.
     const s = state({
       durable: [
-        { id: '70001', sidekick_id: 'umsg_1784147000000_a', role: 'user', content: 'ok', timestamp: 1_784_147_000 },
-        { id: '70002', sidekick_id: 'msg_r1', role: 'assistant', content: 'first', timestamp: 1_784_147_010 },
-        { id: '70003', sidekick_id: 'umsg_1784147100000_b', role: 'user', content: 'ok', timestamp: 1_784_147_100 },
-        { id: '70004', sidekick_id: 'msg_r2', role: 'assistant', content: 'second', timestamp: 1_784_147_110 },
+        { id: '70001', parley_id: 'umsg_1784147000000_a', role: 'user', content: 'ok', timestamp: 1_784_147_000 },
+        { id: '70002', parley_id: 'msg_r1', role: 'assistant', content: 'first', timestamp: 1_784_147_010 },
+        { id: '70003', parley_id: 'umsg_1784147100000_b', role: 'user', content: 'ok', timestamp: 1_784_147_100 },
+        { id: '70004', parley_id: 'msg_r2', role: 'assistant', content: 'second', timestamp: 1_784_147_110 },
       ],
       inflight: [
         { type: 'user_message', chat_id: 'c', message_id: 'umsg_1784147000000_a', text: 'ok' },
@@ -713,7 +713,7 @@ describe('project: compaction-replay durable twins (field 2026-07-16)', () => {
   // Field shape (chat 20249e46…, session 20260715_133109): hermes-core's
   // in-place compaction re-flushed the rebuilt context into the same
   // session — verbatim copies of every recent message, UNANNOTATED
-  // (sidekick_id null; the plugin heal now refuses to link/insert for
+  // (parley_id null; the plugin heal now refuses to link/insert for
   // them). The asymmetry is real and matters: replayed USER rows keep
   // their original timestamps, replayed ASSISTANT rows are re-stamped
   // with the flush time. The old "highest timestamp, then highest id"
@@ -727,10 +727,10 @@ describe('project: compaction-replay durable twins (field 2026-07-16)', () => {
   const JOHN = 'Hey. My name is John. I’m the CEO of R2.';
   const REPEATBACK = '## Daniel’s repeatback\n\n> I understand the technical development story.';
   const replayShape = (): ConversationItem[] => [
-    { id: 75950, sidekick_id: 'umsg_1784208100938_j9hwifw1', role: 'user', content: JOHN, timestamp: SENT },
-    { id: 75967, sidekick_id: 'msg_852640f789b8b3c0f437', role: 'assistant', content: REPEATBACK, timestamp: REPLIED },
-    { id: 76010, sidekick_id: null, role: 'user', content: JOHN, timestamp: SENT },
-    { id: 76027, sidekick_id: null, role: 'assistant', content: REPEATBACK, timestamp: FLUSH },
+    { id: 75950, parley_id: 'umsg_1784208100938_j9hwifw1', role: 'user', content: JOHN, timestamp: SENT },
+    { id: 75967, parley_id: 'msg_852640f789b8b3c0f437', role: 'assistant', content: REPEATBACK, timestamp: REPLIED },
+    { id: 76010, parley_id: null, role: 'user', content: JOHN, timestamp: SENT },
+    { id: 76027, parley_id: null, role: 'assistant', content: REPEATBACK, timestamp: FLUSH },
   ];
 
   it('assistant winner is the annotated ORIGINAL row, not the flush-restamped replay', () => {
@@ -758,8 +758,8 @@ describe('project: compaction-replay durable twins (field 2026-07-16)', () => {
   it('epoch-zero duplicate still loses to a real-wall-clock copy (original tiebreak intent)', () => {
     const specs = project(state({
       durable: [
-        { id: 100, sidekick_id: 'msg_orig', role: 'assistant', content: 'same text', timestamp: 0 },
-        { id: 200, sidekick_id: null, role: 'assistant', content: 'same text', timestamp: REPLIED },
+        { id: 100, parley_id: 'msg_orig', role: 'assistant', content: 'same text', timestamp: 0 },
+        { id: 200, parley_id: null, role: 'assistant', content: 'same text', timestamp: REPLIED },
       ],
     }));
     const assistants = specs.filter(x => x.kind === 'assistant');
@@ -810,8 +810,8 @@ describe('project: byte-identical assistant repeats (field 2026-07-23, /reasonin
     // 30s cluster window, so only the timestamp-blind artifact rule
     // can catch it — annotated (client-keyed) beats unannotated.
     const s = state({ durable: [
-      { id: 500, sidekick_id: 'msg_orig9', role: 'assistant', content: 'replayed reply', timestamp: T0 + 1000 },
-      { id: 900, sidekick_id: null, role: 'assistant', content: 'replayed reply', timestamp: T0 + 601_000 },
+      { id: 500, parley_id: 'msg_orig9', role: 'assistant', content: 'replayed reply', timestamp: T0 + 1000 },
+      { id: 900, parley_id: null, role: 'assistant', content: 'replayed reply', timestamp: T0 + 601_000 },
     ]});
     const assistants = project(s).filter(x => x.kind === 'assistant');
     assert.equal(assistants.length, 1, `replay copy must fold into the original, got ${assistants.length}`);
@@ -825,8 +825,8 @@ describe('project: byte-identical assistant repeats (field 2026-07-23, /reasonin
     // in the group the artifact rule must stand down and let the 30s
     // window decide.
     const s = state({ durable: [
-      { id: 1, sidekick_id: 'legacy:1', role: 'assistant', content: 'ok', timestamp: T0 },
-      { id: 2, sidekick_id: 'legacy:2', role: 'assistant', content: 'ok', timestamp: T0 + 300_000 },
+      { id: 1, parley_id: 'legacy:1', role: 'assistant', content: 'ok', timestamp: T0 },
+      { id: 2, parley_id: 'legacy:2', role: 'assistant', content: 'ok', timestamp: T0 + 300_000 },
     ]});
     const assistants = project(s).filter(x => x.kind === 'assistant');
     assert.equal(assistants.length, 2, `all-legacy far-apart repeats must both render, got ${assistants.length}`);

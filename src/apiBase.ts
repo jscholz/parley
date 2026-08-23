@@ -23,7 +23,7 @@
 
 /** localStorage key holding the saved remote server URL (e.g.
  *  "https://host:3001"). Shared with the CAP bootstrap. */
-export const SERVER_URL_KEY = 'parley_server_url'; // migrated from sidekick_server_url (renameMigration.ts)
+export const SERVER_URL_KEY = 'parley_server_url';
 
 /** True when the page is served by the local CAP shell rather than over the
  *  network. In that case relative URLs resolve to the local bundle, so API

@@ -15,8 +15,8 @@ export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Offline Cache Chat',
     messages: [
-      { role: 'user', content: MARKER, sidekick_id: 'umsg_offline_cache', timestamp: Date.now() / 1000 - 60 },
-      { role: 'assistant', content: REPLY, sidekick_id: 'msg_offline_cache', timestamp: Date.now() / 1000 - 58 },
+      { role: 'user', content: MARKER, parley_id: 'umsg_offline_cache', timestamp: Date.now() / 1000 - 60 },
+      { role: 'assistant', content: REPLY, parley_id: 'msg_offline_cache', timestamp: Date.now() / 1000 - 58 },
     ],
     lastActiveAt: Date.now() - 1000,
   });

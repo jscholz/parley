@@ -40,11 +40,11 @@ const MARKER_A = 'ALPHA seeded marker';
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_A, {
     title: 'Chat A — seeded',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      { role: 'user', content: MARKER_A, message_id: 'a-1', sidekick_id: 'a-1',
+      { role: 'user', content: MARKER_A, message_id: 'a-1', parley_id: 'a-1',
         timestamp: Date.now() / 1000 - 120 },
-      { role: 'assistant', content: MARKER_A + ' reply', message_id: 'a-2', sidekick_id: 'a-2',
+      { role: 'assistant', content: MARKER_A + ' reply', message_id: 'a-2', parley_id: 'a-2',
         timestamp: Date.now() / 1000 - 60 },
     ],
     lastActiveAt: Date.now() - 5_000,

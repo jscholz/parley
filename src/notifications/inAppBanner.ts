@@ -22,7 +22,7 @@ interface ShowArgs {
   chatId: string;
   kind: string;
   content: string;
-  sidekickId: string | null;
+  parleyId: string | null;
   chatLabel?: string;
 }
 
@@ -51,7 +51,7 @@ export function show(args: ShowArgs): void {
   const preview = body.length > 150 ? body.slice(0, 147) + '…' : body;
   const label = isApproval
     ? `Approval required${chatLabel ? ` · ${chatLabel}` : ''}`
-    : (chatLabel || args.chatId.replace(/^sidekick:/, '').slice(0, 12));
+    : (chatLabel || args.chatId.replace(/^parley:/, '').slice(0, 12));
 
   bannerEl.classList.toggle('iab-approval', isApproval);
   bannerEl.innerHTML = `
@@ -72,7 +72,7 @@ export function show(args: ShowArgs): void {
 
   bannerEl.onclick = () => {
     hide();
-    if (onOpenCb) onOpenCb(args.chatId, args.sidekickId);
+    if (onOpenCb) onOpenCb(args.chatId, args.parleyId);
   };
   const dismissBtn = bannerEl.querySelector('.iab-dismiss') as HTMLElement | null;
   if (dismissBtn) {
@@ -87,7 +87,7 @@ export function show(args: ShowArgs): void {
       const action = btn.dataset.iabAction as ApprovalAction | undefined;
       if (!action) return;
       hide();
-      void onActionCb?.(args.chatId, action, args.sidekickId);
+      void onActionCb?.(args.chatId, action, args.parleyId);
     };
   });
 

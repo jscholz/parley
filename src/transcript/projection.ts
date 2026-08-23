@@ -20,7 +20,7 @@
  *
  * Dedup rule:
  *   - `key` is the join axis. For user/assistant bubbles, durable's
- *     `sidekick_id` (umsg_… / msg_…) matches inflight's `message_id` and
+ *     `parley_id` (umsg_… / msg_…) matches inflight's `message_id` and
  *     pendingSend's `messageId`. The dedup happens here, before the
  *     reconciler sees the list.
  */
@@ -63,11 +63,11 @@ export function project(state: ChatState): BubbleSpec[] {
   //   where SSE delivered reply_final before state.db caught up),
   //   the count starts at 0 → no drop → inflight renders. ✓
   //
-  // Tracks ALL durable assistant content (regardless of sidekick_id
-  // presence). The earlier no-sidekick_id-only restriction missed
-  // cases where state.db's assistant row had `sidekick_id="sk-<unix>-<seq>"`
+  // Tracks ALL durable assistant content (regardless of parley_id
+  // presence). The earlier no-parley_id-only restriction missed
+  // cases where state.db's assistant row had `parley_id="sk-<unix>-<seq>"`
   // synthetic shape that didn't match the envelope's `message_id`
-  // shape — both got sidekick_ids, neither dedup'd, both rendered.
+  // shape — both got parley_ids, neither dedup'd, both rendered.
   const durableAssistantContentCounts = new Map<string, number>();
   // Durable USER bubbles by content — consulted by the heal-rekey echo
   // shadow in step 2 (an echo whose key vanished from durable matching
@@ -82,7 +82,7 @@ export function project(state: ChatState): BubbleSpec[] {
   // etc.) — Pass 2 then inserts a parallel `legacy:<state_id>` row
   // alongside the existing `msg_xyz` row — and compaction re-flush
   // (field 2026-07-16) appends unannotated verbatim copies. The PWA
-  // can't tell twins apart by key alone (different sidekick_ids), so
+  // can't tell twins apart by key alone (different parley_ids), so
   // we dedup by content + role — but WINDOWED and artifact-aware, the
   // same way the user rows are dedup'd below. An unconditional whole-
   // window content collapse ate legitimate repeats: slash commands
@@ -130,10 +130,10 @@ export function project(state: ChatState): BubbleSpec[] {
       const next = di + 1 < state.durable.length ? state.durable[di + 1] : null;
       const olderId = item.gap_older_id !== undefined
         ? item.gap_older_id
-        : (prev ? String(prev.sidekick_id || prev.id) : null);
+        : (prev ? String(prev.parley_id || prev.id) : null);
       const newerId = item.gap_newer_id !== undefined
         ? item.gap_newer_id
-        : (next ? String(next.sidekick_id || next.id) : null);
+        : (next ? String(next.parley_id || next.id) : null);
       pushDurableSpec({
         kind: 'gap',
         key: `gap:${olderId ?? '∅'}:${newerId ?? '∅'}`,
@@ -172,12 +172,12 @@ export function project(state: ChatState): BubbleSpec[] {
       // both as notification bubbles so history replay matches live
       // (handleNotification → store envelope) rendering exactly.
       if (isNotificationLikeItem(item)) {
-        // Bare sidekick_id (no `notif:` prefix) so the activity tray's
-        // stored `messageId = item.sidekick_id` matches the bubble's
+        // Bare parley_id (no `notif:` prefix) so the activity tray's
+        // stored `messageId = item.parley_id` matches the bubble's
         // data-key 1:1, and the drill (sessionResume.ts) finds it
         // with a plain querySelector. Pre-v2 (2026-05-29) we prefixed
         // and the drill had to dual-lookup or text-fallback to recover.
-        const key = String(item.sidekick_id || item.id);
+        const key = String(item.parley_id || item.id);
         if (notificationKeys.has(key)) continue;
         notificationKeys.add(key);
         pushDurableSpec({
@@ -210,8 +210,8 @@ export function project(state: ChatState): BubbleSpec[] {
         assistantKeys.add(akey);
         pushDurableSpec({ kind: 'assistant', key: akey, text: item.content, timestamp: ts });
         // Track content for the inflight dedup pass below — covers
-        // both the no-link case (sidekick_id missing) and the
-        // mismatched-link case (sidekick_id present but doesn't
+        // both the no-link case (parley_id missing) and the
+        // mismatched-link case (parley_id present but doesn't
         // equal the envelope's message_id).
         durableAssistantContentCounts.set(
           item.content,
@@ -231,7 +231,7 @@ export function project(state: ChatState): BubbleSpec[] {
         row.tools.push({ callId, name: item.tool_name || inferToolNameFromResult(item.content), args: {}, result: item.content });
       }
     } else if (item.role === 'notification') {
-      const key = String(item.sidekick_id || item.id);
+      const key = String(item.parley_id || item.id);
       if (notificationKeys.has(key)) continue;
       notificationKeys.add(key);
       pushDurableSpec({
@@ -422,7 +422,7 @@ export function project(state: ChatState): BubbleSpec[] {
         break;
       }
       case 'notification': {
-        const key = String(env.sidekick_id || `inflight:${inflightTs}`);
+        const key = String(env.parley_id || `inflight:${inflightTs}`);
         if (notificationKeys.has(key)) break;
         notificationKeys.add(key);
         specs.push({
@@ -442,10 +442,10 @@ export function project(state: ChatState): BubbleSpec[] {
   // ── 2.5. Content-multiset dedup: inflight assistant specs whose
   // text matches an unconsumed durable assistant row are dropped —
   // durable owns the bubble. Without this we'd render both (durable
-  // keyed by its sidekick_id, inflight keyed by SSE message_id) when
-  // the two ids differ — either because durable's sidekick_id is
+  // keyed by its parley_id, inflight keyed by SSE message_id) when
+  // the two ids differ — either because durable's parley_id is
   // missing (causing duplicate bubbles for short replies with no
-  // sidekick_id), or because durable's sidekick_id is present but
+  // parley_id), or because durable's parley_id is present but
   // shaped differently from the envelope's message_id
   // ("sk-<unix>-<seq>" synthetic on durable vs envelope shape on
   // the live SSE).
@@ -624,11 +624,11 @@ function stripCronBoilerplate(text: string, kind: string | undefined): string {
 }
 
 function userKey(item: ConversationItem): string {
-  return item.sidekick_id || String(item.id);
+  return item.parley_id || String(item.id);
 }
 
 function assistantKey(item: ConversationItem): string {
-  return item.sidekick_id || String(item.id);
+  return item.parley_id || String(item.id);
 }
 
 function normalizeTimestamp(item: ConversationItem): number {
@@ -758,12 +758,12 @@ function kindOrder(s: BubbleSpec): number {
  *  durable dedup so the "winner" check compares the same object that
  *  we'll later inspect when walking durable. */
 function identityKey(item: ConversationItem): string {
-  return `${item.sidekick_id || ''}:${String(item.id)}`;
+  return `${item.parley_id || ''}:${String(item.id)}`;
 }
 
 /** Returns > 0 when `a` wins, < 0 when `b` wins, 0 when tied.
  *  Tier order: real-timestamp beats zero-timestamp → annotated
- *  (sidekick_id present) beats unannotated → EARLIER timestamp →
+ *  (parley_id present) beats unannotated → EARLIER timestamp →
  *  lower id.
  *
  *  Earlier-and-annotated-wins because every observed duplicate shape
@@ -784,14 +784,14 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
   const bIsReal = bTs > 0;
   if (aIsReal && !bIsReal) return 1;
   if (!aIsReal && bIsReal) return -1;
-  const aAnnotated = !!a.sidekick_id;
-  const bAnnotated = !!b.sidekick_id;
+  const aAnnotated = !!a.parley_id;
+  const bAnnotated = !!b.parley_id;
   if (aAnnotated && !bAnnotated) return 1;
   if (!aAnnotated && bAnnotated) return -1;
   if (aTs !== bTs) return aTs < bTs ? 1 : -1;
   // Same annotation tier, same timestamp. Tie-break by LOWER id — the
   // original row was persisted first (string compare works for both
-  // integer-id and sidekick_id-string-id shapes; consistent ordering
+  // integer-id and parley_id-string-id shapes; consistent ordering
   // is what we need, not numeric correctness).
   return String(a.id) < String(b.id) ? 1 : -1;
 }
@@ -814,8 +814,8 @@ const ENVELOPE_SHADOW_WINDOW_MS = 30 * 60_000;
 const ENVELOPE_ID_MIN = 1e11;
 
 function isEnvelopeOnlyCopy(it: ConversationItem, envelopeIdPrefix: string): boolean {
-  return typeof it.sidekick_id === 'string'
-    && it.sidekick_id.startsWith(envelopeIdPrefix)
+  return typeof it.parley_id === 'string'
+    && it.parley_id.startsWith(envelopeIdPrefix)
     && Number(it.id) >= ENVELOPE_ID_MIN;
 }
 
@@ -876,7 +876,7 @@ function takeContentShadowedUserSpec(
  *     epoch time) loses to any sibling with a real wall-clock timestamp,
  *     at any distance — the original intent of the 2026-05-19 dedup.
  *  3. Artifact drop (ASSISTANT rows only): rows with a client-keyed
- *     annotation (sidekick_id present, not `legacy:`) are "good"; when
+ *     annotation (parley_id present, not `legacy:`) are "good"; when
  *     any exist, every non-good row is dropped at ANY time distance —
  *     unannotated compaction-replay copies are re-stamped with the flush
  *     time (field 2026-07-16) and `legacy:` reconcile twins collapse
@@ -918,7 +918,7 @@ function pickDuplicateLosers(
     const envelopes = group.filter((it) => isEnvelopeOnlyCopy(it, envelopeIdPrefix));
     const pairedEnvelopes = new Set<ConversationItem>();
     for (const stateCopy of group) {
-      if (stateCopy.sidekick_id) continue;  // annotated → already linked
+      if (stateCopy.parley_id) continue;  // annotated → already linked
       const sTs = normalizeTimestamp(stateCopy);
       let match: ConversationItem | null = null;
       for (const env of envelopes) {
@@ -946,9 +946,9 @@ function pickDuplicateLosers(
     // legacy: twins at any time distance. All-legacy groups fall through.
     if (role === 'assistant' && alive.length >= 2) {
       const good = alive.filter((it) =>
-        typeof it.sidekick_id === 'string'
-        && it.sidekick_id.length > 0
-        && !it.sidekick_id.startsWith('legacy:'));
+        typeof it.parley_id === 'string'
+        && it.parley_id.length > 0
+        && !it.parley_id.startsWith('legacy:'));
       if (good.length > 0 && good.length < alive.length) {
         for (const it of alive) {
           if (!good.includes(it)) losers.add(identityKey(it));
@@ -968,7 +968,7 @@ function pickDuplicateLosers(
       // orphan that live state, and the inflight walk would re-add the
       // key as a ghost bubble (heal-rekeyed twin, field 2026-07-15).
       // Among live-keyed rows (or absent any), the usual tiebreak.
-      // (userKey computes the sidekick_id||id join key — same shape for
+      // (userKey computes the parley_id||id join key — same shape for
       // both roles; assistants pass an empty liveKeys set so this loop
       // is a no-op for them.)
       let winner: ConversationItem | null = null;

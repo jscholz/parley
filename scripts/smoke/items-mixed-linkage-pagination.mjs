@@ -1,13 +1,13 @@
 // B2-refactor regression gate: items endpoint must correctly surface
 // a chat whose messages are a mix of:
-//   - modern rows with `sidekick_id` (umsg_*/msg_*) — write-through path
-//   - legacy rows with no `sidekick_id` (cross-channel or pre-link)
+//   - modern rows with `parley_id` (umsg_*/msg_*) — write-through path
+//   - legacy rows with no `parley_id` (cross-channel or pre-link)
 // across the load-earlier pagination boundary, with no dupes and
 // correct chronological order.
 //
 // This smoke exercises the read path that B2 will refactor (items
 // endpoint reading state.db.messages + JOINing parley.db.msg_links
-// for the sidekick_id annotation). Establishes a green baseline
+// for the parley_id annotation). Establishes a green baseline
 // BEFORE B2 lands; afterward it's a regression gate that breaks loudly
 // if B2's JOIN drops fields, dupes rows, or mis-orders the page.
 
@@ -28,26 +28,26 @@ export function MOCK_SETUP(mock) {
   // the user has to load-earlier twice to see all of them.
   mock.addChat(CHAT_ID, {
     title: 'Mixed linkage pagination test',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
-      // Page 3 (oldest) — legacy rows (no sidekick_id)
+      // Page 3 (oldest) — legacy rows (no parley_id)
       { role: 'user', content: 'oldest q (legacy)', timestamp: T0 + 0 },
       { role: 'assistant', content: 'oldest a (legacy)', timestamp: T0 + 1 },
       // Page 2 — mix
       { role: 'user', content: 'middle q (legacy)', timestamp: T0 + 10 },
       { role: 'assistant', content: 'middle a (modern)',
-        sidekick_id: 'msg_middle_modern', timestamp: T0 + 11 },
+        parley_id: 'msg_middle_modern', timestamp: T0 + 11 },
       { role: 'user', content: 'middle q2 (modern)',
-        sidekick_id: 'umsg_middle_q2', timestamp: T0 + 12 },
+        parley_id: 'umsg_middle_q2', timestamp: T0 + 12 },
       { role: 'assistant', content: 'middle a2 (legacy)', timestamp: T0 + 13 },
       // Page 1 (newest) — all modern
-      { role: 'user', content: 'recent q', sidekick_id: 'umsg_recent_q',
+      { role: 'user', content: 'recent q', parley_id: 'umsg_recent_q',
         timestamp: T0 + 100 },
-      { role: 'assistant', content: 'recent a', sidekick_id: 'msg_recent_a',
+      { role: 'assistant', content: 'recent a', parley_id: 'msg_recent_a',
         timestamp: T0 + 101 },
-      { role: 'user', content: 'newest q', sidekick_id: 'umsg_newest_q',
+      { role: 'user', content: 'newest q', parley_id: 'umsg_newest_q',
         timestamp: T0 + 110 },
-      { role: 'assistant', content: 'newest a', sidekick_id: 'msg_newest_a',
+      { role: 'assistant', content: 'newest a', parley_id: 'msg_newest_a',
         timestamp: T0 + 111 },
     ],
     lastActiveAt: Date.now() - 1000,
@@ -133,15 +133,15 @@ export default async function run({ page, log }) {
   }
   log('all 10 markers present exactly once (no dupes across mixed linkage) ✓');
 
-  // Spot check: data-key surfaces the sidekick_id when present, falls
+  // Spot check: data-key surfaces the parley_id when present, falls
   // back to the integer id when absent.
   const keys = dump.map(d => d.key);
-  // Modern rows should be keyed by sidekick_id
+  // Modern rows should be keyed by parley_id
   assert(keys.includes('msg_newest_a'), `expected msg_newest_a in keys; got ${JSON.stringify(keys)}`);
   assert(keys.includes('umsg_newest_q'), `expected umsg_newest_q in keys; got ${JSON.stringify(keys)}`);
   // Legacy rows should be keyed by integer id (mock assigns 1000+i)
   const integerKeys = keys.filter(k => /^\d+$/.test(k || ''));
   assert(integerKeys.length === 4,
     `expected 4 integer-id keys (legacy rows); got ${integerKeys.length}: ${JSON.stringify(integerKeys)}`);
-  log('key shape: modern → sidekick_id, legacy → integer id ✓');
+  log('key shape: modern → parley_id, legacy → integer id ✓');
 }

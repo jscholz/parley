@@ -41,17 +41,17 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role: 'user',
       content: `Question ${i}. ${'This is a deliberately long user message that wraps across several lines so the rendered bubble is much taller than the 80px estimate. '.repeat(4)}`,
-      sidekick_id: `umsg_jb_${i}`,
+      parley_id: `umsg_jb_${i}`,
       timestamp: t0 + i * 2,
     });
     messages.push({
       role: 'assistant',
       content: `Answer ${i}.\n\n${'A long multi-paragraph assistant reply that wraps and wraps so the measured height greatly exceeds the 160px estimate, amplifying the estimate-vs-measured gap that strands a one-shot jump-to-bottom. '.repeat(5)}`,
-      sidekick_id: `msg_jb_${i}`,
+      parley_id: `msg_jb_${i}`,
       timestamp: t0 + i * 2 + 1,
     });
   }
-  mock.addChat(CHAT_ID, { title: 'Jump-to-bottom chat', source: 'sidekick', messages, lastActiveAt: Date.now() });
+  mock.addChat(CHAT_ID, { title: 'Jump-to-bottom chat', source: 'parley', messages, lastActiveAt: Date.now() });
   mock.setAutoReplyEnabled(false);
 }
 

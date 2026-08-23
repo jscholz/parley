@@ -35,13 +35,13 @@ export function MOCK_SETUP(mock) {
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `filler message with some real height to it (${i}) `.repeat(3),
       message_id: `yank-msg-${i}`,
-      sidekick_id: `yank-msg-${i}`,
+      parley_id: `yank-msg-${i}`,
       timestamp: Date.now() / 1000 - (30 - i) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Stream yank',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 60_000,
   });

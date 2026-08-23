@@ -32,14 +32,14 @@ const CHAT_ID = 'mock-heal-rekey';
 const TEXT = 'can you delete pls?';
 const seedTs = Date.now() / 1000 - 600;
 const SEED = [
-  { role: 'user', content: 'earlier turn', sidekick_id: 'umsg_seed_1', timestamp: seedTs },
-  { role: 'assistant', content: 'earlier reply', sidekick_id: 'msg_seed_1', timestamp: seedTs + 5 },
+  { role: 'user', content: 'earlier turn', parley_id: 'umsg_seed_1', timestamp: seedTs },
+  { role: 'assistant', content: 'earlier reply', parley_id: 'msg_seed_1', timestamp: seedTs + 5 },
 ];
 
 export function MOCK_SETUP(mock) {
   mock.addChat(CHAT_ID, {
     title: 'Heal-rekey repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: SEED.slice(),
     lastActiveAt: Date.now(),
   });
@@ -100,12 +100,12 @@ export default async function run({ page, log, mock }) {
   const healKey = `umsg_${(tSend - 66) * 1000}_heal0000`;
   mock.addChat(CHAT_ID, {
     title: 'Heal-rekey repro',
-    source: 'sidekick',
+    source: 'parley',
     messages: [
       ...SEED,
-      { role: 'user', content: TEXT, sidekick_id: clientKey, timestamp: tSend },
-      { role: 'user', content: TEXT, sidekick_id: healKey, timestamp: tSend },
-      { role: 'assistant', content: `[mock] echo: ${TEXT}`, message_id: replyKey, sidekick_id: replyKey, timestamp: tSend + 1 },
+      { role: 'user', content: TEXT, parley_id: clientKey, timestamp: tSend },
+      { role: 'user', content: TEXT, parley_id: healKey, timestamp: tSend },
+      { role: 'assistant', content: `[mock] echo: ${TEXT}`, message_id: replyKey, parley_id: replyKey, timestamp: tSend + 1 },
     ],
     lastActiveAt: Date.now(),
   });

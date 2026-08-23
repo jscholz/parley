@@ -30,10 +30,10 @@ export function MOCK_SETUP(mock) {
   // ~14 turns of moderately long content so the transcript is scrollable
   // in the 1280×800 test viewport.
   for (let i = 0; i < 14; i++) {
-    messages.push({ role: 'user', content: `Question number ${i} — ${'lorem ipsum '.repeat(6)}`, sidekick_id: `umsg_ft_${i}`, timestamp: t0 + i * 2 });
-    messages.push({ role: 'assistant', content: `Answer number ${i} — ${'dolor sit amet '.repeat(6)}`, sidekick_id: `msg_ft_${i}`, timestamp: t0 + i * 2 + 1 });
+    messages.push({ role: 'user', content: `Question number ${i} — ${'lorem ipsum '.repeat(6)}`, parley_id: `umsg_ft_${i}`, timestamp: t0 + i * 2 });
+    messages.push({ role: 'assistant', content: `Answer number ${i} — ${'dolor sit amet '.repeat(6)}`, parley_id: `msg_ft_${i}`, timestamp: t0 + i * 2 + 1 });
   }
-  mock.addChat(CHAT_ID, { title: 'Follow-tail chat', source: 'sidekick', messages, lastActiveAt: Date.now() });
+  mock.addChat(CHAT_ID, { title: 'Follow-tail chat', source: 'parley', messages, lastActiveAt: Date.now() });
   mock.setAutoReplyEnabled(false);
 }
 

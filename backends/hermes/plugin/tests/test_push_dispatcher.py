@@ -51,7 +51,7 @@ from .. import parley_state as state
 def db(tmp_path):
     """Fresh on-disk sqlite per test (in-memory sqlite doesn't play well
     with the dispatcher's commit-on-prefs semantics)."""
-    db = ParleyDB(tmp_path / "sidekick.db")
+    db = ParleyDB(tmp_path / "parley.db")
     yield db
     db.close()
 
@@ -146,7 +146,7 @@ def test_engagement_hidden_clears_immediately(dispatcher, db):
 
 def test_engagement_key_uses_stripped_chat_id(dispatcher, db):
     """Field bug 2026-05-18: visibility was recorded under the
-    PWA-supplied `sidekick:<uuid>` form but the dispatch path checks
+    PWA-supplied `parley:<uuid>` form but the dispatch path checks
     the stripped form. The route handler now normalizes via
     `_strip_source_prefix`. This test pins the DISPATCH-side contract:
     engagement is keyed on the stripped chat_id, so a route handler
@@ -165,18 +165,18 @@ def test_push_payload_url_routes_to_chat_and_message():
         "type": "notification",
         "kind": "cron",
         "chat_id": "abc-uuid",
-        "sidekick_id": "notif_123",
+        "parley_id": "notif_123",
         "content": "Cron output",
     })
-    assert payload["url"] == "/?chat=sidekick%3Aabc-uuid&msg=notif_123"
+    assert payload["url"] == "/?chat=parley%3Aabc-uuid&msg=notif_123"
     assert "chat_id=" not in payload["url"]
 
     already_prefixed = _build_payload({
         "type": "reply_final",
-        "chat_id": "sidekick:abc-uuid",
+        "chat_id": "parley:abc-uuid",
         "message_id": "msg_123",
     }, body_override="hello")
-    assert already_prefixed["url"] == "/?chat=sidekick%3Aabc-uuid&msg=msg_123"
+    assert already_prefixed["url"] == "/?chat=parley%3Aabc-uuid&msg=msg_123"
 
 
 # ── Per-kind toggle ────────────────────────────────────────────────────

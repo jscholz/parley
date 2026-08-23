@@ -32,7 +32,7 @@ function sha(buf: Buffer): string {
 }
 
 test('lifecycle: create → activate → segments → stop → complete manifest + index', async () => {
-  const created = await createCapture({ title: 'Standup', linkedChat: 'sidekick:abc' });
+  const created = await createCapture({ title: 'Standup', linkedChat: 'parley:abc' });
   assert.match(created.id, /^cap_\d+_[0-9a-f]{6}$/);
   // Two-phase (2026-08-18 postmortem): create is a PENDING placeholder;
   // only /activate — after the client proved a running recorder —
@@ -131,9 +131,9 @@ test('one active capture at a time; stale recording auto-heals', async () => {
 test('patch: rename, re-link, diarize toggle; diarize frozen after finish', async () => {
   const m = await createCapture({ title: 'Meeting 2026-07-08' });
   await activateCapture(m.id);
-  const p1 = await patchCapture(m.id, { title: 'R2 fundraise sync', linkedChat: 'sidekick:xyz' });
+  const p1 = await patchCapture(m.id, { title: 'R2 fundraise sync', linkedChat: 'parley:xyz' });
   assert.equal(p1.title, 'R2 fundraise sync');
-  assert.equal(p1.linked_chat, 'sidekick:xyz');
+  assert.equal(p1.linked_chat, 'parley:xyz');
   const p2 = await patchCapture(m.id, { diarize: false });
   assert.equal(p2.diarize, false);
 
@@ -293,14 +293,13 @@ test('capture_control rejects unknown actions with 400 (no default-to-start)', a
   assert.equal(good.status, 202);
 });
 
-// ── Rename compat: segment-upload headers accept BOTH spellings ────────
+// ── Segment-upload headers are genuinely read ──────────────────────────
 //
-// The renamed PWA sends x-parley-*, but an installed/cached pre-rename
-// bundle keeps sending x-sidekick-*. Dropping the legacy spelling would
-// be silent data corruption rather than a visible error: t0-ms would
-// fall back to 0 (every segment stacked at capture start, scrambling
-// transcript timing + mark alignment) and sha256 would go unchecked.
-test('segment upload honors legacy x-sidekick-* headers (rename compat)', async () => {
+// x-parley-t0-ms places the segment on the capture timeline (a 0
+// fallback would stack every segment at capture start, scrambling
+// transcript timing + mark alignment) and x-parley-sha256 is a real
+// integrity check, not merely tolerated.
+test('segment upload reads x-parley-* headers', async () => {
   const { handleCaptureSegment } = await import('../capture.ts');
   const { Readable } = await import('node:stream');
   const mkRes = () => {
@@ -318,42 +317,30 @@ test('segment upload honors legacy x-sidekick-* headers (rename compat)', async 
     return r;
   };
 
-  const cap = await createCapture({ title: 'Legacy client', linkedChat: null });
+  const cap = await createCapture({ title: 'Header client', linkedChat: null });
   await activateCapture(cap.id);
 
-  // Legacy spellings only — exactly what a cached old bundle sends.
-  const legacyBytes = Buffer.from('legacy-bundle-segment');
+  const bytes = Buffer.from('bundle-segment');
   const res = mkRes();
   await handleCaptureSegment(
-    mkReq(legacyBytes, {
-      'x-sidekick-t0-ms': '45000',
-      'x-sidekick-sha256': sha(legacyBytes),
+    mkReq(bytes, {
+      'x-parley-t0-ms': '45000',
+      'x-parley-sha256': sha(bytes),
     }),
     res, cap.id, '0',
   );
   assert.equal(res.status, 200);
-  const afterLegacy = await getCapture(cap.id);
-  assert.equal(afterLegacy.segments[0].t0_ms, 45_000,
-    'legacy x-sidekick-t0-ms must survive — a 0 fallback scrambles transcript timing');
-  assert.equal(afterLegacy.segments[0].sha256, sha(legacyBytes));
+  const after = await getCapture(cap.id);
+  assert.equal(after.segments[0].t0_ms, 45_000,
+    'x-parley-t0-ms must survive — a 0 fallback scrambles transcript timing');
+  assert.equal(after.segments[0].sha256, sha(bytes));
 
-  // A legacy sha256 that does NOT match must still be rejected (409) —
-  // proving the header is genuinely read, not merely tolerated.
+  // A sha256 that does NOT match must be rejected (409) — proving the
+  // header is genuinely read, not merely tolerated.
   const mismatch = mkRes();
   await handleCaptureSegment(
-    mkReq(Buffer.from('other-bytes'), { 'x-sidekick-sha256': sha(Buffer.from('not-these')) }),
+    mkReq(Buffer.from('other-bytes'), { 'x-parley-sha256': sha(Buffer.from('not-these')) }),
     mismatch, cap.id, '1',
   );
   assert.equal(mismatch.status, 409);
-
-  // New spelling wins when both are present.
-  const newBytes = Buffer.from('renamed-bundle-segment');
-  const both = mkRes();
-  await handleCaptureSegment(
-    mkReq(newBytes, { 'x-parley-t0-ms': '90000', 'x-sidekick-t0-ms': '1' }),
-    both, cap.id, '2',
-  );
-  assert.equal(both.status, 200);
-  const afterBoth = await getCapture(cap.id);
-  assert.equal(afterBoth.segments.find((s) => s.seq === 2).t0_ms, 90_000);
 });

@@ -43,13 +43,13 @@ const B_BODY = 'TAPMISS-B-BODY-MARKER';
 export function MOCK_SETUP(mock) {
   const now = Date.now();
   mock.addChat(CHAT_A, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Landing chat',
     messages: [{ role: 'user', content: 'landing', timestamp: now / 1000 - 30 }],
     lastActiveAt: now - 30_000,
   });
   mock.addChat(CHAT_B, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Unread chat (tap target)',
     messages: [
       { role: 'user', content: 'ping', timestamp: now / 1000 - 600 },
@@ -58,7 +58,7 @@ export function MOCK_SETUP(mock) {
     lastActiveAt: now - 600_000,
   });
   mock.addChat(CHAT_C, {
-    source: 'sidekick',
+    source: 'parley',
     title: 'Background chat',
     messages: [{ role: 'user', content: 'background noise', timestamp: now / 1000 - 900 }],
     lastActiveAt: now - 900_000,

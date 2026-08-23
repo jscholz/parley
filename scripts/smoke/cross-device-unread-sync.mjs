@@ -34,14 +34,14 @@ export function MOCK_SETUP(mock) {
     title: 'Viewed',
     messages: [
       { role: 'user', content: 'viewed-chat-seed',
-        sidekick_id: 'umsg_unread_viewed', timestamp: Date.now() / 1000 - 60 },
+        parley_id: 'umsg_unread_viewed', timestamp: Date.now() / 1000 - 60 },
     ],
   });
   mock.addChat(REMOTE_CHAT, {
     title: 'Remote',
     messages: [
       { role: 'user', content: 'remote-chat-seed',
-        sidekick_id: 'umsg_unread_remote', timestamp: Date.now() / 1000 - 120 },
+        parley_id: 'umsg_unread_remote', timestamp: Date.now() / 1000 - 120 },
     ],
   });
 }

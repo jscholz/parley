@@ -8,14 +8,14 @@
  * completed-turn envelope (anything up to & including the last
  * reply_final), assuming durable was authoritative for those turns.
  * Fixed the ghost-tail bug where durable rows arrived with
- * sidekick_id NULL (the plugin's link-table write had silently
+ * parley_id NULL (the plugin's link-table write had silently
  * failed) — projection couldn't dedup against inflight by key,
  * resulting in duplicate ghost bubbles. Dropping inflight removed
  * the duplicate at the cost of trusting durable absolutely.
  *
  * v2 (this file, 2026-05-19): `setDurable` only drops envelopes
  * whose `reply_final.message_id` is present in durable's
- * `sidekick_id` set. The v1 assumption broke for background-chat
+ * `parley_id` set. The v1 assumption broke for background-chat
  * replies: SSE delivered reply_final to the inflight store, but
  * a subsequent switch-in fired setDurable BEFORE the plugin had
  * mirrored the assistant row into state.db / parley.db. With
@@ -26,7 +26,7 @@
  * The v1 ghost-tail symptom is addressed at the source by the
  * supplemental store self-heal (phase-3 fingerprint linker,
  * phase-4 orphan drop) — durable rows should now reliably arrive
- * with sidekick_id. When the link write somehow still fails, v2
+ * with parley_id. When the link write somehow still fails, v2
  * leaves the inflight envelope alone; the user sees a brief
  * duplicate rather than missing content, which is the safer
  * trade.
@@ -62,14 +62,14 @@ function replyFinal(message_id: string, text?: string): ParleyEnvelope {
 function typing(): ParleyEnvelope {
   return { type: 'typing', chat_id: CHAT };
 }
-function durableUserRow(id: number, content: string, sidekick_id?: string): ConversationItem {
+function durableUserRow(id: number, content: string, parley_id?: string): ConversationItem {
   const row: ConversationItem = { id, role: 'user', content, timestamp: 1_779_120_000 + id };
-  if (sidekick_id) row.sidekick_id = sidekick_id;
+  if (parley_id) row.parley_id = parley_id;
   return row;
 }
-function durableAssistantRow(id: number, content: string, sidekick_id?: string): ConversationItem {
+function durableAssistantRow(id: number, content: string, parley_id?: string): ConversationItem {
   const row: ConversationItem = { id, role: 'assistant', content, timestamp: 1_779_120_000 + id };
-  if (sidekick_id) row.sidekick_id = sidekick_id;
+  if (parley_id) row.parley_id = parley_id;
   return row;
 }
 
@@ -87,15 +87,15 @@ describe('store: setDurable conditionally drains completed-turn inflight envelop
     assert.equal(s.inflight[2].type, 'reply_delta');
   });
 
-  it('drops a completed turn when durable contains the reply_final.message_id as sidekick_id', () => {
+  it('drops a completed turn when durable contains the reply_final.message_id as parley_id', () => {
     reset();
     appendInflight(CHAT, userMsg('umsg_A', 'hello'));
     appendInflight(CHAT, typing());
     appendInflight(CHAT, replyDelta('msg_A', 'hi'));
     appendInflight(CHAT, replyFinal('msg_A', 'hi'));
     // Durable mirror caught up: assistant row carries the SSE-shape
-    // message_id as sidekick_id. Projection dedup will key off this
-    // sidekick_id, so the store can safely drain the inflight copy.
+    // message_id as parley_id. Projection dedup will key off this
+    // parley_id, so the store can safely drain the inflight copy.
     setDurable(CHAT, [
       durableUserRow(1, 'hello', 'umsg_A'),
       durableAssistantRow(2, 'hi', 'msg_A'),
@@ -157,13 +157,13 @@ describe('store: setDurable conditionally drains completed-turn inflight envelop
     assert.equal((s.inflight[2] as any).message_id, 'msg_A');
   });
 
-  it('preserves completed-turn envelopes when durable rows lack sidekick_id', () => {
+  it('preserves completed-turn envelopes when durable rows lack parley_id', () => {
     // Historical scenario (ghost tail): the plugin's link-table write
     // silently failed, leaving durable
-    // assistant rows with sidekick_id NULL. Under v1 the store
+    // assistant rows with parley_id NULL. Under v1 the store
     // nuked the inflight on the assumption that durable was good;
     // under v2 we don't assume — supplemental-store's phase-3/4
-    // self-heal is the real fix for the underlying NULL-sidekick_id
+    // self-heal is the real fix for the underlying NULL-parley_id
     // bug, and v2 keeping the inflight envelope shows a brief
     // duplicate at worst (the projection will eventually dedup once
     // the link gets re-established), never blank content.
@@ -171,14 +171,14 @@ describe('store: setDurable conditionally drains completed-turn inflight envelop
     appendInflight(CHAT, userMsg('umsg_ghost', 'This is great'));
     appendInflight(CHAT, replyDelta('msg_ghost', 'Yep'));
     appendInflight(CHAT, replyFinal('msg_ghost', 'Yep'));
-    // Durable rows arrive without sidekick_id — the bug shape.
+    // Durable rows arrive without parley_id — the bug shape.
     setDurable(CHAT, [
       { id: 100, role: 'user', content: 'This is great', timestamp: 1_779_121_069 },
       { id: 101, role: 'assistant', content: 'Yep', timestamp: 1_779_121_069 },
     ], { firstId: null, hasMore: false });
     const s = getState(CHAT);
     assert.equal(s.inflight.length, 3,
-      `expected inflight preserved when durable lacks sidekick_id (safer than nuking content); got ${s.inflight.length}`);
+      `expected inflight preserved when durable lacks parley_id (safer than nuking content); got ${s.inflight.length}`);
   });
 });
 
@@ -222,7 +222,7 @@ describe('store: targeted post-final inflight drain', () => {
 
 const SEC = 1_779_120_000;
 function row(id: number, role: 'user' | 'assistant', content: string): ConversationItem {
-  return { id, sidekick_id: `s${id}`, role, content, timestamp: SEC + id };
+  return { id, parley_id: `s${id}`, role, content, timestamp: SEC + id };
 }
 function freshChat(name: string): string {
   setDurable(name, [], { firstId: null, hasMore: false });

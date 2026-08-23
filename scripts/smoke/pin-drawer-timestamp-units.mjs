@@ -9,14 +9,14 @@ export const DESCRIPTION = 'server-side pin timestamps in Unix seconds render as
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-const CHAT = 'sidekick:pin-timestamp-units';
+const CHAT = 'parley:pin-timestamp-units';
 
 export function MOCK_SETUP(mock) {
   const nowSec = Date.now() / 1000;
   mock.addChat(CHAT, {
     title: 'Pin Timestamp Units',
     messages: [
-      { role: 'assistant', content: 'timestamp units pin body', message_id: 'msg-pin-ts', sidekick_id: 'msg-pin-ts', timestamp: nowSec - 90 },
+      { role: 'assistant', content: 'timestamp units pin body', message_id: 'msg-pin-ts', parley_id: 'msg-pin-ts', timestamp: nowSec - 90 },
     ],
     lastActiveAt: Date.now() - 90_000,
   });

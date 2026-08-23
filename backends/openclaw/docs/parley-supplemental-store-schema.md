@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS unread (
 
 -- ── Push subscriptions ────────────────────────────────────────────
 -- Web Push endpoints + VAPID keys per device. Today
--- ~/.sidekick/notifications/push-subscriptions.json. Move into the
+-- ~/.parley/notifications/push-subscriptions.json. Move into the
 -- plugin store so backups are unified.
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 -- ── Push mutes ────────────────────────────────────────────────────
 -- Per-chat push mute flags. Today
--- ~/.sidekick/notifications/push-mutes.json.
+-- ~/.parley/notifications/push-mutes.json.
 CREATE TABLE IF NOT EXISTS push_mutes (
   chat_id TEXT PRIMARY KEY,
   muted_at REAL NOT NULL
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS push_mutes (
 
 -- ── Push prefs (kv) ───────────────────────────────────────────────
 -- Quiet hours, kind filters, etc. Today
--- ~/.sidekick/notifications/push-prefs.json.
+-- ~/.parley/notifications/push-prefs.json.
 CREATE TABLE IF NOT EXISTS push_prefs (
   key TEXT PRIMARY KEY,
   value_json TEXT NOT NULL
@@ -197,7 +197,7 @@ CREATE INDEX IF NOT EXISTS idx_inflight_message ON inflight(message_id);
    id (hermes' state.db row id) goes in a separate
    `agent_row_id` column for traceability. No integer auto-increment
    on `messages.id` — that forces consumers to dedup against two
-   id spaces, which is the current source of `sidekick_msg_links`
+   id spaces, which is the current source of `parley_msg_links`
    complexity.
 
 3. **Inflight retention policy.** Three options:

@@ -74,7 +74,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Set
 
-from .parley_ids import SIDEKICK_SOURCE
+from .parley_ids import PARLEY_SOURCE
 from .parley_state import _is_compaction_seed
 
 logger = logging.getLogger(__name__)
@@ -826,7 +826,7 @@ def _background_capture_sync(
     rule-1 exclusions — the notification's own row is already
     deterministically linked by _persist_notification."""
     turn_id = (
-        trigger.get("sidekick_id") or trigger.get("message_id")
+        trigger.get("parley_id") or trigger.get("message_id")
         or f"notif_{int(time.time() * 1000)}"
     )
     last_row = db.fetchone(
@@ -1213,7 +1213,7 @@ async def open_turn_watermark(
     try:
         await run_in_parley_worker(
             _open_sync, db, state_db_path, _bare_chat_id(chat_id),
-            SIDEKICK_SOURCE, turn_id,
+            PARLEY_SOURCE, turn_id,
             user_text=user_text, entry_snapshot=snap,
         )
     except Exception as exc:
@@ -1235,7 +1235,7 @@ async def flush_pending_capture(adapter, chat_id: str) -> None:
     try:
         await run_in_parley_worker(
             _flush_pending_sync, db, state_db_path, _bare_chat_id(chat_id),
-            SIDEKICK_SOURCE, entry_snapshot=snap,
+            PARLEY_SOURCE, entry_snapshot=snap,
         )
     except Exception as exc:
         logger.warning("[parley] turn-linker flush failed for %s: %s", chat_id, exc)
@@ -1259,7 +1259,7 @@ async def close_turn_and_link(
     try:
         await run_in_parley_worker(
             _close_sync, db, state_db_path, _bare_chat_id(chat_id),
-            SIDEKICK_SOURCE, dict(trigger_env), entry_snapshot=snap,
+            PARLEY_SOURCE, dict(trigger_env), entry_snapshot=snap,
         )
     except Exception as exc:
         logger.warning("[parley] turn-linker close failed for %s: %s", chat_id, exc)

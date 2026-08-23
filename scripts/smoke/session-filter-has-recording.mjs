@@ -20,12 +20,12 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 300;
   mock.addChat(CHAT_REC, {
     title: 'Standup (recorded)',
-    messages: [{ role: 'user', content: 'seed rec', sidekick_id: 'umsg_f_rec', timestamp: t0 }],
+    messages: [{ role: 'user', content: 'seed rec', parley_id: 'umsg_f_rec', timestamp: t0 }],
     lastActiveAt: Date.now() - 5000,
   });
   mock.addChat(CHAT_PLAIN, {
     title: 'Plain notes',
-    messages: [{ role: 'user', content: 'seed plain', sidekick_id: 'umsg_f_plain', timestamp: t0 + 5 }],
+    messages: [{ role: 'user', content: 'seed plain', parley_id: 'umsg_f_plain', timestamp: t0 + 5 }],
     lastActiveAt: Date.now() - 1000,
   });
   // Finished capture linked to CHAT_REC — the boot-time meetingsIndex

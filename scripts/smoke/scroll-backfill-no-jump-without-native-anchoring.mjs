@@ -83,13 +83,13 @@ export function MOCK_SETUP(mock) {
     messages.push({
       role: i % 2 === 0 ? 'user' : 'assistant',
       content: `jumpmsg-${idx} ${'content line for height variance '.repeat(reps)}`,
-      sidekick_id: `jump-${idx}`,
+      parley_id: `jump-${idx}`,
       timestamp: Date.now() / 1000 - (TOTAL_MSGS - idx) * 60,
     });
   }
   mock.addChat(CHAT_ID, {
     title: 'Backfill scroll-jump repro',
-    source: 'sidekick',
+    source: 'parley',
     messages,
     lastActiveAt: Date.now() - 1000,
   });
