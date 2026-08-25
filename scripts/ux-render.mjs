@@ -104,6 +104,54 @@ async function shoot(browser, { mobile, theme }) {
   if (!isOpen) throw new Error('sidebar did not expand — do not ship renders that silently omit it');
   await page.screenshot({ path: `${OUT}/${variant}-drawer.png`, fullPage: false });
   console.log('shot', `${variant}-drawer.png`);
+
+  // Third frame: the Pinned panel. Points 2 and 7 of the pass are about
+  // its "Clear" button and its density, and neither can be judged from a
+  // panel with nothing in it. Pins go in through the same POST the app
+  // uses (the mock owns /api/parley/pins), rather than by driving the
+  // per-bubble pin control, so the seed doesn't depend on hover
+  // affordances that differ between desktop and mobile.
+  await page.evaluate(async (chat) => {
+    const pins = [
+      { role: 'assistant', text: 'The one risky dependency is the hosted demo instance — voice needs HTTPS + mic permission.', ago: 600 },
+      { role: 'user', text: 'Gate the HN post on the demo being live.', ago: 5400 },
+      { role: 'assistant', text: 'Show HN: A voice-first phone client for self-hosted agents (Hermes, OpenClaw, Claude Code)', ago: 90_000 },
+    ];
+    for (const [i, p] of pins.entries()) {
+      await fetch('/api/parley/pins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chat, msg_id: `pin-${i}`, role: p.role, text: p.text,
+          timestamp: Date.now() / 1000 - p.ago,
+        }),
+      });
+    }
+  }, CHAT);
+  // Reload so the client refetches pins. The pin store is populated at
+  // boot and opening the panel does not re-request, so seeding after boot
+  // renders an empty "No pinned messages" panel — which is exactly the
+  // frame this is trying not to produce. Playwright's routes are
+  // node-side and survive the navigation, so the mock keeps the pins.
+  await page.reload();
+  await waitForReady(page);
+  await page.evaluate((t) => { document.documentElement.setAttribute('data-theme', t); }, theme);
+  await page.click(`#sessions-list li[data-chat-id="${CHAT}"]`).catch(() => {});
+  await page.waitForTimeout(900);
+  const pinOpened = await page.evaluate(() => {
+    const btn = document.getElementById('btn-pin-drawer-rail')
+      || document.getElementById('btn-pin-drawer');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  });
+  if (!pinOpened) throw new Error('no pin-drawer toggle found — markup changed, fix the harness');
+  await page.waitForTimeout(900);
+  const pinCount = await page.evaluate(() =>
+    document.querySelectorAll('#pin-drawer-list .pin-drawer-item').length);
+  if (pinCount === 0) throw new Error('pinned panel rendered empty — seed did not reach the client');
+  await page.screenshot({ path: `${OUT}/${variant}-pinned.png`, fullPage: false });
+  console.log('shot', `${variant}-pinned.png`);
   await mock.close?.().catch?.(() => {});
   await cleanup();
 }
