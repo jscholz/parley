@@ -63,6 +63,20 @@ async function waitForIsolated(port, timeoutMs = 30_000) {
   throw new Error(`server on :${port} never reported an isolated data_home (${lastErr})`);
 }
 
+// Compile src/ before serving it. `build/` is a prebuilt static directory
+// and server.ts does NOT rebuild it, so a product change you just made is
+// invisible to the browser until someone runs the build — the suite then
+// grades the previous revision and reports it with total confidence. That
+// silently invalidated two debugging experiments on 2026-08-25 before the
+// staleness was noticed. The build is fast; running it unconditionally is
+// cheaper than one wrong conclusion.
+await new Promise((resolve, reject) => {
+  const b = spawn(process.execPath, [path.join(__dirname, 'build.mjs')], {
+    cwd: ROOT, stdio: ['ignore', 'ignore', 'inherit'],
+  });
+  b.on('exit', code => code === 0 ? resolve() : reject(new Error(`build failed (${code})`)));
+});
+
 const port = await freePort();
 const home = mkdtempSync(path.join(os.tmpdir(), 'parley-smoke-home-'));
 
