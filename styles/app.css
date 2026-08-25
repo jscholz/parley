@@ -710,15 +710,34 @@
 
   /* ── Pinned-session region (top of the list) ──
    * Pinned rows get a faint tint so the region reads as "kept above the
-   * recency list" without a heavy header. The clickable pin icon on the
-   * right (.sess-pin-btn) IS the pinned-state indicator — no left accent
-   * or glyph. `cursor: grab` + suppressed text-selection signal that the
-   * row is draggable; order is user-controlled via drag-reorder. */
+   * recency list" (the "Pinned" bucket header names the region; the tint
+   * marks its extent). The tint joins the hover/active color-mix family —
+   * the old var(--surface-2) stopped reading the moment rows went
+   * transparent: #181818 over the sidebar's #141414 is a 4-point delta
+   * nobody can see, where against the old boxed rows' #0a0a0a it had
+   * real contrast (field nit 2026-08-25, same-day regression from the
+   * de-boxing). Sits below hover (6%) and active (10%) so states still
+   * stack visibly on top. The clickable pin icon on the right
+   * (.sess-pin-btn) stays the per-row pinned-state indicator.
+   * `cursor: grab` + suppressed text-selection signal that the row is
+   * draggable; order is user-controlled via drag-reorder. */
   .sessions-list li.sess-pinned {
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
     cursor: grab;
     user-select: none;
     -webkit-user-select: none;
+  }
+  /* Source-order trap: this block sits AFTER the base li:hover / li.active
+   * rules at equal specificity, so without these two the resting pinned
+   * tint would mask both states on pinned rows (an active pinned row
+   * would be indistinguishable from its resting neighbours now that
+   * .active is fill-only — the old rule also set a border, which the
+   * override couldn't eat). */
+  .sessions-list li.sess-pinned:hover {
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+  }
+  .sessions-list li.sess-pinned.active {
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
   }
   /* Drag-reorder is driven by SortableJS in forceFallback mode: the picked
    * row is cloned into a floating element that tracks the pointer, while the
@@ -783,12 +802,6 @@
   .sess-pin-btn.pinned .pin-outline { display: none; }
   .sess-pin-btn.pinned .pin-filled { display: inline-block; }
   /* Hairline between the pinned region and the recency list. */
-  .sessions-list .sess-pinned-divider {
-    height: 0; margin: 4px 0;
-    border-top: 1px solid var(--border, rgba(255,255,255,0.08));
-    list-style: none; padding: 0;
-  }
-
   /* ── Sessions section header (full-width filter input row) ──
    * The "Sessions" label was dropped per the Gemini-style redesign;
    * the magnifier moved to the sidebar-top header (#sb-search). The
