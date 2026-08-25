@@ -503,11 +503,27 @@ def build_push_health(db, dispatcher: Optional["PushDispatcher"] = None) -> Dict
 
 def _is_push_eligible(env: Dict) -> bool:
     """Mirrors the proxy's isPushEligible: explicit `should_push`
-    flag wins; falls back to type allowlist."""
+    flag wins; falls back to type allowlist.
+
+    Keep this tuple in sync with PUSH_ELIGIBLE_TYPES in
+    proxy/parley/notifications/dispatch.ts — the two gates are twins and
+    an envelope can reach either.
+
+    `agent_question` is on the list because the agent is BLOCKED waiting
+    on an answer: it is the one envelope class where silence costs the
+    user a stalled turn rather than a missed line of text. It was
+    omitted until 2026-08-25 even though the envelope mints itself with
+    `urgent: true`, so questions never once reached a phone (field bug
+    2026-08-23: `skip type=agent_question reason=not_eligible`, agent
+    parked for hours). Deliberately NOT given a `_SUPPORTED_PUSH_KINDS`
+    category: an unmapped kind defaults to enabled, whereas mapping it
+    would let a stale/false pref silence it exactly the way the 2026-07
+    all-false-prefs incident silenced everything.
+    """
     should = env.get("should_push")
     if isinstance(should, bool):
         return should
-    return env.get("type") in ("reply_final", "notification")
+    return env.get("type") in ("reply_final", "notification", "agent_question")
 
 
 class PushDispatcher:

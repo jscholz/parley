@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { envelopeToPayload, isProgressHeartbeat } from './dispatch.ts';
+import { envelopeToPayload, isProgressHeartbeat, isPushEligible } from './dispatch.ts';
 
 const CID = 'parley:ae6435b5-pitch-deck';
 
@@ -61,4 +61,18 @@ test('real replies and approvals are NOT treated as heartbeats', () => {
   assert.ok(!isProgressHeartbeat(''));
   // A reply that merely mentions the phrase mid-sentence must not match.
   assert.ok(!isProgressHeartbeat('I was still working on the deck when you asked.'));
+});
+
+test('agent questions are push-eligible — the agent is blocked waiting', () => {
+  // Field bug 2026-08-23: agent_question was absent from the allowlist
+  // and the envelope carries no should_push, so every question was
+  // dropped with reason=not_eligible and never reached a phone.
+  assert.ok(isPushEligible({ type: 'agent_question' }));
+  assert.ok(isPushEligible({ type: 'reply_final' }));
+  assert.ok(isPushEligible({ type: 'notification' }));
+  assert.ok(!isPushEligible({ type: 'reply_delta' }));
+  assert.ok(!isPushEligible({ type: 'typing' }));
+  // An explicit flag still preempts the allowlist in both directions.
+  assert.ok(!isPushEligible({ type: 'agent_question', should_push: false }));
+  assert.ok(isPushEligible({ type: 'typing', should_push: true }));
 });

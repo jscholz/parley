@@ -71,6 +71,12 @@ TARGET_FORMAT = "s16"
 # Cap the audio queue so a slow STT upstream doesn't grow memory
 # unboundedly.  20 ms frames * 100 = ~2 s of buffer.
 MAX_PCM_QUEUE = 100
+# STT reconnect backoff. Base is short because the overwhelmingly common
+# close is Deepgram's idle timeout during a natural pause — the user may
+# already be talking again by the time we notice. Capped so a persistent
+# failure retries slowly instead of hammering the provider.
+STT_RETRY_BASE_S = 0.5
+STT_RETRY_MAX_S = 8.0
 
 
 def attach(peer, *, voice_config: VoiceConfig, api_server: Any = None) -> None:
@@ -297,13 +303,69 @@ async def _run_stt(
                     )
             yield chunk
 
+    # Supervised: a provider stream can close on a transient fault and the
+    # call must survive it. The common one is Deepgram's own idle timeout,
+    # which fires after ~10s of no audio — i.e. whenever the user simply
+    # doesn't speak, or when audio hasn't started flowing yet on a freshly
+    # renegotiated peer. This used to end transcription for the WHOLE call:
+    # _run_stt is spawned exactly once per audio track and nothing ever
+    # observed it finishing, so the peer stayed ICE-connected and read
+    # "Connected" in the UI while being completely deaf (field bug
+    # 2026-08-23 — a reconnect delivered zero mic frames, Deepgram timed
+    # out 13s in, and 90 seconds of speech went nowhere before the client
+    # flushed a mid-sentence utterance).
+    #
+    # Retries are unbounded on purpose: giving up after N attempts just
+    # restores the original bug on call N+1. The loop exits on the pump's
+    # sentinel (track ended) or cancellation, and backoff is capped so a
+    # hard failure (bad API key) settles into a slow, visible retry rather
+    # than a hot loop. `attempt` resets on every transcript, so a long call
+    # that idles out repeatedly keeps reconnecting promptly.
+    attempt = 0
+    degraded = False
     try:
-        async for tx in stt.stream(_pcm_iter()):
-            await _handle_transcript(peer, tx)
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        logger.exception("[stt-bridge] peer %s STT error: %s", peer.peer_id, e)
+        while True:
+            try:
+                async for tx in stt.stream(_pcm_iter()):
+                    if degraded:
+                        degraded = False
+                        _send_data_channel(peer, {"type": "stt-up"})
+                        logger.info(
+                            "[stt-bridge] peer %s STT recovered", peer.peer_id,
+                        )
+                    attempt = 0
+                    await _handle_transcript(peer, tx)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                # Not .exception(): the idle-timeout close is routine and a
+                # traceback per occurrence buries the real faults.
+                logger.warning(
+                    "[stt-bridge] peer %s STT stream closed: %s", peer.peer_id, e,
+                )
+                if not degraded:
+                    degraded = True
+                    _send_data_channel(peer, {"type": "stt-down"})
+            else:
+                # Clean completion — _pcm_iter returned on the pump's None
+                # sentinel, so the track is gone and there is nothing left
+                # to reconnect to.
+                break
+            if pump_task.done():
+                break
+            attempt += 1
+            delay = min(STT_RETRY_MAX_S, STT_RETRY_BASE_S * (2 ** (attempt - 1)))
+            logger.info(
+                "[stt-bridge] peer %s reconnecting STT in %.1fs (attempt %d)",
+                peer.peer_id, delay, attempt,
+            )
+            # Drop the dead socket before opening the next one; stream()
+            # overwrites the provider's _ws and would otherwise leak it.
+            try:
+                await stt.aclose()
+            except Exception:  # pragma: no cover
+                pass
+            await asyncio.sleep(delay)
     finally:
         try:
             await stt.aclose()

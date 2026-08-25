@@ -148,7 +148,17 @@ export async function dispatchPush(payload: PushPayload): Promise<DispatchResult
  *  user-facing turn outputs (the final assistant reply) and explicit
  *  `notification` envelopes. Streaming deltas / typing / tool events
  *  deliberately don't push. */
-const PUSH_ELIGIBLE_TYPES = new Set<string>(['reply_final', 'notification']);
+const PUSH_ELIGIBLE_TYPES = new Set<string>([
+  'reply_final',
+  'notification',
+  // The agent is BLOCKED waiting on an answer, so silence here costs a
+  // stalled turn rather than a missed line of text. Omitted until
+  // 2026-08-25 despite the envelope minting itself `urgent: true`, so
+  // questions never reached a phone at all (field bug 2026-08-23).
+  // Keep in sync with _is_push_eligible in
+  // backends/hermes/plugin/parley_dispatcher.py.
+  'agent_question',
+]);
 
 /** Decide whether an envelope should be pushed. Plugin-driven flag
  *  takes precedence; falls back to the type allowlist when the flag

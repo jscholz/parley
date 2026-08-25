@@ -536,6 +536,23 @@ def test_is_push_eligible_default_allowlist():
     assert not _is_push_eligible({"type": "tool_call"})
 
 
+def test_is_push_eligible_agent_question():
+    """The agent is parked waiting on an answer, so a missed push costs a
+    stalled turn. Field bug 2026-08-23: questions logged
+    `reason=not_eligible` and never reached a phone."""
+    assert _is_push_eligible({"type": "agent_question"})
+    # An explicit flag still wins in both directions.
+    assert not _is_push_eligible({"type": "agent_question", "should_push": False})
+
+
+def test_agent_question_has_no_kind_category_so_it_cannot_be_silenced(db):
+    """An unmapped kind defaults to enabled. Mapping agent_question onto a
+    push category would let a stale/false pref silence it the way the
+    2026-07 all-false-prefs incident silenced every push."""
+    assert _is_kind_enabled(db, {"type": "agent_question", "kind": "approval"})
+    assert _is_kind_enabled(db, {"type": "agent_question", "kind": "clarify"})
+
+
 # ── App-icon badge count (field bug 2026-07-08) ───────────────────────
 #
 # The OS app badge went stale-LOW while the PWA was closed: pushes
