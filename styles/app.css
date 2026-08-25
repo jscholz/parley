@@ -531,13 +531,39 @@
 
   /* ── Sessions list ── */
   .sessions-list { list-style: none; padding: 0; margin: 8px 0 0; }
+  /* Rows are plain text, not boxes. Each row used to carry its own
+   * border + fill, so a drawer of nine sessions read as nine stacked
+   * rectangles — the "we're slightly overusing rects" note. Mainstream
+   * clients (and hermes-webui) draw no per-row chrome at rest and lift
+   * only the row under the pointer or cursor. The radius stays for the
+   * shape of that lift; with no border and no resting fill it doesn't
+   * read as a box.
+   *
+   * The lift is a neutral tint of the foreground rather than a fixed
+   * grey, so one rule serves both themes: on dark it lands just above
+   * --surface, on light just below white. Deliberately NOT --primary —
+   * a sage-tinted active row competes with the accent colour that means
+   * "agent" everywhere else in the app. */
   .sessions-list li {
-    padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
-    margin-bottom: 6px; cursor: pointer; background: var(--bg);
+    padding: 8px 10px; border-radius: 6px;
+    margin-bottom: 1px; cursor: pointer; background: transparent;
     position: relative;  /* anchor for .sess-menu popover */
   }
-  .sessions-list li:hover { background: var(--surface-hover, var(--surface)); }
-  .sessions-list li.active { border-color: var(--primary); background: var(--surface); }
+  .sessions-list li:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+  .sessions-list li.active { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+
+  /* Time-bucket headers (Today / Yesterday / This week / …). Small-caps
+   * muted labels, not rows: no fill, no hover, and not clickable. The
+   * drawer was one undifferentiated scroll where "2h ago" and "9d ago"
+   * sat in identical rows with nothing marking the boundary. */
+  .sessions-list li.sess-bucket {
+    padding: 16px 10px 4px; margin: 0;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--muted); background: none;
+    cursor: default; pointer-events: none;
+  }
+  .sessions-list li.sess-bucket:first-child { padding-top: 6px; }
   /* Multi-select highlight — shift-click toggles. Visually distinct
    * from .active (the single-row resume target) so users can tell the
    * two modes apart at a glance. */

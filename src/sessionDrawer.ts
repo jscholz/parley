@@ -627,6 +627,41 @@ function activeRowId(): string {
   return switchCtl.focusedId() || backend.getCurrentSessionId?.() || '';
 }
 
+/** Time-bucket label a session's row is grouped under in the drawer.
+ *
+ *  Boundaries are CALENDAR-relative, not rolling: at 00:30 a message from
+ *  23:50 belongs under "Yesterday" even though it is forty minutes old,
+ *  which is how a human reads a list of days. A rolling 24h window would
+ *  file it under "Today" and put it above things that genuinely happened
+ *  today.
+ *
+ *  "This week" / "Last week" are rolling 7-day spans off the start of
+ *  today rather than true ISO weeks: a calendar week collapses to nothing
+ *  on a Monday morning, so the divider would flicker in and out depending
+ *  on which day you opened the app. */
+function bucketFor(epochSec: number): string {
+  if (!epochSec) return 'Older';
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const DAY = 86_400_000;
+  const t = epochSec * 1000;
+  if (t >= startOfToday) return 'Today';
+  if (t >= startOfToday - DAY) return 'Yesterday';
+  if (t >= startOfToday - 7 * DAY) return 'This week';
+  if (t >= startOfToday - 14 * DAY) return 'Last week';
+  return 'Older';
+}
+
+function renderBucketHeader(label: string): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'sess-bucket';
+  li.textContent = label;
+  // No data-chat-id: every row walk in this module keys off
+  // `li[data-chat-id]` or an explicit class, so a header is inert to
+  // keyboard nav, multi-select and the active-row patch by construction.
+  return li;
+}
+
 function fmtRelativeTime(epochSec: number): string {
   if (!epochSec) return '';
   const delta = Date.now() / 1000 - epochSec;
@@ -1402,7 +1437,16 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
     sep.setAttribute('aria-hidden', 'true');
     listEl.appendChild(sep);
   }
+  // Recency rows carry time-bucket headers. Pinned rows deliberately
+  // don't: that region is ordered by the user's pin order and is exempt
+  // from recency, so dating it would imply an ordering it doesn't have.
+  let lastBucket = '';
   for (const s of restRows) {
+    const bucket = bucketFor(s.lastMessageAt);
+    if (bucket !== lastBucket) {
+      listEl.appendChild(renderBucketHeader(bucket));
+      lastBucket = bucket;
+    }
     listEl.appendChild(renderRow(s, activeId, false));
   }
   // Refresh the visible-row order cache so range/keyboard handlers
