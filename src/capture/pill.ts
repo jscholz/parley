@@ -55,9 +55,15 @@ function render(state: CaptureUiState): void {
     // actively recording (paused/interrupted hold steady red).
     headerBtn.classList.toggle('active-capture', state.active);
     headerBtn.classList.toggle('recording', state.active && state.phase === 'recording');
+    // Copy tracks what the click actually DOES, including through the
+    // 'starting' window — the button stops a startup in progress, so
+    // labelling it "Record meeting" there would be a lie to anyone
+    // reading the tooltip or a screen reader.
     const title = state.active
       ? 'Stop recording — save and hand to the agent'
-      : 'Record meeting (new session)';
+      : state.phase === 'starting'
+        ? 'Cancel — the microphone is still starting'
+        : 'Record meeting (new session)';
     headerBtn.setAttribute('title', title);
     headerBtn.setAttribute('aria-label', title);
   }
@@ -152,11 +158,23 @@ async function startFromUi(linkedChat?: string): Promise<void> {
  *  view it degrades to the app-level path (mints a dedicated meeting
  *  session and jumps to it via openChatCb). */
 export function hotkeyToggleMeetingCapture(): void {
-  if (getCaptureState().active) {
+  if (captureInProgress()) {
     void stopMeetingCapture();
   } else {
     void startFromUi(switchCtl.viewedId() || undefined);
   }
+}
+
+/** What "a capture is already running" means to a TOGGLE. `active` alone
+ *  is not it: the honest 'starting' phase (postmortem 2026-08-18 P1)
+ *  holds active=false for as long as mic acquisition takes, and a second
+ *  press inside that window used to fall through to start — which
+ *  startMeetingCapture's own dedup then swallowed. Net effect: the press
+ *  did NOTHING and the meeting kept recording. Anything the user can see
+ *  on the pill counts as in-progress. */
+function captureInProgress(): boolean {
+  const s = getCaptureState();
+  return s.active || s.phase === 'starting';
 }
 
 export function initCapturePill(opts: { openChat?: (chatId: string) => void } = {}): void {
@@ -199,7 +217,7 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   // sync). Stop is the save-everything verb, so no confirm; discard
   // lives on the pill's ✕ behind one.
   document.getElementById('btn-capture-header')?.addEventListener('click', () => {
-    if (getCaptureState().active) void stopMeetingCapture();
+    if (captureInProgress()) void stopMeetingCapture();
     else void startFromUi();
   });
   // Cancel = discard, the inverse promise of stop — confirm before
@@ -226,8 +244,11 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   window.addEventListener('parley:capture-control', (ev) => {
     const action = (ev as CustomEvent<{ action?: string }>).detail?.action;
     if (document.visibilityState !== 'visible') return;
-    if (action === 'start' && !getCaptureState().active) void startFromUi();
-    if (action === 'stop' && getCaptureState().active) void stopMeetingCapture();
+    // Same in-progress test as the UI toggles: a remote stop that lands
+    // while the mic is still coming up must stand the start down, not
+    // silently drop and leave the page recording.
+    if (action === 'start' && !captureInProgress()) void startFromUi();
+    if (action === 'stop' && captureInProgress()) void stopMeetingCapture();
   });
 
   // Pocket start: /?capture=start (PWA manifest shortcut). Mic-gesture

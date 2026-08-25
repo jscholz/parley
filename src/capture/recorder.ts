@@ -100,6 +100,8 @@ let segStartMs = 0;          // capture-relative t0 of the running segment
 let mimeType = '';
 let uploader: Uploader | null = null;
 let reacquireTimer: number | null = null;
+/** Monotonic id of the current start attempt — see startMeetingCapture. */
+let startEpoch = 0;
 let watchdogTimer: number | null = null;
 let lastChunkAt = 0;         // epoch ms of the last dataavailable
 
@@ -353,8 +355,21 @@ export async function startMeetingCapture(
   // success signal exists anywhere (server included) until the
   // recorder is proven live.
   state = { ...IDLE_STATE, phase: 'starting' };
+  // Identity for THIS start attempt, needed before there is a
+  // captureId to compare against: stand-down → immediate restart can
+  // put a second attempt in 'starting' while the first is still inside
+  // its create POST, and phase alone can't tell the two apart.
+  const myEpoch = ++startEpoch;
   emit();
-  const failToIdle = () => { state = { ...IDLE_STATE }; emit(); };
+  // Scoped to THIS attempt: a stand-down followed by an immediate
+  // restart means this closure can still fire (late create rejection,
+  // late 409) while attempt N+1 already owns the state — idling it
+  // would kill a start the user is currently watching come up.
+  const failToIdle = () => {
+    if (startEpoch !== myEpoch) return;
+    state = { ...IDLE_STATE };
+    emit();
+  };
 
   // Create server-side FIRST (instant-start: no prompts — title
   // defaults, annotate later via PATCH; §3.4). Cheap now: the entity
@@ -387,11 +402,6 @@ export async function startMeetingCapture(
     failToIdle();
     throw e;
   }
-  state.captureId = capture.id;
-  state.title = capture.title;
-  state.chatId = capture.linked_chat;
-  emit();
-
   // Startup failure → abort-start: fails the pending capture IN PLACE
   // with the reason. NEVER the delete endpoint (postmortem root cause:
   // the old rollback here shared the irreversible DELETE with explicit
@@ -401,6 +411,20 @@ export async function startMeetingCapture(
     apiUrl(`/api/parley/captures/${capture.id}/abort-start`),
     { method: 'POST', headers: lifecycleHeaders(true), body: JSON.stringify({ reason }) },
   ).catch(() => { /* unreachable — pending TTL fails it in place */ });
+
+  // Same re-check as the post-getUserMedia one below, one await
+  // earlier: a stop/cancel can land while the create POST is in
+  // flight, and stamping this capture's id onto the freshly-idled
+  // state (or onto a NEWER start attempt's) would resurrect a capture
+  // the user already stood down.
+  if (startEpoch !== myEpoch || state.phase !== 'starting') {
+    void abortStart('startup superseded on the client');
+    return getCaptureState();
+  }
+  state.captureId = capture.id;
+  state.title = capture.title;
+  state.chatId = capture.linked_chat;
+  emit();
 
   try {
     stream = await acquireMicBounded();
@@ -467,7 +491,27 @@ export async function startMeetingCapture(
   return getCaptureState();
 }
 
+/** Stand down a start that is still in its honest 'starting' phase.
+ *  Every stop-shaped affordance used to test `state.active`, which is
+ *  false for the whole of mic acquisition by design (postmortem
+ *  2026-08-18 P1) — so the pill's live stop button, the header toggle
+ *  and Cmd+Shift+M all did NOTHING if pressed inside that window, and
+ *  the user watched "Starting microphone…" flip to a red recording they
+ *  had already cancelled, mic hot. Resetting local state is the whole
+ *  fix: startMeetingCapture re-checks the phase after every await and
+ *  abort-starts the pending capture server-side (never DELETE — that
+ *  shared-rollback path is what erased a real meeting) the moment it
+ *  finds its start superseded. */
+function standDownPendingStart(): boolean {
+  if (state.active || state.phase !== 'starting') return false;
+  log(`[capture] stood down pending start ${state.captureId || '(not yet created)'}`);
+  state = { ...IDLE_STATE };
+  emit();
+  return true;
+}
+
 export async function stopMeetingCapture(): Promise<void> {
+  if (standDownPendingStart()) return;
   if (!state.active) return;
   const captureId = state.captureId!;
   state.active = false;
@@ -523,6 +567,12 @@ export async function stopMeetingCapture(): Promise<void> {
  *  buffered (the uploader parks them on the server's "frozen" answer)
  *  until the retention janitor or a deliberate purge. */
 export async function cancelMeetingCapture(): Promise<void> {
+  // The pill's ✕ is live during 'starting' too, and there is nothing to
+  // tombstone yet — no audio, no recording claim, just a pending
+  // placeholder. Stand down and let the superseded start abort it; a
+  // Recently-Deleted entry for a meeting that never recorded would be
+  // noise the user has to clean up.
+  if (standDownPendingStart()) return;
   if (!state.active || !state.captureId) return;
   const captureId = state.captureId;
   state = { ...IDLE_STATE };
