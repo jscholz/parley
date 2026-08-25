@@ -518,10 +518,21 @@ async function reconcileActiveChat(gapMs: number, isRetry = false): Promise<void
   if (!isRetry && gapMs >= RECONCILE_GAP_MS) reconcileRetries = 0;
   const owedRun = gapMs < RECONCILE_GAP_MS;
   reconcileOwed = true;
-  log(`proxy-client: reconciling active chat ${activeChatId} after ${gapMs}ms gap${owedRun ? ' (owed)' : ''}`);
+  // Snapshot the chat we are reconciling. The fetch below can take
+  // seconds on a phone link, and the user can navigate away (New chat,
+  // drawer click) while it is in flight — `activeChatId` is live state
+  // and will already point at the NEW chat by the time we resume here.
+  // Labelling the payload with the post-await value made the shell's
+  // epoch guard (main.ts onResume: focusedId() !== e.conversation)
+  // compare the new chat against itself, so it always passed and the
+  // OLD chat's transcript painted over the fresh one. Field bug
+  // 2026-07-12 (CAP walking test): "new chat… some lag… then left me in
+  // current session".
+  const reconcilingChatId = activeChatId;
+  log(`proxy-client: reconciling active chat ${reconcilingChatId} after ${gapMs}ms gap${owedRun ? ' (owed)' : ''}`);
   try {
     const r = await fetch(
-      `${apiBase()}/sessions/${encodeURIComponent(activeChatId)}/messages`,
+      `${apiBase()}/sessions/${encodeURIComponent(reconcilingChatId)}/messages`,
     );
     if (!r.ok) {
       diag(`proxy-client: reconcile HTTP ${r.status}`);
@@ -535,7 +546,7 @@ async function reconcileActiveChat(gapMs: number, isRetry = false): Promise<void
     // set will be reconciled in place rather than producing a duplicate.
     subs.onResume({
       messages,
-      conversation: activeChatId,
+      conversation: reconcilingChatId,
       firstId: d.firstId ?? null,
       hasMore: !!d.hasMore,
     });
