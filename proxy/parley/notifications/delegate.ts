@@ -260,10 +260,26 @@ export async function delegateUnreadMark(req: http.IncomingMessage, res: http.Se
 
 // ── Agent questions (unified elicitation protocol, 2026-07-13) ────────
 
+/** Retire an answered question from the SSE replay ring so it can never
+ *  pop again on any device (field bug: an answered question replayed on
+ *  every PWA refresh until its TTL expired). Dynamic import because
+ *  stream.ts imports this module for isPushOwnedByPlugin — a static
+ *  import here would close the cycle. Best-effort: a failure to retire
+ *  must not fail the user's answer. */
+async function retireAnsweredQuestion(questionId: string): Promise<void> {
+  try {
+    const stream = await import('../stream.ts');
+    stream.resolveQuestion?.(questionId);
+  } catch { /* ring suppression is best-effort */ }
+}
+
 /** POST /api/parley/questions/{id} → plugin /v1/questions/{id}.
  *  Resolves a blocking agent question (hermes clarify). 404 from
  *  upstream = the question lapsed (answered elsewhere / expired) —
- *  the PWA renders that state rather than treating it as an error. */
+ *  the PWA renders that state rather than treating it as an error.
+ *
+ *  On success the question is ALSO retired from the SSE replay ring:
+ *  answering on one device must stop the pop-up on every other one. */
 export async function delegateQuestionAnswer(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -280,12 +296,17 @@ export async function delegateQuestionAnswer(
     const up: any = getUpstream?.();
     if (up && typeof up.answerQuestion === 'function') {
       const ok = up.answerQuestion(questionId, String(body?.response ?? ''));
+      if (ok) await retireAnsweredQuestion(questionId);
       return sendJson(res, ok ? 200 : 404,
         ok ? { ok: true } : { ok: false, error: 'no pending question with that id' });
     }
   } catch { /* fall through to the HTTP plugin route */ }
   try {
     const r = await forwardRaw(`/v1/questions/${encodeURIComponent(questionId)}`, 'POST', body);
+    // Only on acceptance. A 404 means "no pending question with that id"
+    // upstream, which the PWA renders as "lapsed" — leaving the ring
+    // untouched there keeps expiry behavior exactly as it was.
+    if (r.status >= 200 && r.status < 300) await retireAnsweredQuestion(questionId);
     sendJson(res, r.status, r.body ?? {});
   } catch (e: any) { sendUpstreamUnavailable(res, e); }
 }

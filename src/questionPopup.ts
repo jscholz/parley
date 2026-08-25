@@ -52,6 +52,61 @@ let rootEl: HTMLElement | null = null;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let current: AgentQuestion | null = null;
 
+// ── Answered-question memory (field bug 2026-08-24) ───────────────────
+//
+// `agent_question` rides the proxy's SSE replay ring, and expiry used
+// to be the ONLY thing that stopped a replay from popping. A question
+// answered two minutes into a sixty-minute TTL therefore came back on
+// every single refresh. The proxy now retires answered questions from
+// the ring (stream.ts resolveQuestion) — that's the real, cross-device
+// fix. This local memory is the second layer, for the answer paths the
+// proxy CANNOT observe:
+//   - approvals, which resolve inside the backend via '/approve' on
+//     the normal command path — no /questions POST ever reaches the
+//     proxy, so the ring keeps the envelope;
+//   - the gateway text-intercept (typing the answer in the chat).
+//
+// localStorage, not memory: the whole point is surviving a reload.
+// Bounded ring of ids, oldest-first eviction.
+//
+// DISMISSED questions must NOT be recorded. The × button's tooltip is
+// "Hide (the agent keeps waiting)" — hiding is not answering, and a
+// dismissed question is SUPPOSED to come back.
+const ANSWERED_KEY = 'parley.answeredQuestions';
+const ANSWERED_CAP = 200;
+
+function readAnswered(): string[] {
+  try {
+    const raw = localStorage.getItem(ANSWERED_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : [];
+  } catch { return []; }  // private mode / corrupt value
+}
+
+/** Record a question id as ANSWERED so no replay of it ever pops again
+ *  on this device. Idempotent; a repeat answer refreshes recency. */
+function markAnswered(questionId: string): void {
+  if (!questionId) return;
+  try {
+    const ids = readAnswered().filter((id) => id !== questionId);
+    ids.push(questionId);
+    localStorage.setItem(
+      ANSWERED_KEY,
+      JSON.stringify(ids.slice(Math.max(0, ids.length - ANSWERED_CAP))),
+    );
+  } catch { /* private mode — the proxy-side ring still covers us */ }
+}
+
+function isAnswered(questionId: string): boolean {
+  return readAnswered().includes(questionId);
+}
+
+/** Test-only: forget every recorded answer. */
+export function __resetAnsweredForTest(): void {
+  try { localStorage.removeItem(ANSWERED_KEY); } catch { /* private mode */ }
+}
+
 function teardown(): void {
   if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
   rootEl?.remove();
@@ -77,6 +132,7 @@ async function answerClarify(q: AgentQuestion, response: string): Promise<void> 
       markExpired('This question has lapsed — the agent moved on.');
       return;
     }
+    markAnswered(q.question_id);
     teardown();
   } catch (e: any) {
     diag(`[question] answer failed: ${e?.message || e}`);
@@ -98,11 +154,18 @@ function markExpired(note?: string): void {
 }
 
 /** Show (or replace) the pop-up for an agent question. Skips questions
- *  that are already past their expiry (ring replays after the fact). */
+ *  that are already past their expiry (ring replays after the fact) and
+ *  questions this device has already ANSWERED (ring replays of a
+ *  still-live-but-settled question — the refresh-resurrects-answered-
+ *  question bug). */
 export function show(q: AgentQuestion): void {
   if (!q?.question_id || !q?.question) return;
   if (typeof q.expires_at === 'number' && q.expires_at <= Date.now()) {
     diag(`[question] ${q.question_id} already expired — not showing`);
+    return;
+  }
+  if (isAnswered(q.question_id)) {
+    diag(`[question] ${q.question_id} already answered — not showing`);
     return;
   }
   teardown();
@@ -132,6 +195,11 @@ export function show(q: AgentQuestion): void {
     if (!current) return;
     if (q.kind === 'approval') {
       sendCommandCb?.(text, q.chat_id);
+      // Approvals resolve inside the backend, so the proxy never sees a
+      // /questions POST and can't retire the envelope from its ring.
+      // This local record is the ONLY thing standing between the user
+      // and the same approval popping again on next refresh.
+      markAnswered(q.question_id);
       teardown();
     } else {
       void answerClarify(q, text);
@@ -205,5 +273,11 @@ export function show(q: AgentQuestion): void {
  *  text-intercept) — drop the pop-up so it doesn't outlive the
  *  question. Called from the send path. */
 export function noteUserSentText(chatId: string): void {
-  if (current && current.kind !== 'approval' && current.chat_id === chatId) teardown();
+  if (current && current.kind !== 'approval' && current.chat_id === chatId) {
+    // The text-intercept ANSWERED it (the gateway hands the typed text
+    // to the blocked clarify call), so this is an answer, not a
+    // dismissal — record it or the ring replays it on next reload.
+    markAnswered(current.question_id);
+    teardown();
+  }
 }

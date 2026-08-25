@@ -129,6 +129,70 @@ const RECENT_CAP = 128;
 // (replay the whole ring).
 const recent: { id: number; env: Envelope }[] = [];
 let lastId = 0;
+// Highest ring id that has been CAP-evicted. Advances only on the
+// RECENT_CAP shift below — never on resolveQuestion() removals, which
+// drop entries deliberately. Used for the replay_gap probe so pulling
+// an answered question out of the ring doesn't masquerade as "the
+// client missed envelopes" and trigger a spurious transcript refetch.
+let evictedThroughId = 0;
+
+// ── Answered-question suppression (field bug 2026-08-24) ──────────────
+//
+// `agent_question` rides the replay ring like any other envelope, and
+// the PWA's only suppression was expiry. A question answered two
+// minutes into a sixty-minute TTL therefore popped again on EVERY
+// refresh until the TTL ran out. Once a question is ANSWERED it is
+// dead — no device should ever be asked it again.
+//
+// Two halves, both needed:
+//   1. Yank the envelope out of `recent` so replay can't resurface it.
+//   2. Remember the id, because the answer can land BEFORE the
+//      envelope does (plugin emits agent_question on its /v1/events
+//      loop; the phone answers over a separate HTTP route) — a
+//      late arrival must be dropped at broadcast time too.
+//
+// Bounded and insertion-ordered: this is user-visible ephemeral state,
+// not a durable ledger. A few hundred ids covers any plausible burst;
+// past that the oldest fall out and the worst case is the pre-fix
+// behavior for a question answered hundreds of questions ago.
+//
+// DISMISSED questions are deliberately NOT recorded here — the ×
+// button says "Hide (the agent keeps waiting)", so a dismissed
+// question SHOULD come back on reload. Only answers land here.
+const RESOLVED_CAP = 256;
+const resolvedQuestions = new Set<string>();
+
+/** Mark an agent question ANSWERED: drop it from the replay ring and
+ *  remember the id so a late-arriving envelope for it is suppressed at
+ *  broadcast time. Cross-device by construction — answering on the
+ *  phone stops the pop-up on the Mac, because the ring the Mac replays
+ *  on reconnect is this one. Called by the proxy's answer route
+ *  (notifications/delegate.ts delegateQuestionAnswer) once the upstream
+ *  has accepted the answer. */
+export function resolveQuestion(questionId: string): void {
+  if (typeof questionId !== 'string' || !questionId) return;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const env = recent[i].env;
+    if (env.type === 'agent_question' && env.question_id === questionId) {
+      recent.splice(i, 1);
+    }
+  }
+  // Re-insert so a repeat answer refreshes recency rather than aging out.
+  resolvedQuestions.delete(questionId);
+  resolvedQuestions.add(questionId);
+  while (resolvedQuestions.size > RESOLVED_CAP) {
+    const oldest = resolvedQuestions.values().next().value;
+    if (oldest === undefined) break;
+    resolvedQuestions.delete(oldest);
+  }
+}
+
+/** True if `env` is an agent_question we've already seen answered. */
+function isResolvedQuestion(env: Envelope): boolean {
+  return env.type === 'agent_question'
+    && typeof env.question_id === 'string'
+    && resolvedQuestions.has(env.question_id);
+}
 interface Subscriber {
   res: any;
   ka: NodeJS.Timeout;
@@ -176,7 +240,10 @@ function broadcast(env: Envelope): void {
   // attached tab doesn't replay something it already saw via the live
   // path. Bound the ring at RECENT_CAP entries.
   recent.push({ id, env });
-  if (recent.length > RECENT_CAP) recent.shift();
+  if (recent.length > RECENT_CAP) {
+    const dropped = recent.shift();
+    if (dropped) evictedThroughId = dropped.id;
+  }
   // Track per-chat broadcast cadence for the push-dispatch idle gate
   // (see maybeDispatchPush). Updated AFTER fanout so the timestamp
   // reflects "this envelope's broadcast time" — pushEnvelope reads
@@ -353,6 +420,12 @@ function maybeDispatchPush(env: Envelope, prevBroadcastAt: number, bodyOverride?
 export function pushEnvelope(env: ParleyEnvelope | Envelope): void {
   if (!env || typeof env.type !== 'string') return;
   if (!FANOUT_TYPES.has(env.type)) return;
+  // Already answered — drop entirely (no fan-out, no ring entry, no
+  // push). Covers the race where the answer beats the envelope.
+  if (isResolvedQuestion(env as Envelope)) {
+    console.log(`[parley] dropping agent_question ${(env as any).question_id} — already answered`);
+    return;
+  }
   const chatId = typeof (env as any).chat_id === 'string' ? (env as any).chat_id : '';
   // (Previously: the proxy maintained an in-memory `inflight` cache of
   // envelopes for mid-turn switch-away replay. Retired 2026-05-17 once
@@ -460,6 +533,8 @@ export function __resetForTest(): void {
   }
   recent.length = 0;
   lastId = 0;
+  evictedThroughId = 0;
+  resolvedQuestions.clear();
   for (const sub of subscribers) {
     try { clearInterval(sub.ka); } catch { /* noop */ }
     try { sub.res.end(); } catch { /* noop */ }
@@ -533,13 +608,20 @@ export function handleParleyStream(req, res): void {
     // replay below CANNOT cover what the client missed. Say so
     // explicitly: the PWA reacts by refetching the active transcript.
     // No `id:` field, so the control frame never disturbs the cursor.
-    const oldestRetained = recent.length > 0 ? recent[0].id : lastId + 1;
+    // Derived from CAP eviction only (see evictedThroughId) — entries
+    // resolveQuestion() pulled out are intentionally-missing, not a gap.
+    const oldestRetained = evictedThroughId + 1;
     if (replayFrom >= 0 && (replayFrom < oldestRetained - 1 || replayFrom > lastId)) {
       res.write(`event: replay_gap\ndata: ${JSON.stringify({ cursor: replayFrom, oldest: oldestRetained, last: lastId })}\n\n`);
     }
     for (const entry of recent) {
       if (entry.id <= replayFrom) continue;
       if (chatId && entry.env.chat_id !== chatId) continue;
+      // Belt-and-braces: resolveQuestion() already spliced answered
+      // questions out of the ring, but an entry can only be missed
+      // here if that ever regresses. Cheap; keeps the guarantee local
+      // to the replay loop that a reader will actually read.
+      if (isResolvedQuestion(entry.env)) continue;
       const evtName = typeof entry.env.type === 'string' ? entry.env.type : 'message';
       // Tag replayed envelopes so PWA-side handlers can suppress side
       // effects that should only fire on a fresh turn (TTS playback,
