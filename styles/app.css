@@ -2348,13 +2348,21 @@
     grid-column: 1; justify-self: start;
     padding-left: 6px;
   }
+  /* Ghost/text button, not a bordered pill. A 1px-bordered rounded-rect
+   * next to a plain panel title is the dated idiom he flagged, and it
+   * gave a low-frequency, mildly destructive action more visual weight
+   * than the panel's own heading. Same neutral hover tint as the session
+   * rows so the two panels share one language. */
   .pin-drawer-clear-btn {
     grid-column: 2; justify-self: end;
-    background: none; border: 1px solid var(--border); color: var(--muted);
-    font-size: 11px; padding: 4px 10px; border-radius: 4px;
-    cursor: pointer; transition: color 0.12s, border-color 0.12s;
+    background: none; border: none; color: var(--muted);
+    font-size: 11px; padding: 4px 8px; border-radius: 4px;
+    cursor: pointer; transition: color 0.12s, background 0.12s;
   }
-  .pin-drawer-clear-btn:hover { color: var(--fg); border-color: var(--border-strong); }
+  .pin-drawer-clear-btn:hover {
+    color: var(--fg);
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
+  }
   .pin-drawer-toggle {
     justify-self: end;
     /* Positioning context for the count banner overlay
@@ -2606,11 +2614,17 @@
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px;
   }
+  /* Separated by rhythm, not rules. Every item drew a full-width hairline,
+   * so a panel of three pins showed three horizontal lines on top of each
+   * item's own three metadata rows — the "visually cluttered" note. The
+   * items are already distinct blocks; spacing carries the boundary and
+   * the hover tint confirms which one the pointer owns. */
   .pin-drawer-item {
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    padding: 10px 12px;
     transition: background 0.12s ease;
   }
-  .pin-drawer-item:hover { background: var(--surface-2); }
+  .pin-drawer-item + .pin-drawer-item { margin-top: 2px; }
+  .pin-drawer-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
   .pin-item-meta {
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
     font-size: 11px; color: var(--muted); margin-bottom: 4px;
