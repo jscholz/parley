@@ -172,6 +172,24 @@ export function createDocModule(opts: {
     titleEl.appendChild(document.createTextNode(doc.title));
     opts.body.appendChild(titleEl);
 
+    // A leading `_…_` line is METADATA wearing markdown italics —
+    // captureTranscribe mints `_Recorded 2026-08-18 10:35 · 1:34:39 ·
+    // diarized_` as the transcript's first line. miniMarkdown renders
+    // only *asterisk* italics on purpose (underscore italics would
+    // corrupt every snake_case identifier in a transcript), so the line
+    // reached the reader with its markers showing (UX-pass point 5:
+    // "raw markdown markers in chrome"). Lift it out of the body and
+    // render it as a styled subtitle. Presentation-only: downloadDoc
+    // still writes doc.content verbatim, so the file keeps its meta
+    // line and re-imports identically.
+    const { meta: docMeta, rest: docBody } = splitLeadingMetaLine(doc.content, doc.format);
+    if (docMeta) {
+      const sub = document.createElement('div');
+      sub.className = 'doc-drawer-subtitle';
+      sub.textContent = docMeta;
+      opts.body.appendChild(sub);
+    }
+
     // Player strip — capture transcripts only (§3.6): stream the
     // stitched audio, tap a transcript timestamp to seek. This is the
     // trust-but-verify feature: STT/diarization errors cluster in
@@ -193,7 +211,7 @@ export function createDocModule(opts: {
     } else if (doc.format === 'markdown') {
       const md = document.createElement('div');
       md.className = 'doc-drawer-content';
-      md.innerHTML = miniMarkdown(doc.content);
+      md.innerHTML = miniMarkdown(docBody);
       if (doc.source === 'capture' && doc.captureId) {
         wireTapToSeek(md);
       }
@@ -221,6 +239,23 @@ export function createDocModule(opts: {
     },
     onSelect: () => { opts.onSelect?.(); },
   };
+}
+
+/** Split a leading `_…_` metadata line off a markdown doc body.
+ *
+ *  Deliberately strict — one whole line, both markers, nothing else on
+ *  it — so an author who legitimately opens a doc with an italic
+ *  *sentence* (asterisks) or an underscored identifier mid-line is
+ *  untouched. Non-markdown formats pass through whole: plain text has
+ *  no marker convention to strip, and HTML bodies are sandboxed as-is. */
+export function splitLeadingMetaLine(
+  content: string,
+  format: string | undefined,
+): { meta: string | null; rest: string } {
+  if (format !== 'markdown') return { meta: null, rest: content };
+  const m = content.match(/^\s*_([^_\n](?:[^\n]*[^_\n])?)_[ \t]*(?:\n+|$)/);
+  if (!m) return { meta: null, rest: content };
+  return { meta: m[1], rest: content.slice(m[0].length) };
 }
 
 // ── Capture player strip (§3.6 — trust-but-verify playback) ───────────

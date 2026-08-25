@@ -57,3 +57,42 @@ test('wireTapToSeek: seeks in both states, plays ONLY when already playing', () 
   assert.equal(audio.currentTime, 45, 'playing: playhead should seek to the token');
   assert.equal(playCalls, 1, 'playing: seek should keep audio going');
 });
+
+// ── splitLeadingMetaLine (UX-pass point 5) ────────────────────────────
+
+import { splitLeadingMetaLine } from './doc.ts';
+
+test('splitLeadingMetaLine: lifts the capture meta line, body keeps the rest', () => {
+  const body = '_Recorded 2026-08-18 10:35 · 1:34:39 · diarized_\n\n**A:** hello';
+  const { meta, rest } = splitLeadingMetaLine(body, 'markdown');
+  assert.equal(meta, 'Recorded 2026-08-18 10:35 · 1:34:39 · diarized');
+  assert.equal(rest, '**A:** hello');
+});
+
+test('splitLeadingMetaLine: strict — only a whole `_…_` first line qualifies', () => {
+  // snake_case mid-line, __bold__ markers, and asterisk italics all
+  // pass through untouched: this must never eat transcript content.
+  for (const s of [
+    'uses snake_case_names everywhere',
+    '__bold opener__ then text',
+    '*italic opener* then text',
+    'plain first line\n_second line meta?_',
+  ]) {
+    const { meta, rest } = splitLeadingMetaLine(s, 'markdown');
+    assert.equal(meta, null, s);
+    assert.equal(rest, s);
+  }
+});
+
+test('splitLeadingMetaLine: non-markdown formats pass through whole', () => {
+  const s = '_Recorded 2026-08-18_\nbody';
+  assert.equal(splitLeadingMetaLine(s, 'text').meta, null);
+  assert.equal(splitLeadingMetaLine(s, 'html').meta, null);
+  assert.equal(splitLeadingMetaLine(s, undefined).meta, null);
+});
+
+test('splitLeadingMetaLine: meta-only doc leaves an empty body, not a crash', () => {
+  const { meta, rest } = splitLeadingMetaLine('_Recorded 2026-08-18 10:35_', 'markdown');
+  assert.equal(meta, 'Recorded 2026-08-18 10:35');
+  assert.equal(rest, '');
+});

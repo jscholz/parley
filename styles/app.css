@@ -2508,6 +2508,15 @@
     font-weight: 600; font-size: 13px;
     overflow-wrap: anywhere;
   }
+  /* Metadata subtitle under the title — the `_Recorded … · diarized_`
+   * line lifted out of the transcript body (see splitLeadingMetaLine).
+   * Muted small text, per the pass spec: metadata never wears raw
+   * markdown markers in chrome. */
+  .doc-drawer-subtitle {
+    font-size: 11px; color: var(--muted);
+    margin: 2px 0 4px;
+    overflow-wrap: anywhere;
+  }
   .doc-drawer-meta {
     font-size: 11px; color: var(--muted); white-space: nowrap;
   }

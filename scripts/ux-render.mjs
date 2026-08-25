@@ -164,6 +164,56 @@ async function shoot(browser, { mobile, theme }) {
   if (pinCount === 0) throw new Error('pinned panel rendered empty — seed did not reach the client');
   await page.screenshot({ path: `${OUT}/${variant}-pinned.png`, fullPage: false });
   console.log('shot', `${variant}-pinned.png`);
+
+  // Fourth frame: the Docs panel READER on a meeting transcript — the
+  // "doesn't feel professional yet" surface (pass points 4 + 5). The doc
+  // is capture-shaped (source:'capture' + capture_id → the reader's
+  // player strip renders; its /audio fetch 404s against the mock, which
+  // only costs the duration readout) and its body opens with the literal
+  // `_Recorded …_` line captureTranscribe.ts mints, because point 5 IS
+  // that line rendering raw.
+  await mock.pushEnvelope({
+    type: 'doc_show', chat_id: CHAT,
+    title: 'Meeting: Launch planning sync',
+    format: 'markdown', path: '/captures/launch-sync.md',
+    source: 'capture', capture_id: 'cap-ux-demo',
+    displayed_at: Date.now() - 25 * 60_000,
+    content: [
+      '_Recorded 2026-08-25 10:35 · 1:34:39 · diarized_',
+      '',
+      '**Jonathan:** Walk me through where the demo instance stands.',
+      '',
+      '**Sam:** HTTPS cert is live; mic permission prompt tested on iOS and desktop Safari. The only open risk is Deepgram quota on the shared key.',
+      '',
+      '**Jonathan:** Gate the HN post on that. What does the fallback look like if quota trips mid-demo?',
+      '',
+      '**Sam:** Web Speech path degrades gracefully — worse accuracy, but the call stays up.',
+    ].join('\n'),
+  });
+  // A fresh (non-replay) doc_show AUTO-OPENS the docs panel, so clicking
+  // the rail tab unconditionally toggles it straight back shut — and a
+  // `.doc-drawer-content` existence check still passes then, because the
+  // panel hides via [hidden] with its DOM intact. Click only when the
+  // panel isn't already showing, and assert VISIBILITY, not existence.
+  const docVisible = () => page.evaluate(() => {
+    const panel = document.getElementById('doc-drawer-panel');
+    return !!panel && !panel.hidden && panel.getClientRects().length > 0
+      && !!document.querySelector('#doc-drawer-body .doc-drawer-content');
+  });
+  if (!(await docVisible())) {
+    const clicked = await page.evaluate(() => {
+      const btn = document.getElementById('btn-doc-drawer-rail');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    });
+    if (!clicked) throw new Error('no doc-drawer toggle found — markup changed, fix the harness');
+    await page.waitForTimeout(700);
+  }
+  if (!(await docVisible())) throw new Error('doc reader not visible — do not ship a frame without the subject');
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: `${OUT}/${variant}-doc.png`, fullPage: false });
+  console.log('shot', `${variant}-doc.png`);
   await mock.close?.().catch?.(() => {});
   await cleanup();
 }
