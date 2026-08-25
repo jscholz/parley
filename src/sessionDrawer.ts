@@ -1426,17 +1426,17 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   }
   listEl.innerHTML = '';
   if (showPlaceholder) listEl.appendChild(renderPlaceholderRow(activeId));
+  // "Pinned" heads the pinned region, matching the time buckets below so
+  // the whole drawer reads as one labelled list rather than an unlabelled
+  // block followed by labelled ones. Omitted entirely when nothing is
+  // pinned — a header over no rows is just a claim about an empty space.
+  if (pinnedRows.length) listEl.appendChild(renderBucketHeader('Pinned'));
   for (const s of pinnedRows) {
     listEl.appendChild(renderRow(s, activeId, true));
   }
-  // Hairline divider between the pinned region and the recency list —
-  // only when both sides are non-empty.
-  if (pinnedRows.length && restRows.length) {
-    const sep = document.createElement('li');
-    sep.className = 'sess-pinned-divider';
-    sep.setAttribute('aria-hidden', 'true');
-    listEl.appendChild(sep);
-  }
+  // The hairline that used to sit here is gone: the recency list now
+  // opens with its own time-bucket header, so a rule immediately above
+  // "Today" separated the two regions twice over.
   // Recency rows carry time-bucket headers. Pinned rows deliberately
   // don't: that region is ordered by the user's pin order and is exempt
   // from recency, so dating it would imply an ordering it doesn't have.

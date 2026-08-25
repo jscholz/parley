@@ -78,6 +78,18 @@ async function shoot(browser, { mobile, theme }) {
   seed(mock);
   await waitForReady(page);
   await page.evaluate((t) => { document.documentElement.setAttribute('data-theme', t); }, theme);
+  // Pin two sessions so the drawer's Pinned region — and its header —
+  // are in frame. Pins ride the synced `pinnedSessions` setting, so
+  // seed it server-side and reload rather than driving the row menu.
+  await page.evaluate(async () => {
+    await fetch('/api/parley/prefs/pinnedSessions', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: JSON.stringify(['ux-6', 'ux-3']) }),
+    });
+  });
+  await page.reload();
+  await waitForReady(page);
+  await page.evaluate((t) => { document.documentElement.setAttribute('data-theme', t); }, theme);
   await page.click(`#sessions-list li[data-chat-id="${CHAT}"]`).catch(() => {});
   await page.waitForTimeout(1200);
   const variant = `${mobile ? 'mobile' : 'desktop'}-${theme}`;
