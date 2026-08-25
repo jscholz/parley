@@ -6,6 +6,12 @@
  * scenario in sequence in its own fresh Chromium context, and prints
  * a one-line-per-scenario result table at the end.
  *
+ * PREFER `npm run smoke:isolated` — it stands up a disposable server
+ * (free port, throwaway PARLEY_HOME, seeded config) and tears it down,
+ * so the guards below never have to fire. Use this runner directly only
+ * when you already have an isolated server and want to point at it via
+ * SMOKE_URL.
+ *
  * Usage:
  *   node scripts/run-smoke.mjs              # run all
  *   node scripts/run-smoke.mjs text-turn    # filter by name
@@ -15,6 +21,13 @@
  *                                                  (so the live hermes
  *                                                   doesn't accumulate
  *                                                   smoke-test sessions)
+ *   node scripts/run-smoke.mjs --allow-live-server
+ *                                 # bypass the live-server tripwire. This
+ *                                 # suite REWRITES settings on its target
+ *                                 # (resetServerSettings POSTs to
+ *                                 # /api/parley/config/<key>), so only pass
+ *                                 # this when driving the live stack is the
+ *                                 # actual intent. See preflight() below.
  *
  * Exit codes:
  *   0 — all enabled scenarios passed
@@ -37,12 +50,12 @@
  * passed. Each gets a fresh Playwright context — no state leaks.
  */
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   launchBrowser, launchSharedBrowser, launchAudioBrowser, attachConsoleCapture,
-  dumpLines, DEFAULT_URL, resetServerSettings,
+  dumpLines, DEFAULT_URL, resetServerSettings, CHROMIUM,
 } from './smoke/lib.mjs';
 import { installMockBackend } from './smoke/mock-backend.mjs';
 
@@ -55,6 +68,10 @@ const INCLUDE_STUBS = argv.includes('--include-stubs');
 // --include-install opts in to STATUS='install-only' scenarios. Used by
 // the post-install verifier; default dev-loop smoke skips them.
 const INCLUDE_INSTALL = argv.includes('--include-install');
+// Escape hatch for the live-server tripwire in preflight(). Opt-in only:
+// the accident this guard prevents is running the suite at the live proxy
+// by omission, so the safe path must be the default one.
+const ALLOW_LIVE_SERVER = argv.includes('--allow-live-server');
 // --real-backend forces every scenario to run against the live hermes
 // stack regardless of its declared BACKEND. Default mode honors each
 // scenario's BACKEND export ('mocked' | 'real' | 'either').
@@ -166,6 +183,108 @@ async function runOne(scenario, browser) {
   }
 }
 
+/** The setup this runner requires, quoted verbatim so a failure hands
+ *  back a working command instead of a diagnosis to interpret. */
+function isolatedSetupHelp() {
+  return [
+    '',
+    '  Run the suite the safe way — one command, sets up and tears down:',
+    '',
+    '      npm run smoke:isolated',
+    '',
+    '  Or point SMOKE_URL at a server you started yourself with a throwaway',
+    '  PARLEY_HOME (never the live one):',
+    '',
+    '      mkdir -p /tmp/parley-smoke-home',
+    '      PORT=3141 PARLEY_HOME=/tmp/parley-smoke-home \\',
+    '        node --experimental-strip-types server.ts &',
+    '      SMOKE_URL=http://127.0.0.1:3141 npm run smoke -- --mocked-only',
+    '',
+    '  See CONTRIBUTING.md "Smoke tests" for why this is not optional.',
+    '',
+  ].join('\n');
+}
+
+function die(lines) {
+  console.error('\n' + lines.join('\n'));
+  process.exit(2);
+}
+
+/** Refuse to start unless the target is provably a sandbox and a browser
+ *  actually exists.
+ *
+ *  Both halves are fail-closed on purpose, because both have already cost
+ *  real time:
+ *
+ *  - Live-server writes. `resetServerSettings` POSTs to
+ *    /api/parley/config/<key>, so pointing this runner at the live proxy
+ *    rewrites the user's voice preferences. The snapshot/restore below is
+ *    best-effort and does not survive a crash or a kill.
+ *  - Missing browser. Galatea ran for five days with no Chromium and no
+ *    Playwright cache, so every browser test failed at launch with a raw
+ *    "executable doesn't exist" — easy to skim past and conclude the
+ *    suite is unrunnable. The smoke suite was reported green on that host
+ *    when it had in fact never executed once (2026-08-25).
+ *
+ *  An unrecognised server is treated as unsafe: a build predating the
+ *  sentinel cannot prove it is isolated, and "probably fine" is exactly
+ *  the reasoning this guard exists to remove. */
+async function preflight() {
+  if (!existsSync(CHROMIUM)) {
+    die([
+      `  No browser at ${CHROMIUM}.`,
+      '',
+      '  Install Playwright\'s own build (userspace, no sudo):',
+      '',
+      '      npx playwright install chromium',
+      '',
+      '  Or point SMOKE_CHROMIUM at an existing Chromium binary.',
+      '  Do NOT skip the browser suites and report the run as green.',
+      '',
+    ]);
+  }
+
+  if (ALLOW_LIVE_SERVER) {
+    logRunner('WARNING: --allow-live-server — settings on the target WILL be rewritten');
+    return;
+  }
+
+  let health;
+  try {
+    const r = await fetch(`${DEFAULT_URL}/health`);
+    health = await r.json();
+  } catch (e) {
+    die([
+      `  Cannot reach ${DEFAULT_URL} (${e.message}).`,
+      isolatedSetupHelp(),
+    ]);
+  }
+
+  if (health?.data_home === 'live') {
+    die([
+      `  REFUSING to run: ${DEFAULT_URL} is backed by the live ~/.parley state.`,
+      '',
+      '  This suite POSTs to /api/parley/config/<key>, so running it here',
+      '  would overwrite real voice settings (tts, realtime, bargeIn,',
+      '  commitPhrase, streamingEngine, …).',
+      isolatedSetupHelp(),
+      '  If you genuinely mean to drive the live stack (real-backend',
+      '  scenarios), pass --allow-live-server and accept the rewrite.',
+      '',
+    ]);
+  }
+
+  if (health?.data_home !== 'isolated') {
+    die([
+      `  REFUSING to run: ${DEFAULT_URL} did not report a data_home sentinel,`,
+      '  so it cannot prove it is a sandbox. That build predates the guard.',
+      isolatedSetupHelp(),
+      '  If you are certain the target is disposable, pass --allow-live-server.',
+      '',
+    ]);
+  }
+}
+
 async function main() {
   const scenarios = await loadScenarios();
   // Status gating:
@@ -212,6 +331,8 @@ async function main() {
     logRunner('no scenarios matched');
     process.exit(0);
   }
+
+  await preflight();
 
   logRunner(`running ${runnable.length} scenario(s) against ${DEFAULT_URL}${HEADED ? ' (headed)' : ''}`);
   console.log('');

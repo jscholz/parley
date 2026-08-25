@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
+import { isLiveDataHome } from './proxy/dataHome.mjs';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/parley/setup.ts';
@@ -1192,7 +1193,17 @@ const requestHandler: http.RequestListener = async (req, res) => {
     // since the 2026-08 rename accept app:'parley' (and independently
     // match product:'parley'), so the legacy app:'sidekick' value was
     // dropped in the identity purge.
-    res.end(JSON.stringify({ ok: true, app: 'parley', product: 'parley' }));
+    //
+    // `data_home` is a TEST-SAFETY sentinel, not a diagnostic: it lets
+    // scripts/run-smoke.mjs prove a target is a sandbox before it starts
+    // POSTing settings at it. Reports the classification only, never the
+    // path — /health is reachable over tailscale.
+    res.end(JSON.stringify({
+      ok: true,
+      app: 'parley',
+      product: 'parley',
+      data_home: isLiveDataHome() ? 'live' : 'isolated',
+    }));
     return;
   }
   // WebRTC voice signaling proxy → /v1/rtc/* on hermes upstream.

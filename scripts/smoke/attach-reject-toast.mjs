@@ -53,13 +53,24 @@ export default async function run({ page, log }) {
 
   // ── A: oversized → toast + no chip ──────────────────────────────────
   // Over the 100 MB cap (task #158 raised MAX_BYTES from 20 → 100 MB).
-  await addFile(page, { bytes: 101 * 1000 * 1000, type: 'application/pdf', name: 'huge.pdf' });
+  //
+  // Deliberately an IMAGE even though the original incident was a 57 MB
+  // PDF. add() gates on PDF capability BEFORE size (attachments.ts:209),
+  // and canAttachPdf() resolves through a per-model capability lookup —
+  // so with a PDF this case silently tests whichever model the target
+  // server happens to have configured. On a sandbox with no model it
+  // returned "Current model can't accept PDF attachments" and the case
+  // failed for a reason that had nothing to do with the size cap
+  // (2026-08-25). An image reaches the size branch on any server, which
+  // is what this case is actually about. Don't "restore fidelity" by
+  // putting the PDF back without also stubbing the capability tier.
+  await addFile(page, { bytes: 101 * 1000 * 1000, type: 'image/png', name: 'huge.png' });
   let t = await toastState(page);
   assert(t.present && t.visible, 'A: oversized rejection must show a visible toast');
   assert(t.err, 'A: rejection toast must use the err variant');
   assert(/too large/i.test(t.text), `A: toast should say "too large" (got ${JSON.stringify(t.text)})`);
   assert((await chipCount(page)) === 0, 'A: oversized file must NOT add a chip');
-  log('A ✓ oversized PDF → persistent error toast, no chip');
+  log('A ✓ oversized image → persistent error toast, no chip');
 
   // ── B: unsupported type → toast + no chip ───────────────────────────
   await addFile(page, { bytes: 1024, type: 'text/plain', name: 'notes.txt' });

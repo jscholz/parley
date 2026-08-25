@@ -48,6 +48,7 @@
     "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning 'test/**/*.test.ts' 'src/**/*.test.ts' 'proxy/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/run-smoke.mjs",
+    "smoke:isolated": "node scripts/run-smoke-isolated.mjs",
     "smoke:barge": "node scripts/run-smoke-barge.mjs",
     "smoke:live": "node scripts/smoke-live.mjs",
     "prepack": "node scripts/build.mjs",

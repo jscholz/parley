@@ -35,11 +35,33 @@ Knobs (`~/.hermes/.env`): `PARLEY_PDF_DPI` (150),
 
 ## Tests
 
-Keep `npm test` green before every commit:
+Parley has **five** gates, not one. A change is "green" only when the ones
+it can plausibly touch have actually been run — and a gate you skipped is
+reported as skipped, never folded into a pass:
+
 ```
-npm test           # all *.test.ts under test/, src/, proxy/
-npm run typecheck  # tsc --noEmit over TypeScript sources
+npm test                  # node unit suite — *.test.ts under test/, src/, proxy/
+npm run typecheck         # tsc --noEmit over TypeScript sources
+npm run smoke:isolated    # Playwright scenarios (see "Smoke tests" below)
+pytest backends/hermes/plugin/tests   # hermes plugin — needs the venv hermes is installed into
+pytest audio-bridge/tests             # STT/TTS bridge
 ```
+
+The two Python suites are easy to forget because `npm test` says nothing
+about them: the plugin owns push dispatch, unread counts, the transcript
+read paths and chat migration, and the bridge owns the whole voice path.
+Neither has any overlap with the node suite. Run them from the repo root
+with an interpreter that has `pytest` — usually the venv you installed
+hermes into, since the plugin imports gateway modules that `conftest.py`
+stubs.
+
+A repo-root `pytest.ini` blocks pytest plugins that arrive from an ambient
+`PYTHONPATH` rather than this repo's environment. Don't remove it: on a
+workstation that also sources a ROS 2 setup, ROS's seven `pytest11`
+plugins autoload into these suites and either hook log capture (producing
+failures that look like real ones) or abort collection outright. If some
+*other* toolchain leaks in, prefer `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` over
+extending the blocklist — these suites need no third-party pytest plugin.
 
 Source is TypeScript compiled to `.mjs` via esbuild (`scripts/build.mjs`) — the
 browser loads the compiled output, no runtime bundler.
@@ -118,7 +140,53 @@ npm test -- proxy/parley/__tests__/proxy.test.ts
 
 ### Smoke tests (Playwright)
 
-`npm run smoke` runs Playwright scenarios under `scripts/smoke/`.
+**Run them with `npm run smoke:isolated`.** It picks a free port, starts a
+server on a throwaway `PARLEY_HOME` seeded with a deployment config, runs
+the suite against that, and tears the whole thing down — including on
+Ctrl-C and on crash. Flags and name filters pass straight through:
+
+```
+npm run smoke:isolated                        # whole suite
+npm run smoke:isolated -- drill-window-cache  # one scenario
+npm run smoke:isolated -- --mocked-only       # skip BACKEND='real'
+```
+
+Three things this protects you from, all of which have already cost real
+time:
+
+**Never point the suite at the live server.** Scenarios call
+`resetServerSettings`, which POSTs to `/api/parley/config/<key>` on
+whatever host `SMOKE_URL` names. Aimed at the live proxy that rewrites
+the user's actual voice settings — tts, realtime, bargeIn, commitPhrase,
+streamingEngine. The runner snapshots and restores them, but that is
+best-effort and does not survive a crash or a `kill`. `run-smoke.mjs`
+therefore refuses to start unless `/health` reports
+`data_home: "isolated"`; a server that doesn't report the sentinel at all
+is also refused, because it cannot prove it is a sandbox. Override with
+`--allow-live-server` only when you actually mean to drive the live stack
+(the `BACKEND='real'` scenarios), and accept that it rewrites settings.
+
+**A sandbox needs a config file.** With no `parley.config.yaml`, every
+settings write returns `no parley.config.yaml configured` — and
+`resetServerSettings` treats write failures as non-fatal. The suite then
+runs on whatever defaults the server booted with, and the damage shows up
+much later as a scenario asserting the product is broken when it isn't.
+`smoke:isolated` seeds `example.parley.config.yaml` for you; a hand-rolled
+server needs `PARLEY_CONFIG` pointed somewhere real.
+
+**No browser means no run — say so.** These need Chromium. If it's
+missing, install Playwright's own build (userspace, no sudo):
+
+```
+npx playwright install chromium
+```
+
+The runner now fails with that instruction instead of a raw
+"executable doesn't exist". This matters because a host once ran for five
+days with no browser at all, every browser test failed at launch, and the
+suite was recorded as green when it had never executed once. **If a suite
+did not run, report it as "did not run" — never as passing.**
+
 Scenarios opt into mock or real backend via `BACKEND` export:
 - `BACKEND='mocked'` — uses `scripts/smoke/mock-backend.mjs` route
   interception. Fast, hermetic, no chat pollution. **Default for new

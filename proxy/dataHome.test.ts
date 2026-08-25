@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { dataHome } from './dataHome.mjs';
+import { dataHome, isLiveDataHome } from './dataHome.mjs';
 
 function tmpHome(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'parley-datahome-'));
@@ -31,4 +31,29 @@ test('an old ~/.sidekick dir is ignored', () => {
   const home = tmpHome();
   fs.mkdirSync(path.join(home, '.sidekick'));
   assert.equal(dataHome({}, home), path.join(home, '.parley'));
+});
+
+// ── live-home tripwire (test-safety sentinel) ────────────────────────
+//
+// Surfaced on /health as `data_home` and read by scripts/run-smoke.mjs,
+// which refuses to drive a server that reports "live" — the smoke suite
+// POSTs to /api/parley/config/<key> and would overwrite real settings.
+
+test('isLiveDataHome: the default home is live', () => {
+  const home = tmpHome();
+  assert.equal(isLiveDataHome({}, home), true);
+});
+
+test('isLiveDataHome: a sandbox PARLEY_HOME is not live', () => {
+  const home = tmpHome();
+  assert.equal(isLiveDataHome({ PARLEY_HOME: '/tmp/parley-smoke-home' }, home), false);
+});
+
+test('isLiveDataHome: PARLEY_HOME pointing back at the real dir is still live', () => {
+  // The guard compares RESOLVED paths precisely so it cannot be defeated
+  // by setting the env var to the live location — including via a
+  // non-normalised path, which a naive string compare would miss.
+  const home = tmpHome();
+  assert.equal(isLiveDataHome({ PARLEY_HOME: path.join(home, '.parley') }, home), true);
+  assert.equal(isLiveDataHome({ PARLEY_HOME: path.join(home, 'x', '..', '.parley') }, home), true);
 });
