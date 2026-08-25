@@ -15,15 +15,23 @@
 // paths clear any stale edge loader (IfIdle — a legit in-flight
 // pagination keeps its own spinner).
 //
-// WKWebView-stall simulation: a synchronous 700ms busy-loop mid-backfill
-// stalls the pump exactly like an iOS rAF stall, guaranteeing the
-// rolling suppress window has lapsed; then a programmatic scroll-to-top
-// puts the viewport in maybeLoadEarlier's trigger zone while the
-// backfill is still incomplete. Pre-fix: a ?before= fetch fires and the
-// edge spinner shows during backfill (this smoke fails). Post-fix: no
-// fetch, no spinner until the backfill completes; the LEGIT scroll-back
-// pagination afterwards still works (rows grow past the first page) and
-// its spinner clears on settle.
+// WKWebView-stall simulation: the switch-back runs under a CPU throttle
+// (so the pump lasts seconds, as it does on device rather than the
+// ~110ms it takes on unthrottled desktop), then a synchronous 1000ms
+// busy-loop mid-backfill stalls the pump exactly like an iOS rAF stall,
+// guaranteeing the rolling suppress window has lapsed; then a
+// programmatic scroll-to-top puts the viewport in maybeLoadEarlier's
+// trigger zone while the backfill is still incomplete. Pre-fix: a
+// ?before= fetch fires and the edge spinner shows during backfill (this
+// smoke fails). Post-fix: no fetch, no spinner until the backfill
+// completes; the LEGIT scroll-back pagination afterwards still works
+// (rows grow past the first page) and its spinner clears on settle.
+//
+// The throttle is not decoration. Without it the stall outlives the
+// whole backfill, the scroll lands on a fully-rendered transcript, and
+// the (correct, legitimate) pagination that follows reads as the bug —
+// the smoke fails while the product is fine. A non-vacuity assertion
+// below pins that the scroll really did land on a partial window.
 
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
 
@@ -37,6 +45,11 @@ const SMALL = 'mock-edge-spinner-sibling';
 const TOTAL = 260;        // > 200-row first page → hasMore=true, deeper rows exist server-side
 const FIRST_PAGE = 200;   // mock default page size (explicit for clarity)
 const STALL_MS = 1200;    // slow /messages so a phantom fetch's spinner is observable
+// CPU throttle for the switch-back only. 20x puts the windowed backfill
+// at ~4.7s, so the 1000ms stall below lands solidly mid-pump with margin
+// on both sides; unthrottled it is ~110ms and the scenario is
+// unreachable. See the step-2 comment for why this is load-bearing.
+const CPU_THROTTLE = 20;
 
 export function MOCK_SETUP(mock) {
   mock.setMessageDelay(HUGE, STALL_MS);
@@ -127,54 +140,100 @@ export default async function run({ page, log }) {
 
   // 2. Switch back (mem fast path → windowed backfill), let the first
   //    batches land, then simulate the WKWebView stall + scroll-to-top.
-  await clickRow(page, HUGE);
-  await page.waitForTimeout(100);
-  const backfillMark = Date.now();
-  const stalled = await page.evaluate(() => {
-    const el = document.getElementById('transcript');
-    const rowsBefore = el.querySelectorAll('[data-key]').length;
-    // Synchronous main-thread stall — the pump can't tick, its rolling
-    // lazy-load suppress deadline lapses (WKWebView rAF-stall shape).
-    // 1000ms: must outlive BOTH the pump's rolling 400ms suppress AND
-    // the at-bottom restore's one-shot suppressLazyLoadFor(800) armed at
-    // switch time (this evaluate starts ~100ms after the switch).
-    const t0 = performance.now();
-    while (performance.now() - t0 < 1000) { /* busy */ }
-    // Land in maybeLoadEarlier's trigger zone while the backfill is
-    // still incomplete, and run the scroll LISTENER synchronously in
-    // this same task — on WKWebView, queued scroll events get processed
-    // while the pump is still starved, i.e. BEFORE any pump tick can
-    // re-arm its rolling suppress timer. (In Chromium the pump's 150ms
-    // backstop timer, queued during the stall, would otherwise run
-    // first and mask the timer lapse this smoke exists to pin.)
-    el.scrollTop = 0;
-    el.dispatchEvent(new Event('scroll'));
-    return { rowsBefore };
-  });
-  log(`stalled main thread mid-backfill (${stalled.rowsBefore} rows rendered), scrolled to top`);
-
-  // 3. Sample while the backfill is still incomplete: the edge loader
-  //    must never arm and no ?before= fetch may fire.
+  //
+  //    The switch runs under a CPU throttle because the two halves of
+  //    this scenario are otherwise mutually exclusive on desktop
+  //    hardware. The stall has to outlive BOTH suppress timers (~1s of
+  //    real time) for the structural gate to be the only thing left
+  //    holding the line — but an unthrottled headless Chromium finishes
+  //    the whole 170-row backfill in ~110ms (measured: 30 rows at 46ms,
+  //    200 at 110ms), so the pump is always DONE before the stall ends
+  //    and the scroll lands on a fully-rendered transcript where
+  //    pagination is legitimately allowed. Throttling stretches the pump
+  //    to ~4.7s (its adaptive batch floors at BACKFILL_MIN_BATCH), which
+  //    is also the honest shape of the field report: the bug needs a
+  //    device slow enough that a human can scroll mid-backfill at all.
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU_THROTTLE });
   let spinnerSeenDuringBackfill = 0;
   let samples = 0;
-  for (;;) {
-    const s = await page.evaluate(() => ({
-      rows: document.querySelectorAll('#transcript [data-key]').length,
-      spinner: !!document.getElementById('transcript-edge-loader')?.classList.contains('visible'),
-    }));
-    samples++;
-    if (s.spinner) spinnerSeenDuringBackfill++;
-    if (s.rows >= FIRST_PAGE) break;          // backfill complete
-    await page.waitForTimeout(25);
-    if (samples > 400) throw new Error('backfill never completed (10s)');
+  let fetchesDuringBackfill = 0;
+  let rowsAtScroll = 0;
+  try {
+    await clickRow(page, HUGE);
+    // Wait for the pump to be demonstrably mid-flight: the initial
+    // window has painted AND at least one batch has grown it, but the
+    // projection isn't covered yet. Bailing straight into the stall
+    // could catch the pre-render moment where the transcript still holds
+    // the SMALL chat's single row.
+    await page.waitForFunction(
+      (n) => {
+        const c = document.querySelectorAll('#transcript [data-key]').length;
+        return c > 30 && c < n;
+      },
+      FIRST_PAGE, { timeout: 20_000, polling: 20 });
+    const backfillMark = Date.now();
+    const stalled = await page.evaluate(() => {
+      const el = document.getElementById('transcript');
+      const rowsBefore = el.querySelectorAll('[data-key]').length;
+      // Synchronous main-thread stall — the pump can't tick, its rolling
+      // lazy-load suppress deadline lapses (WKWebView rAF-stall shape).
+      // 1000ms: must outlive BOTH the pump's rolling 400ms suppress AND
+      // the at-bottom restore's one-shot suppressLazyLoadFor(800) armed
+      // at switch time.
+      const t0 = performance.now();
+      while (performance.now() - t0 < 1000) { /* busy */ }
+      // Land in maybeLoadEarlier's trigger zone while the backfill is
+      // still incomplete, and run the scroll LISTENER synchronously in
+      // this same task — on WKWebView, queued scroll events get processed
+      // while the pump is still starved, i.e. BEFORE any pump tick can
+      // re-arm its rolling suppress timer. (In Chromium the pump's 150ms
+      // backstop timer, queued during the stall, would otherwise run
+      // first and mask the timer lapse this smoke exists to pin.)
+      el.scrollTop = 0;
+      el.dispatchEvent(new Event('scroll'));
+      return { rowsBefore };
+    });
+    rowsAtScroll = stalled.rowsBefore;
+    log(`stalled main thread mid-backfill (${rowsAtScroll} rows rendered), scrolled to top`);
+
+    // 3. Sample while the backfill is still incomplete: the edge loader
+    //    must never arm and no ?before= fetch may fire.
+    for (;;) {
+      const s = await page.evaluate(() => ({
+        rows: document.querySelectorAll('#transcript [data-key]').length,
+        spinner: !!document.getElementById('transcript-edge-loader')?.classList.contains('visible'),
+      }));
+      samples++;
+      if (s.spinner) spinnerSeenDuringBackfill++;
+      if (s.rows >= FIRST_PAGE) break;          // backfill complete
+      await page.waitForTimeout(25);
+      if (samples > 800) throw new Error('backfill never completed');
+    }
+    fetchesDuringBackfill = beforeFetches.filter((t) => t >= backfillMark).length;
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
-  const fetchesDuringBackfill = beforeFetches.filter((t) => t >= backfillMark).length;
   log(`backfill complete: ${samples} samples, spinner-during-backfill=${spinnerSeenDuringBackfill}, ` +
       `before-fetches-during-backfill=${fetchesDuringBackfill}`);
-  // The primary signals are the fetch count + spinner class; the sample
-  // count just proves the loop observed the tail of the backfill at all
-  // (the stall guarantees the scroll landed while it was incomplete).
-  assert(samples >= 1, 'sampler never ran — stall/backfill timing assumptions broken');
+  // Non-vacuity guard. Both assertions below are trivially satisfiable by
+  // a transcript that finished backfilling before the scroll — which is
+  // exactly what an unthrottled run produces, and how this smoke spent
+  // its first life reporting a bug that wasn't there. Pin that the
+  // scroll actually landed on a PARTIAL window, and that the sampler
+  // then watched the rest of the pump run.
+  //
+  // The upper bound has margin baked in: under the throttle the pump
+  // moves ~8 rows per ~250ms, so leaving >=60 rows unrendered guarantees
+  // the backfill outlives the 1000ms stall rather than finishing inside
+  // it. If a future change speeds the pump up or slows the switch down,
+  // this trips loudly instead of quietly going green for free.
+  assert(rowsAtScroll > 30 && rowsAtScroll <= FIRST_PAGE - 60,
+    `stall/backfill staging broken: scrolled with ${rowsAtScroll} of ${FIRST_PAGE} rows ` +
+    'rendered — the backfill was not solidly in flight, so the gate under test was ' +
+    'never exercised (verify by deleting the isBackfillActive() check in ' +
+    'chat.ts maybeLoadEarlier: this smoke must go red)');
+  assert(samples >= 2, 'sampler never observed an incomplete backfill');
   assert(fetchesDuringBackfill === 0,
     'BUG: a ?before= pagination fetch fired DURING the switch backfill — the rows it ' +
     'returns land above the window slice and never render, so the loop cascades ' +
