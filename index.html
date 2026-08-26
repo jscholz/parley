@@ -692,6 +692,15 @@
          property). Hidden unless a capture is live. -->
     <div id="capture-pill" class="capture-pill" hidden>
       <span class="capture-pill-dot" aria-hidden="true"></span>
+      <!-- State word (B2 pill-HUD legibility): starting / paused /
+           interrupted / uploading differed mostly by dot COLOR, which
+           fails glance-reads (and color-blind users) outright. The chip
+           carries the state as TEXT and — unlike the old "— paused"
+           title suffix — can't be ellipsized away by a long meeting
+           title (flex:none vs the title's flex:1 truncation). Hidden
+           while plainly recording; red pulsing dot + running timer
+           already say that unambiguously. -->
+      <span class="capture-pill-state" id="capture-pill-state" hidden></span>
       <span class="capture-pill-title" id="capture-pill-title">Recording</span>
       <span class="capture-pill-timer" id="capture-pill-timer">0:00</span>
       <!-- Controls (B1 destructive-action pass; 2026-08-18 incident):

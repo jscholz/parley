@@ -75,16 +75,27 @@ function render(state: CaptureUiState): void {
     if (timerInterval != null) { window.clearInterval(timerInterval); timerInterval = null; }
     return;
   }
+  // B2 pill-HUD legibility: the state rides a dedicated chip
+  // (#capture-pill-state) instead of a title SUFFIX. The suffix version
+  // ("Board sync w/ finance — paused") lived in the title's
+  // ellipsis zone, so on a phone any real meeting title truncated the
+  // state word away and the gray-vs-gray dot was all that distinguished
+  // paused from uploading. The chip is flex:none (never truncates) and
+  // the title stays the meeting's name in every live phase. 'recording'
+  // gets no word — red pulsing dot + running timer are that state.
+  const stateEl = document.getElementById('capture-pill-state');
+  if (stateEl) {
+    const word = state.phase === 'paused' ? 'Paused'
+      : state.phase === 'interrupted' ? 'Reconnecting…'
+        : state.phase === 'finishing' ? 'Uploading…'
+          : '';
+    stateEl.textContent = word;
+    stateEl.hidden = !word;
+  }
   if (title) {
     title.textContent = state.phase === 'starting'
-      ? 'Starting microphone…'
-      : state.phase === 'finishing'
-        ? 'Uploading…'
-        : state.phase === 'interrupted'
-          ? `${state.title} — mic interrupted, resuming…`
-          : state.phase === 'paused'
-            ? `${state.title} — paused`
-            : state.title;
+      ? 'Starting microphone…'   // no title exists yet; the text IS the state
+      : (state.title || 'Recording');
   }
   // Pause button doubles as resume; swap glyphs + label.
   const pauseBtn = document.getElementById('capture-pill-pause');

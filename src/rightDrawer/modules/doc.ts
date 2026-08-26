@@ -27,6 +27,7 @@ import {
 } from '../docStore.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
+import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
 
 export type DocView = 'reader' | 'list';
 
@@ -84,6 +85,11 @@ export function createDocModule(opts: {
     if (!doc) {
       opts.empty.hidden = false;
       opts.body.hidden = true;
+      // Recently Deleted must stay reachable with an EMPTY shelf — the
+      // likeliest moment to need it is right after discarding your only
+      // meeting doc (its shelf entry leaves with the discard). Same
+      // self-hiding section the list view carries; zero chrome at n=0.
+      mountRecentlyDeletedSection(opts.empty);
       return;
     }
     opts.empty.hidden = true;
@@ -138,6 +144,15 @@ export function createDocModule(opts: {
     }
     opts.body.appendChild(ul);
     installListDragReorder(ul, ctx);
+
+    // Recently Deleted (B2, 2026-08-18 incident lineage) — discarded
+    // captures' management home. The LIST view is where it belongs:
+    // this view is already the shelf's management surface ("Clear all"
+    // lives here), captures are docs-adjacent (their transcripts ARE
+    // shelf docs), and a collapsed bottom section adds no new chrome —
+    // it self-hides when nothing is deleted. Full rationale + the
+    // rejected session-drawer-lens alternative: recentlyDeleted.ts.
+    mountRecentlyDeletedSection(opts.body);
   }
 
   /** Drag-reorder for the list rows — the same order the rail tabs
@@ -302,8 +317,14 @@ export function createDocModule(opts: {
       const md = document.createElement('div');
       md.className = 'doc-drawer-content';
       md.innerHTML = miniMarkdown(docBody);
-      if (doc.source === 'capture' && doc.captureId) {
-        wireTapToSeek(md);
+      if (doc.source === 'capture') {
+        // Speaker anchors (B2 live-transcript nit): in a diarized wall
+        // of text the "**Name:**" runs are the only scan landmarks, and
+        // as plain <strong> they weigh the same as the timestamp tokens.
+        // Presentation-level tagging + CSS accent; the transcript format
+        // itself is untouched.
+        tagSpeakerLeads(md);
+        if (doc.captureId) wireTapToSeek(md);
       }
       opts.body.appendChild(md);
     } else {
@@ -342,15 +363,30 @@ export function createDocModule(opts: {
  *  it — so an author who legitimately opens a doc with an italic
  *  *sentence* (asterisks) or an underscored identifier mid-line is
  *  untouched. Non-markdown formats pass through whole: plain text has
- *  no marker convention to strip, and HTML bodies are sandboxed as-is. */
+ *  no marker convention to strip, and HTML bodies are sandboxed as-is.
+ *
+ *  The meta line may sit under ONE leading heading (B2 live-transcript
+ *  nit): capture transcripts — live pushes AND the transcript-endpoint
+ *  heal path — open `# Title` then `_Live transcript — recording in
+ *  progress…_` / `_Recorded …_`, so the pt5 first-line-only rule never
+ *  caught the app's own most common meta line and the reader showed
+ *  raw underscores mid-meeting. Handled HERE, not by normalizing the
+ *  server pushDoc: presentation-only keeps doc.content verbatim (the
+ *  downloaded file keeps heading + meta and re-imports identically),
+ *  and it heals BOTH data paths at once — a pushDoc-only fix would
+ *  regress the subtitle every time docReconcile healed from
+ *  GET /transcript, which serves transcript.md byte-for-byte. The
+ *  heading stays in `rest`. */
 export function splitLeadingMetaLine(
   content: string,
   format: string | undefined,
 ): { meta: string | null; rest: string } {
   if (format !== 'markdown') return { meta: null, rest: content };
-  const m = content.match(/^\s*_([^_\n](?:[^\n]*[^_\n])?)_[ \t]*(?:\n+|$)/);
+  const head = content.match(/^\s*#{1,6}[ \t][^\n]*\n+/);
+  const offset = head ? head[0].length : 0;
+  const m = content.slice(offset).match(/^\s*_([^_\n](?:[^\n]*[^_\n])?)_[ \t]*(?:\n+|$)/);
   if (!m) return { meta: null, rest: content };
-  return { meta: m[1], rest: content.slice(m[0].length) };
+  return { meta: m[1], rest: content.slice(0, offset) + content.slice(offset + m[0].length) };
 }
 
 // ── Capture player strip (§3.6 — trust-but-verify playback) ───────────
@@ -552,6 +588,29 @@ export function parseTsToken(text: string): number | null {
   if (!m) return null;
   const h = m[1] ? parseInt(m[1], 10) : 0;
   return h * 3600 + parseInt(m[2], 10) * 60 + parseInt(m[3], 10);
+}
+
+/** Is a block-leading <strong> a SPEAKER label (diarized "**Name**" /
+ *  "**Name:**" turn opener) rather than a timestamp/mark token
+ *  ("**[+0:45]**", "**[MARK 1:05]**")? Every strong the transcript
+ *  renderer emits leads its block, so the bracket is the whole
+ *  distinction. Pure — unit-tested. */
+export function isSpeakerLead(text: string): boolean {
+  const t = (text || '').trimStart();
+  return !!t && !t.startsWith('[');
+}
+
+/** Tag speaker-leading <strong> runs in a rendered capture transcript
+ *  with .doc-speaker (CSS gives them the accent color). Only strongs
+ *  that open their block qualify — a mid-sentence **emphasis** in a
+ *  transcribed turn must not light up as a speaker. */
+export function tagSpeakerLeads(md: HTMLElement): void {
+  for (const strong of Array.from(md.querySelectorAll('strong'))) {
+    // previousSibling (not previousElementSibling): any preceding node,
+    // text included, means the strong is mid-block.
+    if (strong.previousSibling) continue;
+    if (isSpeakerLead(strong.textContent || '')) strong.classList.add('doc-speaker');
+  }
 }
 
 /** Tap a transcript line → seek the strip's audio to that moment.

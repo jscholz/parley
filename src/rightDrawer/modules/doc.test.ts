@@ -96,3 +96,48 @@ test('splitLeadingMetaLine: meta-only doc leaves an empty body, not a crash', ()
   assert.equal(meta, 'Recorded 2026-08-18 10:35');
   assert.equal(rest, '');
 });
+
+// B2 live-transcript nit: capture transcripts (live push AND the
+// transcript-endpoint heal) open `# Title` THEN the meta line — the
+// first-line-only rule never caught the app's own most common shape.
+test('splitLeadingMetaLine: lifts the meta line from under a leading heading', () => {
+  const body = '# Board sync\n\n_Live transcript — recording in progress; updates roughly every minute._\n\n**[+0:00]** hello';
+  const { meta, rest } = splitLeadingMetaLine(body, 'markdown');
+  assert.equal(meta, 'Live transcript — recording in progress; updates roughly every minute.');
+  assert.equal(rest, '# Board sync\n\n**[+0:00]** hello', 'the heading stays in the body');
+});
+
+test('splitLeadingMetaLine: heading + finished-capture meta', () => {
+  const body = '# Board sync\n\n_Recorded 2026-08-18 10:35 · 1:34:39 · diarized_\n\n**Speaker 0** [0:00]: hi';
+  const { meta, rest } = splitLeadingMetaLine(body, 'markdown');
+  assert.equal(meta, 'Recorded 2026-08-18 10:35 · 1:34:39 · diarized');
+  assert.equal(rest, '# Board sync\n\n**Speaker 0** [0:00]: hi');
+});
+
+test('splitLeadingMetaLine: heading without a meta line passes through whole', () => {
+  for (const s of [
+    '# Title\n\nplain first paragraph',
+    '# Title\n\nuses snake_case_names everywhere',
+    '# Title\n\n__bold opener__ then text',
+    // Only ONE heading may precede the meta — a second heading means
+    // the `_…_` line is deep in the document, not doc metadata.
+    '# Title\n\n## Section\n\n_not a meta line_',
+  ]) {
+    const { meta, rest } = splitLeadingMetaLine(s, 'markdown');
+    assert.equal(meta, null, s);
+    assert.equal(rest, s);
+  }
+});
+
+// ── isSpeakerLead (B2 — diarized speaker anchors) ─────────────────────
+
+import { isSpeakerLead } from './doc.ts';
+
+test('isSpeakerLead: speakers yes, timestamp/mark tokens no', () => {
+  assert.equal(isSpeakerLead('Speaker 0'), true);
+  assert.equal(isSpeakerLead('Alice:'), true);
+  assert.equal(isSpeakerLead('[+0:45]'), false);
+  assert.equal(isSpeakerLead('[MARK 1:05]'), false);
+  assert.equal(isSpeakerLead(''), false);
+  assert.equal(isSpeakerLead('  [0:12]'), false);
+});

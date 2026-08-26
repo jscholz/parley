@@ -144,14 +144,19 @@ export default async function run({ page, log }) {
     title: document.querySelector('#doc-drawer-body .doc-drawer-title')?.textContent || '',
     strip: !!document.querySelector('#doc-drawer-body .doc-player-strip'),
     liveGlyph: !!document.querySelector('#doc-drawer-body .doc-capture-glyph.live'),
+    subtitle: document.querySelector('#doc-drawer-body .doc-drawer-subtitle')?.textContent || '',
     body: document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent || '',
   }));
   assert(!reader.title.includes('(live)'), `reader title must not carry "(live)", got "${reader.title}"`);
-  // The meta line lives in the body (capture transcripts open with the
-  // `# title` heading, so splitLeadingMetaLine leaves it in place):
+  // The meta line renders as the styled SUBTITLE (B2: splitLeadingMetaLine
+  // now looks past the `# title` heading capture transcripts open with):
   // "Recorded …" must have replaced the live-progress line.
-  assert(reader.body.includes('Recorded 2026-08-24'), `meta line must be the final "Recorded …" line, got body: "${reader.body.slice(0, 120)}"`);
-  assert(!reader.body.includes('recording in progress'), 'the live-progress meta line must be gone from the reader');
+  assert(reader.subtitle.includes('Recorded 2026-08-24'),
+    `subtitle must carry the final "Recorded …" meta line, got subtitle: "${reader.subtitle}" body: "${reader.body.slice(0, 120)}"`);
+  assert(!reader.subtitle.includes('recording in progress') && !reader.body.includes('recording in progress'),
+    'the live-progress meta line must be gone from the reader');
+  assert(!reader.body.includes('Recorded 2026-08-24'),
+    'the meta line must be LIFTED out of the body (raw underscores in the reader was the pt5/B2 nit)');
   assert(reader.strip, 'player strip must render once the doc healed (it was hidden for two days in the field)');
   assert(!reader.liveGlyph, 'record glyph must drop the live (red) state');
   assert(reader.body.includes('FINAL-HEAL-MARKER'), 'reader body must show the final transcript');

@@ -475,7 +475,11 @@ export async function installMockBackend(page) {
   const captures = new Map();
   const captureLifecycle = [];   // { action, id, body? } in arrival order
   let captureOutage = false;
-  await page.route('**/api/parley/captures', async (route) => {
+  // Regex, not the '**/api/parley/captures' glob: globs must match the
+  // FULL url, so `?include=discarded` (the Recently-Deleted UI's opt-in
+  // view, B2) fell through to the real isolated server — which knows
+  // none of the mock's captures and answered an empty list.
+  await page.route(/.*\/api\/parley\/captures(?:\?.*)?$/, async (route) => {
     // GET = the capture list meetingsIndex fetches at boot (and on
     // capture_changed envelopes). Served from the mock's map so
     // has-recording drawer state is test-controlled — falling back to
@@ -1444,6 +1448,15 @@ export async function installMockBackend(page) {
         // Served by the mocked GET /captures/{id}/transcript (stale-doc
         // reconcile). Omit for "no transcript ever landed" → 404 there.
         ...(typeof opts.transcript === 'string' ? { transcript: opts.transcript } : {}),
+        // Seeding a TOMBSTONE (status:'discarded') carries the discard
+        // bookkeeping a real /discard writes: discarded_at drives the
+        // Recently-Deleted UI's "Deleted 2h ago", pre_discard_status is
+        // the /restore target hint. Without these a seeded tombstone
+        // would restore to a shape no real capture can reach.
+        ...(opts.status === 'discarded' ? {
+          discarded_at: opts.discardedAt ?? Date.now() - 3_600_000,
+          pre_discard_status: opts.preDiscardStatus || 'complete',
+        } : {}),
       });
       return id;
     },

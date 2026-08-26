@@ -5071,6 +5071,82 @@
 .doc-drawer-remove svg { width: 16px; height: 16px; }
 .doc-drawer-remove:hover { color: var(--fg); background: var(--surface); }
 
+/* ── Recently Deleted (rightDrawer/modules/recentlyDeleted.ts; B2 —
+   2026-08-18 incident lineage). A collapsed disclosure section at the
+   bottom of the Docs LIST view (and under the empty state): quiet,
+   muted chrome — a trash drawer, not a feature — that self-hides when
+   nothing is deleted. */
+.recently-deleted {
+  flex: none;
+  border-top: 1px solid var(--border);
+  margin-top: 10px; padding-top: 4px;
+  /* The section also mounts under the panel's centered empty state
+     (.pin-drawer-empty is text-align:center) — rows must stay
+     left-aligned lists there too (render-verify 2026-08-26). */
+  text-align: left;
+}
+.recently-deleted[hidden] { display: none; }
+.recently-deleted-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  padding: 8px 2px; text-align: left;
+  min-height: 32px;
+  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.recently-deleted-toggle:hover { color: var(--fg); }
+.recently-deleted-caret {
+  display: inline-block; transition: transform 0.15s ease;
+  font-size: 14px; line-height: 1;
+}
+.recently-deleted-toggle[aria-expanded="true"] .recently-deleted-caret {
+  transform: rotate(90deg);
+}
+.recently-deleted-hint { margin-left: auto; font-weight: 400; font-size: 11px; }
+.recently-deleted-list { list-style: none; margin: 0; padding: 0; }
+.recently-deleted-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.recently-deleted-item:last-child { border-bottom: none; }
+.recently-deleted-item-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.recently-deleted-item-title {
+  font-size: calc(var(--content-size) - 1px); font-weight: 600;
+  /* Muted, not full-strength: these rows are tombstones, and the list
+     must read as "in the trash" next to the live shelf rows above. */
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.recently-deleted-item-meta { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+/* Restore — the safe verb: quiet outlined text button, one tap. */
+.recently-deleted-restore {
+  background: none; border: 1px solid var(--border); border-radius: 7px;
+  cursor: pointer; font: inherit; font-size: 12px; font-weight: 600;
+  color: var(--primary); padding: 4px 10px;
+  min-height: 32px; flex: none;
+  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.recently-deleted-restore:hover { border-color: var(--primary); background: var(--surface); }
+/* Purge — the app's ONLY irreversible verb: danger only on hover so a
+   collapsed trash list isn't a row of red alarms, and the button never
+   acts without its confirmDialog anyway. */
+.recently-deleted-purge {
+  background: none; border: none; cursor: pointer; color: var(--muted);
+  padding: 6px; border-radius: 5px; line-height: 0;
+  min-width: 32px; min-height: 32px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.recently-deleted-purge svg { width: 15px; height: 15px; }
+.recently-deleted-purge:hover { color: var(--danger); background: var(--surface); }
+/* Speaker anchors in capture transcripts (B2): diarized "**Name**"
+   turn openers get the accent so a wall of text scans by speaker;
+   timestamp/mark strongs (bracket-leading) stay default. */
+.doc-drawer-content strong.doc-speaker { color: var(--accent, #6c9); }
+
 /* ── Meeting-capture pill (src/capture/pill.ts; capture plan §3.4) ──
    App-global chrome docked above the composer. Deliberately LOUD —
    the pill is the on-device consent surface: a red pulsing dot that
@@ -5108,6 +5184,42 @@
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 600;
+}
+/* State chip (B2 pill-HUD legibility): the state word as TEXT + a
+   distinct FORM (bordered chip), never color alone — the gray-dot
+   states (paused / uploading / starting) were indistinguishable at a
+   glance and unreadable to color-blind users. flex:none: unlike the
+   old "— paused" title suffix, a long meeting title can't ellipsize
+   the state away. Fixed light tones: the pill bg is dark in BOTH
+   themes (see .capture-pill). */
+.capture-pill-state {
+  flex: none;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #d8d8d8;
+  white-space: nowrap;
+}
+.capture-pill-state[hidden] { display: none; }
+/* Interrupted keeps its amber urgency on the chip too — but the word
+   ("Reconnecting…") is what makes the state legible. */
+.capture-pill.interrupted .capture-pill-state {
+  border-color: color-mix(in srgb, #f1c40f 60%, transparent);
+  color: #f1c40f;
+}
+@media (max-width: 699px) {
+  /* Phone width: chip + timer + the four ≥44px B1 controls already
+     overflow 390px, so the flex:1 title collapses to a one-glyph
+     sliver (render-verify 2026-08-26). While a state chip shows, the
+     chip IS the message — drop the unreadable title fragment rather
+     than let it dangle. Plain recording (no chip) keeps the title. */
+  .capture-pill.paused .capture-pill-title,
+  .capture-pill.interrupted .capture-pill-title,
+  .capture-pill.finishing .capture-pill-title { display: none; }
+  .capture-pill.paused .capture-pill-timer,
+  .capture-pill.interrupted .capture-pill-timer,
+  .capture-pill.finishing .capture-pill-timer { flex: 1; text-align: left; }
 }
 .capture-pill-timer {
   /* Fixed light-muted: the pill bg is dark in both themes (above). */
@@ -5176,7 +5288,13 @@
   background: var(--surface-1, #1c1c1e);
   box-shadow: none;
 }
-.capture-pill.paused .capture-pill-dot { background: #8a8a8a; animation: none; }
+/* Hollow ring, not a filled dot (B2: state by FORM as well as text) —
+   paused is the one deliberate "mic released" state, and an empty ring
+   reads as "not capturing" even in grayscale. */
+.capture-pill.paused .capture-pill-dot {
+  background: transparent; border: 2px solid #8a8a8a;
+  box-sizing: border-box; animation: none;
+}
 /* Pill buttons hold small stroke SVGs (matches the app's icon set —
    the cartoon-emoji pass was replaced 2026-07-08). 18px inside the
    44px targets — 15px glyphs looked lost in the bigger boxes (B1). */
