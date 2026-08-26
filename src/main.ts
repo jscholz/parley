@@ -55,7 +55,7 @@ import * as sessionDrawer from './sessionDrawer.ts';
 import * as switchCtl from './switchController.ts';
 import * as cmdkPalette from './cmdkPalette.ts';
 import * as hotkeysHelp from './hotkeysHelp.ts';
-import { initPinDrawer } from './pins/drawer.ts';
+import { initPinDrawer, openAllDocs } from './pins/drawer.ts';
 import { initCapturePill, hotkeyToggleMeetingCapture } from './capture/pill.ts';
 import { initMeetingsIndex } from './capture/meetingsIndex.ts';
 import { getCaptureState } from './capture/recorder.ts';
@@ -1043,6 +1043,11 @@ async function boot() {
     onPinClick: (chatId, msgId) => { void drillToChatMessage(chatId, msgId); },
     onActivityOpen: (chatId, msgId) => drillToChatMessage(chatId, msgId, { validateExists: true }),
     onApprovalAction: (chatId, action, msgId) => { void sendApprovalAction(chatId, action, msgId); },
+    // Doc reader "Open chat" (2026-08-26: "a link from the meeting
+    // recording doc to the companion session so the user can ask
+    // questions about it") — same drill path as a pin jump, no target
+    // message: land on the session's tail.
+    onOpenChat: (chatId) => { void drillToChatMessage(chatId, null); },
   });
   // Meeting-capture pill + entry points (mic menu item, ?capture=start,
   // capture_control envelopes) — app-global chrome, survives session
@@ -4330,7 +4335,7 @@ async function boot() {
       // composer would early-return here and the hotkey would be dead
       // exactly where he types.
       const isShortcut = (e.metaKey || e.ctrlKey)
-        && (e.shiftKey || /^Digit[1-9]$/.test(e.code));
+        && (e.shiftKey || /^Digit[0-9]$/.test(e.code));
       if (!isShortcut && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable)) return;
     }
     const s = settings.get();
@@ -4391,7 +4396,7 @@ async function boot() {
     // regular browser tab the browser wins — accepted trade. Same
     // meta/ctrl interchangeability as matches() above; empty setting =
     // disabled, matching the other hotkeys' Backspace-clear.
-    if (/^Digit[1-9]$/.test(e.code)) {
+    if (/^Digit[0-9]$/.test(e.code)) {
       const combo = String((s as any).hotkeyDocTabs || '');
       const mods = combo.split('+').map(x => x.trim().toLowerCase()).filter(x => x && !/^\d$/.test(x));
       if (mods.length) {
@@ -4405,11 +4410,30 @@ async function boot() {
           (needAlt ? e.altKey : !e.altKey) &&
           (needShift ? e.shiftKey : !e.shiftKey);
         if (modifierOK && (needMeta || needCtrl)) {
-          const idx = Number(e.code.slice(5)) - 1;
-          log('[hotkey] docTab', idx + 1);
-          if (selectDocTab(idx)) {
-            claim();
-            return;
+          // ⌘0 → All docs (his ask, 2026-08-26: "cmd+0 for going to all
+          // docs") — completes the browser-tab idiom under the SAME
+          // stored prefix as ⌘1…9 (no new setting key; a synced key
+          // costs two places — settings.ts + frontend-config). Routes
+          // through openAllDocs: the identical list-view aim + select
+          // the Docs rail button click runs, with the tab hotkeys'
+          // toggle parity (list in front → close). Browser ⌘0 is
+          // zoom-reset — page-interceptable, same accepted trade as
+          // ⌘1…9 (installed PWA/CAP are the primary surfaces). Claim
+          // only on a hit — openAllDocs is false when the doc module
+          // isn't registered (cached shell predating it).
+          if (e.code === 'Digit0') {
+            log('[hotkey] docList (0)');
+            if (openAllDocs()) {
+              claim();
+              return;
+            }
+          } else {
+            const idx = Number(e.code.slice(5)) - 1;
+            log('[hotkey] docTab', idx + 1);
+            if (selectDocTab(idx)) {
+              claim();
+              return;
+            }
           }
         }
       }

@@ -3,10 +3,18 @@
 // research-2026-07-07.md — "list + reader", the Claude/Gemini/Open WebUI
 // consensus; never a tab strip).
 //
-// Views: READER (default — the active doc) and LIST (via the `‹ All
-// docs (n)` header row). Tapping a list row activates it and returns to
-// the reader. An agent push adds-or-replaces by path identity and
-// re-activates (docStore.setDoc).
+// Views: READER (default — the active doc) and LIST (via the generic
+// Docs rail button / the tab strip's "+N" overflow chip). Tapping a
+// list row activates it and returns to the reader. An agent push
+// adds-or-replaces by path identity and re-activates (docStore.setDoc).
+//
+// The reader carries NO list breadcrumb (field report 2026-08-26: the
+// old `‹ All docs (n)` link "goes back to the main docs view, but feels
+// like it's doing that in the current tab since there's no panel tint
+// highlight change" — redundant nav that lied about state). The Docs
+// rail button IS the list entry now; view changes announce themselves
+// via `parley:doc-view-changed` so the rail (docTabs.ts) can keep its
+// tint honest about which view is showing.
 //
 // The host's single shared header action button is view-dependent:
 // reader → "Close" (remove active doc), list → "Clear all". Reader adds
@@ -22,7 +30,7 @@ import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
-  currentDoc, tabOrderDocs, docCount, selectDoc, removeDoc, clearDocs, setTabOrder,
+  currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
   type DocState,
 } from '../docStore.ts';
 import { loadSortable } from '../sortableLoader.ts';
@@ -45,8 +53,23 @@ export function createDocModule(opts: {
   body: HTMLElement;
   empty: HTMLElement;
   onSelect?: () => void;
+  /** Capture docs carry their companion chat (doc_show chat_id) — the
+   *  reader's "Open chat" link routes through the same drill machinery
+   *  pin jumps use ("a link from the meeting recording doc to the
+   *  companion session so the user can ask questions about it",
+   *  2026-08-26). */
+  onOpenChat?: (chatId: string) => void;
 }): DocModule {
   let view: DocView = 'reader';
+  /** ALL view mutations go through here: the rail's doc tabs tint by
+   *  which view the panel shows (docTabs.ts), and they can only stay
+   *  honest if every flip — external setView OR an internal list/reader
+   *  hop — announces itself. */
+  const setViewState = (v: DocView): void => {
+    if (view === v) return;
+    view = v;
+    try { window.dispatchEvent(new CustomEvent('parley:doc-view-changed')); } catch { /* non-browser */ }
+  };
   // True mid-drag in the list view. Renders bail while set: render()
   // does innerHTML='', which would yank the dragged row out from under
   // Sortable (same guard the pinned-session reorder uses).
@@ -66,7 +89,7 @@ export function createDocModule(opts: {
   const render = (ctx: RightDrawerModuleContext) => {
     if (listDragActive) return;
     const doc = currentDoc();
-    if (!doc) view = 'reader';   // empty shelf → empty state, not a list
+    if (!doc) setViewState('reader');   // empty shelf → empty state, not a list
 
     // The drawer-header action sits next to the panel title, where a
     // button reads as PANEL chrome — so it must never destroy a document
@@ -105,7 +128,7 @@ export function createDocModule(opts: {
     const back = document.createElement('button');
     back.className = 'doc-shelf-back';
     back.textContent = '‹ Back to document';
-    back.onclick = () => { view = 'reader'; rerender(ctx); };
+    back.onclick = () => { setViewState('reader'); rerender(ctx); };
     opts.body.appendChild(back);
 
     const ul = document.createElement('ul');
@@ -131,7 +154,7 @@ export function createDocModule(opts: {
       if (d.path) meta.title = d.path;
       main.appendChild(title);
       main.appendChild(meta);
-      main.onclick = () => { selectDoc(d.id); view = 'reader'; rerender(ctx); };
+      main.onclick = () => { selectDoc(d.id); setViewState('reader'); rerender(ctx); };
       li.appendChild(main);
 
       const close = document.createElement('button');
@@ -204,15 +227,28 @@ export function createDocModule(opts: {
     const header = document.createElement('div');
     header.className = 'doc-drawer-header';
 
-    // `‹ All docs (n)` — the shelf entry point. Hidden as a no-op when
-    // there's a single doc? No: still useful (shows the count model), but
-    // keep it quiet at n=1 by labelling with the count either way.
-    const listBtn = document.createElement('button');
-    listBtn.className = 'doc-drawer-listbtn';
-    listBtn.textContent = `‹ All docs (${docCount()})`;
-    listBtn.setAttribute('aria-label', 'Show all documents');
-    listBtn.onclick = () => { view = 'list'; rerender(ctx); };
-    header.appendChild(listBtn);
+    // No `‹ All docs (n)` breadcrumb here (field report 2026-08-26):
+    // it navigated to the list "in the current tab" with no rail tint
+    // change, so it read as a stateless jump. The Docs rail button is
+    // the list entry (pins/drawer.ts aims the view before the host
+    // toggle), and when the rail is cramped the tab strip's "+N"
+    // overflow chip opens the list too — the breadcrumb only duplicated
+    // them. The reader instead offers "Open chat" (companion session).
+    if (doc.chatId) {
+      const openChat = document.createElement('button');
+      openChat.className = 'doc-drawer-openchat';
+      openChat.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
+      openChat.appendChild(document.createTextNode('Open chat'));
+      openChat.setAttribute('aria-label', 'Open the companion chat session');
+      openChat.title = 'Open the chat session this document belongs to';
+      openChat.onclick = () => {
+        opts.onOpenChat?.(doc.chatId!);
+        // Mobile: the main view is what the user asked for — same
+        // close-on-drill the pin jump uses (pins.ts).
+        if (window.innerWidth < 700) ctx.close();
+      };
+      header.appendChild(openChat);
+    }
 
     const spacer = document.createElement('span');
     spacer.className = 'doc-drawer-header-spacer';
@@ -343,14 +379,14 @@ export function createDocModule(opts: {
     // View aim for out-of-panel callers (rail tabs → reader on a doc,
     // generic Docs button / "+N" chip → list). State-only: the caller's
     // host.select('doc') triggers the render that shows it.
-    setView: (v: DocView) => { view = v; },
+    setView: (v: DocView) => { setViewState(v); },
     getView: () => view,
     render,
     onClear: (ctx) => {
       // Only reachable from list view (the header action is hidden in the
       // reader — see render()); clears the whole shelf.
       clearDocs();
-      view = 'reader';
+      setViewState('reader');
       ctx.render();
     },
     onSelect: () => { opts.onSelect?.(); },

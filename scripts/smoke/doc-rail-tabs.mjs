@@ -11,6 +11,11 @@
 //      drawer closed; clicking again reopens it.
 //   5. The generic Docs rail button now opens the LIST view (management
 //      home) — the tabs are the reader entry points.
+//   6. Rail honesty (field report 2026-08-26): the reader carries NO
+//      `‹ All docs` breadcrumb, and while the LIST view is showing the
+//      Docs rail button is the selected element with ZERO doc tabs
+//      aria-selected; selecting a doc from the list restores its tab's
+//      tint.
 
 import { waitForReady } from './lib.mjs';
 
@@ -91,6 +96,14 @@ export default async function run({ page, log, mock }) {
   if (await selected() !== 0) throw new Error('clicked tab must become aria-selected');
   log('tab click switches the reader; active state tracks');
 
+  // 6a. Breadcrumb GONE from the reader (2026-08-26: "the 'all docs'
+  // link … feels like it's doing that in the current tab since there's
+  // no panel tint highlight change") — the rail button/+N chip are the
+  // list entries now.
+  const crumb = await page.evaluate(() => !!document.querySelector('.doc-drawer-listbtn'));
+  if (crumb) throw new Error('reader must not render the `‹ All docs` breadcrumb (removed 2026-08-26)');
+  log('reader carries no All-docs breadcrumb');
+
   // 4. Active-tab toggle: clicking Alpha's tab again (reader up, drawer
   // open) closes the drawer; a third click reopens it on the same doc.
   const drawerOpen = () => page.evaluate(() => document.body.classList.contains('pin-drawer-open'));
@@ -122,4 +135,28 @@ export default async function run({ page, log, mock }) {
     null, { timeout: 4000, polling: 50 },
   );
   log('generic Docs rail button opens the list view');
+
+  // 6b. Rail honesty in LIST view: the Docs button carries the selected
+  // tint and NO doc tab does — a tinted tab would claim a reader that
+  // isn't showing (the exact lie the field report called out).
+  const listState = await page.evaluate(() => ({
+    docsBtnSelected: document.getElementById('btn-doc-drawer-rail')?.getAttribute('aria-selected'),
+    tintedTabs: document.querySelectorAll('#doc-rail-tabs .doc-rail-tab[aria-selected="true"]').length,
+  }));
+  if (listState.docsBtnSelected !== 'true') {
+    throw new Error(`list view: Docs rail button must be aria-selected, got ${listState.docsBtnSelected}`);
+  }
+  if (listState.tintedTabs !== 0) {
+    throw new Error(`list view: no doc tab may be aria-selected, got ${listState.tintedTabs}`);
+  }
+  log('list view: Docs button selected, zero tabs tinted');
+
+  // 6c. Back to a reader (tab click from the list) → that tab re-tints.
+  await page.click('#doc-rail-tabs .doc-rail-tab:nth-child(2)');
+  await page.waitForFunction(
+    () => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('BRAVO-MARK'),
+    null, { timeout: 4000, polling: 50 },
+  );
+  if (await selected() !== 1) throw new Error('reader via tab click must restore the tab tint');
+  log('reader restores the active tab tint');
 }

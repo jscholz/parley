@@ -99,8 +99,10 @@ export default async function run({ page, log, mock }) {
   );
   log('hotkey 1 selected the doc now at the top');
 
-  // 4. List view shows the same sequence (one order everywhere).
-  await page.click('.doc-drawer-listbtn');
+  // 4. List view shows the same sequence (one order everywhere). Entry
+  // via Ctrl+0 (the breadcrumb was removed 2026-08-26): one press lands
+  // on the list even with a reader in front.
+  await page.keyboard.press('Control+Digit0');
   await page.waitForSelector('.doc-shelf-item', { timeout: 4000 });
   const rows = await page.evaluate(() =>
     [...document.querySelectorAll('.doc-shelf-item-title')].map(el => el.textContent));

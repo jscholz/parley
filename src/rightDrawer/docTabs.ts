@@ -110,7 +110,14 @@ function buildTab(doc: DocState, position: number): HTMLElement {
   tab.className = 'doc-rail-tab';
   tab.setAttribute('role', 'tab');
   tab.dataset.docId = doc.id;
-  const active = currentDoc()?.id === doc.id;
+  // Rail honesty (field report 2026-08-26: the old reader→list jump
+  // "feels like it's doing that in the current tab since there's no
+  // panel tint highlight change"): while the doc panel's view is the
+  // LIST, no tab is tinted — the generic Docs button carries the
+  // selection (the host's panel-tab tint) because the list, not any one
+  // doc, is what's showing. In reader view the active doc's tab tints
+  // as before.
+  const active = docModuleRef?.getView() !== 'list' && currentDoc()?.id === doc.id;
   tab.setAttribute('aria-selected', active ? 'true' : 'false');
   const prefix = hotkeyGlyph();
   const hotkey = position < 9 && prefix ? ` — ${prefix}${position + 1}` : '';
@@ -151,6 +158,17 @@ function buildMoreChip(hiddenCount: number): HTMLElement {
 function render(): void {
   if (!containerEl || !dividerEl) return;
   if (tabDragActive) return;
+  // The generic Docs button's tooltip carries its hotkey (⌘0 → all
+  // docs) the same way each tab's title carries ⌘n — recomputed per
+  // render so a Settings rebind shows on the next paint. The label
+  // says "All docs": with the tabs owning per-doc entry, this button
+  // means the shelf/list, and the tooltip should say so.
+  const docsBtn = document.getElementById('btn-doc-drawer-rail');
+  if (docsBtn) {
+    const prefix = hotkeyGlyph();
+    docsBtn.title = prefix ? `All docs — ${prefix}0` : 'All docs';
+    docsBtn.setAttribute('aria-label', 'All docs');
+  }
   const docs = tabOrderDocs();
   const empty = docs.length === 0;
   dividerEl.hidden = empty;
@@ -226,6 +244,10 @@ export function initDocTabs(opts: {
   // render cycle — tabs live in the rail, which is visible even with
   // the drawer collapsed.
   window.addEventListener('parley:doc-changed', render);
+  // View flips (reader ⇄ list) repaint the tint gate above — the doc
+  // module announces them (doc.ts setViewState) precisely so the rail
+  // can stay honest without polling.
+  window.addEventListener('parley:doc-view-changed', render);
   installTabDragReorder(opts.container);
   render();
 }

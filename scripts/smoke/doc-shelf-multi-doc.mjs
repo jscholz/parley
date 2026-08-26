@@ -6,7 +6,8 @@
 //      reader shows the newest.
 //   2. Re-push of the FIRST path with new content → replaces in place
 //      (no duplicate), becomes active — latest-wins per document.
-//   3. `‹ All docs (2)` list view → rows for both; tapping the other row
+//   3. List view (via the Docs rail button — the reader's breadcrumb was
+//      removed 2026-08-26) → rows for both; tapping the other row
 //      switches the reader.
 //   4. Per-row ✕ removes a doc; reader falls back to the remaining one.
 //   5. Download button present in the reader header.
@@ -36,6 +37,28 @@ export default async function run({ page, log, mock }) {
     type: 'doc_show', chat_id: CHAT_ID, title, content, format: 'markdown', path,
   });
 
+  // Shelf size observable: one rail tab per doc (the reader's
+  // `‹ All docs (n)` count label was removed with the breadcrumb,
+  // 2026-08-26 — the tab strip is the always-visible count now).
+  const tabCount = () => page.evaluate(
+    () => document.querySelectorAll('#doc-rail-tabs .doc-rail-tab').length,
+  );
+  // List entry: the Docs rail button. With the doc panel already in
+  // front it TOGGLES (close), so a reader-first state needs the
+  // close+reopen dance the doc-rail-tabs smoke documents.
+  const openListView = async () => {
+    for (let i = 0; i < 2; i++) {
+      await page.click('#btn-doc-drawer-rail');
+      const showing = await page.evaluate(() => {
+        const panel = document.getElementById('doc-drawer-panel');
+        return !!panel && !panel.hidden && panel.getClientRects().length > 0
+          && !!document.querySelector('#doc-drawer-body .doc-shelf-list');
+      });
+      if (showing) return;
+    }
+    throw new Error('Docs rail button did not reach the list view');
+  };
+
   // 1. Two docs, different paths.
   push('Deck outline', '# Deck\n\nDECK-V1-MARK', '/w/deck.md');
   await page.waitForFunction(
@@ -47,10 +70,8 @@ export default async function run({ page, log, mock }) {
     () => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('NOTES-MARK'),
     null, { timeout: 6000, polling: 50 },
   );
-  const count1 = await page.evaluate(
-    () => document.querySelector('.doc-drawer-listbtn')?.textContent,
-  );
-  if (!count1?.includes('(2)')) throw new Error(`expected 2 docs on shelf, header says: ${count1}`);
+  const count1 = await tabCount();
+  if (count1 !== 2) throw new Error(`expected 2 docs on shelf, rail shows ${count1} tabs`);
   log('two docs coexist; reader shows the newest');
 
   // 2. Re-push first path → replaces in place, activates, still 2 docs.
@@ -59,14 +80,12 @@ export default async function run({ page, log, mock }) {
     () => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('DECK-V2-MARK'),
     null, { timeout: 6000, polling: 50 },
   );
-  const count2 = await page.evaluate(
-    () => document.querySelector('.doc-drawer-listbtn')?.textContent,
-  );
-  if (!count2?.includes('(2)')) throw new Error(`re-push must not duplicate — header says: ${count2}`);
+  const count2 = await tabCount();
+  if (count2 !== 2) throw new Error(`re-push must not duplicate — rail shows ${count2} tabs`);
   log('same-path re-push replaced in place (no duplicate), refreshed content');
 
   // 3. List view: two rows; switch to the other doc.
-  await page.click('.doc-drawer-listbtn');
+  await openListView();
   await page.waitForSelector('.doc-shelf-item', { timeout: 4000 });
   const rows = await page.evaluate(() =>
     [...document.querySelectorAll('.doc-shelf-item-title')].map(el => el.textContent));
@@ -84,7 +103,7 @@ export default async function run({ page, log, mock }) {
   log('list view switches the reader');
 
   // 4. Remove the active doc via the list ✕ → reader falls back.
-  await page.click('.doc-drawer-listbtn');
+  await openListView();
   await page.waitForSelector('.doc-shelf-item', { timeout: 4000 });
   await page.evaluate(() => {
     const items = [...document.querySelectorAll('.doc-shelf-item')];

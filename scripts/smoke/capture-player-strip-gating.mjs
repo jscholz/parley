@@ -76,7 +76,9 @@ export default async function run({ page, log, mock }) {
   if (!doneStrip.strip || !doneStrip.audio) throw new Error('finished capture doc must render the player strip');
   if (!doneStrip.purge) throw new Error('strip should include the delete-audio action');
   if (doneStrip.liveGlyph) throw new Error('glyph must drop the live state once finished');
-  const count = await page.evaluate(() => document.querySelector('.doc-drawer-listbtn')?.textContent);
-  if (!count?.includes('(1)')) throw new Error(`finished push must refresh in place, not duplicate: ${count}`);
+  // Shelf-size observable is the rail tab strip now (the reader's
+  // `‹ All docs (n)` breadcrumb was removed 2026-08-26).
+  const count = await page.evaluate(() => document.querySelectorAll('#doc-rail-tabs .doc-rail-tab').length);
+  if (count !== 1) throw new Error(`finished push must refresh in place, not duplicate: ${count} rail tabs`);
   log('finished doc: strip + purge action present, glyph neutral, single shelf entry');
 }

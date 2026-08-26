@@ -26,7 +26,26 @@ let titleEl: HTMLElement | null = null;
 let statusEl: HTMLElement | null = null;
 let statusTimer: number | null = null;
 let drawerHost: RightDrawerHost | null = null;
+let docModuleRef: DocModule | null = null;
 let activePanel: 'pins' | 'activity' | 'doc' = 'pins';
+
+/** ⌘0 → All docs (main.ts hotkey dispatcher, 2026-08-26): open the doc
+ *  panel on the LIST view — the same aim-then-select routing the Docs
+ *  rail button's click runs. Toggle parity like the ⌘1…9 tab hotkeys:
+ *  with the list already in front the press closes the drawer. False
+ *  when the doc module isn't registered (cached shell predating it), so
+ *  the dispatcher leaves the keystroke to the browser. */
+export function openAllDocs(): boolean {
+  if (!drawerHost || !docModuleRef) return false;
+  if (drawerHost.isOpen() && drawerHost.activeModuleId() === 'doc'
+      && docModuleRef.getView() === 'list') {
+    drawerHost.close();
+    return true;
+  }
+  docModuleRef.setView('list');
+  drawerHost.select('doc', { open: true });
+  return true;
+}
 
 function defaultDrawerWidthPx(): number {
   return Math.max(320, Math.min(Math.round(window.innerWidth * 0.24), 420));
@@ -127,6 +146,10 @@ export function initPinDrawer(opts: {
   onPinClick: PinClickHandler;
   onActivityOpen?: ActivityOpenHandler;
   onApprovalAction?: ApprovalActionHandler;
+  /** Doc reader → companion session ("Open chat", 2026-08-26): capture
+   *  docs know their chat (doc_show chat_id); this routes the link
+   *  through the same drill machinery pin jumps use. */
+  onOpenChat?: (chatId: string) => void;
 }): void {
   if (drawerEl) return;
   drawerEl = document.getElementById('pin-drawer');
@@ -177,6 +200,7 @@ export function initPinDrawer(opts: {
         panel: docPanelEl,
         body: docBodyEl,
         empty: docEmptyEl,
+        onOpenChat: opts.onOpenChat,
         onSelect: () => {
           activePanel = 'doc';
           setDocDot(false);
@@ -187,6 +211,7 @@ export function initPinDrawer(opts: {
         },
       })
     : null;
+  docModuleRef = docModule;
 
   // The generic Docs rail button opens the LIST view (management home —
   // Clear all lives there): with the rail doc-tabs giving every doc a

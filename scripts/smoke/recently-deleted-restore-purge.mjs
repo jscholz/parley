@@ -126,7 +126,9 @@ export default async function run({ page, log, mock }) {
   // 3. Purge forever — from the LIST view section this time (the shelf
   //    now has the restored doc). Cancel must really cancel; only an
   //    explicit confirm may hit POST /purge; bare DELETE never fires.
-  await page.click('#doc-drawer-body .doc-drawer-listbtn');
+  // List entry via Ctrl+0 (the reader's breadcrumb was removed
+  // 2026-08-26; the hotkey lands on the list in one press).
+  await page.keyboard.press('Control+Digit0');
   await page.waitForFunction(
     () => /Recently Deleted \(1\)/.test(
       document.querySelector('#doc-drawer-body .recently-deleted-toggle')?.textContent || ''),

@@ -5003,14 +5003,20 @@
 .setup-wizard-skip:hover { color: var(--fg); }
 
 /* ── Doc shelf (v2 multi-doc — rightDrawer/modules/doc.ts) ────────────
- * List + single reader. List rows echo the activity-drawer idiom;
- * reader header gains the `‹ All docs (n)` shelf toggle + download. */
-.doc-drawer-listbtn {
+ * List + single reader. List rows echo the activity-drawer idiom. The
+ * reader's `‹ All docs (n)` breadcrumb is GONE (field report 2026-08-26:
+ * it jumped views "in the current tab" with no rail tint change) — the
+ * Docs rail button / "+N" chip are the list entries; its header slot now
+ * hosts the Open-chat companion-session link below. */
+.doc-drawer-openchat {
+  display: inline-flex; align-items: center; gap: 4px;
   background: none; border: none; cursor: pointer; font: inherit;
-  font-size: 13px; color: var(--primary); padding: 2px 0;
-  white-space: nowrap;
+  font-size: 12px; color: var(--muted); padding: 2px 4px 2px 0;
+  border-radius: 4px; white-space: nowrap;
+  transition: color 0.12s;
 }
-.doc-drawer-listbtn:hover { text-decoration: underline; }
+.doc-drawer-openchat:hover { color: var(--fg); text-decoration: underline; }
+.doc-drawer-openchat svg { flex-shrink: 0; }
 .doc-drawer-header-spacer { flex: 1; }
 .doc-drawer-download {
   background: none; border: none; cursor: pointer; color: var(--muted);

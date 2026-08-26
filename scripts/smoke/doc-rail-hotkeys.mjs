@@ -16,6 +16,10 @@
 //      (click parity); with the drawer closed, the hotkey reopens it.
 //   4. A digit with no tab behind it (Digit9, 3 docs open) is NOT
 //      claimed — no drawer state change.
+//   5. Ctrl+Digit0 → All docs (his ask 2026-08-26): opens the doc panel
+//      in LIST view under the same stored prefix, with the rail honest
+//      (Docs button selected, zero tabs tinted) and toggle parity
+//      (Digit0 again on the open list closes the drawer).
 
 import { waitForReady } from './lib.mjs';
 
@@ -93,4 +97,33 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(300);
   if (await drawerOpen() !== before) throw new Error('unmapped digit must not change drawer state');
   log('digit beyond the tab count is left to the browser');
+
+  // 5. Ctrl+Digit0 → All docs. From the reader (First doc is in front),
+  // ONE press must land on the LIST view — not the button's literal
+  // close-toggle — because "going to all docs" is the ask.
+  await page.keyboard.press('Control+Digit0');
+  await page.waitForFunction(
+    () => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 3,
+    null, { timeout: 4000, polling: 50 },
+  );
+  const listState = await page.evaluate(() => ({
+    docsBtnSelected: document.getElementById('btn-doc-drawer-rail')?.getAttribute('aria-selected'),
+    tintedTabs: document.querySelectorAll('#doc-rail-tabs .doc-rail-tab[aria-selected="true"]').length,
+  }));
+  if (listState.docsBtnSelected !== 'true') {
+    throw new Error(`Ctrl+0: Docs rail button must be aria-selected, got ${listState.docsBtnSelected}`);
+  }
+  if (listState.tintedTabs !== 0) {
+    throw new Error(`Ctrl+0: list view must tint no doc tab, got ${listState.tintedTabs}`);
+  }
+  log('Ctrl+Digit0 opens the all-docs list; rail tint honest');
+
+  // Toggle parity (same contract as the tab hotkeys): Digit0 with the
+  // list already in front closes the drawer.
+  await page.keyboard.press('Control+Digit0');
+  await page.waitForFunction(
+    () => !document.body.classList.contains('pin-drawer-open'),
+    null, { timeout: 4000, polling: 50 },
+  );
+  log('Ctrl+Digit0 on the open list toggles the drawer closed');
 }

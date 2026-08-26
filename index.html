@@ -644,13 +644,18 @@
     <div class="row">
       <label for="set-hotkey-meeting">Toggle meeting capture</label>
       <input type="text" id="set-hotkey-meeting" class="hotkey-input" readonly placeholder="click + press keys">
+      <!-- Hint re-homed 2026-08-26: it described meeting capture but sat
+           on the doc-tabs row below. -->
+      <span class="hint">record a meeting in the current session; press again to stop</span>
     </div>
     <div class="row">
-      <label for="set-hotkey-doctabs">Doc tabs 1–9</label>
+      <label for="set-hotkey-doctabs">Doc tabs 1–9 · 0 = all docs</label>
       <!-- One recording generalizes: press the combo on ANY digit and the
-           stored modifiers apply to all nine tab positions. -->
+           stored modifiers apply to all nine tab positions PLUS digit 0,
+           which opens the all-docs list (his ask 2026-08-26) — same
+           stored prefix, no extra setting key. -->
       <input type="text" id="set-hotkey-doctabs" class="hotkey-input" readonly placeholder="click + press keys">
-      <span class="hint">record a meeting in the current session; press again to stop</span>
+      <span class="hint">switch open docs by tab position; 0 opens the all-docs list</span>
     </div>
     <div class="row">
       <label for="set-agent-activity">Tool activity</label>
