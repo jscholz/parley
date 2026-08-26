@@ -12,6 +12,7 @@ import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/p
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
 import { hydrateDoc, listDocs, selectDoc } from '../rightDrawer/docStore.ts';
+import { reconcileStaleCaptureDocs } from '../rightDrawer/docReconcile.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
 
@@ -162,6 +163,12 @@ export function initPinDrawer(opts: {
   // Sync localStorage read — a persisted doc paints on the host's initial
   // render (autoOpen=false, so boot never yanks the drawer open).
   hydrateDoc();
+  // Boot sweep: persisted capture docs still titled "(live)" are checked
+  // against the capture manifest and healed/removed ("Meeting 2026-08-24
+  // (live)" field report 2026-08-26 — the finished doc_show is a one-shot
+  // SSE envelope this client may never have heard). Fire-and-forget:
+  // rendering never waits on it.
+  void reconcileStaleCaptureDocs();
 
   // Built ahead of the host so (a) the rail-button listener below can
   // aim its view and (b) the doc tabs can hold a direct handle.
@@ -170,7 +177,14 @@ export function initPinDrawer(opts: {
         panel: docPanelEl,
         body: docBodyEl,
         empty: docEmptyEl,
-        onSelect: () => { activePanel = 'doc'; setDocDot(false); },
+        onSelect: () => {
+          activePanel = 'doc';
+          setDocDot(false);
+          // Panel-open sweep — the retry lane for stale "(live)" capture
+          // docs when the boot sweep lost to a network blip (docReconcile
+          // dedupes concurrent runs; no live-titled docs = no requests).
+          void reconcileStaleCaptureDocs();
+        },
       })
     : null;
 

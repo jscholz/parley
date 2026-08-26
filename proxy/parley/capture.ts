@@ -255,6 +255,14 @@ export function captureDirPath(id: string): string {
   assertValidId(id);
   return captureDir(id);
 }
+
+/** Canonical transcript file — ONE definition of the layout fact
+ *  "captures store transcript.md" (captureTranscribe's transcriptPath
+ *  delegates here). The storage module owns it so the transcript GET
+ *  endpoint below never has to reach into the pipeline (audit 2.2). */
+export function transcriptFilePath(id: string): string {
+  return path.join(captureDirPath(id), 'transcript.md');
+}
 function manifestPath(id: string): string { return path.join(captureDir(id), 'manifest.json'); }
 
 function extForMime(mime: string): string {
@@ -1164,6 +1172,45 @@ export async function handleCaptureGet(
 ): Promise<void> {
   try { sendJson(res, 200, { capture: await getCapture(id) }); }
   catch (err) { sendError(res, err); }
+}
+
+/** GET /api/parley/captures/{id}/transcript — the transcript as data,
+ *  not fanout. The finished doc_show push is a ONE-SHOT SSE envelope:
+ *  a client that wasn't connected when the meeting ended misses it
+ *  (the 128-entry replay ring churns fast — every reply_delta rides
+ *  it) and its localStorage-persisted shelf doc stays titled "(live)"
+ *  forever ("Meeting 2026-08-24 (live)" field report 2026-08-26; same
+ *  missed-envelope class as the answered-question replay bug fixed
+ *  2026-08-25). This endpoint lets any client reconcile a persisted
+ *  capture doc against reality on demand.
+ *
+ *  200 {capture_id, status, title, format:'markdown', content};
+ *  discarded → status + title WITHOUT content (Recently Deleted — the
+ *  client should drop its shelf entry, not resurrect the words);
+ *  404 when the capture or its transcript file doesn't exist. */
+export async function handleCaptureTranscript(
+  _req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try {
+    const m = await readManifest(id);   // CaptureError(404) on unknown ids
+    if (m.status === 'discarded') {
+      sendJson(res, 200, { capture_id: m.id, status: m.status, title: m.title });
+      return;
+    }
+    let content: string;
+    try {
+      content = await fs.readFile(transcriptFilePath(id), 'utf8');
+    } catch {
+      throw new CaptureError(404, `capture ${id} has no transcript`);
+    }
+    sendJson(res, 200, {
+      capture_id: m.id,
+      status: m.status,
+      title: m.title,
+      format: 'markdown',
+      content,
+    });
+  } catch (err) { sendError(res, err); }
 }
 
 /** POST /api/parley/captures/control — {action: 'start'|'stop', ...}.

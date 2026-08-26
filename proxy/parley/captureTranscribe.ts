@@ -28,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath,
-  sendJson, sendError,
+  transcriptFilePath, sendJson, sendError,
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
@@ -113,7 +113,10 @@ function job(id: string): CaptureJob {
 }
 
 function transcriptPath(m: CaptureManifest): string {
-  return path.join(captureDirPath(m.id), 'transcript.md');
+  // Storage owns the layout fact (capture.ts.transcriptFilePath) so the
+  // transcript GET endpoint and this pipeline can never disagree on
+  // where the file lives.
+  return transcriptFilePath(m.id);
 }
 
 function segTextPath(m: CaptureManifest, seq: number): string {

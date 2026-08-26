@@ -344,3 +344,66 @@ test('segment upload reads x-parley-* headers', async () => {
   );
   assert.equal(mismatch.status, 409);
 });
+
+// ── GET /captures/{id}/transcript — the stale-doc heal path ───────────
+//
+// The finished doc_show push is a ONE-SHOT SSE envelope: a client not
+// connected when the meeting ended misses it and its persisted shelf
+// doc stays "(live)" forever ("Meeting 2026-08-24 (live)" field report
+// 2026-08-26 — same missed-envelope class as the answered-question
+// replay bug fixed 2026-08-25). This endpoint is the pull-based truth
+// clients reconcile against.
+
+test('transcript endpoint: content for finished captures, 404s, discarded tombstone shape', async () => {
+  const { handleCaptureTranscript, transcriptFilePath } = await import('../capture.ts');
+  const mkRes = () => {
+    let status = 0; let payload = '';
+    return {
+      writeHead(code: number) { status = code; return this; },
+      end(b?: string) { payload = b || ''; },
+      get status() { return status; },
+      get body() { return JSON.parse(payload || '{}'); },
+    } as any;
+  };
+  const req = {} as any;   // handler ignores the request
+
+  // Unknown capture → 404 (never a torn 200 the client would trust).
+  const unknown = mkRes();
+  await handleCaptureTranscript(req, unknown, 'cap_1_ffffff');
+  assert.equal(unknown.status, 404);
+
+  const cap = await createCapture({ title: 'Meeting 2026-08-24', linkedChat: null });
+  await activateCapture(cap.id);
+  await putSegment(cap.id, 0, Buffer.from('audio'), { t0Ms: 0, mime: 'audio/mp4' });
+
+  // Finished capture but transcript.md never landed (transcription-less
+  // install) → 404: the client drops its shelf entry rather than keep a
+  // "(live)" lie pointing at nothing.
+  await stopCapture(cap.id);
+  const noFile = mkRes();
+  await handleCaptureTranscript(req, noFile, cap.id);
+  assert.equal(noFile.status, 404);
+
+  // Transcript on disk → the full heal payload.
+  const body = '# Meeting 2026-08-24\n\n**[+0:00]** final words.';
+  await fs.writeFile(transcriptFilePath(cap.id), body);
+  const ok = mkRes();
+  await handleCaptureTranscript(req, ok, cap.id);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body, {
+    capture_id: cap.id,
+    status: 'complete',
+    title: 'Meeting 2026-08-24',
+    format: 'markdown',
+    content: body,
+  });
+
+  // Discarded (Recently Deleted) → status + title WITHOUT content: the
+  // client should drop the doc, not resurrect deleted words.
+  await discardCapture(cap.id);
+  const gone = mkRes();
+  await handleCaptureTranscript(req, gone, cap.id);
+  assert.equal(gone.status, 200);
+  assert.equal(gone.body.status, 'discarded');
+  assert.equal(gone.body.content, undefined);
+});

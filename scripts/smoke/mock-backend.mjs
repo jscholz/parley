@@ -608,7 +608,42 @@ export async function installMockBackend(page) {
     if (cap && cap.status === 'recording') { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
+  // GET /captures/{id}/transcript — the reconcile heal path (stale
+  // "(live)" shelf docs, field report 2026-08-26). Mirrors the real
+  // server: 404 for unknown captures or no transcript content;
+  // discarded → status + title WITHOUT content.
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/transcript(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/transcript$/);
+    const cap = captures.get(m ? m[1] : '');
+    const reply = (status, payload) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(payload),
+    });
+    if (!cap) return reply(404, { error: 'unknown capture' });
+    if (cap.status === 'discarded') {
+      return reply(200, { capture_id: cap.id, status: cap.status, title: cap.title });
+    }
+    if (typeof cap.transcript !== 'string') {
+      return reply(404, { error: `capture ${cap.id} has no transcript` });
+    }
+    return reply(200, {
+      capture_id: cap.id, status: cap.status, title: cap.title,
+      format: 'markdown', content: cap.transcript,
+    });
+  });
   await page.route(/.*\/api\/parley\/captures\/[^/]+$/, async (route) => {
+    // GET = single-capture manifest fetch (the stale-doc reconcile's
+    // status probe). Served from the mock's map like the list route —
+    // falling back to the isolated real server would 404 every mock
+    // capture and make the reconciler DELETE docs the smoke seeded.
+    if (route.request().method() === 'GET') {
+      const gm = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
+      const gcap = captures.get(gm ? gm[1] : '');
+      return route.fulfill({
+        status: gcap ? 200 : 404, contentType: 'application/json',
+        body: JSON.stringify(gcap ? { capture: gcap } : { error: 'unknown capture' }),
+      });
+    }
     if (route.request().method() !== 'DELETE') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
     const cap = captures.get(m ? m[1] : '');
@@ -1406,6 +1441,9 @@ export async function installMockBackend(page) {
         marks: [],
         speakers: {},
         segments: opts.segments || [{ seq: 0, bytes: 1024 }],
+        // Served by the mocked GET /captures/{id}/transcript (stale-doc
+        // reconcile). Omit for "no transcript ever landed" → 404 there.
+        ...(typeof opts.transcript === 'string' ? { transcript: opts.transcript } : {}),
       });
       return id;
     },

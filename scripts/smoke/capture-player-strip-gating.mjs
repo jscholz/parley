@@ -21,6 +21,13 @@ export function MOCK_SETUP(mock) {
     messages: [{ role: 'user', content: 'seed', parley_id: 'umsg_strip_seed', timestamp: t0 }],
     lastActiveAt: Date.now() - 1000,
   });
+  // The live doc push below claims a RECORDING capture — the manifest
+  // must agree, or the stale-doc reconcile (doc panel open triggers a
+  // sweep; field fix 2026-08-26) would see terminal/404 and heal or
+  // remove the doc mid-assertion. A live-titled doc whose capture is
+  // genuinely recording must be left alone — this smoke now proves that
+  // implicitly too.
+  mock.addCapture(CHAT_ID, { id: 'cap_1_abcdef', status: 'recording', endedAt: null });
 }
 
 export default async function run({ page, log, mock }) {

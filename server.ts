@@ -1284,6 +1284,15 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capAudio) {
       return parley.handleCaptureAudio(req, res, capAudio[1]);
     }
+    // Transcript as data, not fanout — the heal path for shelf docs
+    // stuck on "(live)" because the finished doc_show envelope was a
+    // one-shot SSE push no client was connected to hear ("Meeting
+    // 2026-08-24 (live)" field report 2026-08-26).
+    const capTranscript = req.method === 'GET'
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/transcript(?:\?.*)?$/);
+    if (capTranscript) {
+      return parley.handleCaptureTranscript(req, res, capTranscript[1]);
+    }
     // Agent-pushed media (proxy/parley/media.ts): any local agent
     // registers a produced file, embeds the returned url in its reply
     // as markdown, and the client renders a video/image card. Backend-

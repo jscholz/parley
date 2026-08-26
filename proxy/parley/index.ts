@@ -35,6 +35,7 @@ export {
   handleCaptureMark,
   handleCaptureList,
   handleCaptureGet,
+  handleCaptureTranscript,
   handleCaptureDelete,
   handleCaptureDiscard,
   handleCaptureRestore,
