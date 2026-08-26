@@ -320,3 +320,196 @@ def test_compute_unread_cache_invalidation_after_mark_seen(db, state_db):
         f"cache wasn't invalidated after mark_seen — still seeing "
         f"stale unread total={second['total']}"
     )
+
+
+# ── Invalidation hygiene (2026-08-26 200%-CPU diagnosis) ─────────────
+#
+# The record_envelope write-through used to call invalidate_unread_cache
+# on EVERY envelope — including every streaming reply_delta — so during
+# any turn the compute_unread cache was permanently cold and each
+# /unread poll re-ran the full multi-second scan (two executor threads
+# sat in _compute_unread_uncached continuously; gateway idle CPU
+# ~200%, "5-30s replies" field report). The gate now flushes only for
+# persisted envelopes that can actually change an unread count.
+
+
+def test_envelope_affects_unread_type_gate():
+    """Only reply_final and notification produce role='assistant'
+    status='final' rows (the only rows the unread queries count), so
+    only those types may flush the cache. Everything else — streaming
+    deltas, typing, tool envelopes, user messages, transient UI
+    signals — must NOT."""
+    from ..parley_unread import envelope_affects_unread
+
+    assert envelope_affects_unread("reply_final") is True
+    assert envelope_affects_unread("notification") is True
+    for etype in ("reply_delta", "typing", "user_message", "tool_call",
+                  "tool_result", "session_changed", "error", "image",
+                  "unread_changed", "", None):
+        assert envelope_affects_unread(etype) is False, (
+            f"envelope type {etype!r} must not invalidate the unread "
+            f"cache — it cannot change an assistant-final row count"
+        )
+
+
+def _minimal_adapter(db):
+    """ParleyAdapter shell with just the attrs the write-through path
+    touches. object.__new__ skips __init__ (which wires the full
+    gateway adapter surface — irrelevant to the persistence gate)."""
+    from .. import ParleyAdapter
+
+    adapter = object.__new__(ParleyAdapter)
+    adapter._parley_db = db
+    adapter._session_rows_cache = ("sentinel", [])  # type: ignore[assignment]
+    return adapter
+
+
+def test_writethrough_invalidates_only_for_unread_affecting_envelopes(db, monkeypatch):
+    """Regression guard for the reply_delta invalidation storm: a
+    streaming turn emits dozens of reply_delta envelopes per second;
+    each one clearing the cache forces a full recompute per /unread
+    poll. Assert the write-through flushes the cache exactly for the
+    persisted unread-affecting envelopes (reply_final, notification)
+    and NEVER for deltas / typing / tool traffic / user messages."""
+    from .. import parley_unread
+
+    adapter = _minimal_adapter(db)
+    calls: list = []
+    monkeypatch.setattr(
+        parley_unread, "invalidate_unread_cache",
+        lambda source=None: calls.append(source),
+    )
+
+    def send(env):
+        adapter._record_envelope_writethrough(env, env.get("type"))
+
+    # A realistic turn: user message, typing, a tool round-trip, a
+    # burst of streaming deltas — none of these may flush the cache.
+    send({"type": "user_message", "chat_id": CHAT_ID, "message_id": "um1",
+          "text": "hi"})
+    send({"type": "typing", "chat_id": CHAT_ID})
+    send({"type": "tool_call", "chat_id": CHAT_ID, "call_id": "c1",
+          "tool_name": "web_search", "args": {}})
+    send({"type": "tool_result", "chat_id": CHAT_ID, "call_id": "c1",
+          "result": "ok"})
+    for i in range(25):
+        send({"type": "reply_delta", "chat_id": CHAT_ID,
+              "message_id": "m1", "text": "chunk" * (i + 1)})
+    assert calls == [], (
+        f"non-unread-affecting envelopes flushed the cache "
+        f"{len(calls)} time(s) — this is the 2026-08-26 invalidation "
+        f"storm (every reply_delta forced a full recompute per poll)"
+    )
+    # Session-rows cache untouched too (same storm, other executor).
+    assert adapter._session_rows_cache is not None
+
+    # reply_final persists an assistant-final row → exactly one flush,
+    # of both caches.
+    send({"type": "reply_final", "chat_id": CHAT_ID, "message_id": "m1",
+          "text": "final text"})
+    assert len(calls) == 1
+    assert adapter._session_rows_cache is None
+
+    # notification persists an assistant-final row → flush.
+    adapter._session_rows_cache = ("sentinel", [])  # re-prime
+    send({"type": "notification", "chat_id": CHAT_ID,
+          "message_id": "n1", "content": "cron says hi"})
+    assert len(calls) == 2
+    assert adapter._session_rows_cache is None
+
+    # A reply_final that record_envelope REJECTS (no message_id → no
+    # row persisted) must not flush either: nothing changed on disk.
+    adapter._session_rows_cache = ("sentinel", [])
+    send({"type": "reply_final", "chat_id": CHAT_ID, "text": "orphan"})
+    assert len(calls) == 2, "unpersisted reply_final flushed the cache"
+    assert adapter._session_rows_cache is not None
+
+
+# ── Session-rows poll cache (2026-08-26 200%-CPU diagnosis) ──────────
+#
+# _read_session_rows ran its recursive-CTE query uncached at every
+# 1.5s poll tick — 4.3s per call on the live state.db, i.e. the
+# poller's executor thread was busy 100% of the time. The rows are now
+# TTL-cached with event-driven flush (turn end, rename, delete).
+
+
+@pytest.fixture
+def poller_state_db(tmp_path):
+    """state.db shaped for _read_session_rows (needs title column)."""
+    path = tmp_path / "poller_state.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            user_id TEXT,
+            system_prompt TEXT,
+            parent_session_id TEXT,
+            started_at REAL NOT NULL,
+            title TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, source, user_id, started_at, title) "
+        "VALUES ('s1', 'parley', ?, 1000.0, 'first title')",
+        (CHAT_ID,),
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def _poller_adapter(state_db_path):
+    from .. import ParleyAdapter
+
+    adapter = object.__new__(ParleyAdapter)
+    adapter._state_db_path = state_db_path
+    adapter._session_rows_cache = None
+    adapter._sid_to_chat_id_cache = {}
+    return adapter
+
+
+def _insert_session(state_db_path, sid, title, started_at):
+    conn = sqlite3.connect(str(state_db_path))
+    conn.execute(
+        "INSERT INTO sessions (id, source, user_id, started_at, title) "
+        "VALUES (?, 'parley', ?, ?, ?)",
+        (sid, CHAT_ID, started_at, title),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_read_session_rows_serves_from_cache_within_ttl(poller_state_db):
+    """Within the TTL, repeat poll ticks must serve the cached rows —
+    the underlying query must not re-run. Asserted behaviorally: a
+    state.db change made after the first read is invisible to a
+    second read inside the TTL window."""
+    adapter = _poller_adapter(poller_state_db)
+    first = adapter._read_session_rows()
+    assert first == [(CHAT_ID, "s1", "first title")]
+    # Rotate the session behind the cache's back.
+    _insert_session(poller_state_db, "s2", "second title", 2000.0)
+    second = adapter._read_session_rows()
+    assert second == first, (
+        "cache miss within TTL — _read_session_rows re-ran the query "
+        "(the 2026-08-26 diagnosis had it running back-to-back at "
+        "every 1.5s tick)"
+    )
+
+
+def test_read_session_rows_cache_flush_serves_fresh_rows(poller_state_db):
+    """invalidate_session_rows_cache (called on turn end / rename /
+    delete) must make the very next poll tick re-read state.db."""
+    adapter = _poller_adapter(poller_state_db)
+    assert adapter._read_session_rows() == [(CHAT_ID, "s1", "first title")]
+    _insert_session(poller_state_db, "s2", "second title", 2000.0)
+    adapter.invalidate_session_rows_cache()
+    fresh = adapter._read_session_rows()
+    assert fresh == [(CHAT_ID, "s2", "second title")], (
+        f"post-flush read served stale rows: {fresh}"
+    )
+    # The opportunistic sid→chat_id refresh must reflect the new row.
+    assert adapter._sid_to_chat_id_cache == {"s2": CHAT_ID}

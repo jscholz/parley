@@ -527,6 +527,10 @@ async def handle_delete(adapter, request: "web.Request") -> "web.Response":
     # this, the deleted chat would linger in the drawer for up to
     # `_SUMMARIES_CACHE_TTL_S` seconds.
     invalidate_summaries_cache()
+    # Same for the session_changed poller's row cache — a cached row
+    # for the deleted chat would get re-seeded into
+    # _session_state_cache on the next tick.
+    adapter.invalidate_session_rows_cache()
     # Cross-device delete sync: emit conversation_deleted so other
     # connected PWAs drop the row from their sidebar without waiting
     # for a manual refresh. Without an envelope, the other device
@@ -627,6 +631,11 @@ async def handle_rename(adapter, request: "web.Request") -> "web.Response":
     # Drawer summaries cache holds the old title — flush so the next
     # /v1/conversations poll reflects the new one immediately.
     invalidate_summaries_cache()
+    # The session-rows poll cache also holds the old title; without
+    # this flush the next poll tick would compare the STALE cached row
+    # against the freshly-seeded _session_state_cache entry above and
+    # emit a session_changed that reverts the rename client-side.
+    adapter.invalidate_session_rows_cache()
     await adapter._safe_send_envelope({
         "type": "session_changed",
         "chat_id": chat_id,

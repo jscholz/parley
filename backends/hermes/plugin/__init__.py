@@ -219,6 +219,20 @@ def _iso_from_epoch(t: float) -> str:
 # only fires on subsequent (session_id, title) changes.
 SESSION_POLL_INTERVAL_S = 1.5
 
+# TTL for the _read_session_rows result cache. The poller ticks every
+# SESSION_POLL_INTERVAL_S, but the underlying recursive-CTE query only
+# needs to re-run when state.db sessions/titles may have changed —
+# turn-end (reply_final/notification) and rename/delete paths flush the
+# cache explicitly, so within-TTL polls between events serve from
+# memory. Backstop for changes the plugin can't observe (e.g. hermes
+# core writing a generated title after the turn): worst-case staleness
+# is this TTL. Added with the 2026-08-26 200%-CPU diagnosis — the
+# uncached query ran back-to-back at every 1.5s tick and was one of
+# the two continuously-busy executor threads.
+SESSION_ROWS_CACHE_TTL_S = float(
+    env_get("PARLEY_SESSION_ROWS_CACHE_TTL_MS", "5000") or 5000
+) / 1000.0
+
 # Source allow-list for the cross-platform gateway drawer. Any
 # `sessions.source` value not in this set is dropped at query time.
 # This is the canonical hermes-agent platform set as of the platform-
@@ -404,6 +418,13 @@ class ParleyAdapter(BasePlatformAdapter):
         # spawned in connect() and cancelled in disconnect().
         self._session_state_cache: Dict[str, Tuple[str, str]] = {}
         self._session_poll_task: Optional[asyncio.Task] = None
+        # TTL cache for _read_session_rows: (cached_at_monotonic, rows).
+        # Single-slot — the query is parameterless per process. Written
+        # from the poll executor thread, cleared from event handlers;
+        # tuple assignment is atomic in CPython so the benign race
+        # (one redundant query after a concurrent clear) needs no lock.
+        # See SESSION_ROWS_CACHE_TTL_S for the perf rationale.
+        self._session_rows_cache: Optional[Tuple[float, list]] = None
         # Perf-investigation tasks. Both gated behind PARLEY_PERF_TRACE
         # at the function level — when the env is off these tasks return
         # immediately, so the cost of always-instantiating them is nil.
@@ -1749,6 +1770,48 @@ class ParleyAdapter(BasePlatformAdapter):
         except Exception as exc:
             logger.warning("[parley] legacy push subs migration skipped: %s", exc)
 
+    def _record_envelope_writethrough(
+        self, env: Dict[str, Any], env_type: Optional[str],
+    ) -> None:
+        """Parley.db write-through (Phase 1) + targeted cache flushes.
+
+        Upserts the envelope into the parley.db message store, then
+        drops the compute_unread TTL cache ONLY when the write can
+        actually change an unread count: a persisted reply_final /
+        notification (the sole producers of role='assistant'
+        status='final' rows — see _UNREAD_AFFECTING_ENVELOPE_TYPES in
+        parley_unread).
+
+        This used to invalidate on EVERY call on the theory that
+        persist-detection was "much pricier than a dict.clear()" —
+        which inverted reality (2026-08-26 200%-CPU diagnosis, "5-30s
+        replies" field report): every streaming reply_delta cleared
+        the cache, so each /unread poll during a turn re-ran the full
+        multi-second scan and two executor threads sat in
+        _compute_unread_uncached continuously. The type gate is a
+        set-membership check; a spurious clear costs a full recompute
+        per poller.
+
+        reply_final/notification also mean state.db just gained (or is
+        about to gain) new session/title rows — flush the session-rows
+        poll cache too, so the session_changed poller sees the
+        post-turn state on its next 1.5s tick instead of after the
+        TTL. Extracted from _safe_send_envelope so the gating is unit-
+        testable without the full envelope-routing machinery.
+        """
+        if self._parley_db is None:
+            return
+        try:
+            from . import parley_state as _sstate  # local import
+            persisted_row_id = _sstate.record_envelope(self._parley_db, env)
+            from . import parley_unread as _sunread
+            if (persisted_row_id is not None
+                    and _sunread.envelope_affects_unread(env_type)):
+                _sunread.invalidate_unread_cache()
+                self.invalidate_session_rows_cache()
+        except Exception as exc:
+            logger.warning("[parley] parley.db record failed: %s", exc)
+
     async def _safe_send_envelope(self, env: Dict[str, Any]) -> bool:
         """Fan an outbound envelope to consumers.
 
@@ -1830,22 +1893,7 @@ class ParleyAdapter(BasePlatformAdapter):
         # (Phase 2 switches the read path) — rows accumulate alongside
         # the existing state.db path so a write-path bug here can't
         # break reads. See top-of-file design block in parley_db.py.
-        if self._parley_db is not None:
-            try:
-                from . import parley_state as _sstate  # local import
-                _sstate.record_envelope(self._parley_db, env)
-                # Drop the compute_unread TTL cache so the next /unread
-                # poll picks up the new envelope's contribution to the
-                # badge count immediately, instead of waiting up to the
-                # TTL window. record_envelope is idempotent and gates on
-                # _PERSISTED_ENVELOPE_TYPES; we invalidate on every call
-                # rather than only when persistence actually wrote a row
-                # because the persist-detection requires inspecting the
-                # envelope shape and is much pricier than a dict.clear().
-                from . import parley_unread as _sunread
-                _sunread.invalidate_unread_cache()
-            except Exception as exc:
-                logger.warning("[parley] parley.db record failed: %s", exc)
+        self._record_envelope_writethrough(env, env_type)
 
         # Transcript v3 Phase 1 (dark launch): schedule the turn
         # linker's turn-end capture off-loop. reply_final closes the
@@ -2755,6 +2803,16 @@ class ParleyAdapter(BasePlatformAdapter):
         title = str(row["title"] if hasattr(row, "keys") else row[0]).strip()
         return title or None
 
+    def invalidate_session_rows_cache(self) -> None:
+        """Drop the _read_session_rows TTL cache so the next poll tick
+        re-reads state.db. Called when sessions/titles are known to
+        have changed: turn-end envelopes (record_envelope path) and the
+        rename/delete conversation handlers. Rename in particular NEEDS
+        this — the handler pre-seeds _session_state_cache with the new
+        title, and a stale cached row would make the very next tick
+        emit a session_changed that reverts the title client-side."""
+        self._session_rows_cache = None
+
     def _read_session_rows(self) -> list:
         """Synchronous sqlite read — runs in a worker thread. Returns
         ``[(chat_id, session_id, title), …]`` for every parley
@@ -2770,26 +2828,50 @@ class ParleyAdapter(BasePlatformAdapter):
         is actively writing into right now. Also opportunistically
         refreshes the session_id → chat_id cache so the tool-event
         hook resolver gets warm data without an extra read.
+
+        TTL-cached (SESSION_ROWS_CACHE_TTL_S) with event-driven flush
+        via ``invalidate_session_rows_cache``: the poller ticks every
+        1.5s but only needs fresh data after a turn end or a
+        rename/delete; between events the tick serves from memory.
         """
         if self._state_db_path is None or not self._state_db_path.exists():
             return []
+        now = time.monotonic()
+        cached = self._session_rows_cache
+        if cached is not None:
+            cached_at, rows = cached
+            if now - cached_at < SESSION_ROWS_CACHE_TTL_S:
+                return rows
         # For each parley user_id, pick the row with the largest
         # started_at. The window-function approach keeps this to a
         # single round-trip; the index on (user_id, source) added at
         # startup speeds the partition scan.
+        #
+        # PERF (2026-08-26, 200%-CPU diagnosis): the recursive CTE used
+        # to carry the FULL system_prompt (avg ~21KB) through every
+        # recursion row and the planner re-scanned the accumulated
+        # queue per candidate — 4.3s per call on the live 1322-session
+        # state.db, running back-to-back at every 1.5s poll tick (one
+        # of the two continuously-busy executor threads). Carrying only
+        # the 200-char prompt HEAD + length and pinning the join order
+        # with CROSS JOIN (the same rewrite _summaries_by_user_id got
+        # on 2026-07-13) cuts it to ~16ms. Semantics identical: the
+        # original also compared only the first 200 chars of the ROOT's
+        # prompt, propagated unchanged.
         sql = """
-            WITH RECURSIVE session_root(id, root_user_id, root_source, root_system_prompt) AS (
-                SELECT id, user_id, source, system_prompt
+            WITH RECURSIVE session_root(id, root_user_id, root_source, prompt_head, prompt_len) AS (
+                SELECT id, user_id, source,
+                       SUBSTR(COALESCE(system_prompt, ''), 1, 200),
+                       LENGTH(COALESCE(system_prompt, ''))
                   FROM sessions
                  WHERE user_id IS NOT NULL
                 UNION ALL
-                SELECT s.id, sr.root_user_id, sr.root_source, sr.root_system_prompt
-                  FROM sessions s
-                  JOIN session_root sr ON s.parent_session_id = sr.id
-                 WHERE s.user_id IS NULL
-                   AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
-                   AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
-                       = SUBSTR(sr.root_system_prompt, 1, 200)
+                SELECT s.id, sr.root_user_id, sr.root_source, sr.prompt_head, sr.prompt_len
+                  FROM session_root sr CROSS JOIN sessions s
+                 WHERE s.parent_session_id = sr.id
+                   AND s.user_id IS NULL
+                   AND sr.prompt_len >= 200
+                   AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200) = sr.prompt_head
             )
             SELECT root_user_id, id, COALESCE(title, '') FROM (
                 SELECT
@@ -2835,6 +2917,7 @@ class ParleyAdapter(BasePlatformAdapter):
         out = [(chat_id, sid, title) for chat_id, sid, title in rows]
         # Refresh the sid → chat_id cache opportunistically.
         self._sid_to_chat_id_cache = {sid: cid for cid, sid, _t in out}
+        self._session_rows_cache = (now, out)
         return out
 
 

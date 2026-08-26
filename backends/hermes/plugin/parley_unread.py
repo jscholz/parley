@@ -48,6 +48,32 @@ _cache: Dict[str, Tuple[float, Dict]] = {}  # key → (cached_at_monotonic, resu
 _cache_lock = threading.Lock()
 
 
+# Envelope types whose persistence can change an unread count. The
+# unread queries below count ONLY role='assistant' status='final' rows
+# (state.db assistant messages + msg_links finals): record_envelope
+# writes those for reply_final and notification exclusively —
+# reply_delta persists status='streaming', tool_call/tool_result persist
+# role='tool', user_message persists role='user'; none can move a badge.
+#
+# Field diagnosis 2026-08-26: __init__.py invalidated the cache on
+# EVERY record_envelope call — including every streaming reply_delta —
+# so during any turn the cache was permanently cold and each /unread
+# poll re-ran the full multi-second scan. Two executor threads sat in
+# _compute_unread_uncached continuously (~200% gateway CPU, "5-30s
+# replies" field report). Gate invalidation on this set instead: a
+# set-membership check costs nanoseconds; a spurious clear costs a
+# full recompute per poller.
+_UNREAD_AFFECTING_ENVELOPE_TYPES = frozenset({"reply_final", "notification"})
+
+
+def envelope_affects_unread(env_type: Optional[str]) -> bool:
+    """True when persisting an envelope of this type can change the
+    unread computation — i.e. the cache must be invalidated after
+    ``record_envelope`` persists it. See
+    ``_UNREAD_AFFECTING_ENVELOPE_TYPES`` for the derivation."""
+    return env_type in _UNREAD_AFFECTING_ENVELOPE_TYPES
+
+
 def invalidate_unread_cache(source: Optional[str] = None) -> None:
     """Drop cached compute_unread results. Called after writes that
     would change the count (mark_seen, set_marked, envelope arrival).
@@ -298,6 +324,18 @@ def _compute_unread_uncached(
     # once instead of N times. Measured 3.3× speedup on the live
     # 172-chat dataset (6.7s → 2.0s), and the TTL cache can now
     # actually serve repeat polls within the window.
+    #
+    # PERF (2026-08-26, 200%-CPU diagnosis): the session_root CTE here
+    # used to drag the FULL system_prompt (avg ~21KB, some 100KB+)
+    # through every recursion row — the exact pathology
+    # _summaries_by_user_id fixed on 2026-07-13. Carry only the
+    # 200-char prompt HEAD + length, and CROSS JOIN to pin the
+    # recursive step to queue-row → children-by-parent
+    # (idx_sessions_parent) instead of re-scanning the accumulated
+    # queue per candidate. Semantics identical (the original also
+    # compared only the first 200 chars of the ROOT's prompt).
+    # Measured on the live 1322-session / 91.7k-message state.db:
+    # 4.2s → 52ms per uncached call.
     state_counts: Dict[str, int] = {}
     if state_reachable:
         try:
@@ -307,18 +345,20 @@ def _compute_unread_uncached(
                 values_params.extend([cid, float(threshold)])
             batch_sql = f"""
                 WITH RECURSIVE
-                  session_root(id, root_user_id, root_system_prompt) AS (
-                    SELECT id, user_id, system_prompt
+                  session_root(id, root_user_id, prompt_head, prompt_len) AS (
+                    SELECT id, user_id,
+                           SUBSTR(COALESCE(system_prompt, ''), 1, 200),
+                           LENGTH(COALESCE(system_prompt, ''))
                       FROM sessions
                      WHERE user_id IS NOT NULL AND source = ?
                     UNION ALL
-                    SELECT s.id, sr.root_user_id, sr.root_system_prompt
-                      FROM sessions s
-                      JOIN session_root sr ON s.parent_session_id = sr.id
-                     WHERE s.user_id IS NULL
-                       AND LENGTH(COALESCE(sr.root_system_prompt, '')) >= 200
+                    SELECT s.id, sr.root_user_id, sr.prompt_head, sr.prompt_len
+                      FROM session_root sr CROSS JOIN sessions s
+                     WHERE s.parent_session_id = sr.id
+                       AND s.user_id IS NULL
+                       AND sr.prompt_len >= 200
                        AND SUBSTR(COALESCE(s.system_prompt, ''), 1, 200)
-                           = SUBSTR(sr.root_system_prompt, 1, 200)
+                           = sr.prompt_head
                   ),
                   thresholds(chat_id, last_read_at) AS (VALUES {values_clause})
                 SELECT sr.root_user_id, COUNT(*) AS unread_count
