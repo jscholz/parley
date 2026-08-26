@@ -49,13 +49,22 @@ export interface DocState extends DocPayload {
 }
 
 const LS_KEY = 'parley.docs.v2';
-const MAX_DOCS = 7;
+// Raised 7→12 with the rail doc-tabs (2026-08-26): the tab strip shows
+// up to 8 and folds the rest into a "+N" chip, so the shelf must be
+// able to hold MORE than fits — otherwise the overflow affordance is
+// dead chrome. The char budget below still guards localStorage.
+const MAX_DOCS = 12;
 // The SHELF budget that matters for localStorage (shared quota with
 // transcript snapshots; same reasoning as v1's single-doc guard).
 const MAX_PERSIST_CHARS = 2_500_000;
 
 let docs: DocState[] = [];
 let activeId: string | null = null;
+// Rail-tab order (browser-tab semantics, doc-tabs 2026-08-26): ids in
+// INSERTION order, user-reorderable by drag. Deliberately separate from
+// `docs`, which stays newest-activity-first — a re-push refreshes a doc
+// without teleporting its tab, exactly like a browser tab reloading.
+let order: string[] = [];
 let hydrated = false;
 
 /** kind: 'push' = new/updated content from the agent (drives the unread
@@ -75,13 +84,37 @@ export function docIdFor(path: string | undefined, title: string): string {
   return (h >>> 0).toString(16);
 }
 
+/** Reconcile a persisted/committed tab order against the live doc set:
+ *  keep known ids in the given order (first occurrence wins), drop ids
+ *  whose docs are gone, and append docs the order never saw — in
+ *  receivedAt (first-seen) order, i.e. insertion order, so a doc that
+ *  predates the order field (or arrived mid-drag) lands at the bottom
+ *  exactly like a freshly opened tab. Pure — unit-tested directly. */
+export function reconcileTabOrder(
+  proposed: readonly string[],
+  live: readonly Pick<DocState, 'id' | 'receivedAt'>[],
+): string[] {
+  const known = new Set(live.map(d => d.id));
+  const out: string[] = [];
+  for (const id of proposed) {
+    if (known.has(id) && !out.includes(id)) out.push(id);
+  }
+  const missing = live.filter(d => !out.includes(d.id));
+  // Stable sort on receivedAt: same-ms pushes keep their arrival order
+  // because `live` (newest-activity-first) is reversed before sorting.
+  missing.reverse();
+  missing.sort((a, b) => a.receivedAt - b.receivedAt);
+  for (const d of missing) out.push(d.id);
+  return out;
+}
+
 function persist(): void {
   try {
     // Serialize newest-activity-first; evict oldest non-active entries
     // until we fit both the entry cap and the char budget. The active doc
     // is always kept — worst case we store only it.
     let list = docs.slice(0, MAX_DOCS);
-    let raw = JSON.stringify({ docs: list, activeId });
+    let raw = JSON.stringify({ docs: list, activeId, order });
     while (raw.length > MAX_PERSIST_CHARS && list.length > 1) {
       let dropIdx = -1;
       for (let i = list.length - 1; i >= 0; i--) {
@@ -89,7 +122,7 @@ function persist(): void {
       }
       if (dropIdx === -1) break;
       list = list.filter((_, i) => i !== dropIdx);
-      raw = JSON.stringify({ docs: list, activeId });
+      raw = JSON.stringify({ docs: list, activeId, order });
     }
     if (raw.length <= MAX_PERSIST_CHARS) localStorage.setItem(LS_KEY, raw);
     else localStorage.removeItem(LS_KEY);
@@ -108,6 +141,11 @@ export function hydrateDocs(): void {
           d && typeof d.content === 'string' && typeof d.title === 'string' && typeof d.id === 'string');
         activeId = typeof parsed.activeId === 'string' ? parsed.activeId : (docs[0]?.id ?? null);
         if (activeId && !docs.some(d => d.id === activeId)) activeId = docs[0]?.id ?? null;
+        // Pre-order snapshots (or a corrupt field) fall back to
+        // insertion order via the reconcile append path.
+        const rawOrder = Array.isArray(parsed.order)
+          ? parsed.order.filter((x: any) => typeof x === 'string') : [];
+        order = reconcileTabOrder(rawOrder, docs);
         if (docs.length) notify(false);
         return;
       }
@@ -118,6 +156,23 @@ export function hydrateDocs(): void {
 /** Shelf, newest-activity first. */
 export function listDocs(): DocState[] {
   return docs;
+}
+
+/** Shelf in TAB order — insertion order until the user drag-reorders.
+ *  The rail tabs, the list view, and the ⌘⇧1…9 hotkeys all read this
+ *  one sequence so "tab position" means the same thing everywhere. */
+export function tabOrderDocs(): DocState[] {
+  const byId = new Map(docs.map(d => [d.id, d]));
+  return order.map(id => byId.get(id)).filter((d): d is DocState => !!d);
+}
+
+/** Commit a drag-reorder (Sortable onEnd hands us the DOM order).
+ *  Reconciled, not trusted: a mid-drag push/remove may have changed the
+ *  doc set since the DOM was painted. */
+export function setTabOrder(ids: readonly string[]): void {
+  order = reconcileTabOrder(ids, docs);
+  persist();
+  notify(false);
 }
 
 export function docCount(): number {
@@ -165,6 +220,10 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
   };
   docs = [entry, ...docs.filter(d => d.id !== id)].slice(0, MAX_DOCS);
   activeId = id;
+  // New doc → tab appended at the bottom; re-push → tab stays put
+  // (browser semantics: reloading a tab doesn't move it). Eviction
+  // above also drops the evicted doc's tab here.
+  order = reconcileTabOrder(order, docs);
   persist();
   // 'push' drives the unread dot — only claim it when something actually
   // changed. A ring-replayed envelope lands here byte-identical with the
@@ -188,6 +247,7 @@ export function removeDoc(id: string): void {
   docs = docs.filter(d => d.id !== id);
   if (docs.length === had) return;
   if (activeId === id) activeId = docs[0]?.id ?? null;
+  order = reconcileTabOrder(order, docs);
   persist();
   notify(false);
 }
@@ -205,6 +265,7 @@ export function removeDocsFor(match: { chatId?: string; captureId?: string }): n
   const removed = had - docs.length;
   if (!removed) return 0;
   if (activeId && !docs.some(d => d.id === activeId)) activeId = docs[0]?.id ?? null;
+  order = reconcileTabOrder(order, docs);
   persist();
   notify(false);
   return removed;
@@ -214,6 +275,7 @@ export function removeDocsFor(match: { chatId?: string; captureId?: string }): n
 export function clearDocs(): void {
   docs = [];
   activeId = null;
+  order = [];
   try { localStorage.removeItem(LS_KEY); } catch { /* ignore */ }
   notify(false);
 }

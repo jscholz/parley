@@ -172,6 +172,26 @@ async function shoot(browser, { mobile, theme }) {
   // only costs the duration readout) and its body opens with the literal
   // `_Recorded …_` line captureTranscribe.ts mints, because point 5 IS
   // that line rendering raw.
+  //
+  // Three plain docs FIRST (md + html + txt) so the rail's doc-tab
+  // stack is in frame with every glyph variant: three suffix-bearing
+  // file outlines plus the capture doc's record glyph, active (tinted)
+  // at the bottom since it's pushed last.
+  await mock.pushEnvelope({
+    type: 'doc_show', chat_id: CHAT,
+    title: 'Launch plan draft', format: 'markdown', path: '/w/launch-plan.md',
+    content: '# Launch plan\n\nPhases, owners, and the demo-instance gate.',
+  });
+  await mock.pushEnvelope({
+    type: 'doc_show', chat_id: CHAT,
+    title: 'Funnel dashboard', format: 'html', path: '/w/funnel.html',
+    content: '<h1>Funnel</h1><p>video → demo → show-hn</p>',
+  });
+  await mock.pushEnvelope({
+    type: 'doc_show', chat_id: CHAT,
+    title: 'Server log excerpt', format: 'text', path: '/w/server.log.txt',
+    content: 'boot ok\nssl ok\nquota warn: deepgram shared key at 71%',
+  });
   await mock.pushEnvelope({
     type: 'doc_show', chat_id: CHAT,
     title: 'Meeting: Launch planning sync',
@@ -211,9 +231,30 @@ async function shoot(browser, { mobile, theme }) {
     await page.waitForTimeout(700);
   }
   if (!(await docVisible())) throw new Error('doc reader not visible — do not ship a frame without the subject');
+  const tabCount = await page.evaluate(() =>
+    document.querySelectorAll('#doc-rail-tabs .doc-rail-tab').length);
+  if (tabCount !== 4) throw new Error(`expected 4 doc tabs in frame, got ${tabCount}`);
   await page.waitForTimeout(600);
   await page.screenshot({ path: `${OUT}/${variant}-doc.png`, fullPage: false });
   console.log('shot', `${variant}-doc.png`);
+
+  // Fifth frame: tab OVERFLOW — past 8 open docs the strip caps at 7
+  // tabs + a "+N" chip (list-view entry). Six more pushes on top of the
+  // four above = 10 docs → chip reads "+3".
+  for (let i = 1; i <= 6; i++) {
+    await mock.pushEnvelope({
+      type: 'doc_show', chat_id: CHAT,
+      title: `Overflow doc ${i}`, format: 'markdown', path: `/w/overflow-${i}.md`,
+      content: `# Overflow ${i}\n\nFiller to overflow the rail tab strip.`,
+    });
+  }
+  await page.waitForFunction(
+    () => document.querySelector('#doc-rail-tabs .doc-rail-more')?.textContent === '+3',
+    null, { timeout: 6000, polling: 50 },
+  );
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: `${OUT}/${variant}-doc-overflow.png`, fullPage: false });
+  console.log('shot', `${variant}-doc-overflow.png`);
   await mock.close?.().catch?.(() => {});
   await cleanup();
 }

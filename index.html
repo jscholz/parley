@@ -167,6 +167,12 @@
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
       <span id="doc-drawer-dot-rail" class="doc-drawer-dot" hidden></span>
     </button>
+    <!-- Doc tabs (2026-08-26): one tab per OPEN document, browser-tab
+         semantics — insertion order, drag-reorderable, ⌘⇧1…9. Hairline
+         + tinted group separate DOCUMENTS (content) from the three
+         VIEW toggles above. Populated by rightDrawer/docTabs.ts. -->
+    <div id="doc-rail-divider" class="doc-rail-divider" hidden></div>
+    <div id="doc-rail-tabs" class="doc-rail-tabs" hidden></div>
     <!-- NO record button here (field UX 2026-07-09): these rail
          buttons are VIEW TOGGLES (tabs); record is a TRIGGER —
          different semantics, different home. The app-level record

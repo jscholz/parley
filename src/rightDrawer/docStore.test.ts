@@ -56,14 +56,17 @@ test('re-push preserves receivedAt (first seen) but bumps updatedAt', async () =
   assert.ok(second.updatedAt >= first.updatedAt);
 });
 
-test('shelf caps at 7 docs, evicting the oldest', async () => {
+test('shelf caps at 12 docs, evicting the oldest', async () => {
+  // 12, not the original 7 — the rail doc-tabs fold overflow past 8
+  // into a "+N" chip, which requires the shelf to HOLD more than the
+  // strip shows (see MAX_DOCS comment in docStore.ts).
   const s = await freshStore();
-  for (let i = 1; i <= 9; i++) {
+  for (let i = 1; i <= 14; i++) {
     s.setDoc({ title: `Doc ${i}`, content: 'x', format: 'text', path: `/w/${i}.txt` });
   }
-  assert.equal(s.docCount(), 7);
+  assert.equal(s.docCount(), 12);
   const titles = s.listDocs().map((d: any) => d.title);
-  assert.equal(titles[0], 'Doc 9');
+  assert.equal(titles[0], 'Doc 14');
   assert.ok(!titles.includes('Doc 1'));
   assert.ok(!titles.includes('Doc 2'));
 });
@@ -114,6 +117,76 @@ test('char budget evicts oldest non-active from PERSISTENCE', async () => {
   const titles = s2.listDocs().map((d: any) => d.title);
   assert.ok(titles.includes('Big3'));
   assert.ok(!titles.includes('Big1'), 'oldest evicted from persistence');
+});
+
+// ── Tab order (rail doc-tabs, 2026-08-26) ───────────────────────────
+// Browser-tab semantics: insertion order, re-push doesn't move a tab,
+// drag-reorder persists, removals splice.
+
+test('tabOrderDocs is insertion order; re-push does not move a tab', async () => {
+  const s = await freshStore();
+  s.setDoc({ title: 'A', content: 'a', format: 'text', path: '/a' });
+  s.setDoc({ title: 'B', content: 'b', format: 'text', path: '/b' });
+  s.setDoc({ title: 'C', content: 'c', format: 'text', path: '/c' });
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A', 'B', 'C']);
+  // listDocs is newest-activity-first — the two orders are independent.
+  assert.deepEqual(s.listDocs().map((d: any) => d.title), ['C', 'B', 'A']);
+  s.setDoc({ title: 'A2', content: 'a2', format: 'text', path: '/a' });
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A2', 'B', 'C'],
+    're-push refreshes in place, tab stays at its slot');
+});
+
+test('setTabOrder persists across reload; unknown ids dropped', async () => {
+  const s1 = await freshStore();
+  s1.setDoc({ title: 'A', content: 'a', format: 'text', path: '/a' });
+  s1.setDoc({ title: 'B', content: 'b', format: 'text', path: '/b' });
+  s1.setDoc({ title: 'C', content: 'c', format: 'text', path: '/c' });
+  const ids = Object.fromEntries(s1.listDocs().map((d: any) => [d.title, d.id]));
+  s1.setTabOrder([ids.C, 'ghost-id', ids.A, ids.B]);
+  assert.deepEqual(s1.tabOrderDocs().map((d: any) => d.title), ['C', 'A', 'B']);
+
+  const s2 = await freshStore();
+  s2.hydrateDocs();
+  assert.deepEqual(s2.tabOrderDocs().map((d: any) => d.title), ['C', 'A', 'B'],
+    'user reorder survives a reload');
+});
+
+test('removeDoc splices the tab; new doc appends at the bottom', async () => {
+  const s = await freshStore();
+  s.setDoc({ title: 'A', content: 'a', format: 'text', path: '/a' });
+  s.setDoc({ title: 'B', content: 'b', format: 'text', path: '/b' });
+  s.setDoc({ title: 'C', content: 'c', format: 'text', path: '/c' });
+  const bId = s.listDocs().find((d: any) => d.title === 'B')!.id;
+  s.removeDoc(bId);
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A', 'C']);
+  s.setDoc({ title: 'D', content: 'd', format: 'text', path: '/d' });
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A', 'C', 'D']);
+});
+
+test('reconcileTabOrder: keeps known order, drops gone, appends missing by first-seen', async () => {
+  const s = await freshStore();
+  const live = [
+    { id: 'newest', receivedAt: 300 },
+    { id: 'mid', receivedAt: 200 },
+    { id: 'oldest', receivedAt: 100 },
+  ];
+  assert.deepEqual(s.reconcileTabOrder(['mid', 'gone', 'mid'], live),
+    ['mid', 'oldest', 'newest'],
+    'known kept (dedup), unknown dropped, missing appended oldest-first');
+  assert.deepEqual(s.reconcileTabOrder([], live), ['oldest', 'mid', 'newest']);
+});
+
+test('pre-order persisted snapshot hydrates to insertion order', async () => {
+  const s1 = await freshStore();
+  s1.setDoc({ title: 'A', content: 'a', format: 'text', path: '/a' });
+  s1.setDoc({ title: 'B', content: 'b', format: 'text', path: '/b' });
+  // Strip the order field, simulating a snapshot written before it existed.
+  const raw = JSON.parse(backing.get('parley.docs.v2')!);
+  delete raw.order;
+  backing.set('parley.docs.v2', JSON.stringify(raw));
+  const s2 = await freshStore();
+  s2.hydrateDocs();
+  assert.deepEqual(s2.tabOrderDocs().map((d: any) => d.title), ['A', 'B']);
 });
 
 test('docIdFor matches the plugin-side djb2 mirror', async () => {

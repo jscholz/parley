@@ -22,22 +22,48 @@ import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
-  currentDoc, listDocs, docCount, selectDoc, removeDoc, clearDocs,
+  currentDoc, tabOrderDocs, docCount, selectDoc, removeDoc, clearDocs, setTabOrder,
   type DocState,
 } from '../docStore.ts';
+import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 
-type View = 'reader' | 'list';
+export type DocView = 'reader' | 'list';
+
+/** The doc module grows a view handle beyond the host's module contract:
+ *  the rail doc-tabs open the READER on a specific doc while the generic
+ *  Docs rail button opens the LIST (management home — Clear all lives
+ *  there), so callers outside the panel need to aim the next render. */
+export interface DocModule extends RightDrawerModule {
+  setView(v: DocView): void;
+  getView(): DocView;
+}
 
 export function createDocModule(opts: {
   panel: HTMLElement;
   body: HTMLElement;
   empty: HTMLElement;
   onSelect?: () => void;
-}): RightDrawerModule {
-  let view: View = 'reader';
+}): DocModule {
+  let view: DocView = 'reader';
+  // True mid-drag in the list view. Renders bail while set: render()
+  // does innerHTML='', which would yank the dragged row out from under
+  // Sortable (same guard the pinned-session reorder uses).
+  let listDragActive = false;
+  // Swallow the click the browser fires right after a drag so a reorder
+  // never doubles as a row-select (window-gated: only set on a real
+  // drag end, so plain taps still select). On the stable body element
+  // because the <ul> itself is rebuilt in onEnd.
+  let suppressClickUntil = 0;
+  opts.body.addEventListener('click', (e) => {
+    if (Date.now() > suppressClickUntil) return;
+    suppressClickUntil = 0;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 
   const render = (ctx: RightDrawerModuleContext) => {
+    if (listDragActive) return;
     const doc = currentDoc();
     if (!doc) view = 'reader';   // empty shelf → empty state, not a list
 
@@ -78,9 +104,14 @@ export function createDocModule(opts: {
 
     const ul = document.createElement('ul');
     ul.className = 'doc-shelf-list';
-    for (const d of listDocs()) {
+    // TAB order, not newest-activity order (doc-tabs 2026-08-26): the
+    // rail tabs, this list, and the ⌘⇧n hotkeys must agree on what
+    // "position n" means, and the list rows drag-commit into the same
+    // order the tabs read.
+    for (const d of tabOrderDocs()) {
       const li = document.createElement('li');
       li.className = 'doc-shelf-item' + (d.id === currentDoc()?.id ? ' active' : '');
+      li.dataset.docId = d.id;
       const main = document.createElement('button');
       main.className = 'doc-shelf-item-main';
       const title = document.createElement('span');
@@ -106,6 +137,51 @@ export function createDocModule(opts: {
       ul.appendChild(li);
     }
     opts.body.appendChild(ul);
+    installListDragReorder(ul, ctx);
+  }
+
+  /** Drag-reorder for the list rows — the same order the rail tabs
+   *  show, committed through the same setTabOrder. Unlike the pinned
+   *  sessions list, this <ul> is REBUILT every render (renderList
+   *  recreates it), so the Sortable instance is per-build and the old
+   *  one is discarded with its element; the wired-once guard the
+   *  sessions list needs doesn't apply. */
+  function installListDragReorder(ul: HTMLElement, ctx: RightDrawerModuleContext): void {
+    void loadSortable().then((Sortable) => {
+      if (!Sortable || !ul.isConnected) return;
+      Sortable.create(ul, {
+        draggable: 'li.doc-shelf-item',
+        // Presses on the row's ✕ fall through to remove, not a drag.
+        filter: '.doc-shelf-item-close',
+        preventOnFilter: false,
+        // Fallback clone instead of native HTML5 DnD — touch support +
+        // a styleable lifted card (same rationale as sessionDrawer).
+        forceFallback: true,
+        fallbackOnBody: true,
+        fallbackClass: 'doc-shelf-drag-floating',
+        fallbackTolerance: 4,
+        animation: 180,
+        easing: 'cubic-bezier(0.2, 0, 0, 1)',
+        ghostClass: 'doc-shelf-drag-ghost',
+        // Long-press pickup on touch so a tap still selects and a
+        // vertical swipe still scrolls; mouse drags immediately.
+        delay: 160,
+        delayOnTouchOnly: true,
+        touchStartThreshold: 4,
+        onStart: () => { listDragActive = true; },
+        onEnd: () => {
+          // Release the rebuild lock BEFORE the commit so setTabOrder's
+          // change event repaints the list (and the rail tabs).
+          listDragActive = false;
+          suppressClickUntil = Date.now() + 350;
+          const ids = (Array.from(ul.querySelectorAll('li.doc-shelf-item')) as HTMLElement[])
+            .map((li) => li.dataset.docId || '')
+            .filter(Boolean);
+          setTabOrder(ids);
+          rerender(ctx);
+        },
+      });
+    });
   }
 
   function renderReader(ctx: RightDrawerModuleContext, doc: DocState): void {
@@ -243,6 +319,11 @@ export function createDocModule(opts: {
     title: 'Docs',
     panel: opts.panel,
     toggleIds: ['btn-doc-drawer-rail'],
+    // View aim for out-of-panel callers (rail tabs → reader on a doc,
+    // generic Docs button / "+N" chip → list). State-only: the caller's
+    // host.select('doc') triggers the render that shows it.
+    setView: (v: DocView) => { view = v; },
+    getView: () => view,
     render,
     onClear: (ctx) => {
       // Only reachable from list view (the header action is hidden in the
@@ -509,7 +590,7 @@ export function wireTapToSeek(md: HTMLElement): void {
  *  emoji in the title string. Red only while the capture is LIVE
  *  (title carries the pipeline's "(live)" suffix); neutral once done.
  *  Same color rule as the pill: shape = identity, red = live mic. */
-function appendCaptureGlyph(parent: HTMLElement, doc: DocState): void {
+export function appendCaptureGlyph(parent: HTMLElement, doc: Pick<DocState, 'source' | 'title'>): void {
   if (doc.source !== 'capture') return;
   const glyph = document.createElement('span');
   glyph.className = 'doc-capture-glyph' + (isLiveCaptureDoc(doc) ? ' live' : '');

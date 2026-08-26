@@ -9,7 +9,8 @@ import { createRightDrawerHost, type RightDrawerHost } from '../rightDrawer/host
 import { hydrate as hydrateActivity, unresolvedApprovalCount, unreadActivityCount } from '../notifications/activityStore.ts';
 import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHandler } from '../rightDrawer/modules/activity.ts';
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
-import { createDocModule } from '../rightDrawer/modules/doc.ts';
+import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
+import { initDocTabs } from '../rightDrawer/docTabs.ts';
 import { hydrateDoc, listDocs, selectDoc } from '../rightDrawer/docStore.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
@@ -162,6 +163,30 @@ export function initPinDrawer(opts: {
   // render (autoOpen=false, so boot never yanks the drawer open).
   hydrateDoc();
 
+  // Built ahead of the host so (a) the rail-button listener below can
+  // aim its view and (b) the doc tabs can hold a direct handle.
+  const docModule: DocModule | null = docPanelEl && docBodyEl && docEmptyEl
+    ? createDocModule({
+        panel: docPanelEl,
+        body: docBodyEl,
+        empty: docEmptyEl,
+        onSelect: () => { activePanel = 'doc'; setDocDot(false); },
+      })
+    : null;
+
+  // The generic Docs rail button opens the LIST view (management home —
+  // Clear all lives there): with the rail doc-tabs giving every doc a
+  // direct reader entry point, "Docs" the button means the shelf, not
+  // whichever doc happens to be active. Capture-phase and registered
+  // BEFORE the host wires its own capture listener on the same button,
+  // so the view is aimed by the time host.select renders. Deliberately
+  // no stopPropagation — the host's toggle semantics still run.
+  if (docModule) {
+    document.getElementById('btn-doc-drawer-rail')?.addEventListener('click', () => {
+      docModule.setView('list');
+    }, true);
+  }
+
   drawerHost = createRightDrawerHost({
     drawerId: 'pin-drawer',
     titleEl,
@@ -185,14 +210,7 @@ export function initPinDrawer(opts: {
       }),
       // Docs tab is optional chrome: index.html may predate it (cached
       // app shell) — register only when its elements exist.
-      ...(docPanelEl && docBodyEl && docEmptyEl
-        ? [createDocModule({
-            panel: docPanelEl,
-            body: docBodyEl,
-            empty: docEmptyEl,
-            onSelect: () => { activePanel = 'doc'; setDocDot(false); },
-          })]
-        : []),
+      ...(docModule ? [docModule] : []),
     ],
     bodyClass: 'pin-drawer-open',
     prefKey: 'parley.pin-drawer.expanded',
@@ -220,6 +238,19 @@ export function initPinDrawer(opts: {
     },
   });
 
+  // Rail doc tabs — same optional-chrome rule as the module: only when
+  // the app shell carries the elements.
+  const docTabsEl = document.getElementById('doc-rail-tabs');
+  const docDividerEl = document.getElementById('doc-rail-divider');
+  if (docModule && docTabsEl && docDividerEl) {
+    initDocTabs({
+      container: docTabsEl,
+      divider: docDividerEl,
+      host: drawerHost,
+      docModule,
+    });
+  }
+
   window.addEventListener('parley:unread-changed', () => refreshCombinedBanner());
   window.addEventListener('parley:pins-changed', () => {
     refreshCountBanner();
@@ -234,8 +265,11 @@ export function initPinDrawer(opts: {
     const autoOpen = !!detail?.autoOpen;
     if (autoOpen) {
       // Agent push (display_doc): the user asked to SEE this — bring the
-      // Docs tab up on desktop AND mobile. Hydrate/clear (autoOpen=false)
-      // only re-renders in place.
+      // Docs tab up on desktop AND mobile, in the READER (the push just
+      // activated the doc; the rail button's list-view aim must not
+      // stick here). Hydrate/clear (autoOpen=false) only re-renders in
+      // place.
+      docModule?.setView('reader');
       drawerHost?.select('doc', { open: true });
       setDocDot(false);
       return;
@@ -272,6 +306,7 @@ export function initPinDrawer(opts: {
     const doc = listDocs().find((d) => d.captureId === captureId);
     if (doc) {
       selectDoc(doc.id);
+      docModule?.setView('reader');
       drawerHost?.select('doc', { open: true });
     } else {
       showPinStatus('That transcript isn\'t on the shelf yet — it appears within a minute of the recording starting.', 'info');

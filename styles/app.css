@@ -2419,6 +2419,77 @@
     color: var(--primary);
     background: color-mix(in srgb, var(--primary) 12%, transparent);
   }
+  /* ── Rail doc tabs (2026-08-26) ──────────────────────────────────────
+   * Browser-style tabs for the open documents, below the three view
+   * toggles. Hairline + a gently tinted group wrapper mark the boundary
+   * between VIEW chrome above and DOCUMENTS below — the tint is the
+   * pinned-session idiom (3% resting / 6% hover / 10% active fg mixes,
+   * see .sessions-list li.sess-pinned) so "user-curated set" reads the
+   * same on both rails. */
+  .doc-rail-divider {
+    flex: none;
+    width: 26px; height: 1px;
+    background: var(--border);
+  }
+  .doc-rail-tabs {
+    flex: none;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 3px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--fg) 3%, transparent);
+  }
+  .doc-rail-tab,
+  .doc-rail-more {
+    display: flex; align-items: center; justify-content: center;
+    width: 34px; height: 30px;
+    padding: 0; border: none; border-radius: 8px;
+    background: transparent; color: var(--muted);
+    cursor: pointer;
+    /* Draggable (Sortable, long-press on touch) — suppress selection so
+     * the pickup doesn't highlight neighbouring chrome. */
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .doc-rail-tab:hover,
+  .doc-rail-more:hover {
+    background: color-mix(in srgb, var(--fg) 6%, transparent);
+    color: var(--fg);
+  }
+  .doc-rail-tab[aria-selected="true"] {
+    background: color-mix(in srgb, var(--fg) 10%, transparent);
+    color: var(--fg);
+  }
+  .doc-rail-tab svg { width: 19px; height: 19px; }
+  /* Capture tabs reuse the record glyph (.doc-capture-glyph) — undo its
+   * inline-title spacing and scale it to tab size; its red .live rule
+   * carries over untouched. */
+  .doc-rail-tab .doc-capture-glyph { margin-right: 0; vertical-align: 0; }
+  .doc-rail-tab .doc-capture-glyph svg { width: 17px; height: 17px; }
+  .doc-rail-tab[aria-selected="true"] .doc-capture-glyph:not(.live) svg { color: var(--fg); }
+  .doc-rail-more {
+    font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: 0.02em;
+  }
+  /* Sortable drag states — same fallback motif as the pinned-session
+   * rows: the picked tab lifts into a floating clone, the vacated slot
+   * dims to a placeholder. */
+  .doc-rail-tab.doc-rail-tab-drag-ghost { opacity: 0.35; }
+  body > .doc-rail-tab-drag-floating {
+    z-index: 1000;
+    background: var(--surface-2, #222);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    transform: scale(1.06);
+    cursor: grabbing;
+  }
+  /* List-view rows share the same reorder gesture (one order everywhere). */
+  .doc-shelf-item.doc-shelf-drag-ghost { opacity: 0.35; }
+  body > .doc-shelf-drag-floating {
+    z-index: 1000;
+    background: var(--surface-2, #222);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    cursor: grabbing;
+    list-style: none;
+  }
   #pin-drawer:not(.collapsed) .pin-drawer-top,
   #pin-drawer:not(.collapsed) .pin-drawer-content,
   #pin-drawer:not(.collapsed) .pin-drawer-bottom {

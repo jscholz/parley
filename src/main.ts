@@ -94,6 +94,7 @@ import * as composerDrafts from './composerDrafts.ts';
 import * as questionPopup from './questionPopup.ts';
 import * as selectToQuote from './selectToQuote.ts';
 import * as docStore from './rightDrawer/docStore.ts';
+import { selectDocTab } from './rightDrawer/docTabs.ts';
 import * as slashCommands from './slashCommands.ts';
 import * as webrtcControls from './audio/realtime/controls.ts';
 import * as webrtcConnection from './audio/realtime/realtime.ts';
@@ -4321,7 +4322,15 @@ async function boot() {
       // user can hit Cmd+Shift+D from inside the composer to toggle
       // mic without leaving the textarea. Without this, Chrome's
       // Cmd+Shift+D (bookmark all tabs) wins via browser default.
-      const isShortcut = (e.metaKey || e.ctrlKey) && e.shiftKey;
+      // Shift-combos, plus bare ⌘/Ctrl+digit for the doc tabs: those
+      // dropped Shift because ⌘⇧3/4/5 are macOS SYSTEM screenshot
+      // shortcuts — the OS consumes them before the browser ever sees
+      // the keydown, so tabs 3–5 could never fire (his catch,
+      // 2026-08-26). Without widening this gate, ⌘1 from inside the
+      // composer would early-return here and the hotkey would be dead
+      // exactly where he types.
+      const isShortcut = (e.metaKey || e.ctrlKey)
+        && (e.shiftKey || /^Digit[1-9]$/.test(e.code));
       if (!isShortcut && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable)) return;
     }
     const s = settings.get();
@@ -4365,6 +4374,27 @@ async function boot() {
       e.preventDefault();
       e.stopPropagation();
     };
+    // Doc tabs: ⌘⇧1…⌘⇧9 select the Nth rail doc tab (current VISUAL
+    // order, 1 = top — browser tab semantics; a drag-reorder renumbers).
+    // Matched on e.code, NOT e.key: shift+digit mangles e.key layout-
+    // dependently ('!' on US, '+' on German), while Digit1…Digit9 name
+    // the physical key regardless of layout. Alt excluded so option-
+    // modified combos stay the browser's. Claim only on a hit — with no
+    // doc at that position the keystroke keeps its browser meaning.
+    // No Shift: ⌘⇧3/4/5 are macOS system screenshot shortcuts the page
+    // never receives, so a shifted binding silently loses tabs 3–5.
+    // Bare ⌘1…9 is Chrome's own tab idiom; in an installed PWA / the
+    // CAP shell there is no browser tab strip so the keys reach us. In
+    // a regular browser tab the browser wins — accepted trade
+    // (2026-08-26): the installed surfaces are the primary ones.
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && /^Digit[1-9]$/.test(e.code)) {
+      const idx = Number(e.code.slice(5)) - 1;
+      log('[hotkey] docTab', idx + 1);
+      if (selectDocTab(idx)) {
+        claim();
+        return;
+      }
+    }
     if (matches((s as any).hotkeyToggleCall)) {
       claim();
       // Hotkey toggles the CALL — start a call if none active, end any
