@@ -4381,18 +4381,37 @@ async function boot() {
     // the physical key regardless of layout. Alt excluded so option-
     // modified combos stay the browser's. Claim only on a hit — with no
     // doc at that position the keystroke keeps its browser meaning.
-    // No Shift: ⌘⇧3/4/5 are macOS system screenshot shortcuts the page
-    // never receives, so a shifted binding silently loses tabs 3–5.
-    // Bare ⌘1…9 is Chrome's own tab idiom; in an installed PWA / the
-    // CAP shell there is no browser tab strip so the keys reach us. In
-    // a regular browser tab the browser wins — accepted trade
-    // (2026-08-26): the installed surfaces are the primary ones.
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && /^Digit[1-9]$/.test(e.code)) {
-      const idx = Number(e.code.slice(5)) - 1;
-      log('[hotkey] docTab', idx + 1);
-      if (selectDocTab(idx)) {
-        claim();
-        return;
+    // Doc tabs: the stored hotkeyDocTabs combo carries ONE example digit
+    // ('Cmd+1'); its digit is stripped and the MODIFIERS apply to every
+    // Digit1…Digit9 — configuring the prefix once instead of nine
+    // bindings. Default is bare ⌘/Ctrl (Chrome's tab idiom): Shift is
+    // unusable because ⌘⇧3/4/5 are macOS SYSTEM screenshot shortcuts the
+    // page never receives, so a shifted default silently loses tabs 3–5.
+    // In an installed PWA / the CAP shell the digits reach us; in a
+    // regular browser tab the browser wins — accepted trade. Same
+    // meta/ctrl interchangeability as matches() above; empty setting =
+    // disabled, matching the other hotkeys' Backspace-clear.
+    if (/^Digit[1-9]$/.test(e.code)) {
+      const combo = String((s as any).hotkeyDocTabs || '');
+      const mods = combo.split('+').map(x => x.trim().toLowerCase()).filter(x => x && !/^\d$/.test(x));
+      if (mods.length) {
+        const needMeta = mods.includes('cmd') || mods.includes('meta');
+        const needCtrl = mods.includes('ctrl');
+        const needAlt = mods.includes('alt');
+        const needShift = mods.includes('shift');
+        const modifierOK =
+          (needMeta ? (e.metaKey || e.ctrlKey) : !e.metaKey) &&
+          (needCtrl ? (e.ctrlKey || e.metaKey) : (needMeta || !e.ctrlKey)) &&
+          (needAlt ? e.altKey : !e.altKey) &&
+          (needShift ? e.shiftKey : !e.shiftKey);
+        if (modifierOK && (needMeta || needCtrl)) {
+          const idx = Number(e.code.slice(5)) - 1;
+          log('[hotkey] docTab', idx + 1);
+          if (selectDocTab(idx)) {
+            claim();
+            return;
+          }
+        }
       }
     }
     if (matches((s as any).hotkeyToggleCall)) {

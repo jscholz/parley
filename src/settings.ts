@@ -280,6 +280,13 @@ const DEFAULTS = {
   // dictate). hotkeyAutoSend retired with the autoSend menu toggle.
   hotkeyToggleCall: 'Cmd+Shift+C',
   hotkeyToggleMic: 'Cmd+Shift+D',
+  // Doc-tab hotkeys. Stored as ONE example combo (whatever digit the
+  // user pressed while recording); the dispatcher strips the digit and
+  // applies the MODIFIERS to all of 1…9 — configuring the prefix once
+  // rather than nine bindings. Default is bare Cmd/Ctrl: Shift is
+  // unusable (⌘⇧3/4/5 are macOS system screenshot keys the page never
+  // receives). Empty = disabled, like the other hotkeys.
+  hotkeyDocTabs: 'Cmd+1',
   // Meeting-polish #25: toggle meeting capture in the CURRENT session
   // (start when idle; stop when one is recording — same start↔stop
   // flip as the header capture button).
@@ -714,6 +721,7 @@ export function hydrate(handlers: {
   const setSttKeyterms = document.getElementById('set-stt-keyterms') as HTMLInputElement | null;
   const keytermsChips = document.getElementById('keyterms-chips');
   const setHotkeyCall = $inp('set-hotkey-call');
+  const setHotkeyDocTabs = $inp('set-hotkey-doctabs');
   const setHotkeyMic = $inp('set-hotkey-mic');
   const setHotkeyMeeting = $inp('set-hotkey-meeting');
   const setTtsEngine = $sel('set-tts-engine');
@@ -826,6 +834,7 @@ export function hydrate(handlers: {
     if (setTheme) setTheme.value = current.theme;
     if (setAgentActivity) setAgentActivity.value = current.agentActivity;
     if (setHotkeyCall) setHotkeyCall.value = (current as any).hotkeyToggleCall;
+    if (setHotkeyDocTabs) setHotkeyDocTabs.value = (current as any).hotkeyDocTabs;
     if (setHotkeyMic) setHotkeyMic.value = current.hotkeyToggleMic;
     if (setHotkeyMeeting) setHotkeyMeeting.value = (current as any).hotkeyToggleMeeting;
   }
@@ -1295,7 +1304,7 @@ export function hydrate(handlers: {
   // combination, and we format it as a string and save. Cmd is used as
   // the conventional Mac modifier name; the matcher accepts either Cmd
   // (metaKey) or Ctrl (ctrlKey) at runtime.
-  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic' | 'hotkeyToggleMeeting') {
+  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic' | 'hotkeyToggleMeeting' | 'hotkeyDocTabs') {
     if (!el) return;
     el.addEventListener('keydown', (e: KeyboardEvent) => {
       // Don't capture lone modifier keypresses; wait until a "real" key
@@ -1322,8 +1331,13 @@ export function hydrate(handlers: {
       if (e.ctrlKey) parts.push('Ctrl');
       if (e.altKey) parts.push('Alt');
       if (e.shiftKey) parts.push('Shift');
-      // Normalize the key part: single chars uppercased; named keys passed through.
-      const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+      // Normalize the key part: single chars uppercased; named keys
+      // passed through. Digits come from e.code, not e.key — with Shift
+      // held, e.key is the layout's shifted symbol ('@' for Shift+2 on
+      // US), which would poison the stored combo for the doc-tabs field
+      // where the digit is what gets generalized.
+      const codeDigit = /^Digit(\d)$/.exec(e.code)?.[1];
+      const key = codeDigit ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key);
       parts.push(key);
       const combo = parts.join('+');
       el.value = combo;
@@ -1345,6 +1359,7 @@ export function hydrate(handlers: {
   attachHotkeyCapture(setHotkeyCall, 'hotkeyToggleCall');
   attachHotkeyCapture(setHotkeyMic, 'hotkeyToggleMic');
   attachHotkeyCapture(setHotkeyMeeting, 'hotkeyToggleMeeting');
+  attachHotkeyCapture(setHotkeyDocTabs, 'hotkeyDocTabs');
 
   if (setTheme) setTheme.onchange = () => {
     set('theme', setTheme.value);

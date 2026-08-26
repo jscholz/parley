@@ -49,6 +49,8 @@ export const FRONTEND_SETTINGS = {
   // setting to flip; PTT memo always sends, tap dictation never does).
   hotkeyToggleCall:       { category: 'hotkeys',         default: 'Cmd+Shift+C' },
   hotkeyToggleMic:        { category: 'hotkeys',         default: 'Cmd+Shift+D' },
+  // One example combo; the client generalizes its digit to 1…9.
+  hotkeyDocTabs:          { category: 'hotkeys',         default: 'Cmd+1' },
   // Meeting-polish #25. NOTE (2026-08-10 regression lesson): every
   // synced key added to src/settings.ts DEFAULTS MUST land here too —
   // a client-only key flips revalidate()'s missing-key backfill branch

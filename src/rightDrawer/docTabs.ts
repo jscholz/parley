@@ -12,6 +12,7 @@
 // chip that opens the LIST view — the rail never scrolls.
 
 import type { RightDrawerHost } from './host.ts';
+import * as settings from '../settings.ts';
 import { appendCaptureGlyph, type DocModule } from './modules/doc.ts';
 import { currentDoc, selectDoc, setTabOrder, tabOrderDocs, type DocState } from './docStore.ts';
 import { loadSortable } from './sortableLoader.ts';
@@ -83,10 +84,25 @@ function fileGlyphSvg(format: string): string {
     + `${suffix}</text></svg>`;
 }
 
-/** The platform picture for the tooltip only — the dispatcher itself
- *  accepts Cmd OR Ctrl either way (main.ts's cross-platform rule). */
-const HOTKEY_GLYPH = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '')
-  ? '⌘' : 'Ctrl+';
+/** Tooltip prefix from the configurable hotkeyDocTabs combo (the stored
+ *  digit is stripped — modifiers generalize to all nine positions).
+ *  Platform picture only: the dispatcher accepts Cmd OR Ctrl either way
+ *  (main.ts's cross-platform rule). Recomputed per render, so a rebind
+ *  in Settings shows on the next tab paint without a listener. */
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+function hotkeyGlyph(): string {
+  const combo = String((settings.get() as any).hotkeyDocTabs || '');
+  const mods = combo.split('+').map(x => x.trim().toLowerCase()).filter(x => x && !/^\d$/.test(x));
+  if (!mods.length) return '';
+  const glyph = (m: string): string => {
+    if (m === 'cmd' || m === 'meta') return IS_MAC ? '⌘' : 'Ctrl+';
+    if (m === 'ctrl') return IS_MAC ? '⌃' : 'Ctrl+';
+    if (m === 'alt') return IS_MAC ? '⌥' : 'Alt+';
+    if (m === 'shift') return IS_MAC ? '⇧' : 'Shift+';
+    return '';
+  };
+  return mods.map(glyph).join('');
+}
 
 function buildTab(doc: DocState, position: number): HTMLElement {
   const tab = document.createElement('button');
@@ -96,7 +112,8 @@ function buildTab(doc: DocState, position: number): HTMLElement {
   tab.dataset.docId = doc.id;
   const active = currentDoc()?.id === doc.id;
   tab.setAttribute('aria-selected', active ? 'true' : 'false');
-  const hotkey = position < 9 ? ` — ${HOTKEY_GLYPH}${position + 1}` : '';
+  const prefix = hotkeyGlyph();
+  const hotkey = position < 9 && prefix ? ` — ${prefix}${position + 1}` : '';
   tab.title = `${doc.title}${hotkey}`;
   tab.setAttribute('aria-label', doc.title);
   if (doc.source === 'capture') {
