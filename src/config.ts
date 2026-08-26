@@ -111,33 +111,12 @@ export function applySkinning() {
 
   document.title = name;
 
-  // Wordmark layout: header has a logo-as-S + "idekick" split, specifically
-  // tuned for the "Parley" wordmark. If the deployment sets a different
-  // PARLEY_APP_NAME, render the full name as plain text and shrink the
-  // logo to a leading icon so the split isn't lexically wrong (e.g.
-  // "[S]idekick" becoming "[S]randdesk" for a Brandesk fork).
+  // Wordmark: mark-as-icon + full name, for every branding. The old
+  // glyph-as-first-letter split ("[S]idekick" → "[P]arley") died with
+  // the R2-derived mark (2026-08-26) — it isn't a letterform, so there
+  // is no letter to pose as and no fork-renaming edge case left.
   const wmRest = document.querySelector('.header .wm-rest');
-  const wmS = document.querySelector('.header .wm-s');
-  if (wmRest && wmS) {
-    const defaultName = 'Parley';
-    if (name.toLowerCase() === defaultName.toLowerCase()) {
-      // Default branding — keep the [S]idekick split. Preserve case
-      // from the config (e.g. "Parley" lowercases "idekick").
-      wmRest.textContent = name.slice(1);
-    } else {
-      // Custom branding — show full name and present the logo as a
-      // preceding icon (narrower, not oversized-as-cap-height).
-      wmRest.textContent = name;
-      (wmS as HTMLElement).style.width = '1em';
-      (wmS as HTMLElement).style.height = '1em';
-      (wmS as HTMLElement).style.marginRight = '6px';
-      (wmS as HTMLElement).style.marginBottom = '0';
-      // Hide the chevron layer — it was designed as a typographic accent
-      // inside the letter S, not as part of a standalone icon.
-      const chevron = wmS.querySelector('.wm-chevron') as HTMLElement | null;
-      if (chevron) chevron.style.display = 'none';
-    }
-  }
+  if (wmRest) wmRest.textContent = name;
   const subtitleEl = document.querySelector('.header .subtitle');
   if (subtitleEl) subtitleEl.textContent = subtitle;
 

@@ -299,33 +299,24 @@
   }
   .header .wm-s {
     position: relative; display: inline-block;
-    /* Span both rows vertically; logo's square viewBox has built-in
-     * padding (~15% per side) so we oversize to ~2em to make the S
-     * glyph match cap-height of the adjacent text. Center-align
-     * vertically with the full [idekick / AGENT PORTAL] stack. */
+    /* Leading icon beside the full wordmark (the glyph-as-first-letter
+     * layout died with the R2-derived mark, 2026-08-26 — it is not a
+     * letterform). Spans both text rows, centered against the
+     * [Parley / AGENT PORTAL] stack. Masked, not <img>, so it takes
+     * --primary and follows the theme. */
     grid-column: 1; grid-row: 1 / span 2;
-    width: 2em; height: 2em;
+    width: 1.6em; height: 1.6em;
+    margin-right: 2px;
     align-self: center;
   }
-  .header .wm-bars,
-  .header .wm-chevron {
-    position: absolute; inset: 0; display: block;
-  }
   .header .wm-bars {
+    position: absolute; inset: 0; display: block;
     background-color: var(--primary);
     mask: url(/assets/icon.svg) center/contain no-repeat;
     -webkit-mask: url(/assets/icon.svg) center/contain no-repeat;
   }
-  .header .wm-chevron {
-    background-color: var(--fg);
-    mask: url(/assets/icon-chevron.svg) center/contain no-repeat;
-    -webkit-mask: url(/assets/icon-chevron.svg) center/contain no-repeat;
-  }
   .header .wm-rest {
     grid-column: 2; grid-row: 1;
-    /* Pull left to close the visible gap — the S's bounding box has
-     * padding beyond the rightmost bars. Tune if it kisses the bars. */
-    margin-left: -0.35em;
   }
   .header .version {
     grid-column: 3; grid-row: 1;

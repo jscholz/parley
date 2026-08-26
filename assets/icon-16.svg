@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 16px favicon sibling of icon.svg — two mirrored voice-arcs, the
+     brand mark's simplified cousin. The full R2-derived mark is
+     illegible at 16px (render-verified 2026-08-26); this stays crisp. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="#779b6f" stroke-width="8" stroke-linecap="round">
+  <path d="M 26 12 A 16 16 0 0 0 10 32 A 16 16 0 0 0 26 52"/>
+  <path d="M 38 12 A 16 16 0 0 1 54 32 A 16 16 0 0 1 38 52"/>
+</svg>

@@ -6,6 +6,9 @@
 <meta name="theme-color" content="#0a0a0a" id="meta-theme-color"/>
 <title>Parley</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg"/>
+<!-- 16px sibling: the brand mark's double lobes mush at favicon size
+     (render-verified 2026-08-26), so tabs get the simplified arcs. -->
+<link rel="icon" type="image/svg+xml" sizes="16x16" href="/assets/icon-16.svg"/>
 <link rel="icon" type="image/png" href="/assets/icon.png"/>
 <link rel="apple-touch-icon" href="/assets/icon.png"/>
 <link rel="manifest" href="/manifest.json"/>
@@ -76,12 +79,15 @@
 
 <div class="header">
   <h1 class="brand" aria-label="Parley Agent Portal">
+    <!-- Mark + full wordmark. The old layout posed the glyph as the
+         word's first LETTER ("[S]idekick", then "[P]arley") — the R2-
+         derived mark (2026-08-26) is not a letterform, so the icon
+         leads and the name renders whole. -->
     <span class="wm-s" aria-hidden="true">
       <span class="wm-bars"></span>
-      <span class="wm-chevron"></span>
     </span>
     <span class="subtitle">Agent Portal</span>
-    <span class="wm-rest">idekick</span>
+    <span class="wm-rest">Parley</span>
     <span class="version" id="app-version">—</span>
   </h1>
   <span class="status" id="status"><span class="dot"></span><span id="status-text">Not connected</span></span>
