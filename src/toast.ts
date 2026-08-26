@@ -42,9 +42,49 @@ export function toast(msg: string, kind?: 'err', durationMs = DEFAULT_MS): void 
   text.textContent = msg;
   toastEl.appendChild(text);
   toastEl.classList.toggle('err', isErr);
+  toastEl.classList.remove('has-action');   // plain toast is not clickable
   toastEl.classList.add('visible');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl?.classList.remove('visible'), durationMs);
+}
+
+/** PERSISTENT action toast ("Recording discarded · Undo", B1 pass).
+ *  No auto-dismiss: an undo on a countdown the user doesn't know
+ *  they're on is barely an undo — it stays up until the action is
+ *  taken, the ✕ dismisses it, or a later toast replaces it. The
+ *  action itself is one tap (the confirm already happened on the
+ *  destructive side; making the RECOVERY path ask again would invert
+ *  the safety asymmetry). */
+export function toastAction(
+  msg: string,
+  opts: { actionLabel: string; onAction: () => void },
+): void {
+  ensureToast();
+  if (!toastEl) return;
+  toastEl.replaceChildren();
+  const text = document.createElement('span');
+  text.className = 'toast-text';
+  text.textContent = msg;
+  toastEl.appendChild(text);
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = 'toast-action';
+  action.textContent = opts.actionLabel;
+  action.addEventListener('click', () => {
+    toastEl?.classList.remove('visible', 'has-action');
+    opts.onAction();
+  });
+  toastEl.appendChild(action);
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'toast-dismiss';
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.textContent = '✕';
+  dismiss.addEventListener('click', () => toastEl?.classList.remove('visible', 'has-action'));
+  toastEl.appendChild(dismiss);
+  toastEl.classList.remove('err');
+  toastEl.classList.add('has-action', 'visible');   // has-action re-enables pointer events
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
 }
 
 function ensureToast(): void {

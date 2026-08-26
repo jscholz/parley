@@ -688,6 +688,14 @@
       <span class="capture-pill-dot" aria-hidden="true"></span>
       <span class="capture-pill-title" id="capture-pill-title">Recording</span>
       <span class="capture-pill-timer" id="capture-pill-timer">0:00</span>
+      <!-- Controls (B1 destructive-action pass; 2026-08-18 incident):
+           mid-meeting verbs are mark / pause / stop ONLY. Discard is NOT
+           on the live pill — it lives in the ··· sheet (pillSheet.ts)
+           behind confirmDialog: a control that isn't there can't be
+           mis-tapped. Stop is the ~95% action, so it is a LABELLED text
+           button, not a 15px ■ glyph 10px from an identical ✕. Every
+           target here is ≥44px (Apple HIG minimum; the mis-tapped
+           originals measured 31×27). -->
       <button id="capture-pill-flag" class="capture-pill-btn" title="Mark this moment" aria-label="Mark this moment">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
       </button>
@@ -695,12 +703,10 @@
         <svg data-icon="pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/></svg>
         <svg data-icon="resume" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" hidden><polygon points="6 4 20 12 6 20 6 4" fill="currentColor" stroke="none"/></svg>
       </button>
-      <button id="capture-pill-stop" class="capture-pill-btn capture-pill-stop" title="Stop — save and hand to the agent" aria-label="Stop recording (save and ingest)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor" stroke="none"/></svg>
+      <button id="capture-pill-more" class="capture-pill-btn" title="Recording options (discard lives here)" aria-label="Recording options" aria-haspopup="dialog">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
       </button>
-      <button id="capture-pill-cancel" class="capture-pill-btn" title="Discard to Recently Deleted (recoverable ~7 days)" aria-label="Discard recording to Recently Deleted">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l14 14M19 5L5 19"/></svg>
-      </button>
+      <button id="capture-pill-stop" class="capture-pill-btn capture-pill-stop" title="Stop — save and hand to the agent" aria-label="Stop recording (save and ingest)">Stop</button>
     </div>
     <div class="composer">
       <div class="composer-attachments" id="composer-attachments" style="display:none"></div>

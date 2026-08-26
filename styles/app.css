@@ -1260,6 +1260,25 @@
     color: var(--fg);
   }
   .toast.err .toast-icon { color: #ef6b6b; }
+  /* Action toast ("Recording discarded · Undo", B1 pass): the base
+     toast is pointer-events:none so stray taps fall through to the
+     app — an actionable toast must take them again. */
+  .toast.has-action { pointer-events: auto; padding: 6px 6px 6px 16px; }
+  .toast-action {
+    border: none; cursor: pointer;
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+    color: var(--primary);
+    font-size: 13px; font-weight: 700;
+    padding: 9px 14px; border-radius: 9px;
+    flex: 0 0 auto;
+  }
+  .toast-action:hover { background: color-mix(in srgb, var(--primary) 26%, transparent); }
+  .toast-dismiss {
+    border: none; background: none; cursor: pointer;
+    color: var(--muted); font-size: 13px; line-height: 1;
+    padding: 9px 8px; flex: 0 0 auto;
+  }
+  .toast-dismiss:hover { color: var(--fg); }
 
   /* ── Fake lock overlay ── */
   .fake-lock {
@@ -2743,20 +2762,40 @@
   }
   .pin-drawer-item + .pin-drawer-item { margin-top: 2px; }
   .pin-drawer-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-  .pin-item-meta {
-    display: flex; justify-content: space-between; align-items: center; gap: 8px;
-    font-size: 11px; color: var(--muted); margin-bottom: 4px;
+  /* UX-pass pt7 V2 "body first" (user-approved 2026-08-26): the old
+   * meta row (caret/role/time) and footer (chat/unpin/jump) are gone as
+   * separate rows — ONE caption row below the body carries all of it.
+   * The whole row toggles collapse (body clicks only expand, so
+   * expanded text stays selectable); the caret is the visible
+   * affordance. */
+  .pin-item-caption {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--muted); margin-top: 4px;
     cursor: pointer;
     user-select: none;
   }
-  .pin-item-meta-left { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+  /* Left cluster (caret + Role · Chat · time) ellipsizes as one line;
+   * the unpin/jump buttons keep their full hit area on the right. They
+   * stay ALWAYS visible — hover-reveal strands touch devices (see the
+   * touch-pin-btn-visible-no-hover-reveal smoke). */
+  .pin-item-caption-left {
+    display: inline-flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0;
+  }
+  .pin-item-caption-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
   .pin-item-expand-btn {
     width: 18px; height: 18px; padding: 0; border: 0; background: transparent;
     color: var(--muted); display: inline-flex; align-items: center; justify-content: center;
     border-radius: 4px; flex: 0 0 auto; cursor: pointer;
   }
   .pin-item-expand-btn:hover { color: var(--fg); background: var(--surface-2); }
-  .pin-item-role { font-weight: 600; }
+  /* Role gets no bold: the caption is ONE uniform muted line in the
+   * approved V2 mock — emphasis inside it would compete with the body,
+   * which is the only element meant to carry visual weight. */
+  .pin-item-role { font-weight: inherit; }
   /* Pin body renders markdown (bold/italic/code/lists/links). Collapsed
    * state caps height + adds a fade so block elements (<ul>, <pre>)
    * still preview cleanly — line-clamp doesn't work on multi-block
@@ -2764,11 +2803,10 @@
    * Expanded removes the cap. */
   /* A pin IS conversation content the user chose to keep, so the body
    * reads at transcript grade — same --content-size + line-height as
-   * .line .text — not the old 13px notification-crumb size. The drawer
-   * layout stays flat + role-labelled (meta/footer rows below remain
-   * compact); only the message text is promoted. Collapsed cap is ~3
-   * readable lines (em-based so it tracks the content-size slider);
-   * expand removes it. */
+   * .line .text — not the old 13px notification-crumb size. V2 renders
+   * it FIRST at full width; the single caption row below stays compact.
+   * Collapsed cap is ~3 readable lines (em-based so it tracks the
+   * content-size slider); expand removes it. */
   .pin-item-body {
     font-size: var(--content-size); line-height: 1.5; color: var(--fg);
     max-height: 4.5em; overflow: hidden;
@@ -2781,30 +2819,18 @@
     mask-image: linear-gradient(to bottom, #000 70%, transparent 100%);
   }
   /* Drawer is denser than the transcript: the leading/trailing markdown
-   * block shouldn't add its outer margin against the meta/footer rows.
+   * block shouldn't add its outer margin against the item edge/caption.
    * All other element styling (p, lists, code, code-block, copy-btn,
    * headings, tables, blockquotes) is inherited from the SHARED
    * `.line .text, .pin-item-body` rules above — do not re-declare it here. */
   .pin-item-body > :first-child { margin-top: 0; }
   .pin-item-body > :last-child { margin-bottom: 0; }
-  /* Expanded — the top meta row toggles collapse. Body clicks only expand
+  /* Expanded — the caption row toggles collapse. Body clicks only expand
    * from collapsed so the expanded text remains selectable. */
   .pin-drawer-item.expanded .pin-item-body {
     max-height: none;
     -webkit-mask-image: none;
     mask-image: none;
-  }
-  .pin-item-footer {
-    margin-top: 6px;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px;
-    cursor: pointer;
-  }
-  .pin-item-chat {
-    font-size: 11px; color: var(--muted);
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    flex: 1; min-width: 0;
   }
   .pin-item-jump-btn, .pin-item-unpin-btn {
     flex-shrink: 0;
@@ -4902,15 +4928,24 @@
 }
 .sk-confirm-actions button {
   border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
-  border: 1px solid var(--border); background: var(--surface-1, #1c1c1e);
+  /* var(--surface-2), not the old var(--surface-1) fallback: --surface-1
+     is defined NOWHERE, so the fallback dark #1c1c1e always won and the
+     light theme rendered dark-on-dark unreadable buttons (caught by the
+     B1 render-verify pass). --surface-2 exists in both themes. */
+  border: 1px solid var(--border); background: var(--surface-2, #1c1c1e);
   color: var(--fg, #eee);
+  /* 44px targets: this dialog is the last gate on destructive verbs and
+     gets used at phone size (B1 — same HIG floor as the pill controls). */
+  min-height: 44px;
 }
 .sk-confirm-cancel:focus-visible { outline: 2px solid var(--accent, #6ea8fe); outline-offset: 1px; }
 .sk-confirm-accept.danger {
   border-color: color-mix(in srgb, #e5484d 55%, transparent);
-  background: color-mix(in srgb, #e5484d 16%, var(--surface-1, #1c1c1e));
+  background: color-mix(in srgb, #e5484d 16%, var(--surface-2, #1c1c1e));
   color: #ff8589;
 }
+/* Light surface under the 16% red mix needs a DARK red for contrast. */
+:root[data-theme="light"] .sk-confirm-accept.danger { color: var(--danger); }
 
 .setup-wizard-overlay {
   position: fixed; inset: 0; z-index: 200;
@@ -5051,14 +5086,22 @@
    is visible from across a table. */
 .capture-pill {
   position: relative;
-  display: flex; align-items: center; gap: 10px;
-  margin: 0 auto 6px; padding: 8px 14px;
+  display: flex; align-items: center; gap: 6px;
+  /* Vertical padding shrank 8→4 and gap 10→6 when the controls grew
+     to 44px hit targets (B1) — the padding lives inside the buttons
+     now, and four 44px targets plus title/timer have to fit a phone. */
+  margin: 0 auto 6px; padding: 4px 8px 4px 14px;
   max-width: min(560px, calc(100% - 24px));
   background: color-mix(in srgb, #b3261e 14%, var(--surface-1, #1c1c1e));
   border: 1px solid color-mix(in srgb, #b3261e 45%, transparent);
   border-radius: 999px;
   font-size: 13px;
   box-shadow: 0 2px 12px rgba(179, 38, 30, 0.25);
+  /* The bg above is ALWAYS dark (--surface-1 is defined nowhere; the
+     #1c1c1e fallback wins in both themes), so the text/glyph colour
+     must be fixed light too — var(--fg) went near-black in light mode
+     and title + controls sank into the maroon (B1 render-verify). */
+  color: #e8e8e8;
 }
 .capture-pill[hidden] { display: none; }
 .capture-pill-dot {
@@ -5076,17 +5119,39 @@
   font-weight: 600;
 }
 .capture-pill-timer {
-  font-variant-numeric: tabular-nums; color: var(--muted, #9a9a9a);
+  /* Fixed light-muted: the pill bg is dark in both themes (above). */
+  font-variant-numeric: tabular-nums; color: #9a9a9a;
   flex: none;
 }
 .capture-pill-btn {
-  background: transparent; border: none; color: var(--fg, #eee);
+  /* inherit = the pill's fixed light colour (its bg is dark in BOTH
+     themes — see .capture-pill). */
+  background: transparent; border: none; color: inherit;
   cursor: pointer; font-size: 15px; line-height: 1;
-  padding: 6px 8px; border-radius: 8px; flex: none;
+  /* ≥44px HIT target (B1 destructive-action pass — the 2026-08-18
+     mis-tap incident's buttons measured 31×27 against Apple HIG's
+     44×44 minimum). The padding-box IS the target; the glyph stays
+     small, the button doesn't have to look 44px to accept 44px. */
+  min-width: 44px; min-height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; border-radius: 10px; flex: none;
 }
 .capture-pill-btn:hover { background: rgba(255, 255, 255, 0.08); }
 .capture-pill-btn.flashed { background: rgba(229, 72, 77, 0.4); }
-.capture-pill-stop { color: #e5484d; font-size: 13px; }
+/* Stop is the ~95% action — a LABELLED text button (never again a
+   15px ■ one mis-read away from a destructive ✕), tinted the pill's
+   recording red. The pill container is red-dark in BOTH themes
+   (surface-1 falls back dark), so the fixed light-red text holds
+   contrast in light mode too. */
+.capture-pill-stop {
+  font-size: 14px; font-weight: 700;
+  padding: 0 16px;
+  color: #ff8589;
+  border: 1px solid color-mix(in srgb, #e5484d 60%, transparent);
+  background: color-mix(in srgb, #e5484d 20%, transparent);
+  border-radius: 999px;
+}
+.capture-pill-stop:hover { background: color-mix(in srgb, #e5484d 32%, transparent); }
 /* Interrupted (mic stolen by a call/Siri): amber, dot stops pulsing —
    visibly different from "recording fine". */
 .capture-pill.interrupted {
@@ -5122,8 +5187,9 @@
 }
 .capture-pill.paused .capture-pill-dot { background: #8a8a8a; animation: none; }
 /* Pill buttons hold small stroke SVGs (matches the app's icon set —
-   the cartoon-emoji pass was replaced 2026-07-08). */
-.capture-pill-btn svg { width: 15px; height: 15px; display: block; }
+   the cartoon-emoji pass was replaced 2026-07-08). 18px inside the
+   44px targets — 15px glyphs looked lost in the bigger boxes (B1). */
+.capture-pill-btn svg { width: 18px; height: 18px; display: block; }
 /* Mic-menu action rows: leading icon + label (the toggle rows have a
    trailing switch instead; both share .mic-toggle-row chrome). */
 .mic-mode-menu .mic-menu-icon { display: flex; flex: none; }
@@ -5140,6 +5206,54 @@
 /* [hidden] must beat the display:block above (UA [hidden] rule loses
    that specificity fight — caught by render-verify 2026-07-08). */
 .capture-pill-btn svg[hidden] { display: none; }
+/* ── Pill sheet (src/capture/pillSheet.ts; B1 destructive-action
+   pass) — the recording's non-primary verbs, most importantly
+   discard, one deliberate hop off the live pill. Centered card on
+   desktop, bottom sheet on phones. Sits UNDER the confirm dialog's
+   z-260 so the discard confirm stacks on top if both ever coexist. */
+.capture-sheet-overlay {
+  position: fixed; inset: 0; z-index: 250;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  backdrop-filter: blur(2px);
+  padding: 16px;
+}
+.capture-sheet {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%; max-width: 360px;
+  padding: 12px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+}
+.capture-sheet-title {
+  font-weight: 700; font-size: 14px; padding: 4px 10px 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Rows are full-width ≥48px targets — same ergonomics rule as the
+   pill controls; a relocated discard that is still tiny would just
+   move the mis-tap. */
+.capture-sheet-row {
+  display: flex; flex-direction: column; align-items: flex-start;
+  justify-content: center; gap: 2px;
+  width: 100%; min-height: 48px;
+  padding: 8px 10px; border-radius: 10px;
+  background: transparent; border: none; color: var(--fg);
+  cursor: pointer; font-size: 14px; font-weight: 600; text-align: left;
+}
+.capture-sheet-row:hover { background: var(--surface-subtle-2); }
+.capture-sheet-row:focus-visible { outline: 2px solid var(--accent, #6ea8fe); outline-offset: 1px; }
+.capture-sheet-sub { font-size: 12px; font-weight: 400; color: var(--muted); }
+.capture-sheet-discard { color: var(--danger); }
+@media (max-width: 699px) {
+  /* Phone: bottom sheet — thumb-reachable, matches the settings
+     bottom-sheet idiom. */
+  .capture-sheet-overlay { align-items: flex-end; padding: 0; }
+  .capture-sheet {
+    max-width: none;
+    border-radius: 16px 16px 0 0; border-bottom: none;
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+}
 /* App-level record button (right rail): neutral glyph at rest, red
    while a capture is live — same color rule as the shelf + pill. */
 .capture-rail-btn.active-capture { color: #e5484d; }

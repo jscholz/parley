@@ -1,13 +1,18 @@
-// Postmortem 2026-08-18 regression #6: an explicit user cancel moves
+// Postmortem 2026-08-18 regression #6: an explicit user discard moves
 // the capture to Recently Deleted (soft discard — server entity
 // SURVIVES with its pre-discard status recorded, restorable) instead
 // of the hard DELETE that used to erase every byte. The generic DELETE
 // endpoint is never touched.
+//
+// B1 destructive-action pass: discard no longer lives on the live pill
+// at all — it moved to the pill's ··· sheet (pillSheet.ts), still
+// behind the same confirmDialog. This smoke drives that full path:
+// ··· → sheet → "Discard recording…" → confirm → tombstone.
 
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'capture-cancel-discards-recoverable';
-export const DESCRIPTION = 'pill ✕ cancel: capture → discarded (Recently Deleted, restorable); DELETE never called';
+export const DESCRIPTION = 'pill ··· sheet discard: confirm → discarded (Recently Deleted, restorable); DELETE never called';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -29,11 +34,14 @@ export default async function run({ page, log, mock }) {
   }
   assert(mock.getCaptures()[0]?.status === 'recording', 'capture should be recording before cancel');
 
-  // Cancel via the pill's ✕ → the IN-APP confirm dialog (not
-  // window.confirm — 2026-08-18 incident: native confirm is unreliable
-  // in iOS standalone PWAs). Cancel must hold default focus (queued
-  // taps land safe), and the accept button names the action.
-  await page.click('#capture-pill-cancel');
+  // Discard via the pill's ··· sheet (B1: the live pill has NO discard
+  // control) → the IN-APP confirm dialog (not window.confirm —
+  // 2026-08-18 incident: native confirm is unreliable in iOS standalone
+  // PWAs). Cancel must hold default focus (queued taps land safe), and
+  // the accept button names the action.
+  await page.click('#capture-pill-more');
+  await page.waitForSelector('.capture-sheet', { timeout: 5000 });
+  await page.click('.capture-sheet-discard');
   await page.waitForSelector('.sk-confirm-overlay', { timeout: 5000 });
   const dialog = await page.evaluate(() => ({
     focusIsCancel: document.activeElement?.classList?.contains('sk-confirm-cancel') || false,

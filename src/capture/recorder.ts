@@ -565,15 +565,19 @@ export async function stopMeetingCapture(): Promise<void> {
  *  hard-DELETEd — and the local IDB buffer is NOT cleared: un-uploaded
  *  tail segments are the only copy of that audio, so they stay
  *  buffered (the uploader parks them on the server's "frozen" answer)
- *  until the retention janitor or a deliberate purge. */
-export async function cancelMeetingCapture(): Promise<void> {
-  // The pill's ✕ is live during 'starting' too, and there is nothing to
-  // tombstone yet — no audio, no recording claim, just a pending
-  // placeholder. Stand down and let the superseded start abort it; a
-  // Recently-Deleted entry for a meeting that never recorded would be
-  // noise the user has to clean up.
-  if (standDownPendingStart()) return;
-  if (!state.active || !state.captureId) return;
+ *  until the retention janitor or a deliberate purge.
+ *
+ *  Returns the tombstoned capture's id so the caller can offer Undo
+ *  (B1 pass: the pill sheet's post-discard toast), or null when
+ *  nothing was tombstoned (stand-down of a pending start / no capture). */
+export async function cancelMeetingCapture(): Promise<string | null> {
+  // The sheet's discard is reachable during 'starting' too, and there
+  // is nothing to tombstone yet — no audio, no recording claim, just a
+  // pending placeholder. Stand down and let the superseded start abort
+  // it; a Recently-Deleted entry for a meeting that never recorded
+  // would be noise the user has to clean up.
+  if (standDownPendingStart()) return null;
+  if (!state.active || !state.captureId) return null;
   const captureId = state.captureId;
   state = { ...IDLE_STATE };
   emit();
@@ -596,6 +600,21 @@ export async function cancelMeetingCapture(): Promise<void> {
     }
   } catch { /* server unreachable — stale-recording auto-heal resolves it in place */ }
   log(`[capture] canceled ${captureId} → Recently Deleted (recoverable)`);
+  // Returned even if the POST itself failed: the server's sweeps
+  // reconcile the discard, so the id is still the undo target.
+  return captureId;
+}
+
+/** Undo of a sheet discard (B1 pass): POST /restore flips the
+ *  Recently-Deleted tombstone back — to 'complete'/'failed', never to a
+ *  live recording (the mic and segment chain are long gone; this is
+ *  data recovery, not resume). Throws on a non-2xx answer so the undo
+ *  toast can say honestly that the restore did NOT land. */
+export async function restoreDiscardedCapture(captureId: string): Promise<void> {
+  const res = await fetch(apiUrl(`/api/parley/captures/${captureId}/restore`), {
+    method: 'POST', headers: lifecycleHeaders(),
+  });
+  if (!res.ok) throw new Error(`restore failed (${res.status})`);
 }
 
 /** Pause = seal the running segment and RELEASE the mic (the OS mic

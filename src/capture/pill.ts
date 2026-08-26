@@ -15,11 +15,11 @@
 
 import {
   startMeetingCapture, stopMeetingCapture, markMoment,
-  pauseMeetingCapture, resumeMeetingCapture, cancelMeetingCapture,
+  pauseMeetingCapture, resumeMeetingCapture,
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
+import { openPillSheet } from './pillSheet.ts';
 import * as switchCtl from '../switchController.ts';
-import { confirmDialog } from '../confirmDialog.ts';
 import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
@@ -215,26 +215,18 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   // — while a meeting records, its semantics flip to "stop the
   // meeting" and the hover copy says so; render() keeps the title in
   // sync). Stop is the save-everything verb, so no confirm; discard
-  // lives on the pill's ✕ behind one.
+  // lives in the pill's ··· sheet behind one.
   document.getElementById('btn-capture-header')?.addEventListener('click', () => {
     if (captureInProgress()) void stopMeetingCapture();
     else void startFromUi();
   });
-  // Cancel = discard, the inverse promise of stop — confirm before
-  // moving audio to Recently Deleted. IN-APP dialog, not
-  // window.confirm (2026-08-18 incident: native confirm in an iOS
-  // standalone PWA is unreliable, and a tap queued on a frozen phone
-  // can replay onto its OK — the in-app dialog default-focuses CANCEL
-  // and names the action explicitly). The dialog is UX; the safety
-  // boundary is the server's soft discard underneath.
-  document.getElementById('capture-pill-cancel')?.addEventListener('click', () => {
-    void confirmDialog({
-      title: 'Discard this recording?',
-      body: 'It moves to Recently Deleted on the server (recoverable for ~7 days). Nothing is saved to the chat or sent to the agent.',
-      confirmLabel: 'Discard to Recently Deleted',
-      cancelLabel: 'Keep recording',
-      danger: true,
-    }).then((ok) => { if (ok) void cancelMeetingCapture(); });
+  // ··· sheet holds the non-primary verbs — most importantly discard
+  // (B1 destructive-action pass, 2026-08-18 incident: the discard ✕
+  // used to sit 10px from stop on the live pill and destroyed a real
+  // meeting). The whole confirm → soft-discard → Undo-toast flow
+  // lives in pillSheet.ts.
+  document.getElementById('capture-pill-more')?.addEventListener('click', () => {
+    openPillSheet();
   });
 
   // External control plane: capture_control envelopes broadcast by
