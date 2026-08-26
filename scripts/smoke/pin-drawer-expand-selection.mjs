@@ -1,13 +1,14 @@
-// Pin drawer interaction contract:
+// Pin drawer interaction contract (V2 "body first", UX-pass pt7,
+// user-approved 2026-08-26 — body leads, ONE caption row below it):
 // - collapsed body click expands
 // - expanded body click does not collapse, preserving text selection
-// - top meta row/caret toggles collapse and expand
-// - footer remains the drill-to-chat target
+// - caption row/caret toggles collapse and expand
+// - the caption's jump button remains the drill-to-chat target
 
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
 
 export const NAME = 'pin-drawer-expand-selection';
-export const DESCRIPTION = 'pin body expands without stealing text selection; meta toggles; footer drills';
+export const DESCRIPTION = 'pin body expands without stealing text selection; caption toggles; jump drills';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -64,15 +65,18 @@ export default async function run({ page, log }) {
   assert(await expanded(page), 'expanded body click should not collapse pin');
   log('expanded body click leaves text selectable ✓');
 
-  await page.click('#pin-drawer-list .pin-item-meta');
-  assert(!(await expanded(page)), 'meta row click should collapse pin');
+  // V2: the caption ROW (not the caption's buttons) is the collapse
+  // toggle — click its text cluster so the toggle handler, not a
+  // stopPropagation'd child button, is what's exercised.
+  await page.click('#pin-drawer-list .pin-item-caption .pin-item-caption-text');
+  assert(!(await expanded(page)), 'caption row click should collapse pin');
   await page.click('#pin-drawer-list .pin-item-expand-btn');
   assert(await expanded(page), 'caret button should expand pin');
   const aria = await page.locator('#pin-drawer-list .pin-item-expand-btn').first().getAttribute('aria-expanded');
   assert(aria === 'true', `caret aria-expanded should be true, got ${aria}`);
-  log('meta/caret toggles pin expansion ✓');
+  log('caption/caret toggles pin expansion ✓');
 
-  await page.click('#pin-drawer-list .pin-item-footer');
+  await page.click('#pin-drawer-list .pin-item-jump-btn');
   await page.waitForFunction((chatId) => document.querySelector('#sessions-list li.active')?.getAttribute('data-chat-id') === chatId, PIN_CHAT, { timeout: 4_000, polling: 50 });
-  log('footer drills to source chat ✓');
+  log('jump button drills to source chat ✓');
 }

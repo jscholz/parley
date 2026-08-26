@@ -88,13 +88,14 @@ export default async function run({ page, log }) {
   log(`both drawers open ✓`);
 
   // Click the pin item's drill target. The right-drawer refactor (commit
-  // e936c90, 2026-05-21) moved the drill onclick from the LI itself to
-  // its `.pin-item-footer` (and its inner jump button). A click on the
-  // LI no longer triggers the drill — dispatch against the footer so
-  // the handler actually fires.
+  // e936c90, 2026-05-21) moved the drill onclick off the LI itself; the
+  // V2 "body first" redesign (UX-pass pt7, 2026-08-26) then removed the
+  // footer row entirely — the caption's `.pin-item-jump-btn` is now the
+  // ONLY drill target (the caption row itself toggles expand/collapse).
+  // Dispatch against the jump button so the handler actually fires.
   await page.evaluate(() => {
-    const footer = document.querySelector('#pin-drawer-list .pin-drawer-item .pin-item-footer');
-    footer?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    const jump = document.querySelector('#pin-drawer-list .pin-drawer-item .pin-item-jump-btn');
+    jump?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
   await page.waitForTimeout(800);
 
