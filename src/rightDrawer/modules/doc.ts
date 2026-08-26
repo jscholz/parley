@@ -109,6 +109,7 @@ export function createDocModule(opts: {
   }
 
   function renderReader(ctx: RightDrawerModuleContext, doc: DocState): void {
+    const hasStrip = doc.source === 'capture' && !!doc.captureId && !isLiveCaptureDoc(doc);
     const header = document.createElement('div');
     header.className = 'doc-drawer-header';
 
@@ -140,7 +141,7 @@ export function createDocModule(opts: {
     dl.setAttribute('aria-label', 'Download document');
     dl.setAttribute('title', 'Download');
     dl.onclick = () => downloadDoc(doc);
-    header.appendChild(dl);
+    if (!hasStrip) header.appendChild(dl);
 
     // Close-from-shelf — ✕ NEXT TO the doc's own actions so its scope
     // (this document) is unmistakable; never in the drawer header. An ✕,
@@ -162,14 +163,21 @@ export function createDocModule(opts: {
       } catch { /* non-browser */ }
       rerender(ctx);
     };
-    header.appendChild(rm);
 
-    opts.body.appendChild(header);
-
+    // Option B (UX-pass point 4, approved direction 2026-08-25): ONE
+    // action cluster, not two stacked icon rows. Close lives on the
+    // title row (scope: this document — same ✕ the list rows use); on
+    // capture docs the nav row below goes text-only and every remaining
+    // action, downloads included, lives in the player strip. Non-capture
+    // docs have no strip, so the nav row keeps their download icon.
     const titleEl = document.createElement('div');
     titleEl.className = 'doc-drawer-title';
-    appendCaptureGlyph(titleEl, doc);
-    titleEl.appendChild(document.createTextNode(doc.title));
+    const titleText = document.createElement('span');
+    titleText.className = 'doc-drawer-title-text';
+    appendCaptureGlyph(titleText, doc);
+    titleText.appendChild(document.createTextNode(doc.title));
+    titleEl.appendChild(titleText);
+    titleEl.appendChild(rm);
     opts.body.appendChild(titleEl);
 
     // A leading `_…_` line is METADATA wearing markdown italics —
@@ -190,6 +198,12 @@ export function createDocModule(opts: {
       opts.body.appendChild(sub);
     }
 
+    // Document first, chrome second (UX-pass point 4): the breadcrumb/
+    // actions row used to sit ABOVE the title, so the reader opened with
+    // navigation chrome dominating and the document's own identity in
+    // second place. Same elements, demoted one slot.
+    opts.body.appendChild(header);
+
     // Player strip — capture transcripts only (§3.6): stream the
     // stitched audio, tap a transcript timestamp to seek. This is the
     // trust-but-verify feature: STT/diarization errors cluster in
@@ -197,7 +211,7 @@ export function createDocModule(opts: {
     // NOT while live (field bug 2026-07-09): playback exists once the
     // capture is terminal — the endpoint 409s until then, which the
     // native <audio> controls render as a scary "Error".
-    if (doc.source === 'capture' && doc.captureId && !isLiveCaptureDoc(doc)) {
+    if (hasStrip) {
       opts.body.appendChild(buildPlayerStrip(doc));
     }
 
@@ -395,15 +409,57 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
   };
   strip.appendChild(purge);
 
-  // Download audio — same artifact the endpoint streams.
-  const dl = document.createElement('a');
+  // Download — ONE affordance for both artifacts. The reader used to
+  // show two identical download glyphs a few px apart (doc in the nav
+  // row, audio here) with nothing but hover text telling them apart —
+  // the "two action strips with possible redundancy" confusion (his
+  // words, 2026-08-25). One button, one two-item menu; each item names
+  // its artifact and extension so the choice is legible before the tap.
+  const dlWrap = document.createElement('span');
+  dlWrap.className = 'doc-player-dlwrap';
+  const dl = document.createElement('button');
   dl.className = 'doc-player-download';
-  dl.href = audioUrlFor(doc);
-  dl.download = `${doc.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meeting'}.m4a`;
-  dl.title = 'Download audio';
-  dl.setAttribute('aria-label', 'Download audio');
+  dl.title = 'Download…';
+  dl.setAttribute('aria-label', 'Download transcript or audio');
+  dl.setAttribute('aria-haspopup', 'menu');
+  dl.setAttribute('aria-expanded', 'false');
   dl.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8.5"/><path d="M4.5 7.5 8 11l3.5-3.5"/><path d="M2.5 13.5h11"/></svg>';
-  strip.appendChild(dl);
+  const menu = document.createElement('div');
+  menu.className = 'doc-player-dlmenu';
+  menu.setAttribute('role', 'menu');
+  menu.hidden = true;
+  const slug = doc.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meeting';
+  const closeMenu = () => {
+    menu.hidden = true;
+    dl.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onOutside, true);
+  };
+  const onOutside = (e: Event) => {
+    if (!dlWrap.contains(e.target as Node)) closeMenu();
+  };
+  const item = (label: string, act: () => void) => {
+    const b = document.createElement('button');
+    b.setAttribute('role', 'menuitem');
+    b.textContent = label;
+    b.onclick = () => { closeMenu(); act(); };
+    menu.appendChild(b);
+  };
+  item('Transcript (.md)', () => downloadDoc(doc));
+  item('Audio (.m4a)', () => {
+    const a = document.createElement('a');
+    a.href = audioUrlFor(doc);
+    a.download = `${slug}.m4a`;
+    a.click();
+  });
+  dl.onclick = () => {
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    dl.setAttribute('aria-expanded', String(opening));
+    if (opening) document.addEventListener('pointerdown', onOutside, true);
+  };
+  dlWrap.appendChild(dl);
+  dlWrap.appendChild(menu);
+  strip.appendChild(dlWrap);
 
   return strip;
 }

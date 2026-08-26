@@ -2507,6 +2507,31 @@
   .doc-drawer-title {
     font-weight: 600; font-size: 13px;
     overflow-wrap: anywhere;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .doc-drawer-title-text { flex: 1; min-width: 0; }
+  /* Unified download menu on the player strip (option B): one download
+   * affordance for both artifacts, each item naming its extension. */
+  .doc-player-dlwrap { position: relative; display: inline-flex; }
+  /* [hidden] loses to any author `display` — the UA's display:none is
+   * specificity-zero, so `display: flex` below would keep the menu
+   * permanently open (caught by the first render of this menu, which
+   * shipped a screenshot of the popover no one had clicked). */
+  .doc-player-dlmenu[hidden] { display: none; }
+  .doc-player-dlmenu {
+    position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px; min-width: 150px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column;
+  }
+  .doc-player-dlmenu button {
+    background: none; border: none; color: var(--fg);
+    font-size: 12px; text-align: left; padding: 6px 8px;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+  }
+  .doc-player-dlmenu button:hover {
+    background: color-mix(in srgb, var(--fg) 8%, transparent);
   }
   /* Metadata subtitle under the title — the `_Recorded … · diarized_`
    * line lifted out of the transcript body (see splitLeadingMetaLine).
@@ -5084,7 +5109,13 @@
   font: 12px/1 inherit; cursor: pointer; flex: none;
 }
 .doc-player-rate:hover { color: var(--fg, #eee); }
-.doc-player-download { display: flex; color: var(--muted, #aaa); flex: none; padding: 4px; }
+/* background/border/cursor resets matter now: this became a <button>
+ * when the download menu landed (option B), and UA button chrome gave
+ * it a filled box the old <a> never had. */
+.doc-player-download {
+  display: flex; color: var(--muted, #aaa); flex: none; padding: 4px;
+  background: transparent; border: none; cursor: pointer;
+}
 .doc-player-download:hover { color: var(--fg, #eee); }
 .doc-player-download svg { width: 15px; height: 15px; }
 /* Seekable transcript: timestamp tokens read as links. */
