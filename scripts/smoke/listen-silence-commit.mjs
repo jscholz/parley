@@ -18,6 +18,8 @@
 //   3. /tts POSTed once.
 //   4. After audio.ended, listen state is "armed" again (re-arm).
 
+import { assertMicGateReleased } from './lib.mjs';
+
 export const NAME = 'listen-silence-commit';
 export const DESCRIPTION = 'Listen mode commits buffered audio after silence + plays reply';
 export const STATUS = 'implemented';
@@ -104,4 +106,11 @@ export default async function run({ page, log, fail, url, mock }) {
     { timeout: 5_000, polling: 100 },
   );
   log('re-armed after reply');
+
+  // Shared suppression invariant: a completed reply round must leave
+  // the mic gate released. Cheap to bolt onto any voice scenario, and
+  // the class of bug it catches (2026-08-26 post-reply wedge) is
+  // invisible to every other assertion in this file.
+  const ms = await assertMicGateReleased(page, 'listen reply round complete');
+  log(`mic gate released (${ms}ms after re-arm)`);
 }

@@ -113,7 +113,17 @@ export function handleReplyDelta({ replyId, cumulativeText, conversation, messag
   // `listening` envelope (stall-flush/ring-replay) and would re-arm
   // ttsPlaying with no TTS behind it, wedging the user-transcript path
   // for the rest of the call (field bug 2026-08-26).
-  webrtcSuppress.onAssistantDelta();
+  //
+  // `!isReplay` because a replayed envelope is, by definition, text the
+  // agent already spoke — there is no TTS round behind it, so arming
+  // shuts the mic gate with nothing that can reopen it. The `_replay`
+  // flag exists precisely to keep side effects off the replay path
+  // (cbd8c9f speak-replies, 92e0273 drawer bumps, 9484aff approval
+  // banners); suppression arming was simply never added to the list.
+  // cc57300's dcOwnsArming covers this DURING a talk call by ignoring
+  // SSE arming outright — this covers the contexts it deliberately
+  // leaves on SSE arming (stream mode, Listen, no call).
+  if (!isReplay) webrtcSuppress.onAssistantDelta();
   if (ttsModule.isPaused()) {
     cancelReplyTts('new-turn');
   }
@@ -331,8 +341,9 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
   }
 
   // SSE-sourced — no-op during a connected talk call (DC owns arming;
-  // see onAssistantDelta comment in handleReplyDelta).
-  webrtcSuppress.onAssistantFinal();
+  // see onAssistantDelta comment in handleReplyDelta). Replay-guarded
+  // for the same reason: a replayed final has no TTS round behind it.
+  if (!isReplay) webrtcSuppress.onAssistantFinal();
 
   const imageBlocks = extractImageBlocks(content);
 

@@ -208,6 +208,38 @@ or any other locally-derived signal, because the WebRTC peer can be
 "connected" before the STT pipe is actually hot, and chiming there
 would be either too early or doubled with this envelope at call-start.
 
+**`listening` is EDGE-triggered and at most once per turn boundary.**
+It is a cue, not a state — do not build a gate whose only release is
+this envelope. In stream mode it fires exactly once for the whole call
+(there is no TTS track, so `tts_active` never flips and the once-per-
+turn flag never re-arms); a barge consumes the turn's only one; and a
+reply that produces no audio never earns one at all. Use `tts-playing`
+for state. See docs/bugs/2026-08-26-realtime-talk-post-reply-audio-
+failures.md for what building on the edge cost.
+
+#### `tts-playing`
+
+```json
+{ "type": "tts-playing", "active": true }
+```
+
+The bridge's playback LEVEL — a straight republication of
+`tts_track.is_active()`, i.e. the same boolean `stt_bridge._pcm_iter`
+uses to decide whether mic audio reaches the STT provider. Emitted on
+every change, repeated every `TTS_PLAYBACK_PING_S` (1 s) while active,
+and once on the first mic frame of every call in BOTH modes.
+
+That first envelope doubles as a capability announcement: a bridge
+predating this protocol sends none, and clients must then keep their
+older behavior rather than infer that playback ended. Clients should
+treat it as the renewal source for any suppression deadline —
+`active:true` arms, a repeat renews, and `active:false` releases once
+playback has actually started (before the first PCM frame, "not
+active" is just synth latency, not end-of-round).
+
+Consumer: `suppress.onPlaybackState` in
+`src/audio/realtime/suppress.ts`.
+
 ### Client → server
 
 #### `dispatch`

@@ -145,12 +145,29 @@ interface BargeVadEvent {
   type: 'barge-vad';
   available: boolean;
 }
+/**
+ * Playback LEVEL signal — the bridge publishing its own
+ * `PCMTrack.is_active()`, i.e. the exact flag it uses to decide
+ * whether inbound mic audio reaches the STT provider. On every change
+ * plus ~1/s while active, and once on the first mic frame of the call
+ * (that first envelope is also the capability announcement — a bridge
+ * predating this protocol sends none, and the client keeps its older
+ * unbounded suppression behavior rather than risk unsuppressing
+ * mid-playback). Consumed by suppress.onPlaybackState; it is what
+ * bounds `ttsPlaying`, which `listening` alone could not because
+ * `listening` is edge-triggered and fires at most once per turn.
+ */
+interface TtsPlayingEvent {
+  type: 'tts-playing';
+  active: boolean;
+}
 type DataChannelEvent =
   | TranscriptEvent
   | BargeEvent
   | ListeningEvent
   | SpeechActiveEvent
-  | BargeVadEvent;
+  | BargeVadEvent
+  | TtsPlayingEvent;
 
 let onDataChannelEvent: ((ev: DataChannelEvent) => void) | null = null;
 

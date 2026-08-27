@@ -448,6 +448,51 @@ export function assert(cond, msg) {
   if (!cond) throw new Error(`assertion failed: ${msg}`);
 }
 
+/**
+ * THE SUPPRESSION INVARIANT, in one reusable line.
+ *
+ * `ttsPlaying` gates every user transcript in a call (main.ts drops
+ * them outright while it is set). It must be a LEVEL signal that tracks
+ * real playback — never a latch. Once a reply round is over and nothing
+ * is coming out of the speaker, it must be false; if it isn't, the mic
+ * is wedged and the user's next utterance goes nowhere. That is the
+ * 2026-08-26 field bug, and its whole family.
+ *
+ * Cheap enough to drop at the end of ANY voice scenario, which is the
+ * point: broad coverage beats one clever test. Call it after a reply
+ * round has completed. `graceMs` lets a scenario ride out a legitimate
+ * tail (the barge drain grace is 1.5 s).
+ *
+ * NOTE this asserts on the internal boolean, deliberately unlike the
+ * multi-round smokes which assert at the end of the pipe (a user
+ * utterance reaching dispatch). It is the version that is cheap to
+ * apply everywhere; the end-of-pipe version is the version that would
+ * have caught the field bug on its own. Use both.
+ */
+export async function assertMicGateReleased(page, label, { graceMs = 0, timeoutMs = 6_000 } = {}) {
+  if (graceMs) await page.waitForTimeout(graceMs);
+  const start = Date.now();
+  let last = null;
+  while (Date.now() - start < timeoutMs) {
+    last = await page.evaluate(async () => {
+      try {
+        const s = await import('/build/audio/realtime/suppress.mjs');
+        return { ok: true, playing: s.isTtsPlaying() };
+      } catch (e) {
+        return { ok: false, err: String(e?.message || e) };
+      }
+    });
+    if (!last.ok) throw new Error(`assertMicGateReleased(${label}): ${last.err}`);
+    if (last.playing === false) return Date.now() - start;
+    await page.waitForTimeout(150);
+  }
+  throw new Error(
+    `assertion failed: mic gate still shut ${timeoutMs}ms after "${label}" — `
+    + 'suppress.isTtsPlaying() never cleared, so every user transcript from here '
+    + 'on is dropped (the 2026-08-26 post-reply wedge)',
+  );
+}
+
 /** Capture the chat_id minted by the PWA's new-chat flow by watching
  *  the dbg console line `hermes-gateway: new session (chat_id=…)`.
  *  Call BEFORE clicking new-chat — the returned promise resolves on

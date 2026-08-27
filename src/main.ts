@@ -1364,6 +1364,25 @@ async function boot() {
       listenReply.releaseOwnership();
     }
   });
+
+  // Local/turn-based playback as suppression EVIDENCE. Unscoped by
+  // replyId on purpose — this is "is the speaker producing agent audio
+  // right now", which is true regardless of which surface owns the
+  // reply. It is the only playback signal that exists in stream mode:
+  // the bridge has no TTS track there, so suppress's arming policy is
+  // 'playback-only' and a manual per-bubble play tap during a stream
+  // call is the one thing that can legitimately shut the mic gate.
+  // Start/end are authoritative here (the client owns the player), so
+  // these bound themselves without a heartbeat.
+  const playbackEvidence = (active: boolean) => {
+    try { webrtcSuppress.onPlaybackState(active, 'local'); } catch { /* noop */ }
+  };
+  ttsModule.on('play-start', () => playbackEvidence(true));
+  ttsModule.on('resumed',    () => playbackEvidence(true));
+  ttsModule.on('paused',     () => playbackEvidence(false));
+  ttsModule.on('ended',      () => playbackEvidence(false));
+  ttsModule.on('stopped',    () => playbackEvidence(false));
+
   draft.init({
     transcriptEl,
     onChange: updateSendButtonState,

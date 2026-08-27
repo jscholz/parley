@@ -94,6 +94,17 @@ function btnEl(id: string): HTMLButtonElement | null {
 export function init(o: ControlsOpts) {
   opts = o;
 
+  // Playback heartbeat → the bound on suppression's ttsPlaying gate.
+  // Deliberately a tapEnvelopes subscriber, NOT the single-slot
+  // setDataChannelListener: that slot is swapped save-and-restore by
+  // dictate/STTProvider, and a gate that only unbounds itself in some
+  // modes is the class of bug this whole mechanism exists to kill.
+  // Taps fan out and are registered once for the process.
+  conn.tapEnvelopes((ev: any) => {
+    if (!ev || ev.type !== 'tts-playing') return;
+    suppress.onPlaybackState(!!ev.active, 'bridge');
+  });
+
   // Network-drop signal (connected call torn down by the network, not the
   // user). Distinct from the state listener below because the drop reason
   // doesn't survive the transient failed→idle state transitions.
@@ -113,7 +124,18 @@ export function init(o: ControlsOpts) {
     // (field bug 2026-08-26). Every other state falls back to SSE
     // arming (harmless: suppress.reset() runs on the next call open,
     // and the gate is only read while a call is up).
-    suppress.setDataChannelOwnsArming(state === 'connected' && mode === 'talk');
+    //
+    // Stream mode gets 'playback-only': there is no bridge TTS track
+    // (signaling.py attaches one for mode=='talk' only), so the
+    // bridge's `listening` fires exactly ONCE per call and can never
+    // re-open a gate a later delta shut — and there is nothing to
+    // suppress anyway, since reply auto-play is skipped while a call
+    // is open. Text must not arm; only real playback evidence may.
+    suppress.setArmingPolicy(
+      state !== 'connected' ? 'sse'
+        : mode === 'talk' ? 'data-channel'
+        : 'playback-only',
+    );
     // Pre-button-split this code flipped btn-mic.active when a call
     // opened (back when btn-mic WAS the call button). After the split,
     // calls live on btn-call; btn-mic.active should reflect

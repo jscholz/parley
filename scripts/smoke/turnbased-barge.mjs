@@ -26,7 +26,7 @@
 // Latency sentinel: <1s for arm, <1.5s for fire (same budget as
 // realtime — arch is identical).
 
-import { waitForReady, pollUntil, assert } from './lib.mjs';
+import { waitForReady, pollUntil, assert, assertMicGateReleased } from './lib.mjs';
 
 export const NAME = 'turnbased-barge';
 export const DESCRIPTION = 'BargeDetector fires in turnbased mode (parity with realtime)';
@@ -169,6 +169,12 @@ export default async function run({ page, log }) {
     fireMs < 1_500,
     `fire ${fireMs}ms > 1.5s — expected ~600ms (500ms warmup + ticks)`,
   );
+
+  // Shared suppression invariant — a barge that halts playback must
+  // also release the mic gate (after the 1.5s speaker-drain grace),
+  // or the user's post-barge speech goes nowhere.
+  const gateMs = await assertMicGateReleased(page, 'turnbased barge + teardown');
+  log(`mic gate released (${gateMs}ms)`);
 
   log(`turnbased barge: arm=${armMs}ms fire=${fireMs}ms fires=${fires} clean teardown`);
 }

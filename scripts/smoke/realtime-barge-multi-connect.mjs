@@ -28,7 +28,7 @@
 //        actually called speechVad.stop, not just the BargeDetector loop).
 //   4. After 3 cycles: 3 barge sends, 3 destroy calls, no leaked state.
 
-import { assert, DEFAULT_URL } from './lib.mjs';
+import { assert, assertMicGateReleased, DEFAULT_URL } from './lib.mjs';
 
 export const NAME = 'realtime-barge-multi-connect';
 export const DESCRIPTION = 'BargeDetector fires on every cycle of open/fire/close (guards v0.422 stale-stream bug)';
@@ -280,6 +280,11 @@ export default async function run({ page, log }) {
     `expected >= ${CYCLES} VAD destroys, got ${totalDestroys} — ` +
     `stale activeVad would leak into the next call (the v0.422 bug shape)`,
   );
+
+  // Shared suppression invariant — no cycle may leave the gate latched
+  // for the next call.
+  const gateMs = await assertMicGateReleased(page, `${CYCLES} barge cycles`);
+  log(`mic gate released (${gateMs}ms)`);
 
   log(`multi-connect: ${CYCLES} cycles, all fired barge, all teardown clean`);
 }

@@ -78,6 +78,15 @@ MAX_PCM_QUEUE = 100
 STT_RETRY_BASE_S = 0.5
 STT_RETRY_MAX_S = 8.0
 
+# Cadence of the {type:'tts-playing'} playback heartbeat (see
+# _pcm_iter). The client turns this into a DEADLINE — its
+# user-transcript gate stays shut only while playback evidence keeps
+# arriving — so the ping period must sit comfortably under the client's
+# TTS_EVIDENCE_DEADLINE_MS (3 s, src/audio/realtime/suppress.ts). 1 s
+# tolerates two dropped/late pings and costs ~40 bytes/s of SCTP while
+# the agent is speaking, nothing at all while the call is idle.
+TTS_PLAYBACK_PING_S = 1.0
+
 
 def attach(peer, *, voice_config: VoiceConfig, api_server: Any = None) -> None:
     """Wire the inbound audio track of *peer* into the configured STT provider.
@@ -255,11 +264,50 @@ async def _run_stt(
         # frame (spam) or only at call-start (one-shot, useless for
         # multi-turn calls).
         listening_announced = False
+        # ── Playback heartbeat ({type:'tts-playing'}) ────────────────
+        # `listening` is EDGE-triggered and fires at most once per turn
+        # boundary, which is why the client's ttsPlaying gate could get
+        # latched with nothing to unlatch it (field bug 2026-08-26 and
+        # the three follow-on wedges: stream mode never gets a second
+        # `listening` at all, a barge consumes the turn's only one, and
+        # a reply that sanitizes to empty produces no TTS round behind
+        # the arming delta). This ping is the LEVEL signal that closes
+        # all three: it publishes `tts_track.is_active()` — the exact
+        # boolean this loop already uses to decide whether mic audio
+        # reaches Deepgram — so the client's gate can mirror the
+        # bridge's own half-duplex gate instead of guessing from text.
+        #
+        # Emission policy: on every change, plus a repeat every
+        # TTS_PLAYBACK_PING_S while active. `last_playback_sent`
+        # starts as None so the FIRST mic frame of every call publishes
+        # the initial state; that first envelope doubles as the
+        # capability announcement the client needs before it may
+        # enforce its deadline (an older bridge sends none, and the
+        # client then keeps its pre-existing unbounded behavior rather
+        # than risking an unsuppress mid-playback).
+        #
+        # Send failures don't advance the state, so a not-yet-open data
+        # channel simply retries on the next frame — same contract as
+        # listening_announced above.
+        last_playback_sent: Optional[bool] = None
+        last_playback_sent_at = 0.0
         while True:
             chunk = await pcm_q.get()
             if chunk is None:
                 return
             tts_active = tts_track is not None and tts_track.is_active()
+            now_mono = time.monotonic()
+            if (tts_active != last_playback_sent
+                    or (tts_active
+                        and now_mono - last_playback_sent_at >= TTS_PLAYBACK_PING_S)):
+                if _send_data_channel(peer, {"type": "tts-playing", "active": tts_active}):
+                    if tts_active != last_playback_sent:
+                        logger.info(
+                            "[stt-bridge] peer %s tts-playing -> %s",
+                            peer.peer_id, tts_active,
+                        )
+                    last_playback_sent = tts_active
+                    last_playback_sent_at = now_mono
             # Feed the BargePolicy regardless of tts_active — the policy's
             # own gate uses the flag to enable Silero only during the
             # agent-speaking window AND to reset hysteresis cleanly when
@@ -681,6 +729,18 @@ class _ParleyStreamReader:
             if self.peer.on_transcript is not None:
                 try: await self.peer.on_transcript(delta, False)
                 except Exception: pass
+            # Only forward an assistant delta the TTS queue actually
+            # ACCEPTED. Since cc57300 the PWA uses this envelope for
+            # exactly one thing — arming its ttsPlaying suppression gate
+            # (rendering is SSE-only; see main.ts "single render
+            # origin") — and arming is only ever correct when a TTS
+            # round is going to follow. A markup/emoji-only reply
+            # sanitizes to empty here, so pre-fix it armed the gate with
+            # no audio, no `listening` and therefore no clear: the mic
+            # was dead for the rest of the call. No speakable text, no
+            # arming envelope.
+            if not tts_delta:
+                return
             _send_data_channel(self.peer, {
                 "type": "transcript", "text": delta,
                 "is_final": False, "role": "assistant",
@@ -989,6 +1049,12 @@ async def _dispatch_to_agent(peer, utterance: str, *, user_message_id: Optional[
             if peer.on_transcript is not None:
                 try: await peer.on_transcript(delta, False)
                 except Exception: pass
+            # Same rule as _ParleyStreamReader: the DC assistant delta
+            # is the PWA's suppression-ARMING signal, so it may only go
+            # out when there is speakable text (and therefore a TTS
+            # round) behind it. See the comment there.
+            if not tts_delta:
+                return False
             _send_data_channel(peer, {
                 "type": "transcript", "text": delta,
                 "is_final": False, "role": "assistant",
