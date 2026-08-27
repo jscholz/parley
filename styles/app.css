@@ -5259,12 +5259,62 @@
   border-color: color-mix(in srgb, #f1c40f 60%, transparent);
   color: #f1c40f;
 }
+/* Per-phase controls: hide the buttons that CANNOT ACT in the current
+   phase (his report 2026-08-27 — the Stop button hanging outside the
+   pill on a 1:22:15 upload).
+
+   The overflow and the dead buttons are the same bug. Nothing in this
+   row can shrink — chip, timer and the four 44px B1 targets are all
+   flex:none by design — so once the state chip grows past "Paused" the
+   row is simply over-budget and the last child (Stop) is pushed out of
+   the pill. Measured at 390px with an hour-plus timer (7 glyphs, not 5):
+   recording -9px, paused -6px, UPLOADING +26px, RECONNECTING +47px.
+   Shrinking the hit targets was not an option — 44px is the B1
+   destructive-action decision after the 2026-08-18 mis-tap incident.
+   What the row can lose instead is buttons that do nothing:
+
+     pauseMeetingCapture()  early-returns unless phase === 'recording'
+     resumeMeetingCapture() early-returns unless phase === 'paused'
+     markMoment()           early-returns unless state.active
+     stopMeetingCapture()   early-returns unless state.active
+
+   'finishing' has active === false, so flag, pause AND stop are all
+   no-ops there — tapping Stop during an upload already did nothing,
+   which is the more serious half of this report. 'interrupted' keeps
+   flag and stop (both live; marks still land) and loses only pause.
+   'starting' keeps stop (it cancels a pending start via
+   standDownPendingStart) and loses the two that can't fire.
+
+   (Selectors are IDs: the flag and pause buttons carry only
+   .capture-pill-btn in the markup, no per-button class — a class-based
+   version of this rule matches nothing and silently changes nothing.) */
+.capture-pill.finishing #capture-pill-flag,
+.capture-pill.finishing #capture-pill-pause,
+.capture-pill.finishing #capture-pill-stop,
+.capture-pill.interrupted #capture-pill-pause,
+.capture-pill.starting #capture-pill-flag,
+.capture-pill.starting #capture-pill-pause { display: none; }
+
 @media (max-width: 699px) {
   /* Phone width: chip + timer + the four ≥44px B1 controls already
      overflow 390px, so the flex:1 title collapses to a one-glyph
      sliver (render-verify 2026-08-26). While a state chip shows, the
      chip IS the message — drop the unreadable title fragment rather
      than let it dangle. Plain recording (no chip) keeps the title. */
+  /* Last-resort valve. With the title gone there is nothing left to
+     absorb pressure, and paused/recording clear the edge by only 6-9px
+     — one more timer digit (10:00:00) or a wider font would put the
+     primary action outside the pill again. The chip is TEXT, so it
+     degrades legibly; B2 made it flex:none to stop a long meeting title
+     ellipsizing the state away, and that still holds — the title is
+     hidden here. Truncating "Reconnecting…" beats hiding Stop. */
+  .capture-pill-state {
+    /* flex-shrink must be 1 — `flex: none` above ignores min-width:0 and
+       refuses to give up a pixel, which is how the row overflowed in the
+       first place. This makes the chip the single shrink point. */
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis;
+  }
   .capture-pill.paused .capture-pill-title,
   .capture-pill.interrupted .capture-pill-title,
   .capture-pill.finishing .capture-pill-title { display: none; }
