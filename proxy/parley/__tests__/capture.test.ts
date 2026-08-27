@@ -17,7 +17,7 @@ import * as crypto from 'node:crypto';
 import {
   initCapture, createCapture, activateCapture, putSegment, stopCapture,
   patchCapture, addMark, getCapture, listCaptures, discardCapture,
-  purgeCapture, CaptureError,
+  purgeCapture, CaptureError, sweepCaptures,
 } from '../capture.ts';
 
 let dir = '';
@@ -406,4 +406,119 @@ test('transcript endpoint: content for finished captures, 404s, discarded tombst
   assert.equal(gone.status, 200);
   assert.equal(gone.body.status, 'discarded');
   assert.equal(gone.body.content, undefined);
+});
+
+
+// ── Stall detection (incident 2026-08-27) ─────────────────────────────
+// An hour-long meeting produced ZERO segments. The server could see at
+// 14:10 that no audio had ever arrived; it stayed silent until the
+// 10-minute heal at 14:18 and told the user nothing at all, so the phone
+// showed a healthy running timer until 15:30 and the meeting was lost.
+// The sweep now warns — minutes earlier, and out loud — WITHOUT taking
+// the terminal decision away from the existing heal.
+
+async function readManifestRaw(d: string, id: string): Promise<any> {
+  return JSON.parse(await fs.readFile(path.join(d, id, 'manifest.json'), 'utf8'));
+}
+
+/** Backdate ONLY the audio clock, leaving the manifest mtime fresh.
+ *  That combination is the incident: a capture whose file keeps being
+ *  touched while no sound arrives. */
+async function backdateAudio(d: string, id: string, ms: number): Promise<void> {
+  const file = path.join(d, id, 'manifest.json');
+  const m = JSON.parse(await fs.readFile(file, 'utf8'));
+  m.activated_at = Date.now() - ms;
+  if (m.last_segment_at) m.last_segment_at = Date.now() - ms;
+  await fs.writeFile(file, JSON.stringify(m));
+}
+
+test('stall: a live recording with no audio for 2m is flagged, audited and left recording', async () => {
+  const c = await createCapture({ title: 'Silent meeting' });
+  await activateCapture(c.id);
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);
+
+  await sweepCaptures();
+
+  const m = await readManifestRaw(dir, c.id);
+  assert.ok(m.stalled_since, 'stalled_since should be set by the sweep');
+  // Warn, never fail: recovery is still possible and the 10-minute heal
+  // owns the terminal verdict. Failing here would destroy a meeting that
+  // was about to reconnect.
+  assert.equal(m.status, 'recording');
+
+  const audit = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
+  assert.match(audit, /stall-warn/, 'the stall must be audited');
+});
+
+test('stall: warning is edge-triggered — a second sweep does not re-flag', async () => {
+  const c = await createCapture({ title: 'Silent meeting' });
+  await activateCapture(c.id);
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);
+
+  await sweepCaptures();
+  const first = (await readManifestRaw(dir, c.id)).stalled_since;
+  await sweepCaptures();
+  const second = (await readManifestRaw(dir, c.id)).stalled_since;
+
+  assert.equal(first, second, 'stalled_since must not be rewritten on every sweep');
+  const audit = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
+  assert.equal(audit.match(/stall-warn/g)?.length, 1, 'exactly one stall-warn, not one per sweep');
+});
+
+test('stall: an arriving segment clears the flag so a later stall warns again', async () => {
+  const c = await createCapture({ title: 'Recovering meeting' });
+  await activateCapture(c.id);
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);
+  await sweepCaptures();
+  assert.ok((await readManifestRaw(dir, c.id)).stalled_since);
+
+  const seg = Buffer.from('audio-is-back');
+  await putSegment(c.id, 0, seg, { t0Ms: 0, mime: 'audio/mp4', sha256: sha(seg) });
+  assert.equal((await readManifestRaw(dir, c.id)).stalled_since, undefined,
+    'a segment must clear the stall flag');
+
+  // ...and a NEW stall must be able to warn again.
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);
+  await sweepCaptures();
+  assert.ok((await readManifestRaw(dir, c.id)).stalled_since, 'a second stall must re-warn');
+  const audit = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
+  assert.equal(audit.match(/stall-warn/g)?.length, 2);
+});
+
+test('stall: a chatty-but-silent client cannot mask the stall by touching the manifest', async () => {
+  // THE TRAP. lastActivityMs() reads the manifest MTIME, which marks,
+  // patches and health pings all move. Keying the stall detector on that
+  // would let a client that is talking to the server while producing no
+  // sound look perfectly healthy — which is the exact failure being
+  // detected. The detector reads last_segment_at instead; this test is
+  // what stops someone "simplifying" it back.
+  const c = await createCapture({ title: 'Chatty but silent' });
+  await activateCapture(c.id);
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);
+
+  // Non-audio traffic: rename + a mark. Both rewrite the manifest, so
+  // its mtime is now fresh while no audio has EVER arrived.
+  await patchCapture(c.id, { title: 'Chatty but silent (renamed)' });
+  await addMark(c.id, { tMs: 1000 });
+  await backdateAudio(dir, c.id, 3 * 60 * 1000);   // keep audio clock old
+
+  await sweepCaptures();
+
+  const m = await readManifestRaw(dir, c.id);
+  assert.ok(m.stalled_since,
+    'manifest activity is NOT audio — a renamed, marked, silent capture must still stall');
+  assert.equal(m.segments.length, 0);
+});
+
+test('stall: healthy audio never trips the detector', async () => {
+  const c = await createCapture({ title: 'Healthy meeting' });
+  await activateCapture(c.id);
+  const seg = Buffer.from('fresh-audio');
+  await putSegment(c.id, 0, seg, { t0Ms: 0, mime: 'audio/mp4', sha256: sha(seg) });
+
+  await sweepCaptures();
+
+  const m = await readManifestRaw(dir, c.id);
+  assert.equal(m.stalled_since, undefined, 'recent audio must not be flagged');
+  assert.equal(m.status, 'recording');
 });

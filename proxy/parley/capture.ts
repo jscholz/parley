@@ -79,6 +79,18 @@ export interface CaptureManifest {
   failed_reason?: string;
   /** Epoch ms of the pending→recording transition. */
   activated_at?: number;
+  /** Arrival clock for AUDIO specifically, set on every accepted
+   *  segment. Distinct from the manifest mtime that lastActivityMs()
+   *  reads: marks, patches and (from 2026-08-27) health pings also move
+   *  that, and a stall detector keyed on it would be fooled by a client
+   *  that is chattering happily while producing no sound — which is
+   *  exactly the incident this was added for. */
+  last_segment_at?: number;
+  /** Set when the stall detector first notices audio has stopped
+   *  arriving on a live recording; cleared the moment a segment lands.
+   *  Presence is what makes the warning edge-triggered (one push per
+   *  stall, not one per sweep). */
+  stalled_since?: number;
   /** Tombstone stamp — when the capture entered Recently Deleted. */
   discarded_at?: number;
   /** Status held at discard time (restore-target hint). */
@@ -366,6 +378,35 @@ function summarize(m: CaptureManifest): CaptureSummary {
  *  this long is failed in place when the next capture starts. */
 const STALE_RECORDING_MS = 10 * 60 * 1000;
 
+/** Stall warning: audio should arrive every SEGMENT_MS (45s on the
+ *  client), so two missed segments means something is wrong NOW —
+ *  long before the 10-minute heal quietly buries the recording.
+ *
+ *  Incident 2026-08-27: an hour-long meeting produced ZERO segments.
+ *  The server knew at 14:10 that no audio had ever arrived; it said
+ *  nothing until the 14:18 sweep, and said nothing to the USER at all.
+ *  The phone kept showing a running timer until 15:30 and the meeting
+ *  was gone. A recording that is silently not recording is the worst
+ *  failure this feature has, so the server now says so out loud —
+ *  in-band (capture_changed) and out-of-band (push, which reaches a
+ *  pocketed phone even if its page is frozen).
+ *
+ *  Warn, do NOT fail: a stall is often recoverable (route change, a
+ *  backgrounded tab catching up), and the existing 10-minute heal
+ *  already owns the terminal decision. */
+const STALL_WARN_MS = 2 * 60 * 1000;
+
+/** The AUDIO arrival clock — segments only. Deliberately NOT
+ *  lastActivityMs(), which reads the manifest mtime and therefore also
+ *  moves on marks, patches and health pings; keying the stall detector
+ *  on that would let a chatty-but-silent client look healthy, which is
+ *  precisely the failure being detected. Falls back to activation (a
+ *  capture that never produced its FIRST segment is the incident case
+ *  and must warn too). */
+function lastAudioMs(m: CaptureManifest): number {
+  return m.last_segment_at ?? m.activated_at ?? m.started_at;
+}
+
 async function lastActivityMs(m: CaptureManifest): Promise<number> {
   // ARRIVAL clock, not meeting-relative time: manifest mtime moves on
   // every accepted segment/mark/patch. The previous started_at+t0
@@ -390,6 +431,40 @@ const PENDING_TTL_MS = 2 * 60 * 1000;
  *  restorable, for this long before the sweep purges it (audited). */
 const DISCARD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Out-of-band stall warning. A push is the only channel that reaches
+ *  a phone whose page is frozen or pocketed — the exact situation in
+ *  which a silent recording is most costly, because the user is in a
+ *  meeting believing it is being captured.
+ *
+ *  Best-effort by construction: push may be unconfigured (no VAPID) or
+ *  have no subscriptions, and a recording must never fail because a
+ *  notification could not be sent. Import is lazy so capture.ts stays
+ *  usable in unit tests that never touch the notification stack.
+ *
+ *  The copy names the ACTION, not the diagnosis: the user cannot fix a
+ *  stalled uploader, but they can look at their phone — which is all
+ *  that was needed on 2026-08-27 to save the meeting. */
+async function warnStalledCapture(m: CaptureManifest, silentForMs: number): Promise<void> {
+  try {
+    const { dispatchPush } = await import('./notifications/dispatch.ts');
+    const mins = Math.max(1, Math.round(silentForMs / 60000));
+    const body = m.segments.length === 0
+      ? `No audio has reached the server since it started ${mins}m ago. Open Parley to check.`
+      : `Audio stopped arriving ${mins}m ago (${m.segments.length} segments saved). Open Parley to check.`;
+    await dispatchPush({
+      title: `\u26a0\ufe0f "${m.title}" may not be recording`,
+      body,
+      chat_id: m.linked_chat || undefined,
+      // Stable tag: a stall that persists across sweeps must not stack
+      // duplicate banners. (Re-warning is already edge-triggered by
+      // stalled_since; this is belt-and-braces for multi-device.)
+      tag: `capture-stall-${m.id}`,
+    });
+  } catch (e) {
+    console.warn(`[capture] stall push failed for ${m.id}: ${String((e as Error)?.message || e)}`);
+  }
+}
+
 /** Janitor pass over every capture — the stale-recording heal it always
  *  had, plus pending-TTL expiry and Recently-Deleted retention. Runs
  *  under the create lock (createCapture calls it inline; server boot
@@ -410,6 +485,21 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
         await withCaptureLock(row.id, async () => {
           const m = await readManifest(row.id);
           if (m.status !== 'recording') return;
+          // Stall WARNING first — it must be able to fire on a capture
+          // that the heal below will not touch yet (the whole point is
+          // to speak up minutes earlier than the terminal verdict).
+          const audioSilentFor = Date.now() - lastAudioMs(m);
+          if (audioSilentFor > STALL_WARN_MS && m.stalled_since == null) {
+            m.stalled_since = Date.now();
+            await saveManifest(m);
+            const mins = Math.round(audioSilentFor / 60000);
+            void audit(m, 'stall-warn', {
+              actor: { source: 'sweep' },
+              reason: `no audio for ${mins}m (${m.segments.length} segments so far)`,
+            });
+            notifyChanged(m, 'stalled');
+            void warnStalledCapture(m, audioSilentFor);
+          }
           if (Date.now() - await lastActivityMs(m) <= STALE_RECORDING_MS) return;
           const next = m.segments.length ? 'complete' : 'failed';
           void audit(m, 'stale-heal', {
@@ -628,7 +718,18 @@ async function putSegmentLocked(
   await fs.writeFile(segmentPath(id, seg), body);
   m.segments.push(seg);
   m.segments.sort((a, b) => a.seq - b.seq);
+  m.last_segment_at = Date.now();
+  // Audio is flowing again — clear any stall flag so a later stall
+  // re-warns instead of staying silent because the field is still set.
+  const wasStalled = m.stalled_since != null;
+  delete m.stalled_since;
   await saveManifest(m);
+  if (wasStalled) {
+    void audit(m, 'stall-cleared', {
+      actor, reason: 'segment arrived after a stall warning',
+    });
+    notifyChanged(m, 'recovered');
+  }
   if (impliedActivation) {
     void audit(m, 'activate', {
       actor, priorStatus: 'pending', newStatus: 'recording',
@@ -927,7 +1028,7 @@ export async function listCaptures(opts?: { includeDiscarded?: boolean }): Promi
  *  without refetching on every segment. */
 function notifyChanged(
   m: CaptureManifest,
-  kind: 'created' | 'activated' | 'patched' | 'stopped' | 'completed' | 'discarded' | 'restored' | 'deleted',
+  kind: 'created' | 'activated' | 'patched' | 'stopped' | 'completed' | 'discarded' | 'restored' | 'deleted' | 'stalled' | 'recovered',
 ): void {
   try {
     pushEnvelope({
