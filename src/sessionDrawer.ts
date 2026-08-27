@@ -2705,6 +2705,34 @@ export function focusFilter() {
   }
 }
 
+/** Public hook for the "focus session list" hotkey / Esc-from-composer.
+ *
+ *  ArrowUp/Down navigation is a DOCUMENT-level listener that only bails
+ *  when focus sits in a text field (see the keydown handler above), so
+ *  the operative move here is simply to LEAVE the composer — everything
+ *  else is feedback. We still open the sidebar and put real DOM focus on
+ *  the active row so the jump is visible and screen readers land
+ *  somewhere sensible; `tabindex=-1` makes the row programmatically
+ *  focusable without inserting every session into the tab order.
+ *
+ *  Returns false when there is no row to land on (empty list), so the
+ *  caller can decline to claim the keystroke. */
+export function focusList(): boolean {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar && !sidebar.classList.contains('expanded')) {
+    sidebar.classList.add('expanded');
+  }
+  const active = document.querySelector<HTMLElement>('#sessions-list li.active')
+    || document.querySelector<HTMLElement>('#sessions-list li');
+  const focused = document.activeElement as HTMLElement | null;
+  if (focused && focused !== document.body) focused.blur();
+  if (!active) return false;
+  active.tabIndex = -1;
+  active.focus({ preventScroll: true });
+  active.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
 export function init(opts: {
   /** Render callback for every resume rung (mem/cache/server). Receives
    *  the switch's PaintToken — the chat id rides on it (tok.id) and the

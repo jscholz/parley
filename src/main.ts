@@ -249,6 +249,20 @@ function evaluateWakeLock(): void {
 /** Toggle the composer send button between idle (grey) and active (green).
  *  Sendable = memo recording in progress, typed text, draft content, or
  *  a pending voice transcript ready to send. */
+/** Put the caret in the reply box, cursor at the end of whatever draft
+ *  is already there (focus() alone can land it at position 0 in some
+ *  browsers, which makes Enter-then-type silently prepend). Returns
+ *  false when the composer is absent or read-only — the caller then
+ *  leaves the keystroke alone rather than claiming it for a no-op. */
+function focusComposer(): boolean {
+  const input = document.getElementById('composer-input') as HTMLTextAreaElement | null;
+  if (!input || readOnlyComposer || input.disabled) return false;
+  input.focus();
+  const end = input.value.length;
+  try { input.setSelectionRange(end, end); } catch { /* not all inputs support it */ }
+  return true;
+}
+
 function updateSendButtonState() {
   const send = document.getElementById('composer-send') as HTMLButtonElement | null;
   const input = document.getElementById('composer-input') as HTMLTextAreaElement | null;
@@ -1283,6 +1297,57 @@ async function boot() {
       if (infoPanel && !infoPanel.classList.contains('hidden')) {
         infoPanel.classList.add('hidden');
         infoPanel.setAttribute('aria-hidden', 'true');
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Enter (no modifiers, not already typing): jump into the composer
+    // for the session you're on. Completes the keyboard loop — ↑/↓ pick
+    // a session (sessionDrawer's document listener, which is live
+    // precisely when focus is OUTSIDE a text field), Enter drops into
+    // the reply box, Esc comes back out. His framing, 2026-08-27:
+    // "pressing enter while in session focus should take to composer in
+    // that session."
+    //
+    // Enter is a heavily-overloaded key, so this yields rather than
+    // competes: anything focusable that DOES something with Enter keeps
+    // it (buttons, links, summary/details, menu items), and any open
+    // overlay keeps it too — a dialog's default action must not be
+    // hijacked into "go type a message". We also only claim when the
+    // composer actually took focus.
+    if (e.key === 'Enter' && !inText
+        && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const interactive = t?.closest?.('button, a[href], summary, [role="button"], [role="menuitem"], [role="option"], select');
+      // Selectors verified against the real markup — my first pass
+      // guessed `.cmdk-overlay` / `.confirm-dialog`, neither of which
+      // exists, which would have silently let Enter jump to the composer
+      // out from under the search palette and the delete confirmation.
+      const overlayOpen = !!document.querySelector(
+        '#settings.on, #info-panel:not(.hidden), .hotkeys-help-dialog,'
+        + ' dialog[open], .cmdk-dialog, .sk-confirm-overlay',
+      );
+      if (!interactive && !overlayOpen && focusComposer()) {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Esc from the composer: step back out to the session list, so ↑/↓
+    // resume moving between sessions. The inverse of Enter above; keeps
+    // the loop closed without needing a modifier in either direction.
+    // Only fires for the composer itself — Esc inside the session
+    // filter, a hotkey-capture field or a dialog input belongs to those.
+    // Transcript-highlight mode keeps focus ON the composer while ↑/↓
+    // walk the bubbles, and its own Esc means "exit highlight" (which
+    // re-focuses the composer). Stepping out to the sidebar here would
+    // fight that handler — it runs after this one and would pull focus
+    // straight back, having flashed the sidebar open on the way. In
+    // highlight mode Esc stays theirs; a second Esc then lands here.
+    if (e.key === 'Escape' && t?.id === 'composer-input'
+        && !document.querySelector('.transcript-highlight')
+        && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (sessionDrawer.focusList()) {
         e.preventDefault();
         return;
       }
@@ -4478,6 +4543,23 @@ async function boot() {
           }
         }
       }
+    }
+    // Focus moves. These are the two halves of the keyboard loop between
+    // picking a session and replying in it; ArrowUp/Down already handle
+    // the middle (sessionDrawer's document listener, active whenever
+    // focus is outside a text field). Both fire from ANYWHERE including
+    // inside a text field — that's the point of "focus the other thing".
+    if (matches((s as any).hotkeyFocusComposer)) {
+      claim();
+      log('[hotkey] focusComposer');
+      focusComposer();
+      return;
+    }
+    if (matches((s as any).hotkeyFocusSessions)) {
+      claim();
+      log('[hotkey] focusSessions');
+      sessionDrawer.focusList();
+      return;
     }
     if (matches((s as any).hotkeyToggleCall)) {
       claim();
