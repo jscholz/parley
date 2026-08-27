@@ -141,11 +141,20 @@ function renderPinItem(item: PinnedItem, opts: { onPinClick: PinClickHandler }, 
   // all the way to the bottom of it to collapse it" (2026-08-27). This
   // bar exists only while expanded and is `position: sticky`, so it
   // stays reachable no matter how far into the body the list is
-  // scrolled. It is a discrete button rather than a click-anywhere
-  // region on purpose: the body must keep its text selectable, so a
-  // click inside it never folds.
+  // scrolled. The WHOLE bar is the hit target, not just the caret glyph
+  // (his nit, 2026-08-27) — a 14px icon is a poor thing to aim at, and
+  // widening it costs nothing here: the bar is chrome, holding no
+  // selectable text, so "don't let a click fold the message instead of
+  // selecting" still holds. The body itself remains expand-only.
+  // A drag that STARTS on the bar and ends in the body dispatches its
+  // click on the <li> (nearest common ancestor), not the bar, so it
+  // can't fold mid-selection; the guard below covers the residue.
   const collapseBar = document.createElement('div');
   collapseBar.className = 'pin-item-collapse-bar';
+  collapseBar.setAttribute('role', 'button');
+  collapseBar.tabIndex = 0;
+  collapseBar.title = 'Collapse';
+  collapseBar.setAttribute('aria-label', 'Collapse pinned message');
   const collapseBtn = document.createElement('button');
   collapseBtn.className = 'pin-item-collapse-btn';
   collapseBtn.type = 'button';
@@ -160,6 +169,10 @@ function renderPinItem(item: PinnedItem, opts: { onPinClick: PinClickHandler }, 
     caption.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     expandBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     expandBtn.setAttribute('aria-label', expanded ? 'Collapse pinned message' : 'Expand pinned message');
+    // Hover tooltip on both carets (his ask, 2026-08-27). The caption
+    // caret is a toggle so its label tracks state; the top bar only ever
+    // collapses, so its title is fixed at creation.
+    expandBtn.title = expanded ? 'Collapse' : 'Expand';
     expandBtn.innerHTML = expanded
       ? '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 6 8 10 12 6"/></svg>'
       : '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 10 8 6 12"/></svg>';
@@ -178,6 +191,23 @@ function renderPinItem(item: PinnedItem, opts: { onPinClick: PinClickHandler }, 
   caption.onclick = toggleExpanded;
   caption.onkeydown = (e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); toggleExpanded(e); };
   expandBtn.onclick = toggleExpanded;
+  // Whole-row collapse. Declines when the click completes a text
+  // selection, so a stray mouseup over the bar never eats the user's
+  // selection gesture.
+  const collapseFromBar = (e: Event) => {
+    e.stopPropagation();
+    if (String(window.getSelection() || '').length > 0) return;
+    setExpanded(false);
+  };
+  collapseBar.onclick = collapseFromBar;
+  collapseBar.onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    collapseFromBar(e);
+  };
+  // The inner button keeps its own handler: it must win over the bar's
+  // selection guard (an explicit hit on the caret always folds) and it
+  // stays the a11y-visible control.
   collapseBtn.onclick = (e) => { e.stopPropagation(); setExpanded(false); };
   setExpanded(expandedKeys.has(key));
 

@@ -17,9 +17,11 @@
 //   - clicking it (a real mouse click at its on-screen position, not an
 //     element.click(), so an overlapping element would fail here)
 //     collapses
+//   - the ENTIRE bar is the hit target, not just the 14px glyph — but a
+//     bar click that completes a text selection declines to fold
 //   - a click inside the expanded body still does not fold, so the text
-//     stays selectable — the constraint that ruled out making the whole
-//     top row click-sensitive
+//     stays selectable (the bar is chrome and holds no text, which is
+//     why widening its hit area doesn't threaten that)
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
 
 export const NAME = 'pin-drawer-top-collapse';
@@ -140,6 +142,77 @@ export default async function run({ page, log }) {
   await page.waitForTimeout(150);
   assert(!(await expanded(page)), 'clicking the top caret should collapse the pin');
   log('top caret collapses on a real click ✓');
+
+  // The WHOLE bar is the target, not just the glyph (his nit): click the
+  // empty left end of the strip, far from the caret, and it must fold.
+  await page.click('#pin-drawer-list .pin-item-expand-btn');
+  assert(await expanded(page), 're-expand for the whole-row hit test');
+  const farLeft = await page.evaluate(() => {
+    const bar = document.querySelector('#pin-drawer-list .pin-drawer-item.expanded .pin-item-collapse-bar');
+    const btn = bar.querySelector('.pin-item-collapse-btn');
+    const r = bar.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    return { x: r.left + 12, y: r.top + r.height / 2, glyphLeft: b.left, barLeft: r.left };
+  });
+  assert(farLeft.x < farLeft.glyphLeft - 8, 'probe point must be clear of the caret glyph or this proves nothing');
+  await page.mouse.click(farLeft.x, farLeft.y);
+  await page.waitForTimeout(150);
+  assert(!(await expanded(page)), 'clicking the empty part of the top bar should collapse the pin');
+  log('whole top row is the hit target, not just the glyph ✓');
+
+  // ...but a click that completes a text SELECTION must not fold, so a
+  // stray mouseup over the bar never eats the user's drag.
+  await page.click('#pin-drawer-list .pin-item-expand-btn');
+  const guarded = await page.evaluate(() => {
+    const li = document.querySelector('#pin-drawer-list .pin-drawer-item.expanded');
+    const body = li.querySelector('.pin-item-body');
+    const bar = li.querySelector('.pin-item-collapse-bar');
+    const range = document.createRange();
+    range.selectNodeContents(body.querySelector('p') || body);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    bar.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return {
+      selLen: String(window.getSelection()).length,
+      stillExpanded: li.classList.contains('expanded'),
+    };
+  });
+  assert(guarded.selLen > 0, 'selection fixture should have selected text');
+  assert(guarded.stillExpanded, 'a bar click that completes a selection must not fold the pin');
+  log('bar click declines while a selection is live ✓');
+
+  // Hover tooltips on BOTH carets; the caption one tracks state.
+  // Read title OR data-tip: src/util/tooltip.ts moves `title` into
+  // `data-tip` for the duration of a hover (so the native bubble doesn't
+  // double up with the styled one) and moves it back on mouseout. A bare
+  // getAttribute('title') therefore reads null whenever the pointer
+  // happens to rest on the element — which, after a page.click, it does.
+  const tips = await page.evaluate(() => {
+    const tip = (el) => el?.getAttribute('title') ?? el?.getAttribute('data-tip') ?? null;
+    const li = document.querySelector('#pin-drawer-list .pin-drawer-item');
+    return {
+      expandedNow: li.classList.contains('expanded'),
+      captionTip: tip(li.querySelector('.pin-item-expand-btn')),
+      barTip: tip(li.querySelector('.pin-item-collapse-bar')),
+      barBtnTip: tip(li.querySelector('.pin-item-collapse-btn')),
+    };
+  });
+  assert(tips.barTip === 'Collapse', `top bar tooltip should read Collapse, got ${tips.barTip}`);
+  assert(tips.barBtnTip === 'Collapse', `top caret tooltip should read Collapse, got ${tips.barBtnTip}`);
+  assert(tips.captionTip === (tips.expandedNow ? 'Collapse' : 'Expand'),
+    `caption caret tooltip should track state (expanded=${tips.expandedNow}), got ${tips.captionTip}`);
+  await page.click('#pin-drawer-list .pin-item-expand-btn');
+  const flipped = await page.evaluate(() => {
+    const el = document.querySelector('#pin-drawer-list .pin-drawer-item .pin-item-expand-btn');
+    const li = document.querySelector('#pin-drawer-list .pin-drawer-item');
+    return {
+      expandedNow: li.classList.contains('expanded'),
+      tip: el.getAttribute('title') ?? el.getAttribute('data-tip') ?? null,
+    };
+  });
+  assert(flipped.tip === (flipped.expandedNow ? 'Collapse' : 'Expand'),
+    `caption caret tooltip should flip with state, got ${flipped.tip}`);
+  log('both carets carry hover tooltips; caption one tracks state ✓');
 
   // Text selection must survive: body clicks never fold.
   await page.click('#pin-drawer-list .pin-item-expand-btn');

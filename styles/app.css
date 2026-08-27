@@ -2846,9 +2846,21 @@
      * as it scrolls under. */
     margin: -10px -12px 2px; padding: 4px 8px 2px;
     background: var(--surface);
+    /* Whole row is the hit target, not just the glyph — so it has to
+     * LOOK like one. Cursor + a hover tint of its own (a shade past the
+     * item's) keep an otherwise-empty strip from reading as dead space. */
+    cursor: pointer;
+    user-select: none;
   }
   .pin-drawer-item.expanded:hover .pin-item-collapse-bar {
     background: color-mix(in srgb, var(--fg) 6%, var(--surface));
+  }
+  .pin-drawer-item.expanded .pin-item-collapse-bar:hover {
+    background: color-mix(in srgb, var(--fg) 10%, var(--surface));
+  }
+  .pin-drawer-item.expanded .pin-item-collapse-bar:hover .pin-item-collapse-btn { color: var(--fg); }
+  .pin-item-collapse-bar:focus-visible {
+    outline: 2px solid var(--accent, currentColor); outline-offset: -2px;
   }
   .pin-item-collapse-btn {
     width: 22px; height: 22px; padding: 0; border: 0; background: transparent;
