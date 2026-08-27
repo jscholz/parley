@@ -22,7 +22,7 @@ export interface VoiceControllerDeps {
 
   // Sub-controller module singletons (structural shapes, injected so this
   // module stays decoupled from main's import graph).
-  webrtcControls: { isOpen(): boolean; closeIfOpen(): unknown };
+  webrtcControls: { isOpen(): boolean; closeIfOpen(source?: string): unknown };
   webrtcDictate: { isActive(): boolean; stop(): unknown };
   memo: { cancel(): void };
   capture: { hasActive(): boolean; currentOwner(): string | null; release(): void };
@@ -96,7 +96,7 @@ export function createVoiceController(deps: VoiceControllerDeps): VoiceControlle
   }
 
   function releaseCaptureIfActive(): void {
-    if (webrtcControls.isOpen()) void webrtcControls.closeIfOpen();
+    if (webrtcControls.isOpen()) void webrtcControls.closeIfOpen('release-capture');
     if (webrtcDictate.isActive()) void webrtcDictate.stop();
     if (getMemoActive()) {
       memo.cancel();

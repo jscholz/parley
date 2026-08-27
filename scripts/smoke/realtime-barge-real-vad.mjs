@@ -126,7 +126,7 @@ export default async function run({ page, log, mock }) {
   // the looping fixture gives the VAD plenty of runway.
   await page.evaluate(async () => {
     const suppress = await import('/build/audio/realtime/suppress.mjs');
-    suppress.onAssistantDelta();
+    suppress.onAssistantDelta({ viaDataChannel: true });
   });
 
   const bargeSent = async () => page.evaluate(() => {
@@ -143,7 +143,7 @@ export default async function run({ page, log, mock }) {
   while (!fired && Date.now() - t0 < 15_000) {
     await page.evaluate(async () => {
       const suppress = await import('/build/audio/realtime/suppress.mjs');
-      suppress.onAssistantDelta();
+      suppress.onAssistantDelta({ viaDataChannel: true });
     });
     fired = await bargeSent();
     if (!fired) await page.waitForTimeout(250);

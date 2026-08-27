@@ -324,7 +324,7 @@ async function attemptReopen(): Promise<void> {
   log(`[webrtc-recovery] reconnect attempt ${reconnectAttempts}`);
   const args = lastOpenArgs;
   if (!args) { giveUpReconnect(); return; }
-  try { await close('net-failed', { silent: true }); } catch { /* ignore */ }
+  try { await close('net-failed', { silent: true, source: 'reconnect-reopen' }); } catch { /* ignore */ }
   if (!reconnecting) return;  // gave up (or user hung up) during teardown
   try {
     await open(args.mode, args.opts);
@@ -347,7 +347,7 @@ function giveUpReconnect(): void {
   playFeedback('call-dropped');
   haptic([100, 50, 100]);
   if (onDropped) { try { onDropped('net-failed'); } catch (e) { diag('webrtc dropped listener err', e); } }
-  void close('net-failed');  // reconnecting now false → notify('idle') fires
+  void close('net-failed', { source: 'reconnect-giveup' });  // reconnecting now false → notify('idle') fires
 }
 
 // Coming back to the foreground while reconnecting is a strong signal the
@@ -388,6 +388,67 @@ export function currentMode(): CallMode | null {
  *  Returns null when no call is open. */
 export function getMicStream(): MediaStream | null {
   return active?.micStream ?? null;
+}
+
+// ── Post-listening transport diagnostic (field bug 2026-08-26) ─────────
+// The bridge's `listening` envelope only proves ITS side resumed. These
+// two bounded log lines capture the client half of the story the field
+// report couldn't answer: was the peer still healthy, and did outbound
+// mic RTP actually keep flowing after TTS ended? One snapshot + one 5s
+// bytesSent delta per `listening` envelope — cheap enough to leave on
+// permanently. See docs/bugs/2026-08-26-realtime-talk-post-reply-audio-
+// failures.md ("client checks at TTS end").
+let listeningStatsTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function logListeningTransport(): void {
+  const session = active;
+  if (!session) return;
+  const pc = session.pc;
+  let trackDesc = 'none';
+  try {
+    const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'audio');
+    const t = sender?.track ?? null;
+    if (t) trackDesc = `enabled=${t.enabled} muted=${t.muted} readyState=${t.readyState}`;
+  } catch (e: any) {
+    trackDesc = `err:${e?.message}`;
+  }
+  log(
+    `[webrtc-diag] listening: pc=${pc.connectionState}/${pc.iceConnectionState}/` +
+    `${pc.signalingState} dc=${session.dataChannel?.readyState ?? 'none'} ` +
+    `micTrack={${trackDesc}}`,
+  );
+  const readBytesSent = async (): Promise<number | null> => {
+    try {
+      const report = await pc.getStats();
+      let total: number | null = null;
+      report.forEach((s: any) => {
+        if (s && s.type === 'outbound-rtp' && (s.kind === 'audio' || s.mediaType === 'audio')) {
+          total = (total ?? 0) + (Number(s.bytesSent) || 0);
+        }
+      });
+      return total;
+    } catch { return null; }
+  };
+  // One sampler at a time — a new `listening` supersedes the pending one.
+  if (listeningStatsTimer != null) { clearTimeout(listeningStatsTimer); listeningStatsTimer = null; }
+  void readBytesSent().then((t0Bytes) => {
+    if (!active || active.pc !== pc) return;  // call cycled meanwhile
+    listeningStatsTimer = setTimeout(() => {
+      listeningStatsTimer = null;
+      void readBytesSent().then((t5Bytes) => {
+        if (!active || active.pc !== pc) return;
+        if (t0Bytes == null || t5Bytes == null) {
+          log('[webrtc-diag] outbound RTP sample unavailable (getStats)');
+          return;
+        }
+        const delta = t5Bytes - t0Bytes;
+        log(
+          `[webrtc-diag] outbound RTP bytesSent +5s: ${t0Bytes} → ${t5Bytes} ` +
+          `(Δ=${delta}${delta > 0 ? ', increasing' : ' — FLAT: mic RTP stalled after TTS end'})`,
+        );
+      });
+    }, 5000);
+  });
 }
 
 /** No-op kept for call-site compatibility. The bridge's
@@ -498,7 +559,7 @@ export async function open(
 ): Promise<void> {
   if (active) {
     log('[webrtc] open() called but session already active; closing first');
-    await close();
+    await close('user-hangup', { source: 'open-replace' });
   }
 
   // Remember the call args so a reconnect can re-open the same chat with
@@ -759,7 +820,7 @@ export async function open(
         `name=${e?.name ?? 'Unknown'}`,
         `message=${e?.message ?? '(none)'}`);
       setState('failed');
-      void close('setup-failed');
+      void close('setup-failed', { source: 'setup' });
       return;
     }
     // T3 — warm AEC reference path with silence on iOS, talk mode only.
@@ -781,11 +842,11 @@ export async function open(
     if (reconnecting) {
       // Mirror attemptReopen's signaling-failure path: tear this attempt
       // down quietly and retry within the reconnect window.
-      void close('net-failed', { silent: true }).then(() => scheduleReconnectAttempt());
+      void close('net-failed', { silent: true, source: 'reconnect-mic-failed' }).then(() => scheduleReconnectAttempt());
       return;
     }
     setState('failed');
-    void close('setup-failed');
+    void close('setup-failed', { source: 'setup' });
   });
 
   // Trickle ICE: queue candidates until we have a peer_id, then POST each.
@@ -854,7 +915,7 @@ export async function open(
       // Never connected → genuine setup failure. Surface as failed + tear
       // down (the open() error path also logs the specific cause).
       setState('failed');
-      void close('setup-failed');
+      void close('setup-failed', { source: 'setup' });
     }
   });
 
@@ -878,7 +939,7 @@ export async function open(
       `name=${e?.name ?? 'Unknown'}`,
       `message=${e?.message ?? '(none)'}`);
     setState('failed');
-    await close('setup-failed');
+    await close('setup-failed', { source: 'setup' });
     throw e;
   }
 
@@ -977,7 +1038,7 @@ export async function open(
       `name=${e?.name ?? 'Unknown'}`,
       `message=${e?.message ?? '(none)'}`);
     setState('failed');
-    await close('setup-failed');
+    await close('setup-failed', { source: 'setup' });
     throw e;
   }
   phase('signal');
@@ -985,7 +1046,7 @@ export async function open(
   if (!answer || !answer.peer_id) {
     log('[webrtc] answer payload missing peer_id');
     setState('failed');
-    await close('setup-failed');
+    await close('setup-failed', { source: 'setup' });
     throw new Error('answer payload missing peer_id');
   }
 
@@ -1001,7 +1062,7 @@ export async function open(
       `name=${e?.name ?? 'Unknown'}`,
       `message=${e?.message ?? '(none)'}`);
     setState('failed');
-    await close('setup-failed');
+    await close('setup-failed', { source: 'setup' });
     throw e;
   }
 
@@ -1040,7 +1101,7 @@ async function postIce(peerId: string, candidate: RTCIceCandidate) {
 
 export async function close(
   reason: CloseReason = 'user-hangup',
-  opts?: { silent?: boolean },
+  opts?: { silent?: boolean; source?: string },
 ): Promise<void> {
   // A user-initiated hangup cancels any in-flight reconnect. (Internal
   // reconnect teardown passes 'net-failed' + silent, so it won't trip
@@ -1090,7 +1151,11 @@ export async function close(
   }
   const tLocalClose = performance.now();
   log(
-    `[webrtc-close] reason=${reason} ` +
+    // `source` names the CALLER of close() — reason alone can't
+    // distinguish a real hang-up tap from e.g. a media-session pause
+    // handler, and field bug 2026-08-26 needed exactly that
+    // attribution for closes the user says he didn't request.
+    `[webrtc-close] reason=${reason} source=${opts?.source ?? '(internal)'} ` +
     `local-steps mic=${Math.round(tMicReleased - tStart)}ms ` +
     `dc=${Math.round(tDataChClose - tMicReleased)}ms ` +
     `pc=${Math.round(tPcClose - tDataChClose)}ms ` +
@@ -1171,7 +1236,7 @@ export class WebRTCSTTProvider implements STTProvider {
       return;
     }
     this.started = false;
-    try { await close(); } catch (e: any) { diag('[webrtc-stt] close err', e?.message); }
+    try { await close('user-hangup', { source: 'stt-provider-stop' }); } catch (e: any) { diag('[webrtc-stt] close err', e?.message); }
     if (this.savedListener) {
       setDataChannelListener(this.savedListener);
       this.savedListener = null;

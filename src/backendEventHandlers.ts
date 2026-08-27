@@ -107,6 +107,12 @@ export function handleReplyDelta({ replyId, cumulativeText, conversation, messag
       try { playFeedback('send'); } catch { /* best-effort */ }
     }
   }
+  // SSE-sourced arming — a NO-OP while a talk-mode call is connected
+  // (suppress.setDataChannelOwnsArming): during a call the data channel
+  // drives suppression, because SSE deltas can arrive AFTER the bridge's
+  // `listening` envelope (stall-flush/ring-replay) and would re-arm
+  // ttsPlaying with no TTS behind it, wedging the user-transcript path
+  // for the rest of the call (field bug 2026-08-26).
   webrtcSuppress.onAssistantDelta();
   if (ttsModule.isPaused()) {
     cancelReplyTts('new-turn');
@@ -324,6 +330,8 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
     void badge.clearUnread(conversation);
   }
 
+  // SSE-sourced — no-op during a connected talk call (DC owns arming;
+  // see onAssistantDelta comment in handleReplyDelta).
   webrtcSuppress.onAssistantFinal();
 
   const imageBlocks = extractImageBlocks(content);

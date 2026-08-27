@@ -169,9 +169,12 @@ export default async function run({ page, log, mock }) {
   log(`connect latency (mocked): ${connectMs}ms`);
 
   // Mark TTS as "playing" so the BargeDetector's isPlayingCb returns true.
+  // viaDataChannel: during a connected talk call the data channel owns
+  // suppression arming (2026-08-26 post-reply wedge fix) — this simulates
+  // the bridge's DC assistant envelope; bare SSE-style arming is ignored.
   await page.evaluate(async () => {
     const suppress = await import('/build/audio/realtime/suppress.mjs');
-    suppress.onAssistantDelta();
+    suppress.onAssistantDelta({ viaDataChannel: true });
   });
 
   const before = await page.evaluate(() => ({

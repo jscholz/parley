@@ -234,6 +234,18 @@ async def _run_stt(
         # source. See audio-bridge/barge_policy.py.
         barge_policy = peer.extra.get("barge_policy")
         was_active = False
+        # Post-TTS frame-level evidence (field bug 2026-08-26): the
+        # "resuming mic→Deepgram" line only proves the Boolean gate
+        # cleared. These counters prove FRAMES: on every TTS-end
+        # transition we sample the next ~1s (50 frames) of real mic
+        # audio and log its peak amplitude once — silence (peak≈0)
+        # means the CLIENT stopped producing audio; a healthy peak with
+        # no transcripts points at the STT hop instead. Round index +
+        # first-transcript flag live on peer.extra so _handle_transcript
+        # can log the first post-TTS transcript per round. One or two
+        # INFO lines per reply round — bounded.
+        post_tts_sample_left = 0
+        post_tts_peak = 0
         # Whether we've already announced "STT pipe is hot" for this
         # turn boundary. Flips True on the first frame the bridge
         # actually accepts into Deepgram (call-start AND every TTS-end
@@ -283,6 +295,31 @@ async def _run_stt(
                     peer.peer_id,
                 )
                 was_active = False
+                # Arm the post-TTS frame sampler + transcript probe for
+                # this resume (one round = one TTS-active window).
+                round_idx = int(peer.extra.get("post_tts_round") or 0) + 1
+                peer.extra["post_tts_round"] = round_idx
+                peer.extra["post_tts_first_tx_logged"] = False
+                post_tts_sample_left = 50
+                post_tts_peak = 0
+            if post_tts_sample_left > 0:
+                try:
+                    import array as _array
+                    samples = _array.array("h", chunk[: len(chunk) - (len(chunk) % 2)])
+                    if samples:
+                        post_tts_peak = max(post_tts_peak, max(samples), -min(samples))
+                except Exception:  # pragma: no cover — diag only
+                    pass
+                post_tts_sample_left -= 1
+                if post_tts_sample_left == 0:
+                    peer.extra["post_tts_peak"] = post_tts_peak
+                    logger.info(
+                        "[stt-bridge] peer %s post-TTS mic sample: round=%s "
+                        "peak=%.3f over 50 frames (~1s) — %s",
+                        peer.peer_id, peer.extra.get("post_tts_round"),
+                        post_tts_peak / 32768.0,
+                        "real audio flowing" if post_tts_peak > 100 else "SILENCE (client mic stalled?)",
+                    )
             # First mic frame after a TTS-active window (or the first
             # frame of the call entirely): announce listening so the
             # PWA can chime "your turn." Idempotent within a single
@@ -483,6 +520,17 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
     the FIRST utterance's position (Jonathan field bug 2026-08-09).
     Empty interims stay skipped — pure noise.
     """
+    # First transcript after a TTS round ended — the other half of the
+    # post-TTS frame evidence (see _pcm_iter): proves the resumed frames
+    # actually produced STT output. One INFO line per reply round.
+    extra = getattr(peer, "extra", None)
+    if extra is not None and extra.get("post_tts_round") and not extra.get("post_tts_first_tx_logged"):
+        extra["post_tts_first_tx_logged"] = True
+        logger.info(
+            "[stt-bridge] peer %s first post-TTS transcript (round=%s final=%s len=%d)",
+            peer.peer_id, extra.get("post_tts_round"), tx.is_final, len(tx.text or ""),
+        )
+
     if peer.on_transcript is not None:
         try:
             await peer.on_transcript(tx.text, tx.is_final)

@@ -50,6 +50,26 @@ const TTS_DRAIN_GRACE_MS = 1500;
 let suppressing = false;
 let suppressEndTimer: ReturnType<typeof setTimeout> | null = null;
 let ttsPlayingClearTimer: ReturnType<typeof setTimeout> | null = null;
+// While a talk-mode call is CONNECTED, the peer's ordered data channel
+// is the only trusted arming source for suppression. Field bug
+// 2026-08-26 (docs/bugs/2026-08-26-realtime-talk-post-reply-audio-
+// failures.md): the SSE stream channel and the WebRTC data channel are
+// independent transports with no cross-ordering guarantee. A reply's
+// SSE deltas can arrive AFTER the bridge's {type:'listening'} envelope
+// already cleared ttsPlaying — e.g. an SSE stall while the phone is
+// pocketed that flushes on wake, or a visibilitychange forceReconnect
+// ring-replay of the just-spoken reply. Each such late delta re-armed
+// ttsPlaying with no TTS round behind it, so no `listening` ever
+// followed and EVERY subsequent user transcript was dropped at
+// main.ts's isTtsPlaying() gate until the call was cycled ("every time
+// you reply, some state gets flipped; it doesn't stream from me
+// anymore"). The bridge forwards the same assistant deltas over the
+// data channel (rendering parity), and there the ordering IS
+// guaranteed: every DC assistant delta feeds the bridge's TTS queue,
+// and `listening` is only emitted after that audio finishes — so a
+// DC-armed ttsPlaying always has a DC clear coming. Controls flips
+// this on at 'connected' (talk mode) and off on teardown states.
+let dcOwnsArming = false;
 // TTS audio playback flag — distinct from `suppressing` because the
 // transcript-suppression window is short (final + 1.2s grace, just long
 // enough to drop the AEC-leaked speakerphone tail) but the TTS audio
@@ -70,11 +90,29 @@ export function isTtsPlaying(): boolean {
   return ttsPlaying;
 }
 
-/** Called by main.ts on every assistant transcript delta. First call
+/** Flip the arming-source policy. `true` while a talk-mode call is
+ *  connected: only `viaDataChannel` deltas/finals may arm or extend
+ *  suppression (see dcOwnsArming rationale above). Managed exclusively
+ *  by controls.ts's state listener. Idempotent. */
+export function setDataChannelOwnsArming(on: boolean): void {
+  dcOwnsArming = !!on;
+}
+
+/** Test-only introspection. */
+export function __dcOwnsArmingForTests(): boolean {
+  return dcOwnsArming;
+}
+
+/** Called on every assistant transcript delta — from main.ts's SSE
+ *  reply handler (default) or, during a talk call, from the data-
+ *  channel assistant envelopes (`viaDataChannel: true`). First call
  *  of a reply turn flips suppression on; subsequent calls within the
  *  same reply cancel any pending end-timer (each delta extends the
- *  tail). */
-export function onAssistantDelta(): void {
+ *  tail). While a talk call owns arming, non-DC (SSE) deltas are
+ *  IGNORED — they can be late replays with no TTS behind them (the
+ *  2026-08-26 post-reply wedge). */
+export function onAssistantDelta(opts?: { viaDataChannel?: boolean }): void {
+  if (dcOwnsArming && !opts?.viaDataChannel) return;
   if (suppressEndTimer) {
     clearTimeout(suppressEndTimer);
     suppressEndTimer = null;
@@ -90,10 +128,13 @@ export function onAssistantDelta(): void {
   ttsPlaying = true;
 }
 
-/** Called by main.ts on assistant `is_final: true`. Schedules
- *  suppression-clear after the grace period, unless a delta arrives
- *  in the meantime (which would extend the tail). */
-export function onAssistantFinal(): void {
+/** Called on assistant `is_final: true` (same two sources as
+ *  onAssistantDelta). Schedules suppression-clear after the grace
+ *  period, unless a delta arrives in the meantime (which would extend
+ *  the tail). Non-DC finals are ignored while a talk call owns arming
+ *  — symmetric with onAssistantDelta. */
+export function onAssistantFinal(opts?: { viaDataChannel?: boolean }): void {
+  if (dcOwnsArming && !opts?.viaDataChannel) return;
   if (!suppressing) return;
   if (suppressEndTimer) clearTimeout(suppressEndTimer);
   suppressEndTimer = setTimeout(() => {
@@ -161,6 +202,9 @@ export function reset(): void {
     ttsPlayingClearTimer = null;
   }
   ttsPlaying = false;
+  // Arming policy resets with the call lifecycle too — controls re-arms
+  // it on the next 'connected' (talk) transition.
+  dcOwnsArming = false;
 }
 
 function stopSuppressing(reason: string): void {

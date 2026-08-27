@@ -620,13 +620,13 @@ async function boot() {
         return;
       }
       if (webrtcControls.isOpen()) {
-        void webrtcControls.closeIfOpen();
+        void webrtcControls.closeIfOpen('mediasession-pause');
       }
     },
     onStop: () => {
       // BT explicit stop: same as pause for now — close the call.
       if (webrtcControls.isOpen()) {
-        void webrtcControls.closeIfOpen();
+        void webrtcControls.closeIfOpen('mediasession-stop');
       }
     },
     onForeground: () => {
@@ -1195,7 +1195,7 @@ async function boot() {
       // If a WebRTC call is open, close it so the new device picks up on
       // the next open. (Live device-swap on a peer connection is finicky;
       // simpler to bounce.)
-      if (webrtcControls.isOpen()) void webrtcControls.closeIfOpen();
+      if (webrtcControls.isOpen()) void webrtcControls.closeIfOpen('mic-change');
     },
     onStreamingEngineChange: () => {
       // Engine flip — re-evaluate UI affordances. Local engine hides
@@ -2013,6 +2013,11 @@ async function boot() {
       // playing through the speaker — barge couldn't fire past the
       // first 1.2s of any reply (v0.381 field-test regression).
       webrtcSuppress.onListening();
+      // Field-bug 2026-08-26 diagnostics: snapshot pc/ICE/DC/sender-track
+      // state and sample outbound RTP bytesSent over the next 5s, so a
+      // "bridge says listening but my speech goes nowhere" report is
+      // answerable from the client log alone (2 bounded lines per turn).
+      try { webrtcConnection.logListeningTransport(); } catch { /* diag only */ }
       // Visual pulse — adds the .listening class to the mic button so
       // the user can distinguish "we got your touch" (red filled, no
       // pulse) from "actually listening" (red filled + pulse). The
@@ -2022,6 +2027,22 @@ async function boot() {
       return;
     }
     if (ev.type !== 'transcript' || typeof ev.text !== 'string') return;
+    if (ev.role === 'assistant') {
+      // Talk-mode suppression arming rides the DATA CHANNEL, not the SSE
+      // reply stream (field bug 2026-08-26). The bridge forwards every
+      // assistant delta it TTSes over this ordered channel, and its
+      // `listening` envelope is guaranteed to arrive AFTER the last
+      // delta of the last TTS round — so a ttsPlaying armed here always
+      // has its clear coming. SSE deltas, by contrast, can land after
+      // `listening` (stall-flush on wake, ring replay on reconnect) and
+      // used to re-arm ttsPlaying forever, silently dropping every
+      // subsequent user transcript below. Rendering still ignores these
+      // envelopes — the SSE handleReplyDelta/Final path stays the single
+      // render origin.
+      if (ev.is_final) webrtcSuppress.onAssistantFinal({ viaDataChannel: true });
+      else webrtcSuppress.onAssistantDelta({ viaDataChannel: true });
+      return;
+    }
     if (ev.role === 'user') {
       // Half-duplex: while the agent is speaking, the speaker-to-mic
       // path re-captures TTS output as STT input. Drop user transcripts
@@ -2054,9 +2075,10 @@ async function boot() {
       webrtcDictation.handleUserFinal(ev.text);
       return;
     }
-    // Assistant transcripts arrive on the SSE handleReplyDelta /
+    // Assistant transcript RENDERING happens on the SSE handleReplyDelta /
     // handleReplyFinal path (single render origin); the bridge's
-    // ev.role === 'assistant' duplicates are intentionally ignored.
+    // ev.role === 'assistant' duplicates only drive suppression arming
+    // (handled above) and are otherwise ignored.
   });
 
   // Populate the mic picker once on boot. It needs prior getUserMedia
@@ -3014,7 +3036,7 @@ async function boot() {
   ): Promise<void> {
     if (memoActive) return;
     if (dictateActive) await webrtcDictate.stop();
-    if (webrtcControls.isOpen()) await webrtcControls.closeIfOpen();
+    if (webrtcControls.isOpen()) await webrtcControls.closeIfOpen('start-memo');
     // Batch dictation: register the composer insertion anchor NOW, at
     // recording start (the cursor captured at the mic gesture site).
     // The transcript can land seconds — or, via the durable outbox
@@ -3192,7 +3214,7 @@ async function boot() {
 
   async function stopCallStream(): Promise<void> {
     if (!webrtcControls.isOpen()) return;
-    await webrtcControls.closeIfOpen();
+    await webrtcControls.closeIfOpen('stop-call-stream');
   }
 
   // ── Listen mode (turn-based handsfree) ─────────────────────────────
@@ -3206,7 +3228,7 @@ async function boot() {
     if (listenActive) return;
     if (memoActive) return;
     if (dictateActive) await webrtcDictate.stop();
-    if (webrtcControls.isOpen()) await webrtcControls.closeIfOpen();
+    if (webrtcControls.isOpen()) await webrtcControls.closeIfOpen('start-listen');
     primeAudio(player);
     audioSession.prepareForCapture();
     // Mount the recorder bar via the shared helper — same place memo
@@ -4210,7 +4232,7 @@ async function boot() {
       const newMode: 'talk' | 'stream' = next ? 'talk' : 'stream';
       void (async () => {
         try {
-          await webrtcControls.closeIfOpen();
+          await webrtcControls.closeIfOpen('tts-mode-flip');
           await webrtcControls.openCall(newMode);
         } catch (e: any) {
           diag('tts-flip mode swap failed', e?.message);
@@ -4294,7 +4316,7 @@ async function boot() {
     }
     if (webrtcControls.isOpen()) {
       e.preventDefault();
-      void webrtcControls.closeIfOpen();
+      void webrtcControls.closeIfOpen('esc-key');
       return;
     }
   });
@@ -4564,7 +4586,7 @@ async function boot() {
   const btnRefresh = document.getElementById('btn-refresh');
   if (btnRefresh) {
     btnRefresh.onclick = async () => {
-      try { void webrtcControls.closeIfOpen(); } catch {}
+      try { void webrtcControls.closeIfOpen('refresh-button'); } catch {}
       try { player.pause(); player.src = ''; player.load(); } catch {}
 
       // Run keyterms + settings rehydrate in parallel with the SW

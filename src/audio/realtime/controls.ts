@@ -104,6 +104,16 @@ export function init(o: ControlsOpts) {
 
   conn.setStateListener((state, mode) => {
     log('[webrtc-controls] state=', state, 'mode=', mode);
+    // Suppression arming source: while a talk call is CONNECTED, only
+    // the peer's ordered data channel may arm/extend suppression — the
+    // SSE stream channel can deliver a reply's deltas AFTER the
+    // bridge's `listening` envelope (stall-flush on wake, ring replay
+    // on forceReconnect), which re-armed ttsPlaying with no TTS behind
+    // it and wedged the user-transcript path for the rest of the call
+    // (field bug 2026-08-26). Every other state falls back to SSE
+    // arming (harmless: suppress.reset() runs on the next call open,
+    // and the gate is only read while a call is up).
+    suppress.setDataChannelOwnsArming(state === 'connected' && mode === 'talk');
     // Pre-button-split this code flipped btn-mic.active when a call
     // opened (back when btn-mic WAS the call button). After the split,
     // calls live on btn-call; btn-mic.active should reflect
@@ -237,7 +247,7 @@ export async function toggleCall(): Promise<void> {
   // a re-open attempt is mid-flight.
   if (conn.isOpen() || conn.isReconnecting()) {
     log('[webrtc-controls] toggleCall close (currentMode=', conn.currentMode(), ' reconnecting=', conn.isReconnecting(), ')');
-    await conn.close();
+    await conn.close('user-hangup', { source: 'toggle-call' });
     return;
   }
   // Talk mode requires bridge TTS over the peer track; with
@@ -263,7 +273,7 @@ export async function toggleCall(): Promise<void> {
 export async function openCall(mode: conn.CallMode): Promise<void> {
   if (conn.isOpen()) {
     if (conn.currentMode() === mode) return;  // already in the right mode
-    await conn.close();
+    await conn.close('user-hangup', { source: 'open-call-mode-switch' });
   }
   log('[webrtc-controls] openCall mode=', mode);
   try {
@@ -275,8 +285,16 @@ export async function openCall(mode: conn.CallMode): Promise<void> {
   }
 }
 
-export async function closeIfOpen(): Promise<void> {
-  if (conn.isOpen() || conn.isReconnecting()) await conn.close();
+/** Close the call if one is open (or recovering). *source* names the
+ *  caller in the [webrtc-close] log line — field bug 2026-08-26 saw
+ *  clean client-side closes the user swears he didn't request, and
+ *  every close path funnels through here with the same 'user-hangup'
+ *  reason, so the reason alone can't attribute them. Pass a stable
+ *  short tag (e.g. 'mediasession-pause'). */
+export async function closeIfOpen(source = 'close-if-open'): Promise<void> {
+  if (conn.isOpen() || conn.isReconnecting()) {
+    await conn.close('user-hangup', { source });
+  }
 }
 
 export function isOpen(): boolean {

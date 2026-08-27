@@ -158,7 +158,7 @@ export default async function run({ page, log }) {
   });
   await page.evaluate(async () => {
     const suppress = await import('/build/audio/realtime/suppress.mjs');
-    suppress.onAssistantDelta();
+    suppress.onAssistantDelta({ viaDataChannel: true });
   });
 
   // Verify start kicked off — vad-starts should be 1, but resolved likely 0
@@ -203,7 +203,7 @@ export default async function run({ page, log }) {
   await page.evaluate(async () => {
     const suppress = await import('/build/audio/realtime/suppress.mjs');
     suppress.reset();
-    suppress.onAssistantDelta();
+    suppress.onAssistantDelta({ viaDataChannel: true });
   });
   // Wait for second VAD to warm + flip speech active to fire barge.
   await page.waitForTimeout(400);

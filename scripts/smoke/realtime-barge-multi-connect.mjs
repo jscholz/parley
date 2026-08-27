@@ -183,7 +183,7 @@ export default async function run({ page, log }) {
     // Mark TTS playing for this cycle.
     await page.evaluate(async () => {
       const suppress = await import('/build/audio/realtime/suppress.mjs');
-      suppress.onAssistantDelta();
+      suppress.onAssistantDelta({ viaDataChannel: true });
     });
 
     // ── Fire ─────────────────────────────────────────────────────────
