@@ -405,7 +405,21 @@ export function onBarge(): void {
   ttsPlayingClearTimer = setTimeout(() => {
     ttsPlayingClearTimer = null;
     ttsPlaying = false;
+    // Field 2026-08-27: this clear used to be silent — the one healthy
+    // round always logs "playback ended (bridge) — gate open", so its
+    // absence after a barge read as "gate never opened" and cost the
+    // post-barge wedge diagnosis an hour. One line per barge.
+    log('[suppress] playback ended ( barge-drain ) — gate open');
   }, TTS_DRAIN_GRACE_MS);
+}
+
+/** True while the post-barge speaker-drain grace window is running —
+ *  the ~1.5 s after a barge in which `ttsPlaying` is held true so the
+ *  drained speaker tail can't be transcribed into a fake user turn.
+ *  Exposed so main.ts's gate diagnostics can attribute a dropped user
+ *  transcript to the drain window vs the reply window. */
+export function isBargeDrainActive(): boolean {
+  return ttsPlayingClearTimer !== null;
 }
 
 /** Called by main.ts when the bridge sends `{type:'listening'}` —

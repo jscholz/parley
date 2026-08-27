@@ -158,9 +158,26 @@ export default async function run({ page, log, mock }) {
   });
 
   // R5 — barge mid-reply, then the aborted reply's trailing deltas.
+  //
+  // Staged as the bridge actually behaves (verified against the
+  // 2026-08-27 field logs, peer c24cae28…): a parley-platform reply
+  // arrives as ONE cumulative DC delta immediately followed by the DC
+  // final (reply_final trails reply_delta by ~1 ms — the agent ships
+  // whole bubbles), and while the Aura audio is on the wire the bridge
+  // ticks {type:'tts-playing', active:true} at ~1 Hz
+  // (TTS_PLAYBACK_PING_S). The pre-fix staging here had no final and
+  // no heartbeats, which is not an ordering the real bridge produces.
   await afterReply('barge then the halted reply\'s trailing deltas', async () => {
     await dcRecv(page, { type: 'tts-playing', active: true });
     await dcRecv(page, { type: 'transcript', role: 'assistant', text: 'Let me explain at', is_final: false });
+    await dcRecv(page, { type: 'transcript', role: 'assistant', text: '', is_final: true });
+    // ~1 Hz playback heartbeats while the reply audio plays (each one
+    // renews the client's playback-evidence deadline — the barge below
+    // fires mid-heartbeat-stream, exactly like the field round).
+    for (let i = 0; i < 2; i++) {
+      await page.waitForTimeout(1_000);
+      await dcRecv(page, { type: 'tts-playing', active: true });
+    }
     // User interrupts — through the REAL client-side detector, which is
     // the only thing that reaches suppress.onBarge(). The bridge then
     // halts the TTS track and spends the turn's one and only
@@ -168,8 +185,18 @@ export default async function run({ page, log, mock }) {
     const b = await fireClientBarge(page);
     log(`  client barge fired=${b.fired} in ${b.ms}ms`);
     if (!b.fired) failures.push('barge never fired — the R5 ordering was not actually staged');
+    // Bridge halt lands ~150 ms after the upstream envelope; both the
+    // level flip and the turn's `listening` arrive INSIDE the client's
+    // 1.5 s drain grace (field: halt at +160 ms).
+    await page.waitForTimeout(150);
     await dcRecv(page, { type: 'tts-playing', active: false });
     await dcRecv(page, { type: 'listening' });
+    // The user's barge shout itself gets transcribed and lands inside
+    // the drain window (field: `first post-TTS transcript round=3
+    // final=False len=5` at +790 ms). It must be swallowed silently —
+    // and must not poison the next turn.
+    await page.waitForTimeout(400);
+    await dcRecv(page, { type: 'transcript', role: 'user', text: 'Okay.', is_final: false });
     // …and the parley stream subscriber, which was never halted, keeps
     // shipping the dead reply's deltas over the same channel while the
     // agent finishes generating.
@@ -180,9 +207,10 @@ export default async function run({ page, log, mock }) {
     // trailing deltas that land INSIDE that 1.5 s are healed by the
     // drain timer even on pre-fix code, and staging them there proves
     // nothing. The field case is an aborted LONG reply, whose deltas
-    // keep coming for seconds. These land at ~2 s and ~3.2 s: past the
-    // drain grace, and straddling the post-barge stale window.
-    await page.waitForTimeout(2_000);
+    // keep coming for seconds. These land at ~1.9 s and ~3.1 s after
+    // the barge: past the drain grace, and straddling the post-barge
+    // stale window (BARGE_STALE_DELTA_MS = 2.5 s).
+    await page.waitForTimeout(1_300);
     await dcRecv(page, { type: 'transcript', role: 'assistant', text: ' great', is_final: false });
     await page.waitForTimeout(1_200);
     await dcRecv(page, { type: 'transcript', role: 'assistant', text: ' length about this.', is_final: false });

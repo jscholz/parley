@@ -499,7 +499,7 @@ test('stall: a chatty-but-silent client cannot mask the stall by touching the ma
   // Non-audio traffic: rename + a mark. Both rewrite the manifest, so
   // its mtime is now fresh while no audio has EVER arrived.
   await patchCapture(c.id, { title: 'Chatty but silent (renamed)' });
-  await addMark(c.id, { tMs: 1000 });
+  await addMark(c.id, 1000);
   await backdateAudio(dir, c.id, 3 * 60 * 1000);   // keep audio clock old
 
   await sweepCaptures();

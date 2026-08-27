@@ -48,6 +48,7 @@ Dispatch path:
 
 from __future__ import annotations
 
+import array
 import asyncio
 import logging
 import os
@@ -77,6 +78,48 @@ MAX_PCM_QUEUE = 100
 # failure retries slowly instead of hammering the provider.
 STT_RETRY_BASE_S = 0.5
 STT_RETRY_MAX_S = 8.0
+
+# ── Transcript-hole diagnostics (field 2026-08-27, bike test) ─────────
+#
+# Three times that night, real mic audio flowed into Deepgram and NO
+# transcripts came back for 11–30+ seconds (once mid-monologue, twice
+# right after a barge — the post-barge dictation wedge). The logs could
+# not localize it: the bridge only logged the FIRST transcript per
+# post-TTS round and sampled mic peaks for a single second, so "Deepgram
+# went quiet", "the mic went quiet" and "the client dropped them" were
+# indistinguishable. Lab replays of the exact stream parameters (clean
+# speech → zero-fill gate → speech, including mid-word cuts) show
+# Deepgram itself recovering within ~0.9 s — so when the next hole
+# happens, these bounded diagnostics have to name the guilty layer:
+#
+#   • per-round transcript counters (interims / finals / empty finals),
+#     logged when the round ends — zeros are the wedge signature;
+#   • a stall line when the mic has voice-level audio but no transcript
+#     has arrived for STALL_AFTER_S — "audio in, nothing out" pins the
+#     STT hop; its absence with a silent mic pins the capture path;
+#   • an "utterance closed EMPTY after N interims" line — observed live
+#     in the lab: Deepgram occasionally returns a FINAL with an empty
+#     transcript for a segment its interims had already shown, which
+#     silently eats the content (and any sendword) the interims carried.
+#
+# Cost: ≤2 INFO lines per reply round + at most one stall line per
+# STALL_RELOG_S while the anomaly persists.
+STALL_AFTER_S = 5.0
+STALL_RELOG_S = 10.0
+# Peak (int16) above which a probed frame counts as "voice-level".
+# 656/32768 ≈ 0.02 — an order of magnitude over line noise, well under
+# any real speech peak seen in the field samples (0.1–0.3).
+STALL_VOICE_PEAK = 656
+# Probe every Nth frame (20 ms frames → 10 probes/s). Keeps the extra
+# per-frame work off the hot path.
+STALL_PROBE_EVERY = 5
+# Inbound-RTP gap logging (the case the per-frame stall detector CANNOT
+# see: when the phone's uplink stalls, track.recv() blocks and NO frames
+# arrive at all — Deepgram is fed nothing, transcribes nothing, and
+# closes with NET-0001 after ~10 s; below 10 s the stall was completely
+# invisible). Logged retroactively when the next frame lands. 20 ms is
+# the nominal cadence, so 1 s ≈ 50 missing frames — far beyond jitter.
+RTP_GAP_LOG_S = 1.0
 
 # Cadence of the {type:'tts-playing'} playback heartbeat (see
 # _pcm_iter). The client turns this into a DEADLINE — its
@@ -146,9 +189,19 @@ async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: s
     frames_seen = 0
     bytes_pushed = 0
     started = time.time()
+    last_frame_at: Optional[float] = None
     try:
         while True:
             frame = await track.recv()
+            now_mono = time.monotonic()
+            if last_frame_at is not None and now_mono - last_frame_at >= RTP_GAP_LOG_S:
+                logger.warning(
+                    "[stt-bridge] peer %s inbound mic RTP GAP: %.1fs with no "
+                    "frames (frame %d) — uplink stalled; Deepgram heard "
+                    "nothing for the duration",
+                    peer_id, now_mono - last_frame_at, frames_seen + 1,
+                )
+            last_frame_at = now_mono
             frames_seen += 1
             for resampled in resampler.resample(frame):
                 # av AudioFrame.to_ndarray() => int16 array shaped (channels, samples)
@@ -291,6 +344,16 @@ async def _run_stt(
         # listening_announced above.
         last_playback_sent: Optional[bool] = None
         last_playback_sent_at = 0.0
+        # Transcript-hole stall detector state (see STALL_AFTER_S).
+        # `resumed_at` anchors the "no transcripts since" clock at the
+        # start of each listening window; `voice_last_at` is refreshed
+        # by the 10 Hz peak probe whenever the mic carries voice-level
+        # audio. Voice after the anchor + STALL_AFTER_S of transcript
+        # silence = the smoking-gun line tonight's logs were missing.
+        resumed_at: Optional[float] = None
+        voice_last_at = 0.0
+        stall_logged_at = 0.0
+        probe_i = 0
         while True:
             chunk = await pcm_q.get()
             if chunk is None:
@@ -327,6 +390,10 @@ async def _run_stt(
                         peer.peer_id,
                     )
                     was_active = True
+                    # The listening round that just ended: say what the
+                    # STT hop produced for it (zeros = the wedge shape).
+                    _log_round_tx_summary(peer, "tts-start")
+                    resumed_at = None
                 # Half-duplex echo guard: substitute silence so Deepgram
                 # doesn't get fed the speakerphone bleed of our own TTS.
                 # Barge detection is owned by the PWA's client-side
@@ -350,6 +417,37 @@ async def _run_stt(
                 peer.extra["post_tts_first_tx_logged"] = False
                 post_tts_sample_left = 50
                 post_tts_peak = 0
+            if resumed_at is None:
+                # First forwarded frame of a listening window (call
+                # start or post-TTS resume) — anchor the stall clock.
+                resumed_at = now_mono
+                stall_logged_at = 0.0
+            # ── Stall detector: voice-level mic audio with no
+            # transcripts for STALL_AFTER_S. 10 Hz peak probe keeps the
+            # per-frame cost negligible; the log is rate-limited to one
+            # line per STALL_RELOG_S while the anomaly persists.
+            probe_i += 1
+            if probe_i % STALL_PROBE_EVERY == 0:
+                try:
+                    samples = array.array("h", chunk[: len(chunk) - (len(chunk) % 2)])
+                    if samples and max(max(samples), -min(samples)) >= STALL_VOICE_PEAK:
+                        voice_last_at = now_mono
+                except Exception:  # pragma: no cover — diag only
+                    pass
+            anchor = max(peer.extra.get("last_tx_mono") or 0.0, resumed_at)
+            if (
+                voice_last_at > anchor
+                and now_mono - anchor >= STALL_AFTER_S
+                and now_mono - stall_logged_at >= STALL_RELOG_S
+            ):
+                stall_logged_at = now_mono
+                logger.warning(
+                    "[stt-bridge] peer %s STT HOLE: voice-level mic audio "
+                    "(last %.1fs ago) but no transcript for %.1fs "
+                    "(round=%s) — audio in, nothing out of Deepgram",
+                    peer.peer_id, now_mono - voice_last_at,
+                    now_mono - anchor, peer.extra.get("post_tts_round") or 0,
+                )
             if post_tts_sample_left > 0:
                 try:
                     import array as _array
@@ -452,6 +550,10 @@ async def _run_stt(
                 pass
             await asyncio.sleep(delay)
     finally:
+        # Close out the last listening round's counters — the 2026-08-27
+        # wedge ended in a hangup, so a summary only-at-next-TTS-start
+        # would have skipped exactly the round that mattered.
+        _log_round_tx_summary(peer, "stream-end")
         try:
             await stt.aclose()
         except Exception:  # pragma: no cover
@@ -522,6 +624,29 @@ def _sanitize_for_tts(text: str) -> str:
     return out
 
 
+def _log_round_tx_summary(peer, why: str) -> None:
+    """One line per listening round: what the STT hop actually produced.
+
+    Called when a round ENDS (the next TTS window starts, or the stream
+    winds down). All-zero counters are the point — that is the exact
+    signature of the 2026-08-27 post-barge wedge, and pre-fix it was
+    invisible (only the FIRST transcript per round was ever logged)."""
+    extra = getattr(peer, "extra", None)
+    if extra is None:
+        return
+    interims = extra.pop("tx_interims", 0)
+    finals = extra.pop("tx_finals", 0)
+    empty_finals = extra.pop("tx_empty_finals", 0)
+    extra.pop("tx_interims_since_final", None)
+    logger.info(
+        "[stt-bridge] peer %s round=%s transcript summary (%s): "
+        "interims=%d finals=%d empty_finals=%d%s",
+        peer.peer_id, extra.get("post_tts_round") or 0, why,
+        interims, finals, empty_finals,
+        "" if (interims or finals) else " — NO TRANSCRIPTS THIS ROUND",
+    )
+
+
 def _send_data_channel(peer, payload: dict) -> bool:
     """Best-effort send of a JSON envelope over the peer's data channel.
 
@@ -578,6 +703,31 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
             "[stt-bridge] peer %s first post-TTS transcript (round=%s final=%s len=%d)",
             peer.peer_id, extra.get("post_tts_round"), tx.is_final, len(tx.text or ""),
         )
+
+    # Round counters + Deepgram-ate-the-utterance probe — see the
+    # transcript-hole diagnostics comment near STALL_AFTER_S.
+    if extra is not None:
+        extra["last_tx_mono"] = time.monotonic()
+        has_text = bool((tx.text or "").strip())
+        if tx.is_final:
+            if has_text:
+                extra["tx_finals"] = extra.get("tx_finals", 0) + 1
+                extra["tx_interims_since_final"] = 0
+            else:
+                extra["tx_empty_finals"] = extra.get("tx_empty_finals", 0) + 1
+                orphaned = extra.get("tx_interims_since_final", 0)
+                if orphaned:
+                    logger.info(
+                        "[stt-bridge] peer %s utterance closed EMPTY after %d "
+                        "non-empty interims — Deepgram dropped the content the "
+                        "interims showed (observed live in lab replay; any "
+                        "sendword in it is lost)",
+                        peer.peer_id, orphaned,
+                    )
+                    extra["tx_interims_since_final"] = 0
+        elif has_text:
+            extra["tx_interims"] = extra.get("tx_interims", 0) + 1
+            extra["tx_interims_since_final"] = extra.get("tx_interims_since_final", 0) + 1
 
     if peer.on_transcript is not None:
         try:

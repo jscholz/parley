@@ -1998,6 +1998,25 @@ async function boot() {
   // the same key.
   let dcUserMessageId: string | null = null;
   let dcUserBufferedFinals = '';
+  // Per-window tally of user transcripts the half-duplex gate dropped,
+  // split by which protection dropped them (reply window vs post-barge
+  // speaker-drain grace). Field 2026-08-27: without this, "the bridge
+  // sent transcripts and the client ate them" and "the bridge sent
+  // nothing" produce byte-identical client logs. Flushed as ONE line
+  // when the pipe reopens.
+  const dcGateDrops = {
+    windowInterims: 0, windowFinals: 0, drainInterims: 0, drainFinals: 0,
+  };
+  function logGateDropsIfAny(where: string): void {
+    const { windowInterims, windowFinals, drainInterims, drainFinals } = dcGateDrops;
+    if (windowInterims + windowFinals + drainInterims + drainFinals === 0) return;
+    log(`[dictation] gate reopened (${where}) — dropped during TTS window: `
+      + `${windowInterims} interim/${windowFinals} final; `
+      + `during barge drain: ${drainInterims} interim/${drainFinals} final`
+      + (windowFinals + drainFinals > 0 ? ' — FINALS WERE DROPPED (real speech may be lost)' : ''));
+    dcGateDrops.windowInterims = 0; dcGateDrops.windowFinals = 0;
+    dcGateDrops.drainInterims = 0; dcGateDrops.drainFinals = 0;
+  }
   function currentChatId(): string | null {
     // View state FIRST (hardening invariant #3: sends are addressed,
     // not pointed). focusedId() flips synchronously at the row click;
@@ -2029,10 +2048,27 @@ async function boot() {
   }
 
   function ensureUserBubble(initial: string): void {
+    const chatId = currentChatId();
     if (!dcUserMessageId) {
       dcUserMessageId = `umsg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const chatId = currentChatId();
       if (chatId) {
+        transcriptStore.addPendingSend(chatId, {
+          messageId: dcUserMessageId, text: initial, source: 'voice', sentAt: Date.now(),
+        });
+      }
+      return;
+    }
+    // Heal a swept pendingSend. handleReplyFinal defensively clears ALL
+    // pendingSends for the chat on reply_final ("whole turn ack'd") —
+    // but an utterance the user is STILL speaking when a reply lands
+    // keeps its dcUserMessageId here while its pendingSend is gone, so
+    // every subsequent interim updated a nonexistent row and the live
+    // caption went invisible for the rest of the utterance (field
+    // 2026-08-27: streaming captions never rendered all ride). Re-add
+    // under the same id so the echo still dedups.
+    if (chatId) {
+      const st = transcriptStore.getState(chatId);
+      if (!st.pendingSends.find(p => p.messageId === dcUserMessageId)) {
         transcriptStore.addPendingSend(chatId, {
           messageId: dcUserMessageId, text: initial, source: 'voice', sentAt: Date.now(),
         });
@@ -2059,6 +2095,8 @@ async function boot() {
     }
     dcUserMessageId = null;
     dcUserBufferedFinals = '';
+    dcGateDrops.windowInterims = 0; dcGateDrops.windowFinals = 0;
+    dcGateDrops.drainInterims = 0; dcGateDrops.drainFinals = 0;
   });
   webrtcDictation.setUserBubbleHandler((text) => {
     // Dispatch fired — pendingSend gets the final text; the server's
@@ -2097,6 +2135,10 @@ async function boot() {
       // playing through the speaker — barge couldn't fire past the
       // first 1.2s of any reply (v0.381 field-test regression).
       webrtcSuppress.onListening();
+      // Flush the gate-drop tally now if the gate actually opened (a
+      // listening landing inside the barge-drain grace leaves it shut;
+      // the tally then flushes on the first post-drain user event).
+      if (!webrtcSuppress.isTtsPlaying()) logGateDropsIfAny('listening');
       // Field-bug 2026-08-26 diagnostics: snapshot pc/ICE/DC/sender-track
       // state and sample outbound RTP bytesSent over the next 5s, so a
       // "bridge says listening but my speech goes nowhere" report is
@@ -2140,7 +2182,30 @@ async function boot() {
       // feedback loop on slow-terminating TTS). Use ttsPlaying
       // for full playback coverage; client-side BargeWindow handles
       // the legitimate barge case independently.
-      if (webrtcSuppress.isTtsPlaying()) return;
+      //
+      // Diagnostics (field 2026-08-27): these drops were INVISIBLE — a
+      // reply window that eats a final of real pre-reply speech and a
+      // wedged round that receives nothing look identical in the log.
+      // Count what the gate drops, attributed to the reply window vs
+      // the post-barge drain, and emit ONE line when the pipe reopens.
+      if (webrtcSuppress.isTtsPlaying()) {
+        if (webrtcSuppress.isBargeDrainActive()) {
+          if (ev.is_final) dcGateDrops.drainFinals++; else dcGateDrops.drainInterims++;
+        } else if (ev.is_final) dcGateDrops.windowFinals++; else dcGateDrops.windowInterims++;
+        return;
+      }
+      logGateDropsIfAny('gate-open');
+      // Deepgram's UtteranceEnd arrives as an EMPTY final (the bridge
+      // forwards empty finals since 9eb5a88 for dictate.ts's caret
+      // re-anchor; the dictate listener is a different consumer). In
+      // talk mode it carries nothing: pre-fix the final branch below
+      // minted a pendingSend for it via ensureUserBubble(''), leaving
+      // an EMPTY user bubble after every dispatch — which in turn
+      // baited the projection's thinking placeholder into rendering an
+      // empty CLAWDIAN bubble under it (the two ghost bubbles of the
+      // 2026-08-27 field screenshot). It has no dictation effect either
+      // (handleUserFinal no-ops on empty). Ignore it entirely.
+      if (typeof ev.text !== 'string' || !ev.text.trim()) return;
       if (!ev.is_final) {
         // Interim: upsert the streaming user bubble. Display = previously
         // is_finalized segments for this utterance + current interim.
