@@ -56,6 +56,11 @@ export const FRONTEND_SETTINGS = {
   // a client-only key flips revalidate()'s missing-key backfill branch
   // on every boot (404 writebacks + a spurious settings-changed event).
   hotkeyToggleMeeting:    { category: 'hotkeys',         default: 'Cmd+Shift+M' },
+  // Keyboard loop: focus the composer / focus the session list. See the
+  // rationale in src/settings.ts. (Landing here as well as there is the
+  // rule stated in the note above — not optional.)
+  hotkeyFocusComposer:    { category: 'hotkeys',         default: 'Cmd+Shift+Enter' },
+  hotkeyFocusSessions:    { category: 'hotkeys',         default: 'Cmd+Shift+J' },
   // Agent-activity surfacing (tool-call + tool-result row rendering)
   agentActivity:          { category: 'agent_activity',  default: 'summary' },
   // Display

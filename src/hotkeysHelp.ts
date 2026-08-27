@@ -88,6 +88,8 @@ function buildCatalog(): Category[] {
   const hkMic = s.hotkeyToggleMic || 'Cmd+Shift+D';
   const hkCall = s.hotkeyToggleCall || 'Cmd+Shift+C';
   const hkMeeting = (s as any).hotkeyToggleMeeting || 'Cmd+Shift+M';
+  const hkComposer = (s as any).hotkeyFocusComposer || 'Cmd+Shift+Enter';
+  const hkSessions = (s as any).hotkeyFocusSessions || 'Cmd+Shift+J';
   return [
     {
       title: 'Composer',
@@ -96,6 +98,8 @@ function buildCatalog(): Category[] {
         { keys: ['Shift+Enter'], label: 'New line inside the composer' },
         { keys: ['Cmd+Enter', 'Ctrl+Enter'], label: 'Send from any focused input' },
         { keys: ['/'], label: 'Open slash-command popover (at column 1)' },
+        { keys: [hkComposer], label: 'Focus the composer from anywhere' },
+        { keys: ['Esc'], label: 'Leave the composer for the session list' },
       ],
     },
     {
@@ -126,6 +130,8 @@ function buildCatalog(): Category[] {
         { keys: ['Cmd+Shift+P', 'Ctrl+Shift+P'], label: 'Toggle pinned-messages drawer' },
         { keys: ['Cmd+Shift+A', 'Ctrl+Shift+A'], label: 'Toggle Activity drawer' },
         { keys: ['↑', '↓'], label: 'Navigate sessions while the sidebar search has focus' },
+        { keys: [hkSessions], label: 'Focus the session list (↑/↓ then move between sessions)' },
+        { keys: ['Enter'], label: 'From the session list: jump into that session\u2019s composer' },
       ],
     },
     {
