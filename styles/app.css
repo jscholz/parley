@@ -2559,7 +2559,13 @@
     line-height: 1.35;
   }
   .pin-drawer-list {
-    list-style: none; margin: 0; padding: 6px 0;
+    /* Published as a var because the expanded-pin collapse bar sticks
+     * against it: `position: sticky; top: 0` pins to the PADDING box, so
+     * scrolled body text shows through this band above the bar. The bar
+     * offsets by exactly -1 × this to sit flush with the list's top
+     * edge — change the padding here and the bar follows. */
+    --pin-list-pad-y: 6px;
+    list-style: none; margin: 0; padding: var(--pin-list-pad-y) 0;
     overflow-y: auto; flex: 1;
   }
   .right-drawer-panel {
@@ -2823,6 +2829,33 @@
     -webkit-mask-image: none;
     mask-image: none;
   }
+  /* Top collapse caret (2026-08-27). The caption row lives BELOW the
+   * body, so an expanded long pin stranded its collapse control past the
+   * end of the text. This bar shows only while expanded and sticks to
+   * the top of the scroller, so collapse is one click away from any
+   * scroll position. It is opaque (body text scrolls underneath it) and
+   * mirrors the item's own hover tint so the strip never reads as a
+   * seam. Collapsed items render it `display: none` — zero footprint on
+   * the approved V2 resting layout. */
+  .pin-item-collapse-bar { display: none; }
+  .pin-drawer-item.expanded .pin-item-collapse-bar {
+    display: flex; justify-content: flex-end;
+    position: sticky; top: calc(-1 * var(--pin-list-pad-y, 0px)); z-index: 1;
+    /* Bleed over the item's 12px side padding so the strip spans the
+     * full item width — otherwise body text shows through at the edges
+     * as it scrolls under. */
+    margin: -10px -12px 2px; padding: 4px 8px 2px;
+    background: var(--surface);
+  }
+  .pin-drawer-item.expanded:hover .pin-item-collapse-bar {
+    background: color-mix(in srgb, var(--fg) 6%, var(--surface));
+  }
+  .pin-item-collapse-btn {
+    width: 22px; height: 22px; padding: 0; border: 0; background: transparent;
+    color: var(--muted); display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 4px; cursor: pointer;
+  }
+  .pin-item-collapse-btn:hover { color: var(--fg); background: var(--surface-2); }
   .pin-item-jump-btn, .pin-item-unpin-btn {
     flex-shrink: 0;
     background: none; border: none; color: var(--muted);

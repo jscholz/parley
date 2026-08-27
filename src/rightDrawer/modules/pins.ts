@@ -135,6 +135,26 @@ function renderPinItem(item: PinnedItem, opts: { onPinClick: PinClickHandler }, 
   caption.appendChild(unpinBtn);
   caption.appendChild(jumpBtn);
 
+  // Collapse caret at the TOP of an expanded item. V2 puts the body
+  // first and the caption (with the caret) below it, so expanding a long
+  // pin pushed its only collapse control off-screen — "I have to scroll
+  // all the way to the bottom of it to collapse it" (2026-08-27). This
+  // bar exists only while expanded and is `position: sticky`, so it
+  // stays reachable no matter how far into the body the list is
+  // scrolled. It is a discrete button rather than a click-anywhere
+  // region on purpose: the body must keep its text selectable, so a
+  // click inside it never folds.
+  const collapseBar = document.createElement('div');
+  collapseBar.className = 'pin-item-collapse-bar';
+  const collapseBtn = document.createElement('button');
+  collapseBtn.className = 'pin-item-collapse-btn';
+  collapseBtn.type = 'button';
+  collapseBtn.title = 'Collapse';
+  collapseBtn.setAttribute('aria-label', 'Collapse pinned message');
+  collapseBtn.setAttribute('aria-expanded', 'true');
+  collapseBtn.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 10 8 6 12 10"/></svg>';
+  collapseBar.appendChild(collapseBtn);
+
   const setExpanded = (expanded: boolean) => {
     li.classList.toggle('expanded', expanded);
     caption.setAttribute('aria-expanded', expanded ? 'true' : 'false');
@@ -151,15 +171,17 @@ function renderPinItem(item: PinnedItem, opts: { onPinClick: PinClickHandler }, 
         body.innerHTML = miniMarkdown(latest);
       }
     } else expandedKeys.delete(key);
+    body.title = expanded ? '' : 'Click to expand';
   };
-  body.title = 'Click to expand';
   body.onclick = (e) => { e.stopPropagation(); if (!li.classList.contains('expanded')) setExpanded(true); };
   const toggleExpanded = (e: Event) => { e.stopPropagation(); setExpanded(!li.classList.contains('expanded')); };
   caption.onclick = toggleExpanded;
   caption.onkeydown = (e) => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); toggleExpanded(e); };
   expandBtn.onclick = toggleExpanded;
+  collapseBtn.onclick = (e) => { e.stopPropagation(); setExpanded(false); };
   setExpanded(expandedKeys.has(key));
 
+  li.appendChild(collapseBar);
   li.appendChild(body);
   li.appendChild(caption);
 
