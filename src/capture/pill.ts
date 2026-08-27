@@ -47,7 +47,12 @@ function render(state: CaptureUiState): void {
   // 'starting' shows the pill in its honest gray "Starting microphone…"
   // form (postmortem 2026-08-18 P1): visible progress, NO red recording
   // state — nothing may look like success until the recorder is proven.
-  const show = state.active || state.phase === 'starting' || state.phase === 'finishing';
+  // 'failed' MUST show (2026-08-27). It is the one state the user has to
+  // see: the recording is over and nothing was saved. Hiding the pill
+  // here would reproduce the incident exactly — silence where a warning
+  // belongs.
+  const show = state.active || state.phase === 'starting'
+    || state.phase === 'finishing' || state.phase === 'failed';
   pill.hidden = !show;
   const headerBtn = document.getElementById('btn-capture-header');
   if (headerBtn) {
@@ -71,6 +76,7 @@ function render(state: CaptureUiState): void {
   pill.classList.toggle('interrupted', state.phase === 'interrupted');
   pill.classList.toggle('paused', state.phase === 'paused');
   pill.classList.toggle('finishing', state.phase === 'finishing');
+  pill.classList.toggle('failed', state.phase === 'failed');
   if (!show) {
     if (timerInterval != null) { window.clearInterval(timerInterval); timerInterval = null; }
     return;
@@ -88,14 +94,19 @@ function render(state: CaptureUiState): void {
     const word = state.phase === 'paused' ? 'Paused'
       : state.phase === 'interrupted' ? 'Reconnecting…'
         : state.phase === 'finishing' ? 'Uploading…'
-          : '';
+          : state.phase === 'failed' ? 'Not recorded'
+            : '';
     stateEl.textContent = word;
     stateEl.hidden = !word;
   }
   if (title) {
     title.textContent = state.phase === 'starting'
       ? 'Starting microphone…'   // no title exists yet; the text IS the state
-      : (state.title || 'Recording');
+      : state.phase === 'failed'
+        // The REASON is the message — "Meeting 2026-08-27" tells a user
+        // who just lost an hour nothing they need.
+        ? (state.failedReason || 'No audio was saved.')
+        : (state.title || 'Recording');
   }
   // Pause button doubles as resume; swap glyphs + label.
   const pauseBtn = document.getElementById('capture-pill-pause');

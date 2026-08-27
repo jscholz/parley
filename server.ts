@@ -1239,6 +1239,14 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capSegment) {
       return parley.handleCaptureSegment(req, res, capSegment[1], capSegment[2]);
     }
+    // Client health ping (incident 2026-08-27): the client reports what
+    // it believes about its own recorder, so "no audio arrived" can be
+    // told apart from "the phone was asleep" without a forensic dig.
+    const capHealth = req.method === 'POST'
+      && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/health$/);
+    if (capHealth) {
+      return parley.handleCaptureHealth(req, res, capHealth[1]);
+    }
     const capStop = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/stop$/);
     if (capStop) {

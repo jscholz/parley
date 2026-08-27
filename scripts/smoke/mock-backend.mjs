@@ -1424,6 +1424,16 @@ export async function installMockBackend(page) {
      *  assertions (segment acks, marks, stop state). */
     setCaptureOutage(on) { captureOutage = !!on; },
     getCaptures() { return Array.from(captures.values()); },
+    /** Force a capture into a terminal state SERVER-SIDE without the
+     *  client doing it — models the stale-heal sweep failing a recording
+     *  the client still believes in (incident 2026-08-27). */
+    setCaptureStatus(id, status, extra = {}) {
+      const cap = captures.get(id);
+      if (!cap) throw new Error(`mock: unknown capture ${id}`);
+      cap.status = status;
+      Object.assign(cap, extra);
+      return { ...cap };
+    },
     /** Lifecycle calls in arrival order ({action, id, body?}) — lets
      *  smokes assert e.g. "DELETE was never called" (postmortem
      *  regression: startup failure must abort-start, not delete). */

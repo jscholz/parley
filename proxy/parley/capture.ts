@@ -754,6 +754,89 @@ async function addMarkLocked(id: string, tMs: number): Promise<CaptureManifest> 
   return m;
 }
 
+/** Client health ping (incident 2026-08-27).
+ *
+ *  When his meeting recorded nothing, the server saw silence and had no
+ *  way to tell WHY: a suspended phone and a running-but-mute recorder
+ *  produce byte-identical evidence — none. That ambiguity cost an
+ *  afternoon of forensics and still did not yield a cause. The client
+ *  now reports what it believes about itself, so the next incident is a
+ *  one-line read instead.
+ *
+ *  Deliberately NOT written into the manifest. lastActivityMs() reads
+ *  the manifest mtime and drives the 10-minute stale heal; a 30s ping
+ *  touching that file would keep a DEAD capture looking alive forever
+ *  and quietly disable the heal. Health lives in its own file, and the
+ *  audio clock (last_segment_at) stays the only thing the detectors
+ *  trust.
+ *
+ *  Audited on CHANGE only — 30s pings across an hour-long meeting would
+ *  otherwise bury the audit log in noise that hides the events worth
+ *  reading. */
+export interface CaptureHealth {
+  /** Client's own phase — compare against the server's status to catch
+   *  the two disagreeing, which is the bug class from this incident. */
+  phase?: string;
+  /** MediaRecorder.state as the client sees it. */
+  recorder_state?: string;
+  /** Mic track: a muted or ended track is the smoking gun for
+   *  "recorder says recording, no audio exists". */
+  track_ready_state?: string;
+  track_muted?: boolean;
+  track_enabled?: boolean;
+  /** dataavailable events seen this session, and how long since the
+   *  last one. chunks === 0 on a live recorder means the chain never
+   *  started; a growing last_chunk_age_ms means it died mid-meeting. */
+  chunks?: number;
+  last_chunk_age_ms?: number;
+  /** Sealed-but-unsent segments still queued in the client's IDB. */
+  pending_uploads?: number;
+  sealed_segments?: number;
+  mime?: string;
+}
+
+function healthPath(id: string): string {
+  return path.join(captureDir(id), 'health.json');
+}
+
+/** Fields whose CHANGE is worth an audit line. Counters are excluded on
+ *  purpose: chunks ticks every ping and would defeat the point. */
+function healthSignature(h: CaptureHealth): string {
+  return [
+    h.phase, h.recorder_state, h.track_ready_state,
+    String(h.track_muted), String(h.track_enabled),
+    // Not the count — just whether audio is flowing at all.
+    (h.chunks ?? 0) > 0 ? 'chunks' : 'no-chunks',
+  ].join('|');
+}
+
+export async function recordHealth(id: string, health: CaptureHealth): Promise<void> {
+  const m = await readManifest(id);           // 404s for an unknown id
+  let prior: any = null;
+  try { prior = JSON.parse(await fs.readFile(healthPath(id), 'utf8')); } catch { /* first ping */ }
+  const now = Date.now();
+  const record = { ...health, at: now };
+  await fs.mkdir(captureDir(id), { recursive: true });
+  await fs.writeFile(healthPath(id), JSON.stringify(record, null, 1));
+  if (!prior || healthSignature(prior) !== healthSignature(health)) {
+    void audit(m, 'health', {
+      actor: { source: 'pwa-recorder' },
+      detail: {
+        phase: health.phase, recorder_state: health.recorder_state,
+        track: `${health.track_ready_state}/muted=${health.track_muted}/enabled=${health.track_enabled}`,
+        chunks: health.chunks, last_chunk_age_ms: health.last_chunk_age_ms,
+        pending_uploads: health.pending_uploads, server_status: m.status,
+      },
+    });
+  }
+}
+
+/** Latest health ping, for diagnosis. Null when the client never sent
+ *  one — itself the finding (an old build, or a page that never ran). */
+export async function getHealth(id: string): Promise<any | null> {
+  try { return JSON.parse(await fs.readFile(healthPath(id), 'utf8')); } catch { return null; }
+}
+
 export function patchCapture(id: string, patch: {
   title?: string;
   linkedChat?: string | null;
@@ -1244,6 +1327,26 @@ export async function handleCaptureDelete(
   try {
     await deleteCapture(id, actorFromReq(req));
     sendJson(res, 200, { ok: true, deleted: id });
+  } catch (err) { sendError(res, err); }
+}
+
+/** POST /api/parley/captures/{id}/health — client self-report.
+ *  Fire-and-forget from the client's perspective: it must never block
+ *  or fail a recording, so even an error answers 200-shaped. */
+export async function handleCaptureHealth(
+  req: IncomingMessage, res: ServerResponse, id: string,
+): Promise<void> {
+  try {
+    const body = await readJson(req);
+    await recordHealth(id, {
+      phase: body.phase, recorder_state: body.recorder_state,
+      track_ready_state: body.track_ready_state,
+      track_muted: body.track_muted, track_enabled: body.track_enabled,
+      chunks: body.chunks, last_chunk_age_ms: body.last_chunk_age_ms,
+      pending_uploads: body.pending_uploads, sealed_segments: body.sealed_segments,
+      mime: body.mime,
+    });
+    sendJson(res, 200, { ok: true });
   } catch (err) { sendError(res, err); }
 }
 

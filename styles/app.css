@@ -5288,6 +5288,42 @@
    (Selectors are IDs: the flag and pause buttons carry only
    .capture-pill-btn in the markup, no per-button class — a class-based
    version of this rule matches nothing and silently changes nothing.) */
+/* Failed (2026-08-27): the recording is over and nothing was saved. Red
+   border, dead dot, and the REASON as the message. Every mid-meeting
+   control is gone — there is no recording left to mark, pause or stop —
+   leaving only ··· (which owns dismiss/discard). This is the state whose
+   absence caused the incident: the pill had no way to say "this went
+   wrong", so it kept saying "recording" instead. */
+.capture-pill.failed {
+  border-color: color-mix(in srgb, #e5484d 70%, transparent);
+  background: color-mix(in srgb, #b3261e 18%, var(--surface-1, #1c1c1e));
+}
+.capture-pill.failed .capture-pill-dot { background: #8a8a8a; animation: none; }
+.capture-pill.failed .capture-pill-state {
+  border-color: color-mix(in srgb, #e5484d 70%, transparent);
+  color: #ff8589;
+}
+/* The failure text IS the state — it must not ellipsize. Every other
+   phase keeps the title on one line because a meeting NAME degrades
+   gracefully to a fragment; a REASON does not ("The server stopped
+   receiv…" tells a user who just lost an hour nothing). Terminal state,
+   no timer and no mid-meeting controls, so there is room to wrap. */
+.capture-pill.failed {
+  align-items: flex-start;
+  border-radius: 16px;          /* a 2-line pill reads better softened */
+  padding-top: 8px; padding-bottom: 8px;
+}
+.capture-pill.failed .capture-pill-dot { margin-top: 4px; }
+.capture-pill.failed .capture-pill-title {
+  font-weight: 500;
+  white-space: normal; overflow: visible; text-overflow: clip;
+  line-height: 1.35;
+}
+.capture-pill.failed #capture-pill-timer { display: none; }
+.capture-pill.failed #capture-pill-flag,
+.capture-pill.failed #capture-pill-pause,
+.capture-pill.failed #capture-pill-stop { display: none; }
+
 .capture-pill.finishing #capture-pill-flag,
 .capture-pill.finishing #capture-pill-pause,
 .capture-pill.finishing #capture-pill-stop,
@@ -5318,6 +5354,10 @@
   .capture-pill.paused .capture-pill-title,
   .capture-pill.interrupted .capture-pill-title,
   .capture-pill.finishing .capture-pill-title { display: none; }
+  /* ...but NOT 'failed': there the title holds the failure reason, which
+     is the only thing on screen worth reading. It fits because every
+     mid-meeting control and the timer are hidden in that state. */
+  .capture-pill.failed .capture-pill-title { display: block; }
   .capture-pill.paused .capture-pill-timer,
   .capture-pill.interrupted .capture-pill-timer,
   .capture-pill.finishing .capture-pill-timer { flex: 1; text-align: left; }

@@ -40,7 +40,13 @@ export interface CaptureUiState {
    *  'interrupted' is INVOLUNTARY (call/Siri stole the mic — amber,
    *  auto-resume polling). Distinct on purpose: auto-resume after a
    *  deliberate pause would be a privacy bug. */
-  phase: 'idle' | 'starting' | 'recording' | 'paused' | 'interrupted' | 'finishing';
+  /** 'failed' (2026-08-27) is the HONEST terminal state for a recording
+   *  the server has written off while the client still believed in it.
+   *  Before this, that situation had no representation at all: the pill
+   *  kept counting for 72 minutes after the capture was declared dead. */
+  phase: 'idle' | 'starting' | 'recording' | 'paused' | 'interrupted' | 'finishing' | 'failed';
+  /** User-facing explanation for 'failed'. Shown, not swallowed. */
+  failedReason?: string;
   uploaderPending: number;
   sealedSegments: number;
   marks: number;
@@ -104,6 +110,15 @@ let reacquireTimer: number | null = null;
 let startEpoch = 0;
 let watchdogTimer: number | null = null;
 let lastChunkAt = 0;         // epoch ms of the last dataavailable
+/** dataavailable events seen since this capture started. ZERO on a
+ *  live recorder is the incident signature (2026-08-27) — it separates
+ *  "the recorder never produced anything" from "audio was produced but
+ *  never uploaded", which the server cannot tell apart on its own. */
+let chunkCount = 0;
+let healthTimer: number | null = null;
+let failedDismissTimer: number | null = null;
+/** How long the 'nothing was saved' pill stays up. */
+const FAILED_PILL_MS = 90_000;
 
 function emit(): void {
   try {
@@ -166,7 +181,7 @@ function startSegment(): boolean {
   recorder = rec;
   rec.ondataavailable = (ev: BlobEvent) => {
     lastChunkAt = Date.now();
-    if (ev.data && ev.data.size) chunks.push(ev.data);
+    if (ev.data && ev.data.size) { chunkCount += 1; chunks.push(ev.data); }
   };
   // A recorder error is a dead segment chain unless handled — route it
   // through the interruption path (seal what we have, re-acquire).
@@ -295,6 +310,120 @@ function watchTracks(): void {
   });
 }
 
+/** Heartbeat + resume reconciliation (incident 2026-08-27).
+ *
+ *  Two things went wrong that day and this closes both from the client
+ *  side. First, the server had no way to tell a sleeping phone from a
+ *  mute recorder — identical silence — so the cause was never found.
+ *  Second, the server FAILED the capture at 14:18 and the client never
+ *  learned: the pill counted happily to 1:22:15. `capture_changed`
+ *  envelopes were already being broadcast, but their only consumer was
+ *  the sidebar's meetings index.
+ *
+ *  The ping is deliberately cheap and total-failure-tolerant: a
+ *  recording must never break because a diagnostic POST failed. */
+const HEALTH_PING_MS = 30_000;
+
+function healthSnapshot(): Record<string, unknown> {
+  const track = stream?.getAudioTracks?.()[0] || null;
+  return {
+    phase: state.phase,
+    recorder_state: recorder?.state ?? 'none',
+    track_ready_state: track?.readyState ?? 'none',
+    track_muted: track?.muted ?? null,
+    track_enabled: track?.enabled ?? null,
+    chunks: chunkCount,
+    last_chunk_age_ms: lastChunkAt ? Date.now() - lastChunkAt : null,
+    pending_uploads: state.uploaderPending,
+    sealed_segments: state.sealedSegments,
+    mime: mimeType || null,
+  };
+}
+
+async function pingHealth(): Promise<void> {
+  const id = state.captureId;
+  if (!id) return;
+  try {
+    await fetch(apiUrl(`/api/parley/captures/${id}/health`), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(healthSnapshot()),
+      keepalive: true,   // survives a page being backgrounded mid-flight
+    });
+  } catch { /* diagnostics must never disturb a recording */ }
+}
+
+/** Ask the server what it thinks of OUR capture and believe it.
+ *
+ *  Runs on resume, because that is when a client is most likely to be
+ *  holding a stale belief (it may have been frozen for an hour), and on
+ *  any capture_changed envelope naming our id. If the server has moved
+ *  the capture to a terminal state, the local recorder is describing a
+ *  recording that no longer exists — stop claiming otherwise. */
+async function reconcileWithServer(reason: string): Promise<void> {
+  const id = state.captureId;
+  if (!id || !state.active) return;
+  try {
+    const res = await fetch(apiUrl(`/api/parley/captures/${id}`));
+    if (!res.ok) return;                       // transient — keep recording
+    const remote = await res.json();
+    const status = String(remote?.status ?? remote?.capture?.status ?? '');
+    if (status === 'failed' || status === 'discarded' || status === 'complete') {
+      log(`[capture] server says ${id} is ${status} (${reason}) — standing down a recording that no longer exists`);
+      await forceLocalStop(status);
+      return;
+    }
+    if (remote?.stalled_since || remote?.capture?.stalled_since) {
+      // Server is not receiving audio. Say so where the user is looking;
+      // the recorder keeps trying, because stalls do recover.
+      if (state.phase === 'recording') {
+        state.phase = 'interrupted';
+        emit();
+      }
+    }
+  } catch { /* offline — the uploader's durable queue still owns the audio */ }
+}
+
+/** Tear down local recording machinery when the server has already
+ *  written the capture off. Keeps whatever audio exists in the durable
+ *  IDB queue (the uploader parks rather than deletes), so a later
+ *  unfreeze can still drain it. */
+async function forceLocalStop(remoteStatus: string): Promise<void> {
+  stopWatchdog();
+  stopHealthPings();
+  if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
+  try { sealCurrent(); } catch { /* best effort */ }
+  try { mic.release('meeting'); } catch { /* released */ }
+  stream = null;
+  state.active = false;
+  state.phase = 'failed';
+  // Bounded, so a data-loss notice can never become permanent chrome.
+  // Long enough to be read and acted on, short enough that a pill the
+  // user has already absorbed stops occupying the composer forever.
+  // (Starting another capture resets state and clears it sooner.)
+  if (failedDismissTimer != null) window.clearTimeout(failedDismissTimer);
+  failedDismissTimer = window.setTimeout(() => {
+    failedDismissTimer = null;
+    if (state.phase !== 'failed') return;
+    state = { ...IDLE_STATE };
+    emit();
+  }, FAILED_PILL_MS);
+  state.failedReason = remoteStatus === 'failed'
+    ? 'No audio reached the server — nothing was saved.'
+    : `This recording was ${remoteStatus} elsewhere.`;
+  emit();
+}
+
+function startHealthPings(): void {
+  if (healthTimer != null) return;
+  void pingHealth();                    // one immediately: the FIRST ping
+  healthTimer = window.setInterval(() => { void pingHealth(); }, HEALTH_PING_MS);
+}
+
+function stopHealthPings(): void {
+  if (healthTimer != null) { window.clearInterval(healthTimer); healthTimer = null; }
+}
+
 function startWatchdog(): void {
   if (watchdogTimer != null) return;
   watchdogTimer = window.setInterval(() => {
@@ -314,6 +443,35 @@ function startWatchdog(): void {
 
 function stopWatchdog(): void {
   if (watchdogTimer != null) { window.clearInterval(watchdogTimer); watchdogTimer = null; }
+}
+
+/** Resume reconciliation + the server's own verdict.
+ *
+ *  visibilitychange is the moment a client is most likely to be holding
+ *  a stale belief — proxyClient already uses the same hook to
+ *  forceReconnect its stream, which is how we know it fires reliably in
+ *  the CAP shell (his console, 2026-08-27). Wired ONCE per module; the
+ *  handlers no-op unless a capture of ours is live. */
+let reconcileWired = false;
+function startResumeReconcile(): void {
+  if (reconcileWired) return;
+  reconcileWired = true;
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      void reconcileWithServer('resume');
+      void pingHealth();     // ...and re-report immediately on wake
+    });
+    // A capture_changed envelope naming OUR capture is the fastest
+    // possible notice. Previously this event had exactly one consumer
+    // (the sidebar meetings index) and the recorder never heard it.
+    window.addEventListener('parley:capture-changed-remote', (ev) => {
+      const detail = (ev as CustomEvent).detail || {};
+      const id = detail?.capture?.id;
+      if (!id || id !== state.captureId) return;
+      void reconcileWithServer(`envelope:${detail?.kind ?? 'changed'}`);
+    });
+  } catch { /* non-browser */ }
 }
 
 const IDLE_STATE: CaptureUiState = {
@@ -486,6 +644,9 @@ export async function startMeetingCapture(
 
   watchTracks();
   startWatchdog();
+  chunkCount = 0;
+  startHealthPings();
+  startResumeReconcile();
   emit();   // NOW the pill flips to the real red recording state
   log(`[capture] started ${capture.id} ("${capture.title}") chat=${capture.linked_chat}`);
   return getCaptureState();
@@ -518,6 +679,11 @@ export async function stopMeetingCapture(): Promise<void> {
   state.phase = 'finishing';
   emit();
   stopWatchdog();
+  // One FINAL ping before the pings stop — it is the record of what the
+  // recorder looked like at the moment of stop, which is exactly the
+  // snapshot that was missing on 2026-08-27.
+  void pingHealth();
+  stopHealthPings();
   if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
   sealCurrent();
   try { mic.release('meeting'); } catch { /* fine */ }
@@ -582,6 +748,7 @@ export async function cancelMeetingCapture(): Promise<string | null> {
   state = { ...IDLE_STATE };
   emit();
   stopWatchdog();
+  stopHealthPings();
   if (reacquireTimer != null) { window.clearTimeout(reacquireTimer); reacquireTimer = null; }
   sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
   try { mic.release('meeting'); } catch { /* fine */ }

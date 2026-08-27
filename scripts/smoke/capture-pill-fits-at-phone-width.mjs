@@ -33,7 +33,7 @@ export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = true;
 
-const PHASES = ['starting', 'recording', 'paused', 'interrupted', 'finishing'];
+const PHASES = ['starting', 'recording', 'paused', 'interrupted', 'finishing', 'failed'];
 // 1:22:15 is his field case; 10:00:00 is one glyph wider than anything
 // the layout was designed for.
 const DURATIONS = [
@@ -45,7 +45,7 @@ async function measure(page, phase, elapsedMs) {
   return page.evaluate(({ ph, ms }) => {
     window.dispatchEvent(new CustomEvent('parley:capture-state', {
       detail: {
-        active: ph !== 'finishing' && ph !== 'starting',
+        active: ph !== 'finishing' && ph !== 'starting' && ph !== 'failed',
         captureId: 'cap_fits_test',
         title: 'Board sync with finance and ops',
         chatId: 'c1',
@@ -54,6 +54,7 @@ async function measure(page, phase, elapsedMs) {
         uploaderPending: ph === 'finishing' ? 2 : 0,
         sealedSegments: 3, marks: 1,
         stalledTotalMs: 0, stalledSince: null,
+        failedReason: 'The server stopped receiving audio and ended this recording.',
       },
     }));
     const pill = document.getElementById('capture-pill');
@@ -96,7 +97,8 @@ export default async function run({ page, log }) {
     for (const phase of PHASES) {
       const m = await measure(page, phase, ms);
       assert(!m.hidden, `pill should be visible in phase ${phase}`);
-      assert(m.timer.length > 0 || phase === 'starting',
+      // 'failed' hides the timer on purpose — the reason is the message.
+      assert(m.timer.length > 0 || phase === 'starting' || phase === 'failed',
         `phase ${phase} should render a timer`);
       assert(m.worstRight <= 0,
         `[${label}/${phase}] a control escapes the pill's right edge by ${m.worstRight}px `

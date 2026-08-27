@@ -33,6 +33,7 @@ export {
   handleCaptureStop,
   handleCapturePatch,
   handleCaptureMark,
+  handleCaptureHealth,
   handleCaptureList,
   handleCaptureGet,
   handleCaptureTranscript,
