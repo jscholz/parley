@@ -54,6 +54,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 from typing import Any, AsyncIterator, Dict, Optional
 
 from config import VoiceConfig
@@ -120,6 +121,40 @@ STALL_PROBE_EVERY = 5
 # invisible). Logged retroactively when the next frame lands. 20 ms is
 # the nominal cadence, so 1 s ≈ 50 missing frames — far beyond jitter.
 RTP_GAP_LOG_S = 1.0
+# Rate limit for the "pcm queue full" warning (see _pump_audio).
+DROP_RELOG_S = 2.0
+
+# ── Barge-window audio replay ─────────────────────────────────────────
+#
+# The half-duplex echo guard below substitutes silence for mic audio
+# while TTS plays. That is correct for the speakerphone bleed of our own
+# voice and WRONG for the one case that matters most: a barge, where the
+# user is genuinely talking THROUGH the gate. Pre-fix, those words were
+# deliberately deleted before Deepgram ever saw them, so interrupting a
+# reply and immediately speaking reliably lost the first words of the
+# interruption.
+#
+# Measured on the offline Deepgram harness (/tmp/dg-repro/harness.py,
+# real API, repo smoke fixtures, gate 3.02 s with the user speaking the
+# last 0.76 s of it — the exact field shape of 2026-08-27 23:04:20):
+#
+#   zerofill (pre-fix)  first post-release transcript = "Three four"
+#                       → the spoken "one two" is GONE; 1.25 s to first word
+#   replay   (this fix) first post-release transcript = "One"
+#                       → gated speech recovered; 0.21 s to first word
+#
+# Safety: frames are captured ONLY while the bridge's own BargePolicy
+# reports speech-active (Silero p≥0.5 sustained ~224 ms) during the
+# playback window. On rounds where the user stayed quiet the policy never
+# fires (field: max p_speech 0.044 / 0.048) and the ring is discarded, so
+# the echo guard is bit-for-bit unchanged. Nothing but audio the VAD has
+# positively identified as the user's voice is ever replayed.
+BARGE_REPLAY_MAX_S = 2.0
+BARGE_REPLAY_MAX_FRAMES = int(BARGE_REPLAY_MAX_S / 0.02)
+# Silero needs MIN_SPEECH_FRAMES (~224 ms) of sustained speech before it
+# declares a barge, so the first syllable or two are already past by the
+# time is_active flips. Keep a short pre-roll to hand them back.
+BARGE_REPLAY_PRE_ROLL_FRAMES = 15  # 300 ms
 
 # Cadence of the {type:'tts-playing'} playback heartbeat (see
 # _pcm_iter). The client turns this into a DEADLINE — its
@@ -190,6 +225,8 @@ async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: s
     bytes_pushed = 0
     started = time.time()
     last_frame_at: Optional[float] = None
+    frames_dropped = 0
+    last_drop_log_at = 0.0
     try:
         while True:
             frame = await track.recv()
@@ -216,10 +253,35 @@ async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: s
                 try:
                     pcm_q.put_nowait(pcm)
                 except asyncio.QueueFull:
-                    logger.warning(
-                        "[stt-bridge] peer %s pcm queue full; dropping frame",
-                        peer_id,
-                    )
+                    # Drop the OLDEST frame, not the newest. The consumer
+                    # only starts draining once the Deepgram WS handshake
+                    # completes, and that handshake is not always fast:
+                    # on 2026-08-27 21:49 (peer c8e08f57) it took 4.5 s,
+                    # during which this queue filled at 2 s and then
+                    # discarded every subsequent frame — so the audio
+                    # Deepgram eventually received was the FIRST 2 s
+                    # followed by a 2.5 s hole, and the words either side
+                    # of the hole were spliced into nonsense. Sliding the
+                    # window keeps the most RECENT audio, which is both
+                    # contiguous and the part still worth transcribing.
+                    frames_dropped += 1
+                    try:
+                        pcm_q.get_nowait()
+                        pcm_q.put_nowait(pcm)
+                    except (asyncio.QueueEmpty, asyncio.QueueFull):  # pragma: no cover
+                        pass
+                    # One line per burst, not one per frame: the pre-fix
+                    # version emitted 100+ WARNINGs per stall and buried
+                    # everything else in the journal.
+                    if now_mono - last_drop_log_at >= DROP_RELOG_S:
+                        logger.warning(
+                            "[stt-bridge] peer %s pcm queue full — STT "
+                            "consumer not draining (provider still "
+                            "connecting?); %d frames (%.1fs of audio) "
+                            "dropped so far, keeping the newest",
+                            peer_id, frames_dropped, frames_dropped * 0.02,
+                        )
+                        last_drop_log_at = now_mono
             if frames_seen in (1, 50, 250):
                 elapsed = time.time() - started
                 logger.info(
@@ -354,6 +416,15 @@ async def _run_stt(
         voice_last_at = 0.0
         stall_logged_at = 0.0
         probe_i = 0
+        # ── Barge-window ring buffer (see BARGE_REPLAY_MAX_S) ─────────
+        # `barge_pre_roll` always trails the last few gated mic frames so
+        # the syllables Silero consumed while making up its mind aren't
+        # lost. `barge_ring` starts filling the moment the policy fires
+        # and is flushed into the STT stream at gate release. Both are
+        # dropped at gate start, so nothing ever crosses a turn boundary.
+        barge_pre_roll: "deque[bytes]" = deque(maxlen=BARGE_REPLAY_PRE_ROLL_FRAMES)
+        barge_ring: list[bytes] = []
+        barge_armed = False
         while True:
             chunk = await pcm_q.get()
             if chunk is None:
@@ -394,6 +465,31 @@ async def _run_stt(
                     # STT hop produced for it (zeros = the wedge shape).
                     _log_round_tx_summary(peer, "tts-start")
                     resumed_at = None
+                    # New playback window — no barge has happened in it
+                    # yet, and last window's audio must not leak into it.
+                    barge_pre_roll.clear()
+                    barge_ring.clear()
+                    barge_armed = False
+                # Capture, don't discard, the mic audio of an in-progress
+                # barge. `is_active` is the same Silero verdict that
+                # halts TTS, so we only ever retain frames the VAD has
+                # attributed to the user — never idle speakerphone bleed.
+                # Once armed we keep capturing to the end of the window
+                # (bounded), because he is mid-sentence and the tail
+                # matters as much as the head.
+                if not barge_armed and barge_policy is not None:
+                    try:
+                        barge_armed = bool(barge_policy.is_active)
+                    except Exception:  # pragma: no cover — diag only
+                        barge_armed = False
+                    if barge_armed:
+                        barge_ring.extend(barge_pre_roll)
+                        barge_pre_roll.clear()
+                if barge_armed:
+                    if len(barge_ring) < BARGE_REPLAY_MAX_FRAMES:
+                        barge_ring.append(chunk)
+                else:
+                    barge_pre_roll.append(chunk)
                 # Half-duplex echo guard: substitute silence so Deepgram
                 # doesn't get fed the speakerphone bleed of our own TTS.
                 # Barge detection is owned by the PWA's client-side
@@ -417,6 +513,26 @@ async def _run_stt(
                 peer.extra["post_tts_first_tx_logged"] = False
                 post_tts_sample_left = 50
                 post_tts_peak = 0
+                # Hand Deepgram the interrupting speech the echo guard
+                # swallowed, ahead of the live frames, so the utterance
+                # arrives whole and in order instead of starting
+                # mid-word. Harness: recovers "One" (the gated words)
+                # and cuts time-to-first-word 1.25 s → 0.21 s.
+                if barge_ring:
+                    peer.extra["barge_replay_frames"] = len(barge_ring)
+                    logger.info(
+                        "[stt-bridge] peer %s barge replay: %d frames "
+                        "(%.2fs) of gated mic audio flushed to Deepgram "
+                        "ahead of live frames (round=%s)",
+                        peer.peer_id, len(barge_ring),
+                        len(barge_ring) * 0.02,
+                        peer.extra.get("post_tts_round"),
+                    )
+                    for replay_frame in barge_ring:
+                        yield replay_frame
+                    barge_ring.clear()
+                barge_pre_roll.clear()
+                barge_armed = False
             if resumed_at is None:
                 # First forwarded frame of a listening window (call
                 # start or post-TTS resume) — anchor the stall clock.
@@ -441,12 +557,28 @@ async def _run_stt(
                 and now_mono - stall_logged_at >= STALL_RELOG_S
             ):
                 stall_logged_at = now_mono
+                # Socket liveness vs. transcript liveness are DIFFERENT
+                # failures and pre-fix this line could not tell them
+                # apart: the provider drops every empty Results frame
+                # before the bridge sees it, so a Deepgram that is
+                # answering once a second — but transcribing his speech
+                # as nothing — looked identical to a dead socket. The
+                # provider now stamps every inbound frame; report it.
+                dg_last = getattr(stt, "last_message_mono", None)
+                if dg_last is None:
+                    dg_state = "deepgram has sent NOTHING on this stream"
+                else:
+                    dg_state = (
+                        f"deepgram last spoke {now_mono - dg_last:.1f}s ago "
+                        f"({getattr(stt, 'messages_seen', 0)} frames this stream)"
+                    )
                 logger.warning(
                     "[stt-bridge] peer %s STT HOLE: voice-level mic audio "
                     "(last %.1fs ago) but no transcript for %.1fs "
-                    "(round=%s) — audio in, nothing out of Deepgram",
+                    "(round=%s) — audio in, nothing out of Deepgram; %s",
                     peer.peer_id, now_mono - voice_last_at,
                     now_mono - anchor, peer.extra.get("post_tts_round") or 0,
+                    dg_state,
                 )
             if post_tts_sample_left > 0:
                 try:

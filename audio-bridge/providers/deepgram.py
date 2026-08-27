@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 import urllib.parse
 from typing import AsyncIterator, Optional
 
@@ -50,6 +51,17 @@ class DeepgramSTT(STTProvider):
         self._keyterms = list(spec.options.get("keyterms", []) or [])
         self._ws = None  # type: ignore[assignment]
         self._closed = False
+        # ── Liveness telemetry for the STT-hole diagnostics ───────────
+        # `last_message_mono` is stamped on EVERY inbound Deepgram frame,
+        # including the ones the parser discards (empty interims, empty
+        # finals, Metadata, SpeechStarted). stt_bridge's stall detector
+        # only ever saw PARSED transcripts, so "Deepgram's socket went
+        # silent" and "Deepgram is answering but transcribing his speech
+        # as nothing" produced an identical log line — which is exactly
+        # the ambiguity that kept the 2026-08-27 holes unattributable.
+        # None until the first frame of the current stream arrives.
+        self.last_message_mono: Optional[float] = None
+        self.messages_seen = 0
 
     def _build_url(self) -> str:
         params = {
@@ -88,6 +100,22 @@ class DeepgramSTT(STTProvider):
             raise RuntimeError(
                 "websockets package not installed; run `pip install hermes-agent[webrtc]`"
             ) from exc
+
+        # Re-arm for THIS stream. `_closed` is the pcm pump's stop flag,
+        # and both aclose() and the previous stream()'s finally set it —
+        # so without this reset, the FIRST reconnect produced a socket
+        # that sent zero audio: _pump_pcm saw _closed on its very first
+        # chunk, broke immediately and CloseStream'd. Deepgram then
+        # replied Metadata + close, the `async for raw in ws` loop ended
+        # WITHOUT raising, and _run_stt read that clean completion as
+        # "the track is gone" and broke out of its supervisor loop. Net
+        # effect: one transient Deepgram close (its ~10 s idle timeout is
+        # routine — the user simply stopped talking) permanently deafened
+        # the call, silently, with no error line. That is the 2026-08-23
+        # field bug re-created one layer down from where it was fixed.
+        self._closed = False
+        self.last_message_mono = None
+        self.messages_seen = 0
 
         url = self._build_url()
         # Deepgram authenticates via either Authorization: Token <key> or
@@ -143,6 +171,12 @@ class DeepgramSTT(STTProvider):
 
         try:
             async for raw in ws:
+                # Stamp liveness BEFORE any filtering: an empty interim
+                # is worthless as a transcript but is decisive evidence
+                # that the socket is healthy and Deepgram is chewing on
+                # our audio. See the note on last_message_mono.
+                self.last_message_mono = time.monotonic()
+                self.messages_seen += 1
                 if isinstance(raw, (bytes, bytearray)):
                     # We never expect binary frames back from Deepgram on
                     # this path — log and skip.
