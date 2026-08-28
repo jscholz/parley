@@ -44,6 +44,39 @@ TTS_FRAME_MS = 20
 TTS_FRAME_SAMPLES = int(TTS_SAMPLE_RATE * TTS_FRAME_MS / 1000)
 TTS_FRAME_BYTES = TTS_FRAME_SAMPLES * 2
 
+# ── Post-halt speaker tail ────────────────────────────────────────────
+#
+# `halt()` stops the bridge ORIGINATING TTS within one 20 ms tick (it
+# drains _frame_queue and recv() falls straight through to silence).
+# It does not, and cannot, stop the audio that has already left:
+#
+#   • RTP in flight + the browser's jitter buffer. Measured and
+#     documented at the other end of this same path — see
+#     src/audio/realtime/realtime.ts `cancelRemotePlayback`: "The WebRTC
+#     jitter buffer holds 100-300 ms of TTS audio at barge time — that's
+#     the audible tail you'll hear." The client-side cancel is a
+#     deliberate no-op (nulling srcObject permanently unbound playback),
+#     so that 100–300 ms genuinely comes out of the phone's speaker.
+#   • decoder + Web Audio + AVAudioSession output latency, tens of ms.
+#   • the return trip: the mic re-captures that tail and it reaches this
+#     process one uplink later (RTP transit + the pump queue), ~50–150 ms.
+#
+# 300 ms (worst-case jitter buffer) + ~100 ms (driver + uplink) ≈ 400 ms
+# from halt() until the last echo-bearing mic frame has been consumed
+# here. That is what this constant is; it is deliberately much SHORTER
+# than TTS_TAIL_GRACE_S (1.2 s), which covers a NATURAL end-of-reply
+# where the provider may still be emitting and the room reverb tail is
+# in play. After a halt nothing new is being originated, so only the
+# in-flight audio has to drain.
+#
+# `is_active()` reports True for this window, which is the single
+# boolean the whole system already mirrors: stt_bridge's half-duplex
+# gate, its {type:'tts-playing'} heartbeat, and barge_policy's Silero
+# gate. Holding it True is therefore the complete fix — the speaker
+# tail never reaches Deepgram, and no separate concept has to be
+# threaded through three modules.
+HALT_TAIL_GRACE_S = 0.4
+
 # Cap text queue so a runaway delta stream doesn't OOM us.
 MAX_TEXT_QUEUE = 1024
 # PCM frame queue cap. The producer (synth feed loop) blocks via
@@ -308,6 +341,11 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
         # gate inbound transcription during TTS playback (kills the
         # iOS speakerphone echo loop deterministically).
         self._last_nonsilent_at: Optional[float] = None
+        # Monotonic timestamp of the last halt() (i.e. of a barge).
+        # Keeps is_active() True for HALT_TAIL_GRACE_S afterwards so the
+        # speaker tail still draining out of the phone can't be
+        # re-captured into Deepgram. Cleared by the next fed frame.
+        self._halted_at: Optional[float] = None
         # Halt signal: set by halt() to tell the synthesis loop in
         # _run_tts to bail out of the current TTS reply ASAP. The
         # synth loop polls this between provider chunks (Option A —
@@ -324,6 +362,10 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
         """
         if self._closed:
             return
+        # New audio for a fresh round supersedes the previous round's
+        # halt tail — there is nothing left to drain once we are
+        # deliberately playing again.
+        self._halted_at = None
         if len(pcm_bytes) != TTS_FRAME_BYTES:
             if len(pcm_bytes) < TTS_FRAME_BYTES:
                 pcm_bytes = pcm_bytes + bytes(TTS_FRAME_BYTES - len(pcm_bytes))
@@ -346,6 +388,8 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
         """
         if self._closed:
             return
+        # See feed(): a fed frame ends any pending halt tail.
+        self._halted_at = None
         if len(pcm_bytes) != TTS_FRAME_BYTES:
             if len(pcm_bytes) < TTS_FRAME_BYTES:
                 pcm_bytes = pcm_bytes + bytes(TTS_FRAME_BYTES - len(pcm_bytes))
@@ -403,14 +447,41 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
     # margin without making barge-in feel laggy.
     TTS_TAIL_GRACE_S = 1.2
 
+    def is_halt_tail(self) -> bool:
+        """True while the post-halt speaker-tail window is running.
+
+        Distinct from plain `is_active()` because the two windows want
+        opposite treatment of the barge ring: during normal playback the
+        bridge CAPTURES gated mic audio so a barge can be replayed
+        (ef904f3), whereas during the halt tail the mic is carrying our
+        own drained TTS and nothing captured there may ever be replayed.
+        See stt_bridge._pcm_iter.
+        """
+        if self._halted_at is None:
+            return False
+        return (time.monotonic() - self._halted_at) < HALT_TAIL_GRACE_S
+
     def is_active(self, grace_s: Optional[float] = None) -> bool:
-        """True if a non-silent TTS frame was emitted recently.
+        """True if a non-silent TTS frame was emitted recently, OR if we
+        are inside the post-halt speaker-tail window.
 
         STT bridge calls this to decide whether to forward mic audio
         to Deepgram. While True, mic frames are replaced with silence
         — Deepgram sees a quiet input and produces no false transcripts
         from the speakerphone echo of TTS playback.
+
+        The halt-tail term is what makes that guarantee hold across a
+        BARGE. halt() used to flip this False on the very next call, so
+        for ~400 ms the mic→Deepgram path was open while the phone was
+        still emitting the drained TTS tail; the client compensated by
+        blanket-dropping every user transcript for 1.5 s, which also ate
+        the user's genuine post-barge words (field 2026-08-27 23:04:25,
+        "during barge drain: 1 interim/1 final"). Suppressing the echo
+        where the AUDIO is means the client can trust every transcript
+        it receives.
         """
+        if self.is_halt_tail():
+            return True
         if self._last_nonsilent_at is None:
             return False
         g = grace_s if grace_s is not None else PCMTrack.TTS_TAIL_GRACE_S
@@ -429,10 +500,16 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
            recv() keeps `_last_nonsilent_at` fresh and `is_active()`
            stays true.
 
-        2. Reset `_last_nonsilent_at` to None so `is_active()` flips
-           false on the very next call. The STT bridge polls
-           `is_active()` per inbound frame; a False return immediately
-           reopens the mic→Deepgram path.
+        2. Reset `_last_nonsilent_at` to None and stamp `_halted_at`, so
+           `is_active()` reports the post-halt SPEAKER TAIL
+           (HALT_TAIL_GRACE_S) and then goes false. The STT bridge polls
+           `is_active()` per inbound frame; it keeps feeding Deepgram
+           silence for the tail and reopens the mic→Deepgram path once
+           the drained audio can no longer be in the room. Stamping
+           rather than clearing outright is the 2026-08-28 fix: an
+           immediate reopen let the tail be transcribed as a fake user
+           turn, which the client then had to defend against by dropping
+           the user's real post-barge speech too.
 
         Halt synthesis-in-flight via `halt_event`: the `_run_tts` loop
         polls this between provider chunks and bails out of the current
@@ -448,6 +525,7 @@ class PCMTrack(MediaStreamTrack):  # type: ignore[misc]
             except asyncio.QueueEmpty:
                 break
         self._last_nonsilent_at = None
+        self._halted_at = time.monotonic()
 
     def stop(self) -> None:  # pragma: no cover — aiortc lifecycle
         self._closed = True

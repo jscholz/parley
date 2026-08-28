@@ -151,11 +151,14 @@ def _handle_inbound(peer, raw) -> None:
     elif msg_type == "barge":
         # Client-side BargeWindow fired during TTS playback. Halt the
         # outbound TTS track exactly as the (now-removed) bridge-side
-        # VAD path did: track.halt() drains the queued PCM frames and
-        # flips is_active() False, so the mic→STT loop in stt_bridge
-        # resumes on the very next inbound frame. Idempotent: a second
-        # barge envelope after the track has already halted is a
-        # cheap no-op.
+        # VAD path did: track.halt() drains the queued PCM frames so no
+        # further TTS is originated. is_active() then reports the
+        # post-halt SPEAKER TAIL (tts_bridge.HALT_TAIL_GRACE_S) before
+        # going False, so stt_bridge keeps the mic→Deepgram path shut
+        # while the already-in-flight audio plays out of the phone and
+        # reopens it once the echo can no longer be in the room.
+        # Idempotent: a second barge envelope after the track has
+        # already halted is a cheap no-op (it just re-stamps the tail).
         tts_track = peer.extra.get("tts_track")
         if tts_track is None:
             # talk-mode-only path; in stream mode there's no TTS to

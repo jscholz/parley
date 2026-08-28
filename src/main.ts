@@ -1998,12 +1998,23 @@ async function boot() {
   // the same key.
   let dcUserMessageId: string | null = null;
   let dcUserBufferedFinals = '';
-  // Per-window tally of user transcripts the half-duplex gate dropped,
-  // split by which protection dropped them (reply window vs post-barge
-  // speaker-drain grace). Field 2026-08-27: without this, "the bridge
-  // sent transcripts and the client ate them" and "the bridge sent
-  // nothing" produce byte-identical client logs. Flushed as ONE line
-  // when the pipe reopens.
+  // Per-window tally of what the half-duplex gate did to user
+  // transcripts. Field 2026-08-27: without this, "the bridge sent
+  // transcripts and the client ate them" and "the bridge sent nothing"
+  // produce byte-identical client logs. Flushed as ONE line when the
+  // pipe reopens.
+  //
+  // Two windows, two OUTCOMES since 2026-08-28:
+  //   window* — the reply window (agent genuinely speaking): DROPPED,
+  //             same as ever.
+  //   drain*  — the post-barge speaker-drain grace: DELIVERED. The
+  //             bridge's own gate now covers the speaker tail
+  //             (tts_bridge.HALT_TAIL_GRACE_S), so anything arriving
+  //             here is real user speech. The counter stays because it
+  //             is the line that caught the bug — a non-zero drain
+  //             count used to mean "his words were eaten"; now it means
+  //             "his words made it", and a REGRESSION would show up as
+  //             the wording flipping back.
   const dcGateDrops = {
     windowInterims: 0, windowFinals: 0, drainInterims: 0, drainFinals: 0,
   };
@@ -2012,8 +2023,8 @@ async function boot() {
     if (windowInterims + windowFinals + drainInterims + drainFinals === 0) return;
     log(`[dictation] gate reopened (${where}) — dropped during TTS window: `
       + `${windowInterims} interim/${windowFinals} final; `
-      + `during barge drain: ${drainInterims} interim/${drainFinals} final`
-      + (windowFinals + drainFinals > 0 ? ' — FINALS WERE DROPPED (real speech may be lost)' : ''));
+      + `delivered during barge drain: ${drainInterims} interim/${drainFinals} final`
+      + (windowFinals > 0 ? ' — FINALS WERE DROPPED (real speech may be lost)' : ''));
     dcGateDrops.windowInterims = 0; dcGateDrops.windowFinals = 0;
     dcGateDrops.drainInterims = 0; dcGateDrops.drainFinals = 0;
   }
@@ -2188,13 +2199,33 @@ async function boot() {
       // wedged round that receives nothing look identical in the log.
       // Count what the gate drops, attributed to the reply window vs
       // the post-barge drain, and emit ONE line when the pipe reopens.
+      //
+      // 2026-08-28: the post-barge DRAIN no longer drops anything. Echo
+      // suppression moved to where the audio is — the bridge now holds
+      // its own mic→Deepgram gate shut for the post-halt speaker tail
+      // (tts_bridge.HALT_TAIL_GRACE_S), so the drained TTS never reaches
+      // STT and cannot become a transcript in the first place. Any user
+      // transcript that arrives after a barge is therefore genuine
+      // speech BY CONSTRUCTION, and dropping it only loses the user's
+      // words: field 2026-08-27 23:04:25 ate his first post-barge
+      // interim AND final ("during barge drain: 1 interim/1 final")
+      // while the bridge journal showed it had delivered them
+      // (`first post-TTS transcript (round=2 final=False len=11)`).
+      // The REPLY-window gate below is untouched — while the agent is
+      // actually speaking the bridge's gate and this one agree, and
+      // this one still catches anything that slips the seam.
       if (webrtcSuppress.isTtsPlaying()) {
-        if (webrtcSuppress.isBargeDrainActive()) {
-          if (ev.is_final) dcGateDrops.drainFinals++; else dcGateDrops.drainInterims++;
-        } else if (ev.is_final) dcGateDrops.windowFinals++; else dcGateDrops.windowInterims++;
-        return;
+        if (!webrtcSuppress.isBargeDrainActive()) {
+          if (ev.is_final) dcGateDrops.windowFinals++; else dcGateDrops.windowInterims++;
+          return;
+        }
+        // Post-barge drain: count what we let through (so the tally
+        // line still says what happened in the window that used to eat
+        // it) and fall through to normal handling.
+        if (ev.is_final) dcGateDrops.drainFinals++; else dcGateDrops.drainInterims++;
+      } else {
+        logGateDropsIfAny('gate-open');
       }
-      logGateDropsIfAny('gate-open');
       // Deepgram's UtteranceEnd arrives as an EMPTY final (the bridge
       // forwards empty finals since 9eb5a88 for dictate.ts's caret
       // re-anchor; the dictate listener is a different consumer). In

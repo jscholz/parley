@@ -193,8 +193,11 @@ export default async function run({ page, log, mock }) {
     await dcRecv(page, { type: 'listening' });
     // The user's barge shout itself gets transcribed and lands inside
     // the drain window (field: `first post-TTS transcript round=3
-    // final=False len=5` at +790 ms). It must be swallowed silently —
-    // and must not poison the next turn.
+    // final=False len=5` at +790 ms). Since 2026-08-28 the client
+    // DELIVERS this rather than dropping it — the bridge's own
+    // speaker-tail gate guarantees it isn't echo — so what this round
+    // proves here is that delivering it does not poison the next turn
+    // (interims never enter the dispatch buffer; only finals do).
     await page.waitForTimeout(400);
     await dcRecv(page, { type: 'transcript', role: 'user', text: 'Okay.', is_final: false });
     // …and the parley stream subscriber, which was never halted, keeps

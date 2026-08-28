@@ -34,17 +34,28 @@ const SUPPRESS_GRACE_MS = 1200;
 
 // Speaker-buffer drain time after a barge halt. The bridge stops
 // sending TTS frames when it receives the upstream barge envelope,
-// but the client's audio output queue (Web Audio + OS speaker buffer)
-// has ~300-500ms of TTS already in flight. During that drain window,
-// the mic captures the residual TTS audio — without this grace, the
-// drained tail gets STT-transcribed into a fake user turn (the
-// "1 2 3 ... zero" feedback loop).
-// Bumped 600 → 1500ms: post-barge user speech (e.g. "okay okay") was
-// bleeding past the 600ms window before the user could stop talking.
-// The longer grace gives both the speaker tail AND the user's reflex
-// talking-stop time to settle before transcripts re-enable.
-// Trade-off: legitimate post-barge follow-up speech takes 1.5s before
-// it counts as the next turn.
+// but the client's audio output queue (WebRTC jitter buffer + OS
+// speaker buffer) has ~100-300ms of TTS already in flight, and the mic
+// captures it.
+//
+// 2026-08-28 — WHAT THIS WINDOW IS FOR NOW. It used to be the echo
+// defence: main.ts dropped every user transcript while `ttsPlaying`,
+// so holding the flag here for 1.5s blanket-suppressed the drained
+// tail (the "1 2 3 ... zero" feedback loop). That also ate the user's
+// genuine interrupting words — the whole point of a barge — and on
+// 2026-08-27 23:04 it ate the first interim AND final of his
+// post-barge sentence.
+//
+// Echo suppression now lives where the AUDIO is: the bridge holds its
+// own mic→Deepgram gate shut across the speaker tail
+// (audio-bridge/tts_bridge.py HALT_TAIL_GRACE_S), so the tail is never
+// transcribed at all and main.ts DELIVERS user transcripts during this
+// window. What remains here is the `ttsPlaying` LEVEL: it keeps the
+// barge detector's playback gate and the bridge's own late
+// `tts-playing`/`listening` envelopes coherent across the halt (the
+// v0.398 contract in onListening/onPlaybackState) rather than
+// censoring anything. Length is uncritical for that job; left at 1500
+// so the surrounding race behaviour is unchanged.
 const TTS_DRAIN_GRACE_MS = 1500;
 
 // ── The bounded-playback invariant ───────────────────────────────────
@@ -380,9 +391,10 @@ export function onAssistantFinal(opts?: { viaDataChannel?: boolean }): void {
  *  longer handled). The user interrupted, so cancel any pending
  *  tail-grace and let user
  *  transcripts flow again immediately for the user's intentional
- *  speech. BUT: keep `ttsPlaying` true for TTS_DRAIN_GRACE_MS so the
- *  speaker-buffer tail draining over the next ~500ms doesn't get
- *  STT-transcribed as a fake user turn. */
+ *  speech. `ttsPlaying` is still held for TTS_DRAIN_GRACE_MS, but as a
+ *  LEVEL for the barge detector / playback-evidence races only — the
+ *  speaker tail is suppressed on the bridge now, not by censoring
+ *  transcripts here. See TTS_DRAIN_GRACE_MS. */
 export function onBarge(): void {
   if (suppressEndTimer) {
     clearTimeout(suppressEndTimer);
@@ -414,10 +426,14 @@ export function onBarge(): void {
 }
 
 /** True while the post-barge speaker-drain grace window is running —
- *  the ~1.5 s after a barge in which `ttsPlaying` is held true so the
- *  drained speaker tail can't be transcribed into a fake user turn.
- *  Exposed so main.ts's gate diagnostics can attribute a dropped user
- *  transcript to the drain window vs the reply window. */
+ *  the ~1.5 s after a barge in which `ttsPlaying` is held true.
+ *
+ *  main.ts's user-transcript gate uses it to tell the two windows
+ *  apart, and they now have OPPOSITE outcomes: the reply window drops
+ *  (the agent is really speaking), the drain window delivers (the
+ *  bridge's HALT_TAIL_GRACE_S gate already guaranteed the speaker tail
+ *  never reached STT, so anything here is the user). Also drives the
+ *  drop/deliver tally line. */
 export function isBargeDrainActive(): boolean {
   return ttsPlayingClearTimer !== null;
 }
