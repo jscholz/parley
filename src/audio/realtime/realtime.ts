@@ -544,6 +544,49 @@ export function queryBargeVad(): boolean {
  *  silent buffer overlaps the ~500 ms-2 s SDP exchange. No-op on
  *  non-iOS or when the audio context isn't running yet (primeAudio
  *  in the user-gesture handler should have left it 'running'). */
+// ── Call-open phase timing (2026-08-28) ──────────────────────────────
+// He: "took a while to start the call… makes the app feel flakey and
+// immature", benchmarked against WhatsApp memo (chime instant, waveform
+// ~0.5s). Field measurement put tap→connected at ~2.3s, of which the
+// SERVER is only 361ms (offer POST → connected). The rest is client-side
+// and, at 1-second log granularity, unattributable — which is exactly
+// how you end up optimising the wrong thing.
+//
+// These marks split the client half into phases that map to real code:
+// mic acquisition (incl. the iOS session prime, which does a whole
+// throwaway getUserMedia + a 200ms settle sleep BEFORE the real one),
+// SDP creation, the offer round-trip, and ICE/DTLS to connected. One
+// summary line per call open; costs nothing when no call is opening.
+const openMarks: Array<{ label: string; at: number }> = [];
+let openT0 = 0;
+
+function markOpen(label: string): void {
+  if (!openT0) return;
+  openMarks.push({ label, at: performance.now() });
+}
+
+export function beginOpenTiming(): void {
+  openT0 = performance.now();
+  openMarks.length = 0;
+}
+
+/** Emit the phase breakdown. Called once the call is usable (first
+ *  `listening` envelope) — that is the moment that matters to him, not
+ *  `connectionstate=connected`. */
+export function logOpenTiming(reason: string): void {
+  if (!openT0) return;
+  const total = Math.round(performance.now() - openT0);
+  let prev = openT0;
+  const parts = openMarks.map((m) => {
+    const d = Math.round(m.at - prev);
+    prev = m.at;
+    return `${m.label}=${d}ms`;
+  });
+  log(`[call-open] ${reason} total=${total}ms ${parts.join(' ')}`);
+  openT0 = 0;
+  openMarks.length = 0;
+}
+
 function warmAecReferencePathIOS(): void {
   const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
   const isIOS = /iPad|iPhone|iPod/.test(ua) ||
@@ -614,6 +657,7 @@ export async function open(
   // session category SHOULD be playAndRecord by here for AEC to
   // engage. If it's still 'playback' we'll see it in the trace.
   logAudioState('pre-getUserMedia');
+  beginOpenTiming();
   const micPromise = audioPlatform.getMicStream('webrtc', {
     echoCancellation: useAec,
     noiseSuppression: false,
@@ -831,6 +875,7 @@ export async function open(
     }
     active.micStream = micStream;
     try {
+      markOpen('mic');
       await audioTransceiver.sender.replaceTrack(micStream.getAudioTracks()[0] ?? null);
     } catch (e: any) {
       log('[webrtc] replaceTrack failed',
@@ -888,6 +933,7 @@ export async function open(
     log('[webrtc] connectionstate=', pc.connectionState);
     const cs = pc.connectionState;
     if (cs === 'connected') {
+      markOpen('connect');
       phase('ice→connected');
       if (reconnecting) {
         const elapsed = Math.round(performance.now() - reconnectStartedAt);
@@ -943,9 +989,11 @@ export async function open(
   let offer: RTCSessionDescriptionInit;
   try {
     const tCreateOffer = performance.now();
+    markOpen('pre-sdp');
     offer = await pc.createOffer();
     const tCreateOfferDone = performance.now();
     await pc.setLocalDescription(offer);
+    markOpen('sdp');
     const tSetLocalDone = performance.now();
     log(
       `[webrtc-signal] createOffer +${Math.round(tCreateOfferDone - tCreateOffer)}ms ` +
@@ -1044,6 +1092,7 @@ export async function open(
       throw new Error(`offer ${res.status}: ${txt.slice(0, 200)}`);
     }
     answer = await res.json();
+    markOpen('offer-rtt');
     const tPostJson = performance.now();
     log(
       `[webrtc-signal] POST-offer headers +${Math.round(tPostHeaders - tPostStart)}ms ` +
@@ -1072,6 +1121,7 @@ export async function open(
   try {
     const tSetRemote = performance.now();
     await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type as RTCSdpType });
+    markOpen('remote-sdp');
     const tSetRemoteDone = performance.now();
     log(`[webrtc-signal] setRemoteDescription +${Math.round(tSetRemoteDone - tSetRemote)}ms`);
   } catch (e: any) {

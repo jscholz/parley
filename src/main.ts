@@ -2138,6 +2138,10 @@ async function boot() {
       // turn" cue. Single source of truth: don't fire this anywhere
       // else on the client.
       log('[bubble-diag] listening envelope received from bridge');
+      // The call is only USABLE at the first `listening` — that is the
+      // moment he is waiting for, not connectionstate=connected. One
+      // breakdown line per open; no-op on later rounds' listening.
+      webrtcConnection.logOpenTiming('first-listening');
       try { playFeedback('listening'); } catch { /* ignore */ }
       // Authoritative "TTS audio done" signal — flips the realtime
       // BargeWindow's playback gate off. Without this the gate was
