@@ -48,34 +48,55 @@ TTS_FRAME_BYTES = TTS_FRAME_SAMPLES * 2
 #
 # `halt()` stops the bridge ORIGINATING TTS within one 20 ms tick (it
 # drains _frame_queue and recv() falls straight through to silence).
-# It does not, and cannot, stop the audio that has already left:
+# It cannot stop the audio that has already left this process — but as
+# of 2026-08-28 it no longer has to. The client now MUTES its remote
+# output at the barge (src/audio/realtime/realtime.ts
+# `cancelRemotePlayback`: a 25 ms gain ramp to zero, not an unbind), so
+# the 100–300 ms sitting in the browser's jitter buffer plays into a
+# zeroed gain and never reaches the speaker. That mute IS the cut the
+# user hears, and it is what Jonathan asked for: "everything before the
+# barge is detected will be discarded, but everything immediately
+# afterwards will be captured."
 #
-#   • RTP in flight + the browser's jitter buffer. Measured and
-#     documented at the other end of this same path — see
-#     src/audio/realtime/realtime.ts `cancelRemotePlayback`: "The WebRTC
-#     jitter buffer holds 100-300 ms of TTS audio at barge time — that's
-#     the audible tail you'll hear." The client-side cancel is a
-#     deliberate no-op (nulling srcObject permanently unbound playback),
-#     so that 100–300 ms genuinely comes out of the phone's speaker.
-#   • decoder + Web Audio + AVAudioSession output latency, tens of ms.
-#   • the return trip: the mic re-captures that tail and it reaches this
-#     process one uplink later (RTP transit + the pump queue), ~50–150 ms.
+# So this window is no longer "how long the speaker keeps talking". It
+# is one thing only: UPLINK SKEW — mic frames captured just BEFORE the
+# mute, still in flight, which still carry the agent's voice.
 #
-# 300 ms (worst-case jitter buffer) + ~100 ms (driver + uplink) ≈ 400 ms
-# from halt() until the last echo-bearing mic frame has been consumed
-# here. That is what this constant is; it is deliberately much SHORTER
-# than TTS_TAIL_GRACE_S (1.2 s), which covers a NATURAL end-of-reply
-# where the provider may still be emitting and the room reverb tail is
-# in play. After a halt nothing new is being originated, so only the
-# in-flight audio has to drain.
+#   Let t=0 be the instant the client mutes (its own barge decision).
+#   The barge envelope reaches us over the data channel at t + D, and
+#   halt() runs there, so this window starts at t + D.
+#   A mic frame captured at time c arrives in _pcm_iter at c + U.
+#   Frames are contaminated for c < t + ramp, i.e. they keep arriving
+#   until t + ramp + U.
+#   Required window = (t + ramp + U) - (t + D) = U - D + ramp.
+#
+#   U (mic capture → here): iOS capture buffer 20–40 ms, Opus encode +
+#     packetization 20 ms, network one-way 10–30 ms, aiortc jitter
+#     buffer + decode + pump queue 20–60 ms  →  ~70–150 ms.
+#   D (data channel one-way): same network path, no media buffering
+#     →  ~10–30 ms.
+#   ramp: 25 ms (DUCK_RAMP_MS in realtime.ts).
+#
+#   U - D + ramp  ≈  55–165 ms.  Round up to 200 ms for headroom on a
+#   worse uplink and for the few ms of room-reverb tail already in the
+#   air at the mute.
+#
+# Was 400 ms, which was correct when the speaker genuinely kept playing
+# for 100–300 ms after the halt. Halving it directly buys back 200 ms of
+# the user's post-cut speech: every gated frame is DISCARDED now (there
+# is no replay — see stt_bridge), so a longer window is not caution, it
+# is deleted words.
+#
+# It stays deliberately much shorter than TTS_TAIL_GRACE_S (1.2 s),
+# which covers a NATURAL end-of-reply where the provider may still be
+# emitting into an UNMUTED speaker and the room reverb tail is in play.
 #
 # `is_active()` reports True for this window, which is the single
 # boolean the whole system already mirrors: stt_bridge's half-duplex
 # gate, its {type:'tts-playing'} heartbeat, and barge_policy's Silero
-# gate. Holding it True is therefore the complete fix — the speaker
-# tail never reaches Deepgram, and no separate concept has to be
-# threaded through three modules.
-HALT_TAIL_GRACE_S = 0.4
+# gate. Holding it True is therefore the complete fix — no separate
+# concept has to be threaded through three modules.
+HALT_TAIL_GRACE_S = 0.2
 
 # Cap text queue so a runaway delta stream doesn't OOM us.
 MAX_TEXT_QUEUE = 1024

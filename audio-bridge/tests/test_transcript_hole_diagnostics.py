@@ -187,6 +187,119 @@ async def test_stt_hole_stall_line_fires_on_voice_without_transcripts(monkeypatc
     assert "no transcript for" in holes[0].getMessage()
 
 
+def _stale_voice_scenario(monkeypatch, *, voice_frames, total, dg_last_ago=None):
+    """Voice for the first `voice_frames` frames, silence after, on a
+    fake clock advancing 50 ms per consumed frame. STALL_AFTER_S is set
+    to 2.0 so the stall window only opens LONG after the voice stopped —
+    the shape of the 2026-08-28 11:21:06 false positive.
+
+    `dg_last_ago` (seconds) models a Deepgram that is answering.
+    """
+    monkeypatch.setattr(stt_bridge, "STALL_AFTER_S", 2.0)
+    monkeypatch.setattr(stt_bridge, "STALL_RELOG_S", 3600.0)
+
+    t0 = stt_bridge.time.monotonic()
+    seen = {"n": 0}
+    monkeypatch.setattr(
+        stt_bridge.time, "monotonic", lambda: t0 + seen["n"] * 0.05,
+    )
+
+    class _LivelySTT:
+        def __init__(self):
+            self.chunks = []
+            self.messages_seen = 78
+
+        @property
+        def last_message_mono(self):
+            if dg_last_ago is None:
+                return None
+            return t0 + seen["n"] * 0.05 - dg_last_ago
+
+        async def stream(self, pcm_iter):
+            async for chunk in pcm_iter:
+                seen["n"] += 1
+                self.chunks.append(chunk)
+                if False:  # pragma: no cover — generator shape
+                    yield None
+
+        async def aclose(self):
+            pass
+
+    track = _FakeTtsTrack()
+    peer = _FakePeer(track)
+    stt = _LivelySTT()
+    monkeypatch.setattr(stt_bridge, "get_stt_provider", lambda spec: stt)
+    pcm_q: asyncio.Queue = asyncio.Queue()
+    for i in range(total):
+        pcm_q.put_nowait(REAL if i < voice_frames else SILENCE)
+    pcm_q.put_nowait(None)
+    return peer, stt, pcm_q
+
+
+@pytest.mark.asyncio
+async def test_stale_voice_with_a_responsive_deepgram_is_not_a_hole(monkeypatch, caplog):
+    """THE cried-wolf regression, walk test 2026-08-28 11:21:06:
+
+        STT HOLE: voice-level mic audio (last 3.6s ago) but no transcript
+        for 5.0s (round=2) — deepgram last spoke 0.7s ago (78 frames
+        this stream)
+
+    Nothing was wrong. He had stopped talking 3.6 s earlier and Deepgram
+    was answering 0.7 s before the line was written. "Voice at some point
+    in this listening window" is not the detector's premise — "audio in,
+    nothing out" is, and audio 3.6 s ago is not audio in.
+
+    Here: voice stops at 0.5 s (fake clock), the stall window opens at
+    2.0 s, so voice is 1.5 s stale — comfortably past
+    STALL_VOICE_RECENT_S — while Deepgram answered 0.2 s ago.
+    """
+    caplog.set_level(logging.INFO, logger="stt_bridge")
+    peer, _stt, pcm_q = _stale_voice_scenario(
+        monkeypatch, voice_frames=10, total=80, dg_last_ago=0.2,
+    )
+    pump = asyncio.create_task(asyncio.sleep(3600))
+    try:
+        await stt_bridge._run_stt(peer, _VoiceConfig(), pcm_q, pump)
+    finally:
+        pump.cancel()
+
+    holes = [r.getMessage() for r in caplog.records if "STT HOLE" in r.getMessage()]
+    assert not holes, (
+        "warned about a hole that was not there — his voice was long over "
+        f"and Deepgram was answering: {holes}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_responsive_deepgram_does_not_suppress_a_real_hole(monkeypatch, caplog):
+    """The tradeoff, pinned. A socket that is alive and answering while
+    transcribing CURRENT speech as nothing is a REAL failure — it is one
+    of the shapes the detector was built for (see the `dg_state` branch
+    in _pcm_iter). So Deepgram liveness must only CLASSIFY the warning,
+    never suppress it. A missed real hole costs a whole ride; a rare
+    false one costs a log line."""
+    caplog.set_level(logging.INFO, logger="stt_bridge")
+    # Voice all the way through — the real shape — with Deepgram
+    # answering 0.2 s ago the entire time.
+    peer, _stt, pcm_q = _stale_voice_scenario(
+        monkeypatch, voice_frames=80, total=80, dg_last_ago=0.2,
+    )
+    pump = asyncio.create_task(asyncio.sleep(3600))
+    try:
+        await stt_bridge._run_stt(peer, _VoiceConfig(), pcm_q, pump)
+    finally:
+        pump.cancel()
+
+    holes = [r.getMessage() for r in caplog.records if "STT HOLE" in r.getMessage()]
+    assert len(holes) == 1, (
+        f"the real shape must still warn, got {len(holes)} lines: {holes}"
+    )
+    assert "deepgram last spoke 0.2s ago (78 frames this stream)" in holes[0], (
+        "the liveness readout must still be in the line — it is what "
+        "names the guilty layer"
+    )
+
+
 @pytest.mark.asyncio
 async def test_no_stall_line_when_transcripts_flow_or_mic_silent(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="stt_bridge")

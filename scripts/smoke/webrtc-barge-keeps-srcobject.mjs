@@ -1,28 +1,33 @@
-// Pin the de5b48f fix: cancelRemotePlayback() is a no-op and MUST
-// NOT detach the remote-track <audio>'s srcObject.
+// Pin the de5b48f fix: cancelRemotePlayback() MUST NOT detach the
+// remote-track <audio>'s srcObject.
 //
 // Pre-fix it called audio.pause() + audio.srcObject = null, which
 // permanently unbound the element from the peer track (ontrack only
 // fires once at session setup — nothing rebinds later). One false
-// barge therefore silenced TTS for the rest of the call. Bridge
-// already handles cancellation server-side via tts_track.halt(); the
-// PWA-side cancel was redundant double-work.
+// barge therefore silenced TTS for the rest of the call.
 //
-// Test plan (mocked):
-//   1. Construct a fake MediaStream sentinel and assign it to a real
-//      <audio> element's srcObject (matching the production binding).
-//   2. Import connection.mjs and call cancelRemotePlayback().
-//   3. Assert audio.srcObject === sentinel (still bound) AND
-//      audio.paused state was not flipped.
+// 2026-08-28: cancelRemotePlayback() is no longer a no-op. Jonathan
+// asked for the cut to be audible — "everything before the barge is
+// detected will be discarded, but everything immediately afterwards
+// will be captured" — so it now ramps the remote output to silence over
+// 25 ms. That makes THIS smoke more important, not less: the whole
+// point is that it mutes rather than unbinds. Both halves are asserted
+// below, in a real browser against a real <audio> element:
 //
-// This is a static behavioural test — exercises the function directly
-// rather than going through the WebRTC negotiation. The fix is "do
-// nothing"; the test pins that nothing-ness.
+//   1. srcObject and paused are untouched (the de5b48f guarantee), and
+//   2. the output actually goes silent, and
+//   3. it comes BACK — a barge may never cost the user every subsequent
+//      reply. The bridge's {type:'tts-playing', active:false} is the
+//      restore signal.
+//
+// The exhaustive lifecycle (watchdog, repeated barges, teardown
+// mid-ramp, the iOS gain path) lives in test/realtime-barge-duck.test.ts;
+// this smoke is the real-DOM end of it.
 
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'webrtc-barge-keeps-srcobject';
-export const DESCRIPTION = 'cancelRemotePlayback() does NOT unbind the peer-track <audio> element';
+export const DESCRIPTION = 'barge mutes the remote <audio> output (and restores it) WITHOUT unbinding srcObject';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -47,18 +52,33 @@ export default async function run({ page, log }) {
     // srcObject binding survival under cancelRemotePlayback().
     const wasPaused = audio.paused;
 
+    // Bind this element as the duck's playback target, standing in for
+    // the ontrack <audio>-fallback route.
+    conn.setRemotePlaybackTargetsForTests(audio, null);
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
     // Fire the function under test.
     let threw = null;
     try { conn.cancelRemotePlayback(); }
     catch (e) { threw = String(e?.message || e); }
+    await sleep(120);   // >> DUCK_RAMP_MS (25)
 
-    return {
-      threw,
+    const mutedState = {
+      volume: audio.volume,
+      level: conn.getRemotePlaybackLevel(),
       srcObjectStillSentinel: audio.srcObject === sentinel,
       srcObjectIsNull: audio.srcObject === null,
       pausedAfter: audio.paused,
-      wasPaused,
     };
+
+    // The bridge's restore signal for the next reply round.
+    conn.handleRemotePlaybackEnvelope({ type: 'tts-playing', active: false });
+    await sleep(120);
+    const restoredVolume = audio.volume;
+
+    conn.setRemotePlaybackTargetsForTests(null, null);
+
+    return { threw, wasPaused, ...mutedState, restoredVolume };
   });
 
   log(`cancelRemotePlayback result: ${JSON.stringify(result)}`);
@@ -78,4 +98,17 @@ export default async function run({ page, log }) {
     `cancelRemotePlayback flipped audio.paused (was ${result.wasPaused}, now ${result.pausedAfter})`,
   );
   log('cancelRemotePlayback() leaves the <audio> binding + paused state intact ✓');
+
+  // …and it DOES cut the audio, which is the point of the barge.
+  assert(
+    result.volume === 0 && result.level === 0,
+    `barge did not silence the remote output (volume=${result.volume}, level=${result.level}) — the agent talks through the interruption and keeps feeding the mic`,
+  );
+  log('barge mutes the remote output ✓');
+
+  assert(
+    result.restoredVolume === 1,
+    `remote output stayed muted at ${result.restoredVolume} after tts-playing:false — every subsequent reply would be silent for the rest of the call`,
+  );
+  log('remote output is restored for the next reply round ✓');
 }

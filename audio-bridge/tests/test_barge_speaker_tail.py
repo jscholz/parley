@@ -18,24 +18,27 @@ that audio went straight into Deepgram and came back as a fake user turn
 defence was a blanket 1.5 s transcript drop — which necessarily ate the
 user's interrupting words too, i.e. exactly the thing a barge is for.
 
-The fix puts the suppression where the AUDIO is. These tests pin both
-halves of it:
+The fix puts the suppression where the AUDIO is. These tests pin it:
 
   1. `PCMTrack.halt()` keeps `is_active()` True for HALT_TAIL_GRACE_S,
-     so stt_bridge keeps feeding Deepgram paced silence until the
-     in-flight audio can no longer be in the room.
+     so stt_bridge keeps feeding Deepgram paced silence until the last
+     contaminated mic frame has drained through.
 
-  2. `_pcm_iter` disarms the ef904f3 barge ring at the tail's leading
-     edge. This is the subtle half: `barge_policy.is_active` is STILL
-     True across the tail (the user is mid-sentence), so capture would
-     otherwise run straight through the echo window and the replay would
-     hand Deepgram the very audio the gate just excluded. The ring is
-     flushed at that edge instead — the user's pre-halt speech goes to
-     Deepgram immediately (ef904f3's whole point, preserved), and not
-     one tail frame is ever replayed.
+  2. Not one frame captured inside that window — or anywhere else inside
+     the playback gate — is ever handed to Deepgram.
+
+2026-08-28 update. Point 2 used to have an exception: the ef904f3 barge
+ring replayed gated audio the bridge's own Silero had attributed to
+speech. Round 0 of the 11:20 walk test showed bridge-side Silero firing
+on the AGENT's voice (max p_speech 0.993, |amp| 0.6137) with no client
+barge at all, and the ring duly replayed 1.74 s of it into Deepgram.
+The ring is gone; see audio-bridge/tests/test_barge_no_prebarge_audio.py
+for the full account. What pays for the loss is the client muting its
+speaker at the barge, which makes the cut audible and lets this window
+shrink from 400 ms to 200 ms.
 
 Plain queues and fakes; no aiortc, no sockets. Same style as
-test_barge_audio_replay.py.
+test_barge_no_prebarge_audio.py.
 """
 
 import asyncio
@@ -266,27 +269,41 @@ async def test_speaker_tail_never_reaches_deepgram(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_genuine_barge_speech_is_still_replayed(monkeypatch):
-    """ef904f3 preserved: everything the VAD attributed to the user
-    before the halt still reaches Deepgram, contiguously, ahead of the
-    live frames."""
+async def test_nothing_from_before_the_cut_reaches_deepgram(monkeypatch):
+    """Jonathan's rule, stated as an invariant: the ONLY mic audio
+    Deepgram sees is what the mic produced with the gate open. Not the
+    bleed, not the interrupting words that provoked the barge, not the
+    tail — the gate window is silence end to end."""
     _peer, stt = await _drive_barge_round(monkeypatch)
 
-    assert stt.chunks.count(BARGE) == BARGE_N, (
-        "the user's interrupting speech was dropped — the tail gate must "
-        "not cost us ef904f3's replay"
+    assert BARGE not in stt.chunks, (
+        "pre-barge audio reached Deepgram — everything before the cut is "
+        "discarded by design (2026-08-28 rule); the replay that used to "
+        "send it is what fed the agent's own voice back on round 0"
     )
-    assert stt.chunks.count(QUIET) == stt_bridge.BARGE_REPLAY_PRE_ROLL_FRAMES, (
-        "the pre-roll that covers Silero's confirmation lag is missing"
+    assert QUIET not in stt.chunks, "speakerphone bleed reached Deepgram"
+    assert ECHO not in stt.chunks
+    assert set(stt.chunks) <= {REAL, SILENCE}
+    # The whole gate — bleed, barge and tail — is exactly one paced
+    # silence frame per mic frame. No holes, no splices.
+    assert stt.chunks.count(SILENCE) == BLEED + BARGE_N + TAIL
+    assert len(stt.chunks) == PRE + BLEED + BARGE_N + TAIL + POST
+
+
+def test_halt_tail_stays_short_enough_to_be_a_cut():
+    """The window is pure uplink skew now (U - D + mute ramp ≈ 55–165 ms;
+    see the derivation over HALT_TAIL_GRACE_S). Since nothing gated is
+    replayed any more, every extra millisecond here is a millisecond of
+    the user's post-cut speech deleted — so this must not silently drift
+    back up toward the old 400 ms."""
+    assert tts_bridge.HALT_TAIL_GRACE_S <= 0.25, (
+        f"halt tail grew to {tts_bridge.HALT_TAIL_GRACE_S}s — that is "
+        "deleted user speech, not caution"
     )
-    first_barge = stt.chunks.index(BARGE)
-    last_barge = len(stt.chunks) - 1 - stt.chunks[::-1].index(BARGE)
-    assert stt.chunks[first_barge:last_barge + 1].count(BARGE) == BARGE_N, \
-        "barge frames must be replayed contiguously"
-    # Between the replay and the live mic there is only the tail's paced
-    # silence — no echo spliced in, no live frames interleaved.
-    assert set(stt.chunks[last_barge + 1:last_barge + 1 + TAIL]) == {SILENCE}
-    assert all(c == REAL for c in stt.chunks[last_barge + 1 + TAIL:])
+    assert tts_bridge.HALT_TAIL_GRACE_S >= 0.1, (
+        "too short to cover the uplink skew — the agent's own voice will "
+        "reach Deepgram"
+    )
 
 
 @pytest.mark.asyncio

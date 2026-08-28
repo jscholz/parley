@@ -468,19 +468,184 @@ export function logListeningTransport(): void {
   });
 }
 
-/** No-op kept for call-site compatibility. The bridge's
- *  tts_track.halt() (audio-bridge/tts_bridge.py:367) already drains
- *  the outbound PCM queue and falls back to silence frames within one
- *  20ms tick of the barge fire — the PWA does NOT need to cancel
- *  anything client-side. The previous implementation paused the
- *  <audio> element AND nulled its srcObject, which permanently
- *  unbound it from the peer track: any subsequent reply's TTS frames
- *  reached the peer connection but had nowhere to play, so one false
- *  barge silenced TTS for the rest of the call. The WebRTC jitter
- *  buffer holds 100-300 ms of TTS audio at barge time — that's the
- *  audible tail you'll hear, vs. a permanently-dead playback path. */
+// ─── Remote-playback duck: the audible cut at barge ────────────────────
+//
+// Jonathan, 2026-08-28: "It might be better from a user standpoint if
+// the audio was clipped to synchronize with the barge time that the user
+// hears. So the user understands that everything before the barge is
+// detected will be discarded, but everything immediately afterwards will
+// be captured."
+//
+// For that contract to be honest the cut must be AUDIBLE. This function
+// used to be a deliberate no-op, so 100-300 ms of already-buffered TTS
+// kept coming out of the speaker after every barge — and the bridge had
+// to hold its mic gate shut across all of it (HALT_TAIL_GRACE_S was
+// 400 ms), which is what made the barge-replay ring look necessary. That
+// ring is what replayed 1.74 s of the agent's own voice into Deepgram on
+// 2026-08-28 11:20:38. Muting here is what let all of it go away.
+//
+// MUTE, NEVER UNBIND. The previous non-no-op implementation (de5b48f)
+// paused the <audio> element and nulled its srcObject. ontrack fires
+// once per session and nothing rebinds, so one false barge silenced TTS
+// for the rest of the call. scripts/smoke/webrtc-barge-keeps-srcobject.mjs
+// pins that srcObject and paused are never touched. A gain/volume value
+// is fully reversible and cannot break the binding.
+//
+// THE OUTPUT CAN NEVER BE LEFT MUTED. That is the safety property, and
+// it has three independent guarantors:
+//   1. the bridge's {type:'tts-playing', active:false} envelope, which
+//      lands one mic frame after the halt tail ends (the normal path);
+//   2. DUCK_WATCHDOG_MS, for when that envelope never arrives at all
+//      (older bridge, dropped data channel, teardown race);
+//   3. resetRemotePlaybackForTeardown() on close(), so no call can
+//      inherit a ducked output from its predecessor.
+// Pinned by test/realtime-barge-duck.test.ts.
+
+/** Fade length for the duck. An instantaneous 1→0 step on a live audio
+ *  stream is a click; 25 ms is under the perceptual "instant" threshold
+ *  and long enough to avoid the discontinuity. The bridge budgets for
+ *  this number — see tts_bridge.HALT_TAIL_GRACE_S's derivation. */
+const DUCK_RAMP_MS = 25;
+/** Backstop for guarantor 2 above. Generous next to the real restore
+ *  latency (halt tail 200 ms + one 20 ms frame), tight enough that a
+ *  wedged duck can never swallow a whole reply. */
+let duckWatchdogMs = 3000;
+
+/** iOS Web Audio path: source → THIS → destination. Null elsewhere. */
+let remoteGain: GainNode | null = null;
+/** <audio> fallback path. Null when the Web Audio path is in use. */
+let remoteAudioEl: HTMLAudioElement | null = null;
+let duckRampTimer: ReturnType<typeof setInterval> | null = null;
+let duckWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+let remoteDucked = false;
+
+/** Current audible level of the remote (TTS) output, 0..1. Diagnostic —
+ *  "is the agent audible right now" is otherwise unobservable. */
+export function getRemotePlaybackLevel(): number {
+  if (remoteGain) { try { return remoteGain.gain.value; } catch { return 1; } }
+  if (remoteAudioEl) { try { return remoteAudioEl.volume; } catch { return 1; } }
+  return 1;
+}
+
+function clearDuckRamp(): void {
+  if (duckRampTimer != null) { clearInterval(duckRampTimer); duckRampTimer = null; }
+}
+
+/** Fade the remote output to `target` over DUCK_RAMP_MS.
+ *
+ *  Web Audio gets a scheduled AudioParam ramp (sample-accurate, and the
+ *  right tool on the platform that has it). The <audio> element has no
+ *  scheduling, so its `volume` is stepped from a short timer. */
+function rampRemoteTo(target: number): void {
+  clearDuckRamp();
+  const g = remoteGain;
+  if (g) {
+    try {
+      const ctx: any = (g as any).context;
+      const now = typeof ctx?.currentTime === 'number' ? ctx.currentTime : 0;
+      g.gain.cancelScheduledValues(now);
+      g.gain.setValueAtTime(g.gain.value, now);
+      g.gain.linearRampToValueAtTime(target, now + DUCK_RAMP_MS / 1000);
+      return;
+    } catch (e: any) {
+      diag('[webrtc] remote gain ramp failed, falling back to element volume:', e?.message);
+    }
+  }
+  const el = remoteAudioEl;
+  if (!el) return;
+  let from = 1;
+  try { if (typeof el.volume === 'number') from = el.volume; } catch { return; }
+  const t0 = Date.now();
+  duckRampTimer = setInterval(() => {
+    const k = Math.min(1, (Date.now() - t0) / DUCK_RAMP_MS);
+    const v = from + (target - from) * k;
+    try { el.volume = v < 0 ? 0 : v > 1 ? 1 : v; } catch { /* ignore */ }
+    if (k >= 1) clearDuckRamp();
+  }, 5);
+}
+
+/** Silence the agent at the barge. Idempotent; a no-op when no playback
+ *  path is bound (no call up, or stream mode, which has no TTS track). */
 export function cancelRemotePlayback(): void {
-  /* intentionally empty — see docstring */
+  if (remoteDucked) return;
+  if (!remoteGain && !remoteAudioEl) return;
+  remoteDucked = true;
+  rampRemoteTo(0);
+  // Deliberately NOT re-armed by a repeat barge: the guard must not be
+  // starvable by the very event it guards against.
+  if (duckWatchdogTimer == null) {
+    duckWatchdogTimer = setTimeout(() => {
+      duckWatchdogTimer = null;
+      if (!remoteDucked) return;
+      diag('[webrtc] duck watchdog fired — no tts-playing:false arrived, restoring');
+      restoreRemotePlayback('watchdog');
+    }, duckWatchdogMs);
+  }
+  log(`[webrtc] barge: remote TTS output muted over ${DUCK_RAMP_MS}ms — this is the cut the user hears`);
+}
+
+/** Make the agent audible again. Safe to call unconditionally. */
+export function restoreRemotePlayback(why: string): void {
+  if (duckWatchdogTimer != null) { clearTimeout(duckWatchdogTimer); duckWatchdogTimer = null; }
+  if (!remoteDucked) return;
+  remoteDucked = false;
+  rampRemoteTo(1);
+  log(`[webrtc] remote TTS output restored (${why})`);
+}
+
+/** Guarantor 1. Called for every inbound data-channel envelope.
+ *
+ *  Only `active:false` restores. The bridge keeps publishing
+ *  `active:true` heartbeats through the post-halt tail, and honouring
+ *  those would put the drained tail straight back into the room — and
+ *  back into the mic. */
+export function handleRemotePlaybackEnvelope(ev: any): void {
+  if (!ev || ev.type !== 'tts-playing') return;
+  if (ev.active === false) restoreRemotePlayback('tts-playing:false');
+}
+
+/** Guarantor 3. Hard reset — no ramp, no conditions. Runs on close() so
+ *  a call torn down mid-barge cannot hand a ducked element or gain node
+ *  to the reconnect that reuses it. */
+export function resetRemotePlaybackForTeardown(): void {
+  clearDuckRamp();
+  if (duckWatchdogTimer != null) { clearTimeout(duckWatchdogTimer); duckWatchdogTimer = null; }
+  remoteDucked = false;
+  if (remoteGain) {
+    try {
+      const ctx: any = (remoteGain as any).context;
+      const now = typeof ctx?.currentTime === 'number' ? ctx.currentTime : 0;
+      remoteGain.gain.cancelScheduledValues(now);
+      remoteGain.gain.setValueAtTime(1, now);
+    } catch { /* ignore */ }
+  }
+  if (remoteAudioEl) {
+    try { remoteAudioEl.volume = 1; } catch { /* ignore */ }
+  }
+}
+
+/** Bind the playback path the duck operates on. Called from ontrack once
+ *  the route (Web Audio gain vs. <audio> element) is known. Always lands
+ *  unducked at level 1, on both the outgoing and incoming targets. */
+function bindRemotePlaybackTargets(
+  el: HTMLAudioElement | null,
+  gain: GainNode | null,
+): void {
+  resetRemotePlaybackForTeardown();   // un-duck whatever we're dropping
+  remoteAudioEl = el;
+  remoteGain = gain;
+  resetRemotePlaybackForTeardown();   // …and normalise what we picked up
+}
+
+/** Test seam: exercise the duck without a live peer connection.
+ *  Mirrors setReconnectParamsForTests. */
+export function setRemotePlaybackTargetsForTests(
+  el: HTMLAudioElement | null,
+  gain: GainNode | null,
+  watchdogMs?: number,
+): void {
+  bindRemotePlaybackTargets(el, gain);
+  if (typeof watchdogMs === 'number') duckWatchdogMs = watchdogMs;
 }
 
 export function dispatch(text: string, userMessageId?: string): boolean {
@@ -711,11 +876,31 @@ export async function open(
         if (ctx && ctx.state === 'running') {
           // Detach any prior source from a previous track flip.
           try { remoteSourceNode?.disconnect(); } catch { /* ignore */ }
+          try { remoteGain?.disconnect(); } catch { /* ignore */ }
           remoteSourceNode = ctx.createMediaStreamSource(stream);
-          remoteSourceNode.connect(ctx.destination);
+          // source → gain → destination. The gain node exists solely so
+          // a barge can silence the agent mid-sentence (see the
+          // remote-playback duck block above); it sits at unity
+          // otherwise and does not change the AEC reference path, which
+          // is still ctx.destination.
+          let gainNode: GainNode | null = null;
+          try {
+            gainNode = ctx.createGain();
+            gainNode.gain.value = 1;
+            remoteSourceNode.connect(gainNode);
+            gainNode.connect(ctx.destination);
+          } catch (e: any) {
+            // Never let the duck cost us playback — fall back to the
+            // direct connection and simply have no client-side mute.
+            diag('[webrtc] remote gain node unavailable, connecting direct:', e?.message);
+            gainNode = null;
+            remoteSourceNode.connect(ctx.destination);
+          }
+          bindRemotePlaybackTargets(null, gainNode);
           if (active) active.remoteSourceNode = remoteSourceNode;
           webAudioOk = true;
-          log('[webrtc] remote audio routed via Web Audio destination (iOS AEC reference path)');
+          log('[webrtc] remote audio routed via Web Audio destination (iOS AEC reference path)'
+            + (gainNode ? ' with barge-duck gain' : ' — NO duck gain'));
         } else {
           diag('[webrtc] shared audioCtx unavailable or not running, falling back to <audio>',
             'state=' + (ctx?.state ?? 'null'));
@@ -744,6 +929,7 @@ export async function open(
       }
       remoteAudio.srcObject = stream;
       remoteAudio.play().catch((e) => diag('[webrtc] remoteAudio.play err', e?.message));
+      bindRemotePlaybackTargets(remoteAudio, null);
     }
   });
 
@@ -771,6 +957,10 @@ export async function open(
     try { parsed = JSON.parse(data); }
     catch (e: any) { diag('[webrtc] dc bad json:', e?.message); return; }
     if (!parsed || typeof parsed.type !== 'string') return;
+    // Before any listener: the un-duck must not be hostage to a
+    // subscriber that throws. A stuck mute is silence for the rest of
+    // the call; nothing else here is that expensive.
+    handleRemotePlaybackEnvelope(parsed);
     for (const tap of internalEnvelopeTaps) {
       try { tap(parsed); }
       catch (e: any) { diag('[webrtc] dc tap threw:', e?.message); }
@@ -1156,6 +1346,12 @@ export async function close(
   const tDataChClose = performance.now();
   try { session.pc.close(); } catch { /* ignore */ }
   const tPcClose = performance.now();
+  // Un-duck BEFORE dropping the references, so a call closed mid-barge
+  // can't strand its element/gain node at volume 0 for a reconnect that
+  // reuses them. bindRemotePlaybackTargets(null, null) resets the
+  // outgoing targets on the way out.
+  try { remoteGain?.disconnect(); } catch { /* ignore */ }
+  bindRemotePlaybackTargets(null, null);
   if (session.remoteSourceNode) {
     try { session.remoteSourceNode.disconnect(); } catch { /* ignore */ }
   }
