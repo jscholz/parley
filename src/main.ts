@@ -274,6 +274,25 @@ function updateSendButtonState() {
       || attachments.hasPending());
   send.classList.toggle('active', sendable);
   send.disabled = !sendable;
+  // Same choke point, same question ("what's in the box?"): the clear ✕
+  // is gated on composer content, so every path that re-evaluates the
+  // send button must re-evaluate it too. Programmatic writes to
+  // composerInput.value (slash commands, dictation, rescue) don't fire
+  // an `input` event, and this is the one call they all already make.
+  syncComposerEditButtons();
+}
+
+/** Gate the composer's clear (✕) and restore (↩) controls on the state
+ *  that makes each meaningful — content in the box, and an un-spent undo
+ *  buffer for the bound chat respectively. Neither adds chrome at rest
+ *  (Jonathan, 2026-08-30). Module-level so updateSendButtonState can
+ *  reach it; queries the DOM per call, like its neighbour. */
+function syncComposerEditButtons(): void {
+  const input = document.getElementById('composer-input') as HTMLTextAreaElement | null;
+  const clearBtn = document.getElementById('composer-clear') as HTMLButtonElement | null;
+  const restoreBtn = document.getElementById('composer-restore') as HTMLButtonElement | null;
+  if (clearBtn) clearBtn.hidden = !(input?.value ?? '');
+  if (restoreBtn) restoreBtn.hidden = !composerDrafts.hasClearedText(composerDrafts.boundTo());
 }
 
 /** Whether the composer is currently in read-only mode — set true
@@ -1944,6 +1963,12 @@ async function boot() {
     // closure: dictateActive is declared later in this scope but state
     // transitions only fire after a user opens a voice path.
     isMicOwnedCall: () => dictateActive,
+    // Ending a call must never destroy buffered speech (field bug
+    // 2026-08-30). Fires on every terminal state, before the dictation
+    // machine is reset; drains anything un-sent into the composer draft
+    // of the chat the utterance was spoken into. Lazy closure — same
+    // pattern as isMicOwnedCall above, only ever invoked post-boot.
+    onRescueBufferedSpeech: (reason) => rescueBufferedSpeech(reason),
   });
 
   // ── Call-dropped banner ───────────────────────────────────────────────
@@ -1998,6 +2023,26 @@ async function boot() {
   // the same key.
   let dcUserMessageId: string | null = null;
   let dcUserBufferedFinals = '';
+  // The chat the CURRENT utterance is addressed to, captured when its
+  // bubble id is minted. Everything about this utterance (its pending
+  // bubble, and — since 2026-08-30 — its rescue into a composer draft)
+  // must go here, not to whatever chat happens to be on screen when the
+  // network finally gives up. Same "addressed, not pointed" rule as
+  // sends (hardening invariant #3); the pre-existing reset handler read
+  // currentChatId() and would have orphaned a bubble on a mid-call
+  // chat switch.
+  let dcUserChatId: string | null = null;
+  // The trailing INTERIM (not yet is_final) segment the streaming user
+  // bubble is showing. The dictation buffer only ever sees is_finals,
+  // so without this the rescue loses the last half-sentence — which is
+  // exactly the "dropped mid-sentence" half of the complaint. Cleared
+  // when the segment's final lands (the final supersedes it) and on
+  // dispatch.
+  let dcUserLastInterim = '';
+  // (messageId, chatId) of the LAST utterance handed to the bridge.
+  // Only read by the dispatch-failed rescue, which runs after the bubble
+  // handler has already cleared the live per-utterance state.
+  let lastDispatchedBubble: { id: string; chatId: string | null } | null = null;
   // Per-window tally of what the half-duplex gate did to user
   // transcripts. Field 2026-08-27: without this, "the bridge sent
   // transcripts and the client ate them" and "the bridge sent nothing"
@@ -2062,6 +2107,7 @@ async function boot() {
     const chatId = currentChatId();
     if (!dcUserMessageId) {
       dcUserMessageId = `umsg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      dcUserChatId = chatId;
       if (chatId) {
         transcriptStore.addPendingSend(chatId, {
           messageId: dcUserMessageId, text: initial, source: 'voice', sentAt: Date.now(),
@@ -2094,20 +2140,107 @@ async function boot() {
   function getOrMintUserMessageId(): string {
     if (!dcUserMessageId) {
       dcUserMessageId = `umsg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      dcUserChatId = currentChatId();
     }
     return dcUserMessageId;
   }
-  webrtcDictation.setOnResetHandler(() => {
-    // Call closed mid-utterance — drop the in-flight pending send if
-    // it never made it through dispatch.
+  /** Tear down the streaming ("phantom") user bubble for the in-flight
+   *  utterance and forget the per-utterance state. Addressed to
+   *  dcUserChatId, so a mid-call chat switch can't leave the bubble
+   *  stranded in a chat we no longer point at. */
+  function clearStreamingUserBubble(): void {
     if (dcUserMessageId) {
-      const chatId = currentChatId();
+      const chatId = dcUserChatId ?? currentChatId();
       if (chatId) transcriptStore.clearPendingSend(chatId, dcUserMessageId);
     }
     dcUserMessageId = null;
+    dcUserChatId = null;
     dcUserBufferedFinals = '';
+    dcUserLastInterim = '';
+  }
+  /** Everything the user has SPOKEN but the client has not SENT:
+   *  the dictation machine's finalised segments plus the trailing
+   *  interim. Draining is what keeps the rescue idempotent and
+   *  double-send-proof — dispatchNow() empties the dictation buffer
+   *  before it writes to the bridge, and the bubble handler below
+   *  clears the interim on the same edge, so an utterance that went out
+   *  normally leaves nothing here to rescue. */
+  function drainUnsentSpeech(): string {
+    const buffered = webrtcDictation.takeBufferedText();
+    const interim = dcUserLastInterim.trim();
+    dcUserLastInterim = '';
+    if (!interim) return buffered;
+    if (!buffered) return interim;
+    // Interims are per-SEGMENT partials; earlier segments are already in
+    // the buffer as finals, so this is an append. The endsWith guard is
+    // defensive against an engine that re-sends a segment it already
+    // finalised (would otherwise duplicate the tail).
+    if (buffered.endsWith(interim)) return buffered;
+    return `${buffered} ${interim}`;
+  }
+  /** Park rescued speech in the composer of the chat it was spoken
+   *  into, durably (IDB-backed drafts), and tell the user it happened.
+   *  Never sends: a rescue is text the user did NOT commit, so it lands
+   *  for review — same rule the cross-chat listen-turn recovery
+   *  already follows. */
+  function rescueSpokenText(text: string, reason: string, addressedTo: string | null): void {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
+    const chatId = addressedTo ?? currentChatId();
+    log(`[voice-rescue] reason=${reason} chars=${trimmed.length} chat=${chatId ?? '∅'}`);
+    if (!chatId) {
+      // No chat to address (shouldn't happen — a call always has one) —
+      // still better to show the text than to eat it.
+      const ta = document.getElementById('composer-input') as HTMLTextAreaElement | null;
+      if (ta) {
+        ta.value = ta.value.trim() ? `${ta.value.replace(/\s+$/, '')}\n\n${trimmed}` : trimmed;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      toast('Saved what you said to the composer');
+      return;
+    }
+    const visible = composerDrafts.appendDraft(chatId, trimmed);
+    // Lead with WHY the text moved — "Call ended" is the fact he needs
+    // to reconcile the silence with; the rest tells him where to look.
+    const lead = reason === 'dispatch-failed' ? "Couldn't send" : 'Call ended';
+    toast(visible
+      ? `${lead} — saved what you said to the composer`
+      : `${lead} — saved what you said as a draft in that chat`);
+  }
+  /** Terminal-call rescue. Wired to webrtcControls.onRescueBufferedSpeech
+   *  and run before dictation.reset() on every path that ends a call.
+   *  Jonathan field bug 2026-08-30: reconnect gave up in the car and
+   *  several minutes of dictation were deleted with no trace. */
+  function rescueBufferedSpeech(reason: string): void {
+    const text = drainUnsentSpeech();
+    const addressedTo = dcUserChatId ?? currentChatId();
+    // Always clear the phantom bubble, even with nothing to rescue — a
+    // rescued utterance must not ALSO leave a dangling streaming bubble
+    // in the transcript.
+    clearStreamingUserBubble();
+    if (!text) return;
+    rescueSpokenText(text, reason, addressedTo);
+  }
+  webrtcDictation.setOnResetHandler(() => {
+    // Call closed mid-utterance — drop the in-flight pending send if
+    // it never made it through dispatch. The TEXT is not lost here:
+    // controls.ts drains it into the composer (rescueBufferedSpeech)
+    // immediately before invoking reset().
+    clearStreamingUserBubble();
     dcGateDrops.windowInterims = 0; dcGateDrops.windowFinals = 0;
     dcGateDrops.drainInterims = 0; dcGateDrops.drainFinals = 0;
+  });
+  // A dispatch the bridge refused (dead channel) used to vanish: the
+  // buffer was already empty and a pending bubble was already on
+  // screen. Clean the bubble up and route the text to the composer.
+  webrtcDictation.setDispatchFailedHandler((text) => {
+    const chatId = lastDispatchedBubble?.chatId ?? null;
+    if (chatId && lastDispatchedBubble?.id) {
+      transcriptStore.clearPendingSend(chatId, lastDispatchedBubble.id);
+    }
+    lastDispatchedBubble = null;
+    clearStreamingUserBubble();
+    rescueSpokenText(text, 'dispatch-failed', chatId);
   });
   webrtcDictation.setUserBubbleHandler((text) => {
     // Dispatch fired — pendingSend gets the final text; the server's
@@ -2126,8 +2259,17 @@ async function boot() {
         });
       }
     }
+    // Remember what this dispatch claimed so the dispatch-FAILED hook
+    // (fired microseconds later, after dcUserMessageId is nulled) can
+    // still take the phantom bubble back down.
+    lastDispatchedBubble = { id, chatId };
     dcUserMessageId = null;
+    dcUserChatId = null;
     dcUserBufferedFinals = '';
+    // The utterance left the client: its interim is spoken-for. Not
+    // clearing this is how the same half-sentence would be both sent
+    // AND rescued into the composer on the next call teardown.
+    dcUserLastInterim = '';
   });
   webrtcDictation.setUserMessageIdProvider(getOrMintUserMessageId);
   webrtcConnection.setDataChannelListener((ev) => {
@@ -2246,6 +2388,9 @@ async function boot() {
         // is_finalized segments for this utterance + current interim.
         const display = (dcUserBufferedFinals + ' ' + ev.text).trim();
         if (!display) return;
+        // Keep the raw partial so a call that dies before this segment
+        // is finalised can still rescue the half-sentence (2026-08-30).
+        dcUserLastInterim = ev.text;
         ensureUserBubble(display);
         setUserBubbleText(display);
         return;
@@ -2254,6 +2399,10 @@ async function boot() {
       // bubble to reflect the locked-in text, then feed the dictation
       // state machine so it can buffer for dispatch (silence/commit).
       dcUserBufferedFinals = (dcUserBufferedFinals + ' ' + ev.text).trim();
+      // The final SUPERSEDES the segment's interim (and is what goes
+      // into the dictation buffer), so the rescue must not also carry
+      // the partial or the tail would be duplicated.
+      dcUserLastInterim = '';
       ensureUserBubble(dcUserBufferedFinals);
       setUserBubbleText(dcUserBufferedFinals);
       webrtcDictation.handleUserFinal(ev.text);
@@ -2284,11 +2433,35 @@ async function boot() {
   // drafts on switch. onRestored re-runs the chrome a real keystroke
   // would have (autoResize/updateSendButtonState are hoisted function
   // declarations — defined below, callable from this callback).
+  // (init call is below the clear/restore wiring, so those buttons are
+  // already looked up when the first onComposerState fires.)
+
+  // ── Composer clear (✕) + restore (↩) ────────────────────────────────
+  // Jonathan, 2026-08-30: "a very subtle x" that shows only when the
+  // composer has content and clears it, plus a restore icon that shows
+  // only while the cleared text can be put back. This is the discard
+  // gesture for dictation the call-end rescue parks here — the reason
+  // it is safe next to the call button is that the undo is real
+  // (per-chat, persisted next to the draft, no expiry — see the
+  // lifetime note in composerDrafts.ts), not a countdown toast.
+  const composerClearBtn = document.getElementById('composer-clear') as HTMLButtonElement | null;
+  const composerRestoreBtn = document.getElementById('composer-restore') as HTMLButtonElement | null;
+  composerClearBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (composerDrafts.clearWithUndo()) log('[composer] cleared (undoable)');
+  });
+  composerRestoreBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (composerDrafts.restoreCleared()) log('[composer] restored cleared text');
+  });
+
   composerDrafts.init({
     textarea: composerInput,
     onRestored: () => { autoResize(); updateSendButtonState(); },
+    onComposerState: () => syncComposerEditButtons(),
   });
   void composerDrafts.hydrateDrafts();
+  syncComposerEditButtons();
 
   // Agent-question pop-up (unified elicitation): approval answers ride
   // the normal ADDRESSED send path — same invariant-#3 plumbing as any

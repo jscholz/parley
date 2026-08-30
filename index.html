@@ -794,6 +794,25 @@
               </div>
             </div>
           </div>
+          <!-- Clear / restore the composer. Both are state-gated: the ✕
+               exists only when there is text to clear, the restore arrow
+               only when there is something to put back. Nothing at rest.
+
+               The ✕ is the DISCARD gesture for rescued dictation (call
+               end parks un-sent speech here — see controls.ts's
+               onRescueBufferedSpeech). It sits next to the call button,
+               which is the 2026-08-18 mis-tap adjacency; what makes that
+               safe is that the clear is genuinely undoable — the text
+               goes to a per-chat restore buffer persisted next to the
+               draft, not to a 5-second toast. -->
+          <button id="composer-clear" class="composer-edit-btn" type="button" hidden
+                  aria-label="Clear composer" title="Clear composer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+          <button id="composer-restore" class="composer-edit-btn composer-restore-btn" type="button" hidden
+                  aria-label="Restore cleared text" title="Restore cleared text">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h11a5 5 0 0 1 0 10H8"/><polyline points="7 6 3 10 7 14"/></svg>
+          </button>
         </div>
         <div class="composer-actions-mid">
           <button id="composer-hotkeys-hint" class="composer-hotkeys-hint" type="button" title="Keyboard shortcuts · ⌘/" aria-label="Keyboard shortcuts · ⌘/">

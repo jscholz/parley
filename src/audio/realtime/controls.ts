@@ -83,6 +83,27 @@ export interface ControlsOpts {
    *  2026-06-12: low-network recovery during dictation flashed btn-call
    *  orange while the red mic stayed untouched. */
   isMicOwnedCall?: () => boolean;
+  /** Called on EVERY terminal call state, immediately before the
+   *  dictation machine is reset, so the host can drain any speech the
+   *  user has spoken but not yet sent and park it in the composer.
+   *
+   *  Jonathan field bug 2026-08-30 (in the car, lost signal): the chime
+   *  came through, reconnect eventually gave up, and the give-up path
+   *  transitions 'reconnecting' → 'closing' → 'idle' — straight into the
+   *  reset branch below, which deletes the dictation buffer. Several
+   *  minutes of dictation gone, silently, with no undo. The rescue runs
+   *  BEFORE reset() and is purely local text, so it works fine with a
+   *  dead data channel — which is precisely the case that needs it.
+   *
+   *  There is deliberately NO button for this (Jonathan, 2026-08-30:
+   *  "there's no reason for a button if the rule is always that if you
+   *  end a call before saying over, it dumps the text in the composer").
+   *  The rule is unconditional, so the affordance is the absence of one.
+   *
+   *  Must be idempotent: several terminal states can fire for one
+   *  teardown ('closing' then 'idle'). Draining is what makes it
+   *  idempotent — the second call finds an empty buffer. */
+  onRescueBufferedSpeech?: (reason: string) => void;
 }
 
 let opts: ControlsOpts | null = null;
@@ -185,6 +206,18 @@ export function init(o: ControlsOpts) {
     // safe place to clear (idempotent).
     if (state === 'idle' || state === 'closing' || state === 'failed'
         || state === 'requesting-mic') {
+      // RESCUE BEFORE RESET (Jonathan field bug 2026-08-30). reset()
+      // clears `buffer` outright; every path that ends a call — user
+      // hangup, reconnect give-up/'call-dropped', failure, timeout —
+      // funnels through here, which is why the loss was total and
+      // silent. Draining first turns "ending a call" from a destructive
+      // act into a save. 'requesting-mic' is a fresh OPEN, not a
+      // terminal state: its buffer is already empty, and calling the
+      // rescue there would only risk re-parking text on call start.
+      if (state !== 'requesting-mic') {
+        try { opts?.onRescueBufferedSpeech?.(state); }
+        catch (e: any) { diag('[webrtc-controls] rescue handler err', e?.message); }
+      }
       dictation.reset();
       suppress.reset();
       realtimeBarge.stop();

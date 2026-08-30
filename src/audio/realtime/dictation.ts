@@ -22,7 +22,10 @@
  *     (one utterance = one bubble = one dispatch).
  *
  * On call close, callers must invoke reset() so a stale buffer doesn't
- * survive into the next call.
+ * survive into the next call — but they must call takeBufferedText()
+ * FIRST and park the result somewhere the user can still see it.
+ * reset() is destructive by design; ending a call is not allowed to
+ * destroy speech (Jonathan field bug 2026-08-30).
  */
 
 import * as conn from './realtime.ts';
@@ -42,6 +45,7 @@ let commitTimer: ReturnType<typeof setTimeout> | null = null;
 let commitPendingThroughPause = false;
 let onUserBubble: ((text: string) => void) | null = null;
 let onReset: (() => void) | null = null;
+let onDispatchFailed: ((text: string) => void) | null = null;
 let userMessageIdProvider: (() => string) | null = null;
 // When true, the silence countdown is held — armSilenceTimer becomes a
 // no-op and any in-flight timer is cleared. Set during a 'reconnecting'
@@ -62,6 +66,48 @@ export function setUserBubbleHandler(cb: (text: string) => void): void {
  *  streaming user bubble id) can clear in lockstep. */
 export function setOnResetHandler(cb: () => void): void {
   onReset = cb;
+}
+
+/** Caller registers a handler invoked when a dispatch was ATTEMPTED but
+ *  the data channel refused it (`conn.dispatch` returned false — bridge
+ *  gone). Pre-2026-08-30 that utterance was simply gone: dispatchNow
+ *  had already emptied the buffer and rendered a pending user bubble,
+ *  so the text existed nowhere and the bubble hung forever. The host
+ *  routes it to the composer instead (see main.ts rescueSpokenText).
+ *  Deliberately NOT re-buffered here: onUserBubble has already run, so
+ *  the host has bubble state to clean up and only it can do that. */
+export function setDispatchFailedHandler(cb: ((text: string) => void) | null): void {
+  onDispatchFailed = cb;
+}
+
+/** Drain the un-dispatched utterance buffer and return it as one
+ *  string, leaving the machine empty (timers cleared, pause flag
+ *  untouched — reset() owns that).
+ *
+ *  This is the rescue seam for Jonathan's 2026-08-30 field bug: a call
+ *  in the car lost signal, reconnect gave up, and controls.ts's
+ *  terminal-state branch called reset() — which drops `buffer` on the
+ *  floor. Several minutes of transcribed speech vanished with no trace
+ *  and no undo. Callers now drain FIRST and park the text in the
+ *  composer, then reset. Returning the text (rather than dispatching
+ *  it) keeps this module free of any composer/chat knowledge.
+ *
+ *  Safe against double-send by construction: dispatchNow() empties
+ *  `buffer` before it hands the utterance to the bridge, so anything
+ *  still in here is by definition text that never left the client. */
+export function takeBufferedText(): string {
+  const text = buffer.join(' ').trim();
+  buffer = [];
+  if (silenceTimer !== null) {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+  if (commitTimer !== null) {
+    clearTimeout(commitTimer);
+    commitTimer = null;
+  }
+  commitPendingThroughPause = false;
+  return text;
 }
 
 /** Caller registers a provider that returns the current utterance's
@@ -155,7 +201,14 @@ function dispatchNow(): void {
   }
   const ok = conn.dispatch(utterance, userMessageId);
   if (!ok) {
-    diag('[dictation] dispatch send failed (channel not open?)');
+    // The channel is gone and the buffer is already empty — without the
+    // rescue hook this utterance is destroyed here (2026-08-30 field
+    // bug's sibling path: give-up can land between the silence timer
+    // firing and the write). Hand it to the host for the composer.
+    diag('[dictation] dispatch send failed (channel not open?) — rescuing to composer');
+    if (onDispatchFailed) {
+      try { onDispatchFailed(utterance); } catch (e: any) { diag('[dictation] rescue handler err', e?.message); }
+    }
     return;
   }
   // No 'send' chime here: in WebRTC voice mode the dispatch is a

@@ -3990,6 +3990,53 @@
     cursor: not-allowed;
     pointer-events: none;
   }
+  /* ── Composer clear (✕) + restore (↩) ─────────────────────────────
+     State-gated pair in the composer's bottom row, right of the call
+     button. Neither exists at rest: the ✕ appears only when there is
+     text, the restore only when a clear is undoable (main.ts owns both
+     `hidden` flags — see syncComposerEditButtons).
+
+     Load-bearing, not decoration:
+       - SPACING. .composer-actions-left is a gap:4px flex row. The ✕ is
+         a text-destroying control sitting next to a CALL control, which
+         is the exact adjacency of the 2026-08-18 mis-tap incident (see
+         the B1 notes around .capture-pill). The explicit margin pushes
+         ~14px of clear space between the call button's edge and this
+         hit box, on top of the undo that makes a mis-tap recoverable.
+       - 44px HIT TARGET (B1 / Apple HIG floor; the 2026-08-18 buttons
+         measured 31x27). The padding box IS the target — the glyph
+         stays 16px so "very subtle" survives the big touch area.
+       - SUBTLE AT REST, not invisible: --muted at 0.55, full --fg on
+         hover/focus. Jonathan asked for "a very subtle x"; a control
+         you cannot find is not subtle, it is missing. */
+  .composer .composer-edit-btn {
+    margin-left: 14px;
+    min-width: 44px; min-height: 44px;
+    padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: none;
+    background: none; border: none; cursor: pointer;
+    color: var(--muted);
+    opacity: 0.55;
+    border-radius: 50%;
+    transition: color .15s, opacity .15s, background .15s;
+  }
+  /* The pair reads as one control group — no extra gutter between them. */
+  .composer .composer-edit-btn + .composer-edit-btn { margin-left: 2px; }
+  .composer .composer-edit-btn:hover,
+  .composer .composer-edit-btn:focus-visible {
+    color: var(--fg); opacity: 1; background: var(--surface);
+  }
+  .composer .composer-edit-btn svg { width: 16px; height: 16px; }
+  /* Restore is the RECOVERY half of the pair, so it is allowed to be a
+     little louder than the ✕ — finding it is the whole safety story. */
+  .composer .composer-restore-btn { opacity: 0.8; }
+  /* Attribute selector outranks the class rule above, so a gated-off
+     button is genuinely absent from the layout rather than transparent
+     (a 44px invisible tap target next to a call button would be worse
+     than no button at all). */
+  .composer .composer-edit-btn[hidden] { display: none; }
+
   /* Call-menu anchors LEFT (button is on the left side of composer), so
      the dropdown opens flush with the button instead of overflowing
      into the textarea. Same visual style as .mic-mode-menu otherwise. */

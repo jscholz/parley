@@ -244,6 +244,68 @@ describe('dictation — sendword commitDelaySec grace window (2026-08-04 audit f
   });
 });
 
+describe('dictation — takeBufferedText rescue drain (Jonathan bug 2026-08-30)', () => {
+  beforeEach(() => {
+    settings.set('silenceSec', 30);
+    settings.set('commitPhrase', '');
+    settings.set('commitDelaySec', 0);
+    dictation.reset();
+    dictation.setUserBubbleHandler(() => {});
+  });
+
+  afterEach(() => {
+    dictation.reset();
+    dictation.setUserBubbleHandler(() => {});
+    settings.set('commitPhrase', 'over');
+  });
+
+  it('drains the buffered utterance as one string and empties the machine', () => {
+    dictation.handleUserFinal('so the plan for the quarter');
+    dictation.handleUserFinal('is to ship the recovery work');
+    assert.equal(
+      dictation.takeBufferedText(),
+      'so the plan for the quarter is to ship the recovery work',
+    );
+    assert.deepEqual(dictation.__getBufferForTests(), [],
+      'the drain must leave the machine empty so a following reset() is a no-op');
+    assert.equal(dictation.__hasSilenceTimerForTests(), false,
+      'the drain must clear the silence timer — the call is over');
+  });
+
+  it('is idempotent: a second drain yields nothing (no double-rescue)', () => {
+    dictation.handleUserFinal('only once please');
+    assert.equal(dictation.takeBufferedText(), 'only once please');
+    assert.equal(dictation.takeBufferedText(), '',
+      'controls.ts fires the rescue on BOTH closing and idle; the second must be empty');
+  });
+
+  it('yields nothing after a normal dispatch (no double-send)', async () => {
+    settings.set('silenceSec', 0.05);
+    dictation.handleUserFinal('this one goes out properly');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(
+      dictation.takeBufferedText(),
+      '',
+      'a dispatched utterance is already spent — rescuing it would send it twice',
+    );
+    settings.set('silenceSec', 30);
+  });
+
+  it('drops a pending sendword commit rather than firing it after the drain', async () => {
+    settings.set('commitPhrase', 'over');
+    settings.set('commitDelaySec', 0.05);
+    const bubbles: string[] = [];
+    dictation.setUserBubbleHandler((t: string) => { bubbles.push(t); });
+    dictation.handleUserFinal('half a thought over');
+    assert.equal(dictation.__hasCommitTimerForTests(), true);
+    assert.equal(dictation.takeBufferedText(), 'half a thought');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.deepEqual(bubbles, [],
+      'the drained text must not ALSO dispatch when the grace window expires');
+    settings.set('commitDelaySec', 0);
+  });
+});
+
 // Restore fetch when the test process exits — defensive in case other
 // suites in the same node:test run expected the real one.
 process.on('exit', () => {

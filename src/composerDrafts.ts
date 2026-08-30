@@ -33,6 +33,10 @@ import { diag } from './util/log.ts';
 
 const DB_NAME = 'parley-drafts';
 const STORE = 'drafts';
+// Second store, same DB (v2): the per-chat UNDO buffer for "clear the
+// composer". See clearWithUndo() for the lifetime rules.
+const CLEARED_STORE = 'cleared';
+const DB_VERSION = 2;
 const PERSIST_DEBOUNCE_MS = 300;
 
 interface DraftRecord {
@@ -42,6 +46,7 @@ interface DraftRecord {
 }
 
 const cache = new Map<string, string>();
+const clearedCache = new Map<string, string>();
 const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
 let hydrated = false;
 /** Debounced "drafts changed" broadcast — the drawer listens and
@@ -60,14 +65,25 @@ let textareaRef: HTMLTextAreaElement | null = null;
 /** Re-run composer chrome (autoResize, send-button state) after a
  *  programmatic restore. Wired by init. */
 let onRestoredCb: (() => void) | null = null;
+/** Synchronous "composer content or undo buffer changed" notifier —
+ *  see init({ onComposerState }). */
+let onComposerStateCb: (() => void) | null = null;
+function notifyComposerState(): void {
+  try { onComposerStateCb?.(); } catch { /* swallow — UI listener */ }
+}
 
 function dbOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
+      // Both creates are guarded, so v1→v2 adds only what's missing and
+      // a fresh install gets both in one pass.
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'chatId' });
+      }
+      if (!db.objectStoreNames.contains(CLEARED_STORE)) {
+        db.createObjectStore(CLEARED_STORE, { keyPath: 'chatId' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -92,6 +108,21 @@ export async function hydrateDrafts(): Promise<void> {
       };
       req.onerror = () => resolve();
     });
+    // The undo buffers hydrate alongside the drafts: a cleared block of
+    // rescued dictation must still be restorable after an app restart
+    // (see clearWithUndo for why it has no expiry).
+    const creq = db.transaction(CLEARED_STORE, 'readonly').objectStore(CLEARED_STORE).getAll();
+    await new Promise<void>((resolve) => {
+      creq.onsuccess = () => {
+        const rows = (creq.result || []) as DraftRecord[];
+        for (const r of rows) {
+          if (r?.chatId && typeof r.text === 'string' && r.text) clearedCache.set(r.chatId, r.text);
+        }
+        diag(`[drafts] hydrate: ${rows.length} undo buffers from IDB`);
+        resolve();
+      };
+      creq.onerror = () => resolve();
+    });
     db.close();
   } catch (e: any) {
     diag(`[drafts] hydrate failed: ${e?.message ?? e}`);
@@ -107,6 +138,9 @@ export async function hydrateDrafts(): Promise<void> {
       diag(`[drafts] late-hydrate restore for ${boundChatId.slice(-12)}`);
     }
   }
+  // A hydrated undo buffer changes which composer controls are relevant
+  // even when the draft itself didn't change.
+  notifyComposerState();
 }
 
 /** Wire the composer. The input listener saves keystrokes to the chat
@@ -114,10 +148,19 @@ export async function hydrateDrafts(): Promise<void> {
 export function init(opts: {
   textarea: HTMLTextAreaElement;
   onRestored?: () => void;
+  /** Fired SYNCHRONOUSLY whenever the composer's content or its undo
+   *  buffer changes — drives the clear/restore button gating in main.ts.
+   *  Deliberately not the debounced `parley:draft-changed` broadcast:
+   *  that one exists to batch sidebar repaints, and a 250 ms lag on a
+   *  control that has to appear the instant you type is a different
+   *  requirement wearing the same name. */
+  onComposerState?: () => void;
 }): void {
   textareaRef = opts.textarea;
   onRestoredCb = opts.onRestored ?? null;
+  onComposerStateCb = opts.onComposerState ?? null;
   opts.textarea.addEventListener('input', () => {
+    notifyComposerState();
     if (!boundChatId) return;
     saveDraft(boundChatId, opts.textarea.value);
   });
@@ -178,6 +221,9 @@ export function switchTo(chatId: string | null): void {
   // Bind change flips which row hides its "Draft:" snippet (the bound
   // chat's draft lives in the composer, not its row).
   notifyChanged();
+  // …and flips which composer controls are relevant: both the content
+  // and the undo buffer are per-chat.
+  notifyComposerState();
 }
 
 /** New-chat's pre-mint step: preserve the outgoing chat's text and
@@ -193,6 +239,182 @@ export function stashAndClear(): void {
   }
   boundChatId = null;
   textareaRef.value = '';
+  notifyComposerState();
+}
+
+/** APPEND text to a chat's draft, whether or not that chat is the one
+ *  currently in the composer. Returns true when the text landed in the
+ *  visible textarea (so the caller can toast "in the composer" rather
+ *  than "as a draft").
+ *
+ *  Built for voice rescue (Jonathan field bug 2026-08-30 — dropped call
+ *  ate several minutes of dictation). Two properties matter:
+ *
+ *   - ADDRESSED, not pointed. The call's chat may not be the one on
+ *     screen when the network finally gives up, so the write is keyed
+ *     by chatId — same rule as sends (invariant #3) and the same
+ *     precedent as the cross-chat listen-turn recovery, which routes a
+ *     late transcript to the composer for review instead of sending it.
+ *   - NON-CLOBBERING. Whatever he was typing stays; the rescued speech
+ *     is appended after it with a blank line, so nothing he authored is
+ *     overwritten by a background event he didn't ask for.
+ *
+ *  Durability comes free: this funnels through saveDraft, so the text is
+ *  in the `parley-drafts` IDB store and survives an app restart (a
+ *  rescue that only lived in a DOM node would be lost to the very same
+ *  reload the dropped call often triggers). flushDraft skips the
+ *  300 ms debounce — a rescue must not race a backgrounding tab. */
+export function appendDraft(chatId: string | null, text: string): boolean {
+  const addition = (text || '').trim();
+  if (!chatId || !addition) return false;
+  if (chatId === boundChatId && textareaRef) {
+    const existing = textareaRef.value;
+    textareaRef.value = existing.trim() ? `${existing.replace(/\s+$/, '')}\n\n${addition}` : addition;
+    saveDraft(chatId, textareaRef.value);
+    flushDraft(chatId);
+    onRestoredCb?.();
+    notifyComposerState();
+    return true;
+  }
+  const existing = cache.get(chatId) ?? '';
+  saveDraft(chatId, existing.trim() ? `${existing.replace(/\s+$/, '')}\n\n${addition}` : addition);
+  flushDraft(chatId);
+  return false;
+}
+
+// ── Clear-with-undo ────────────────────────────────────────────────────
+//
+// Jonathan's ask, 2026-08-30: "a very subtle x" in the composer's bottom
+// row that appears only when there's content, and a restore icon that
+// appears only while there's something to put back. This is the DISCARD
+// gesture for text the call-end rescue parked here — which is why it has
+// to be genuinely undoable rather than a toast with a countdown.
+//
+// BUFFER LIFETIME (he left this to us; the rule and its reasoning):
+//   Kept:    across chat switches, across call end, across reload. The
+//            buffer is per-chat and persisted in the same IDB database
+//            as the draft, so it has the draft's durability. Rescued
+//            dictation is the single most expensive content in the app
+//            to lose — minutes of speech that exists nowhere else — and
+//            a reload is exactly what a flaky-network session tends to
+//            produce.
+//   Dropped: (a) on a successful SEND from that chat's composer (the
+//            turn moved on; the cleared text is stale relative to a
+//            conversation that has advanced), and (b) when another
+//            clear in the same chat replaces it.
+//   Explicitly NOT time-based. A 5-second (or 5-minute) expiry is a
+//   trap for the exact user this feature exists for: on a bike or in a
+//   car, unable to look at the screen, discovering the mistake later.
+//   An undo that has quietly expired is worse than no undo, because he
+//   will have stopped worrying about the text.
+
+/** True iff `chatId` has text that a clear stashed and nothing has
+ *  spent yet — i.e. the restore control should exist. */
+export function hasClearedText(chatId: string | null): boolean {
+  return !!(chatId && clearedCache.get(chatId));
+}
+
+/** The stashed text for `chatId` ('' if none). Exposed for tests and
+ *  for callers that want to preview the undo. */
+export function getClearedText(chatId: string | null): string {
+  return (chatId && clearedCache.get(chatId)) || '';
+}
+
+function saveCleared(chatId: string, text: string): void {
+  if (text) clearedCache.set(chatId, text);
+  else clearedCache.delete(chatId);
+  void persistCleared(chatId);
+  notifyComposerState();
+}
+
+/** Write `next` into the textarea, preserving the browser's native undo
+ *  stack when we can.
+ *
+ *  Assigning `.value` destroys that stack outright, so ⌘Z / iOS
+ *  shake-to-undo silently stop working on the composer. execCommand
+ *  ('insertText') keeps it — but it requires focus, and stealing focus
+ *  would pop the on-screen keyboard on a phone, which is precisely the
+ *  wrong thing to do to someone clearing a block of rescued dictation
+ *  while cycling. So: use the undoable path ONLY when the textarea is
+ *  already focused (the typing case, where reaching for ⌘Z is the
+ *  reflex), and fall back to the plain assignment otherwise. The
+ *  explicit restore button is the primary mechanism either way; native
+ *  undo is a bonus we take when it is free. */
+function writeTextarea(ta: HTMLTextAreaElement, next: string): void {
+  if (document.activeElement === ta) {
+    try {
+      ta.setSelectionRange(0, ta.value.length);
+      // Deprecated but still the only cross-browser way to make a
+      // programmatic edit undoable. Guarded: Safari/WebView return
+      // false (or throw) in some states, and we verify the result
+      // rather than trusting the return value.
+      const ok = document.execCommand('insertText', false, next);
+      if (ok && ta.value === next) return;
+    } catch { /* fall through to the plain assignment */ }
+  }
+  ta.value = next;
+}
+
+/** Clear the composer, stashing its text in the bound chat's undo
+ *  buffer. Returns true if anything was cleared. */
+export function clearWithUndo(): boolean {
+  if (!textareaRef) return false;
+  const text = textareaRef.value;
+  if (!text) return false;
+  writeTextarea(textareaRef, '');
+  if (boundChatId) {
+    saveDraft(boundChatId, '');
+    flushDraft(boundChatId);
+    saveCleared(boundChatId, text);
+  }
+  onRestoredCb?.();
+  notifyComposerState();
+  diag(`[drafts] cleared ${text.length} chars (undoable) for ${boundChatId?.slice(-12) ?? '∅'}`);
+  return true;
+}
+
+/** Put the bound chat's undo buffer back in the composer. Returns true
+ *  if anything was restored.
+ *
+ *  APPENDS rather than overwrites: between the clear and the restore he
+ *  may have typed something, and a restore that ate it would need its
+ *  own undo. Same non-clobbering rule as appendDraft. */
+export function restoreCleared(): boolean {
+  if (!textareaRef || !boundChatId) return false;
+  const stashed = clearedCache.get(boundChatId);
+  if (!stashed) return false;
+  const existing = textareaRef.value;
+  const next = existing.trim()
+    ? `${existing.replace(/\s+$/, '')}\n\n${stashed}`
+    : stashed;
+  writeTextarea(textareaRef, next);
+  saveDraft(boundChatId, next);
+  flushDraft(boundChatId);
+  saveCleared(boundChatId, '');
+  onRestoredCb?.();
+  notifyComposerState();
+  diag(`[drafts] restored ${stashed.length} chars for ${boundChatId.slice(-12)}`);
+  return true;
+}
+
+async function persistCleared(chatId: string): Promise<void> {
+  try {
+    const db = await dbOpen();
+    const tx = db.transaction(CLEARED_STORE, 'readwrite');
+    const text = clearedCache.get(chatId);
+    if (text) {
+      tx.objectStore(CLEARED_STORE).put({ chatId, text, savedAt: Date.now() } as DraftRecord);
+    } else {
+      tx.objectStore(CLEARED_STORE).delete(chatId);
+    }
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e: any) {
+    diag(`[drafts] undo-buffer persist failed for ${chatId}: ${e?.message ?? e}`);
+  }
 }
 
 /** Successful send: the ADDRESSED chat's draft is spent. Uses the
@@ -200,6 +422,11 @@ export function stashAndClear(): void {
 export function clearDraft(chatId: string | null): void {
   if (!chatId) return;
   cache.delete(chatId);
+  // The send is also what spends the undo buffer — the conversation has
+  // moved on, so restoring pre-send text into the composer would be
+  // offering to un-say something that was already said. This is the
+  // ONLY lifetime rule besides "a newer clear replaces it".
+  if (clearedCache.has(chatId)) saveCleared(chatId, '');
   notifyChanged();
   flushDraft(chatId);
 }
