@@ -44,10 +44,12 @@ Both modes answer the same question — "is this user utterance done?" — using
 Both triggers live in `shared/handsfree.ts`:
 
 - `matchSendword(text, phrase)` — the captured-prefix regex (anchored, word-boundary, case-insensitive). Used by both turn-based (`turnbased.ts` + `sendwordDetector.ts`) and realtime (`dictation.ts`).
-- `SilenceWindow` class — `lastVoiceAt` + threshold tracker. Modes drive it differently (turn-based polls expired() in its 50ms analyser loop; realtime arms a setTimeout on each `is_final` from the bridge) but share the policy.
+- `SilenceWindow` class — `lastVoiceAt` + threshold tracker. Both modes now feed it from the MICROPHONE (turn-based polls `expired()` in its 50 ms analyser loop; realtime's `turnGuard.ts` runs the same 50 ms analyser loop and calls `dictation.noteVoice()`, and dictation chases the deadline rather than polling). Realtime used to arm a bare setTimeout on each `is_final` from the bridge — which made an STT hole indistinguishable from a pause and committed half-utterances under the user (field bug 2026-08-30). Transcripts are still a secondary arming input; voice is authoritative.
 - `getHandsfreeConfig()` — single resolver for the two settings keys.
 
-The **mechanism** for detecting speech stays per-mode (turn-based reads analyser peaks; realtime gets discrete `is_final` events from the bridge). Different inputs, same policy.
+The **mechanism** for detecting speech is now the same in both modes — an analyser peak loop over the live mic — and realtime additionally consumes `is_final` events from the bridge as corroboration. Same policy, same primary input.
+
+`realtime/turnGuard.ts` also owns **newest input wins**: if the user starts a new utterance while a reply is still generating, that reply is stale and is halted through the existing barge path the moment it starts speaking. It never reads the mic while TTS is audible — no amplitude or VAD verdict taken then can tell the user from the agent's own speaker bleed (walk test 2026-08-28).
 
 **Barge-in** has the same shape: same algorithm in both modes (sliding N-of-K hot frames above a peak threshold), different runtimes. The PWA-side detector lives in `shared/barge.ts` (`BargeWindow` class, used by `turnbased.ts:tickBarge`); the bridge runs the Python equivalent. No code share is possible across language, but the algorithm is identical.
 

@@ -5,15 +5,22 @@
  * the PWA decides when an utterance is "done" and tells the bridge to
  * dispatch it via the data channel.
  *
- * Inputs (every is_final user transcript from the bridge):
- *   handleUserFinal(text)
+ * Inputs:
+ *   handleUserFinal(text)  — every is_final user transcript from the bridge
+ *   noteVoice()            — the local mic is carrying voice right now
  *
  * Triggers that fire a dispatch:
- *   1. Silence timeout — `settings.silenceSec` seconds without a new
- *      is_final.  silenceSec=0 disables (waits forever for a commit
- *      phrase).
+ *   1. End-of-turn silence — `settings.silenceSec` seconds during which
+ *      THE MICROPHONE was quiet. silenceSec=0 disables (waits forever
+ *      for a commit phrase). Pre-2026-08-30 this counted from the last
+ *      is_final instead, which made an STT hole look exactly like a
+ *      pause and committed half-utterances under him — see noteVoice().
  *   2. Commit-phrase match — utterance ends in the configured phrase
  *      (e.g. "over"); the phrase is stripped and the rest is sent.
+ *      IMMEDIATE by default (commitDelaySec=0) and deliberately does
+ *      not consult the voice window at all: "I like the immediate
+ *      reactivity of the send as soon as I say over" (Jonathan,
+ *      2026-08-30). Nothing in this module may add latency there.
  *
  * On dispatch:
  *   - Clear the buffer.
@@ -30,11 +37,16 @@
 
 import * as conn from './realtime.ts';
 import { playFeedback } from '../shared/feedback.ts';
-import { matchSendword, getHandsfreeConfig } from '../shared/handsfree.ts';
+import { matchSendword, getHandsfreeConfig, SilenceWindow } from '../shared/handsfree.ts';
+import * as turnGuard from './turnGuard.ts';
 import { log, diag } from '../../util/log.ts';
 
 let buffer: string[] = [];
 let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+/** End-of-turn evidence. A pause is only a pause if the MICROPHONE is
+ *  quiet — see armSilenceTimer(). Non-null only while a countdown is
+ *  live; noteVoice() before any countdown is a cheap no-op. */
+let voiceWindow: SilenceWindow | null = null;
 // Sendword grace window (commitDelaySec): armed when the commit phrase
 // is heard, dispatches when it elapses. Finals landing inside the
 // window append to the buffer and ride the same dispatch. Distinct
@@ -107,6 +119,7 @@ export function takeBufferedText(): string {
     commitTimer = null;
   }
   commitPendingThroughPause = false;
+  voiceWindow = null;
   return text;
 }
 
@@ -131,6 +144,7 @@ export function reset(): void {
     commitTimer = null;
   }
   commitPendingThroughPause = false;
+  voiceWindow = null;
   // Drop any pause flag too — a 'reconnecting'-paused buffer that's
   // being torn down (call ended, fresh open) should not start the next
   // call already-paused. Pause is strictly a within-call hold.
@@ -187,6 +201,7 @@ function dispatchNow(): void {
     commitTimer = null;
   }
   commitPendingThroughPause = false;
+  voiceWindow = null;
   const utterance = buffer.join(' ').trim();
   buffer = [];
   if (!utterance) return;
@@ -211,6 +226,9 @@ function dispatchNow(): void {
     }
     return;
   }
+  // A reply is now in flight. The turn guard watches for the user
+  // starting a NEW utterance before it lands — see turnGuard.ts.
+  turnGuard.onDispatch();
   // No 'send' chime here: in WebRTC voice mode the dispatch is a
   // synchronous data-channel write (no network round-trip from the
   // PWA's POV — the bridge is the one talking to the agent). Firing
@@ -222,6 +240,44 @@ function dispatchNow(): void {
   // commit = "I heard the over"; send = "agent is replying."
 }
 
+/**
+ * Report detected VOICE on the local microphone.
+ *
+ * THE 2026-08-30 FIX. Pre-fix the end-of-turn countdown was armed on
+ * TRANSCRIPTS — `handleUserFinal` was the only caller of
+ * armSilenceTimer, and it returns early on empty text, so an empty
+ * final does not re-arm. That made "the user fell silent" and "the STT
+ * hop stopped producing text" the SAME EVENT to this module. They are
+ * not remotely the same thing, and the difference is a whole dictation:
+ *
+ *   "I was in the middle of a dictation, and I paused to think. And for
+ *    some reason, it sent the message, and the agent fired a reply. I
+ *    hadn't realized this, so I continued to talk… we started having
+ *    this staggered turn dynamic where it was replying to an old chunk
+ *    of my previous text."   — Jonathan, 2026-08-30
+ *
+ * A run of empty finals (Phase 1's bug — ~30% of utterances that
+ * session) or a transcript hole (2026-08-27, 11-30 s three times) is
+ * indistinguishable from silence when you only listen to text. So the
+ * countdown now elapses on MIC SILENCE, with transcripts as a secondary
+ * arming input. Voice is authoritative.
+ *
+ * Cost on the happy path: zero. This does not delay anything — it only
+ * refuses to fire the timer EARLY. The sendword path never touches it.
+ */
+export function noteVoice(now: number = Date.now()): void {
+  if (voiceWindow) voiceWindow.noteVoice(now);
+}
+
+/** Arm (or re-arm) the end-of-turn countdown.
+ *
+ *  Two-stage by design: the setTimeout is a DEADLINE, and when it
+ *  fires we re-check the voice window. If the mic has been active more
+ *  recently than the deadline assumed, we re-arm for exactly the
+ *  remaining time instead of committing. Deadline-chasing rather than
+ *  polling — no per-frame timer work, and the commit still lands the
+ *  instant silenceSec of genuine silence has elapsed (no added
+ *  latency, which is the hard constraint here). */
 function armSilenceTimer(): void {
   if (silenceTimer !== null) {
     clearTimeout(silenceTimer);
@@ -234,10 +290,39 @@ function armSilenceTimer(): void {
   if (silencePaused) return;
   const { silenceSec } = getHandsfreeConfig();
   if (silenceSec <= 0) return;  // 0 = disabled (sendword-only mode).
+  const now = Date.now();
+  // A final transcript IS evidence the user was speaking, so arming
+  // from handleUserFinal counts as voice. Callers that arm for other
+  // reasons (resumeSilenceTimer) get the same treatment — the mic loop
+  // will correct it within a frame if he is in fact still talking.
+  if (voiceWindow === null) voiceWindow = new SilenceWindow(silenceSec, now);
+  else {
+    voiceWindow.setThreshold(silenceSec);
+    voiceWindow.noteVoice(now);
+  }
+  scheduleSilenceCheck(silenceSec * 1000);
+}
+
+function scheduleSilenceCheck(delayMs: number): void {
   silenceTimer = setTimeout(() => {
     silenceTimer = null;
-    dispatchNow();
-  }, silenceSec * 1000);
+    const w = voiceWindow;
+    if (!w) { dispatchNow(); return; }
+    const { silenceSec } = getHandsfreeConfig();
+    w.setThreshold(silenceSec);
+    if (silenceSec <= 0) return;   // slider moved to "sendword only" mid-turn
+    const now = Date.now();
+    if (w.expired(now)) {
+      dispatchNow();
+      return;
+    }
+    // Still talking — the transcripts just went quiet. Chase the real
+    // deadline. This is the branch that saves the dictation.
+    const remaining = Math.max(20, silenceSec * 1000 - w.msSinceVoice(now));
+    diag('[dictation] end-of-turn deferred — mic still active,',
+      `${Math.round(w.msSinceVoice(now))}ms since voice`);
+    scheduleSilenceCheck(remaining);
+  }, Math.max(0, delayMs));
 }
 
 /**
@@ -271,6 +356,12 @@ export function __hasSilenceTimerForTests(): boolean {
  *  (commitDelaySec) is currently pending. */
 export function __hasCommitTimerForTests(): boolean {
   return commitTimer !== null;
+}
+
+/** Test-only introspection — ms since the last noteVoice() on the live
+ *  end-of-turn window, or null when no countdown is armed. */
+export function __msSinceVoiceForTests(now: number = Date.now()): number | null {
+  return voiceWindow ? voiceWindow.msSinceVoice(now) : null;
 }
 
 export function handleUserFinal(text: string): void {

@@ -211,6 +211,44 @@ DROP_RELOG_S = 2.0
 # the agent is speaking, nothing at all while the call is idle.
 TTS_PLAYBACK_PING_S = 1.0
 
+# ── Empty-final recovery (field 2026-08-28, airport session) ──────────
+#
+# Deepgram nova-3 sometimes SHOWS an utterance's words in interim
+# results and then closes the utterance with no non-empty final at all.
+# The bridge used to log that ("utterance closed EMPTY after N
+# non-empty interims") and drop the words on the floor, because the PWA
+# only moves its dictation state machine on FINALS. Field rate that
+# session: 14 empty finals / 47 finals and 11 / 27 in two rounds —
+# roughly 30% of utterances, and he lost a long dictation to it
+# ("I just dictated a long summary of day and ended with some
+# gratitudes…"). Same hole ate a sendword on 2026-08-27, which
+# auto-committed a partial when the "over" landed in a vanished final.
+#
+# Fix is REACTIVE, not pre-emptive: nothing waits, nothing is delayed.
+# When the utterance closes empty we forward the last non-empty interim
+# we already have in hand as that utterance's final. Zero added latency
+# on the happy path — this code only runs on a shape that was
+# previously a total loss.
+#
+# Duplicate safety: Deepgram's UtteranceEnd can (rarely) race ahead of a
+# straggling is_final for the same segment. If a non-empty final lands
+# within RECOVERED_FINAL_DEDUP_S carrying the same text we just
+# recovered, we suppress it — the client already has those words. The
+# window is deliberately short so a genuine repeat ("over … over") a few
+# seconds later is never swallowed.
+RECOVERED_FINAL_DEDUP_S = 2.0
+
+
+def _norm_for_dedup(text: str) -> str:
+    """Loose comparison key for the recovered-final duplicate guard.
+
+    Deepgram's final for a segment usually differs from its last interim
+    only in punctuation/casing ("four five six" → "Four, five, six."),
+    so an exact match would miss the very duplicate we're guarding
+    against. Strip everything but alphanumerics and single spaces.
+    """
+    return " ".join(re.sub(r"[^0-9a-z ]+", " ", (text or "").lower()).split())
+
 
 def _halt_tail_grace_s() -> float:
     """Length of the post-halt gate, for the log line only.
@@ -816,12 +854,19 @@ def _log_round_tx_summary(peer, why: str) -> None:
     interims = extra.pop("tx_interims", 0)
     finals = extra.pop("tx_finals", 0)
     empty_finals = extra.pop("tx_empty_finals", 0)
+    # `eaten` counts the Deepgram-dropped-the-utterance shape; `recovered`
+    # counts how many of those we handed back to the client from the last
+    # non-empty interim. eaten>recovered means words were still lost —
+    # that difference is the field metric to watch.
+    eaten = extra.pop("tx_eaten_utterances", 0)
+    recovered = extra.pop("tx_recovered_finals", 0)
     extra.pop("tx_interims_since_final", None)
+    extra.pop("tx_last_interim_text", None)
     logger.info(
         "[stt-bridge] peer %s round=%s transcript summary (%s): "
-        "interims=%d finals=%d empty_finals=%d%s",
+        "interims=%d finals=%d empty_finals=%d eaten=%d recovered=%d%s",
         peer.peer_id, extra.get("post_tts_round") or 0, why,
-        interims, finals, empty_finals,
+        interims, finals, empty_finals, eaten, recovered,
         "" if (interims or finals) else " — NO TRANSCRIPTS THIS ROUND",
     )
 
@@ -871,6 +916,17 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
     reset, so after a caret move every later utterance still landed at
     the FIRST utterance's position (Jonathan field bug 2026-08-09).
     Empty interims stay skipped — pure noise.
+
+    Empty-final RECOVERY: when an utterance closes empty after we had
+    already seen non-empty interims for it, the last such interim is
+    forwarded as that utterance's final BEFORE the empty end-of-utterance
+    marker. See RECOVERED_FINAL_DEDUP_S. A recovered final is an ordinary
+    {is_final:true} envelope on the wire — deliberately unmarked, so
+    every downstream consumer (dictation buffer, sendword matcher, user
+    bubble, dictate.ts caret anchor) treats it exactly like any other
+    final. There is nothing useful the client could do differently with
+    the knowledge, and a new envelope field would have to be understood
+    by the frozen CAP bundle on his phone to be worth anything.
     """
     # First transcript after a TTS round ended — the other half of the
     # post-TTS frame evidence (see _pcm_iter): proves the resumed frames
@@ -885,28 +941,93 @@ async def _handle_transcript(peer, tx: Transcript) -> None:
 
     # Round counters + Deepgram-ate-the-utterance probe — see the
     # transcript-hole diagnostics comment near STALL_AFTER_S.
+    recovered_text = ""
     if extra is not None:
-        extra["last_tx_mono"] = time.monotonic()
+        now_mono = time.monotonic()
+        extra["last_tx_mono"] = now_mono
         has_text = bool((tx.text or "").strip())
         if tx.is_final:
             if has_text:
+                # Duplicate guard: UtteranceEnd can beat a straggling
+                # is_final for the same segment, in which case we already
+                # recovered these exact words a moment ago. Suppress the
+                # late arrival rather than let the client render + buffer
+                # the sentence twice.
+                pending = extra.get("tx_recovered_text") or ""
+                pending_at = extra.get("tx_recovered_at") or 0.0
+                if (
+                    pending
+                    and (now_mono - pending_at) <= RECOVERED_FINAL_DEDUP_S
+                    and _norm_for_dedup(pending) == _norm_for_dedup(tx.text)
+                ):
+                    extra["tx_recovered_text"] = ""
+                    extra["tx_interims_since_final"] = 0
+                    extra["tx_last_interim_text"] = ""
+                    logger.info(
+                        "[stt-bridge] peer %s suppressed late final duplicating "
+                        "a recovered utterance (%d chars) — client already has it",
+                        peer.peer_id, len(tx.text or ""),
+                    )
+                    return
+                extra["tx_recovered_text"] = ""
                 extra["tx_finals"] = extra.get("tx_finals", 0) + 1
                 extra["tx_interims_since_final"] = 0
+                extra["tx_last_interim_text"] = ""
             else:
                 extra["tx_empty_finals"] = extra.get("tx_empty_finals", 0) + 1
                 orphaned = extra.get("tx_interims_since_final", 0)
                 if orphaned:
-                    logger.info(
-                        "[stt-bridge] peer %s utterance closed EMPTY after %d "
-                        "non-empty interims — Deepgram dropped the content the "
-                        "interims showed (observed live in lab replay; any "
-                        "sendword in it is lost)",
-                        peer.peer_id, orphaned,
-                    )
+                    extra["tx_eaten_utterances"] = extra.get("tx_eaten_utterances", 0) + 1
+                    # RECOVERY — forward what the interims already showed
+                    # instead of dropping the utterance. Reactive: costs
+                    # nothing on the happy path, runs only on a shape
+                    # that was previously a total loss.
+                    recovered_text = (extra.get("tx_last_interim_text") or "").strip()
+                    if recovered_text:
+                        extra["tx_recovered_finals"] = extra.get("tx_recovered_finals", 0) + 1
+                        extra["tx_recovered_text"] = recovered_text
+                        extra["tx_recovered_at"] = now_mono
+                        logger.info(
+                            "[stt-bridge] peer %s RECOVERED utterance closed EMPTY "
+                            "after %d non-empty interims — forwarding the last "
+                            "interim as the final (%d chars): %r",
+                            peer.peer_id, orphaned, len(recovered_text),
+                            recovered_text[:120],
+                        )
+                    else:
+                        # Should not happen (orphaned>0 implies we stored
+                        # text), but never fabricate: log and drop.
+                        logger.info(
+                            "[stt-bridge] peer %s utterance closed EMPTY after %d "
+                            "non-empty interims and NO interim text was retained "
+                            "— content lost (unrecoverable)",
+                            peer.peer_id, orphaned,
+                        )
                     extra["tx_interims_since_final"] = 0
+                    extra["tx_last_interim_text"] = ""
         elif has_text:
             extra["tx_interims"] = extra.get("tx_interims", 0) + 1
             extra["tx_interims_since_final"] = extra.get("tx_interims_since_final", 0) + 1
+            # Deepgram interims for a segment are cumulative, so the most
+            # recent one is the fullest view of the utterance we ever get
+            # if the final never arrives. Keep only that one.
+            extra["tx_last_interim_text"] = tx.text
+
+    # Emit the recovered final FIRST, then fall through to the empty
+    # end-of-utterance marker below — the client needs the words before
+    # the utterance-closed signal, same order a healthy Deepgram uses.
+    if recovered_text:
+        if peer.on_transcript is not None:
+            try:
+                await peer.on_transcript(recovered_text, True)
+            except Exception as e:  # pragma: no cover
+                logger.warning("[stt-bridge] peer %s on_transcript hook raised: %s", peer.peer_id, e)
+        _send_data_channel(peer, {
+            "type": "transcript",
+            "text": recovered_text,
+            "is_final": True,
+            "role": "user",
+        })
 
     if peer.on_transcript is not None:
         try:

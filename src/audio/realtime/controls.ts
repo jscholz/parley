@@ -19,6 +19,7 @@ import * as conn from './realtime.ts';
 import * as dictation from './dictation.ts';
 import * as suppress from './suppress.ts';
 import * as realtimeBarge from './realtimeBarge.ts';
+import * as turnGuard from './turnGuard.ts';
 import * as settings from '../../settings.ts';
 import * as backend from '../../backend.ts';
 import { playFeedback } from '../shared/feedback.ts';
@@ -221,6 +222,7 @@ export function init(o: ControlsOpts) {
       dictation.reset();
       suppress.reset();
       realtimeBarge.stop();
+      turnGuard.stop();
     }
     // 'reconnecting' is INTENTIONALLY split out from the reset branch
     // above — Jonathan field bug 2026-06-23. Pre-fix the dictation
@@ -239,6 +241,10 @@ export function init(o: ControlsOpts) {
     // elapse during the yellow gap and dispatch the half-utterance.
     if (state === 'reconnecting') {
       realtimeBarge.stop();
+      // Same reason as realtimeBarge: the mic stream is dead through
+      // the gap, so the analyser would read zeros and manufacture a
+      // "he stopped talking" verdict for the whole yellow window.
+      turnGuard.stop();
       dictation.pauseSilenceTimer();
       startReconnectTickLoop();
     } else {
@@ -252,6 +258,35 @@ export function init(o: ControlsOpts) {
     // window or commit phrase.
     if (state === 'connected') {
       dictation.resumeSilenceTimer();
+    }
+    // Turn guard: the end-of-turn countdown's VOICE source, plus
+    // "newest input wins" for a reply the user has already talked over.
+    // Runs in BOTH modes and independently of the bargeIn kill switch —
+    // it is not a barge detector, it never reads the mic while TTS is
+    // audible, and dictation's commit trigger must not silently depend
+    // on a barge setting. See turnGuard.ts.
+    if (state === 'connected') {
+      const micForGuard = conn.getMicStream();
+      if (micForGuard) {
+        turnGuard.start({
+          micStream: micForGuard,
+          isTtsPlayingCb: () => suppress.isTtsPlaying(),
+          onVoice: () => dictation.noteVoice(),
+          onStaleReply: (why) => {
+            // Deliberately the EXACT barge halt sequence — one halt
+            // path, not two. There is no upstream generation-cancel
+            // API (see turnGuard.ts / the report): this stops the
+            // agent SPEAKING and reopens the mic gate, which is what
+            // makes his next words the next turn instead of being
+            // eaten by the half-duplex window.
+            log('[webrtc-controls] turn-guard halting stale reply —', why);
+            conn.sendBarge();
+            conn.cancelRemotePlayback();
+            suppress.onBarge();
+          },
+          subscribeEnvelopes: conn.tapEnvelopes,
+        });
+      }
     }
     // Barge loop runs only while a call is connected. Started here
     // (not in realtime.ts itself) because it depends on suppress's
