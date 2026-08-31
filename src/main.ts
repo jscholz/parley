@@ -293,6 +293,14 @@ function syncComposerEditButtons(): void {
   const restoreBtn = document.getElementById('composer-restore') as HTMLButtonElement | null;
   if (clearBtn) clearBtn.hidden = !(input?.value ?? '');
   if (restoreBtn) restoreBtn.hidden = !composerDrafts.hasClearedText(composerDrafts.boundTo());
+  // The pair overlays the composer's top-right corner, and a <textarea>
+  // cannot reflow around a child — so the field reserves right-hand room
+  // ONLY while one of them is actually showing. Padding permanently would
+  // cost ~9% of line width on a phone for a rarely-used control.
+  try {
+    const occupied = !!((clearBtn && !clearBtn.hidden) || (restoreBtn && !restoreBtn.hidden));
+    document.body.classList.toggle('has-composer-edit', occupied);
+  } catch { /* non-browser */ }
 }
 
 /** Whether the composer is currently in read-only mode — set true
@@ -2196,16 +2204,21 @@ async function boot() {
         ta.value = ta.value.trim() ? `${ta.value.replace(/\s+$/, '')}\n\n${trimmed}` : trimmed;
         ta.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      toast('Saved what you said to the composer');
+      // No toast when the text lands in the composer he is looking at:
+      // the text appearing IS the notification, and the banner sat over
+      // the composer it was pointing at (his note, 2026-08-31: "it
+      // actually overshadowed the composer, and it's just annoying...
+      // users will figure it out pretty quick").
       return;
     }
     const visible = composerDrafts.appendDraft(chatId, trimmed);
-    // Lead with WHY the text moved — "Call ended" is the fact he needs
-    // to reconcile the silence with; the rest tells him where to look.
-    const lead = reason === 'dispatch-failed' ? "Couldn't send" : 'Call ended';
-    toast(visible
-      ? `${lead} — saved what you said to the composer`
-      : `${lead} — saved what you said as a draft in that chat`);
+    // A toast survives ONLY for the invisible case: the rescue landed in
+    // a DIFFERENT chat's draft, so there is nothing on screen to notice.
+    // Silence there would be the old bug wearing a smile.
+    if (!visible) {
+      const lead = reason === 'dispatch-failed' ? "Couldn't send" : 'Call ended';
+      toast(`${lead} — saved what you said as a draft in that chat`);
+    }
   }
   /** Terminal-call rescue. Wired to webrtcControls.onRescueBufferedSpeech
    *  and run before dictation.reset() on every path that ends a call.

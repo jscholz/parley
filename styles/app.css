@@ -3689,6 +3689,9 @@
   /* ── Composer (unified text + actions box) ── */
   .composer {
     display: flex; flex-direction: column;
+    /* Positioning context for .composer-edit-corner (clear/restore
+       overlay their own top-right corner as of 2026-08-31). */
+    position: relative;
     margin: 10px 14px;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -4023,8 +4026,30 @@
        - SUBTLE AT REST, not invisible: --muted at 0.55, full --fg on
          hover/focus. Jonathan asked for "a very subtle x"; a control
          you cannot find is not subtle, it is missing. */
+  /* ── Clear / restore corner (2026-08-31) ──────────────────────────
+     Moved out of the action row at his request: an x sitting beside the
+     headset icon read as "cancel the call", and the row is already a row
+     of INPUT-MODE controls, so a text action there is ambiguous ("not
+     clear whether its about text or attachment or something else").
+     The composer's own top-right corner is unambiguous — it is inside
+     the box whose contents it clears.
+     Overlaid, because a <textarea> cannot reflow text around a child.
+     That is also why the textarea reserves right-hand room only while a
+     button is actually showing: padding it permanently would cost ~9% of
+     line width on a phone for a control used rarely. */
+  .composer-edit-corner {
+    position: absolute; top: 2px; right: 6px;
+    z-index: 2;
+    display: flex; align-items: flex-start;
+    pointer-events: none;            /* the gap between buttons is not a target */
+  }
+  .composer-edit-corner > * { pointer-events: auto; }
+  /* Reserve the corner only when occupied. Class is set by main.ts
+     alongside the [hidden] toggles. */
+  body.has-composer-edit #composer-input { padding-right: 40px; }
+
   .composer .composer-edit-btn {
-    margin-left: 14px;
+    margin-left: 0;
     min-width: 44px; min-height: 44px;
     padding: 0;
     display: inline-flex; align-items: center; justify-content: center;
@@ -4037,6 +4062,15 @@
   }
   /* The pair reads as one control group — no extra gutter between them. */
   .composer .composer-edit-btn + .composer-edit-btn { margin-left: 2px; }
+  /* In the corner the 44px box would swallow the composer's top edge, so
+     shrink the BOX and give the glyph a slightly larger visual weight to
+     compensate. 36px is under the HIG floor, accepted deliberately here:
+     this is a non-destructive, undoable action sitting away from every
+     other control, i.e. the opposite of the 2026-08-18 mis-tap geometry
+     that motivated the 44px rule. */
+  .composer-edit-corner .composer-edit-btn {
+    min-width: 36px; min-height: 36px;
+  }
   .composer .composer-edit-btn:hover,
   .composer .composer-edit-btn:focus-visible {
     color: var(--fg); opacity: 1; background: var(--surface);

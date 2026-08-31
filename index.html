@@ -740,6 +740,25 @@
     </div>
     <div class="composer">
       <div class="composer-attachments" id="composer-attachments" style="display:none"></div>
+      <!-- Clear / restore live in the composer's TOP-RIGHT CORNER, not in
+           the action row (his call, 2026-08-31: an x beside the headset
+           icon "is not obviously a thing to clear the composer... not
+           clear there whether its about text or attachment or something
+           else"). Overlaid on the field, so .composer needs position:
+           relative; the textarea reserves right-hand room ONLY while a
+           button is showing (body.has-composer-edit) — a textarea cannot
+           reflow around an overlay, so without that the first line runs
+           under the icon. -->
+      <div class="composer-edit-corner">
+        <button id="composer-clear" class="composer-edit-btn" type="button" hidden
+                  aria-label="Clear composer" title="Clear composer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+        <button id="composer-restore" class="composer-edit-btn composer-restore-btn" type="button" hidden
+                  aria-label="Restore cleared text" title="Restore cleared text">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h11a5 5 0 0 1 0 10H8"/><polyline points="7 6 3 10 7 14"/></svg>
+          </button>
+      </div>
       <textarea id="composer-input" rows="1" placeholder="Type / for commands"></textarea>
       <!-- Live STT interim preview when autoSend is OFF. Sits below the
            textarea, faded; hidden when empty or when auto-send is on. -->
@@ -805,14 +824,6 @@
                safe is that the clear is genuinely undoable — the text
                goes to a per-chat restore buffer persisted next to the
                draft, not to a 5-second toast. -->
-          <button id="composer-clear" class="composer-edit-btn" type="button" hidden
-                  aria-label="Clear composer" title="Clear composer">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
-          </button>
-          <button id="composer-restore" class="composer-edit-btn composer-restore-btn" type="button" hidden
-                  aria-label="Restore cleared text" title="Restore cleared text">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h11a5 5 0 0 1 0 10H8"/><polyline points="7 6 3 10 7 14"/></svg>
-          </button>
         </div>
         <div class="composer-actions-mid">
           <button id="composer-hotkeys-hint" class="composer-hotkeys-hint" type="button" title="Keyboard shortcuts · ⌘/" aria-label="Keyboard shortcuts · ⌘/">

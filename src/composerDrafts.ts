@@ -311,6 +311,7 @@ export function appendDraft(chatId: string | null, text: string): boolean {
 /** True iff `chatId` has text that a clear stashed and nothing has
  *  spent yet — i.e. the restore control should exist. */
 export function hasClearedText(chatId: string | null): boolean {
+  if (!chatId) return !!unboundCleared;
   return !!(chatId && clearedCache.get(chatId));
 }
 
@@ -357,6 +358,16 @@ function writeTextarea(ta: HTMLTextAreaElement, next: string): void {
 
 /** Clear the composer, stashing its text in the bound chat's undo
  *  buffer. Returns true if anything was cleared. */
+/** Undo buffer for a clear performed while NO chat is bound (fresh app,
+ *  nothing selected yet — the composer still accepts text and mints a
+ *  chat on send). There is no per-chat key to persist under, so this one
+ *  is in-memory and dies with the page. That is a real limitation, but
+ *  the alternative shipped for a day and was worse: clearWithUndo wiped
+ *  the textarea and stored NOTHING, so the ✕ was silently destructive in
+ *  exactly the state where the restore button also could not appear.
+ *  Caught by a render with no chat selected, 2026-08-31. */
+let unboundCleared: string | null = null;
+
 export function clearWithUndo(): boolean {
   if (!textareaRef) return false;
   const text = textareaRef.value;
@@ -366,6 +377,8 @@ export function clearWithUndo(): boolean {
     saveDraft(boundChatId, '');
     flushDraft(boundChatId);
     saveCleared(boundChatId, text);
+  } else {
+    unboundCleared = text;
   }
   onRestoredCb?.();
   notifyComposerState();
@@ -380,7 +393,18 @@ export function clearWithUndo(): boolean {
  *  may have typed something, and a restore that ate it would need its
  *  own undo. Same non-clobbering rule as appendDraft. */
 export function restoreCleared(): boolean {
-  if (!textareaRef || !boundChatId) return false;
+  if (!textareaRef) return false;
+  if (!boundChatId) {
+    // Unbound-clear counterpart. Same append-not-overwrite rule.
+    const pending = unboundCleared;
+    if (!pending) return false;
+    unboundCleared = null;
+    const cur = textareaRef.value;
+    writeTextarea(textareaRef, cur.trim() ? `${cur.replace(/\s+$/, '')}\n\n${pending}` : pending);
+    onRestoredCb?.();
+    notifyComposerState();
+    return true;
+  }
   const stashed = clearedCache.get(boundChatId);
   if (!stashed) return false;
   const existing = textareaRef.value;
