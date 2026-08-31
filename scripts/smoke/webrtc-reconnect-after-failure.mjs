@@ -149,6 +149,18 @@ export default async function run({ page, log, mock }) {
   await setLastPcState('failed');
   assert(await waitForState('reconnecting'), 'connected call dropped but never entered reconnecting');
   assert(await waitForPcCount(2), 'reconnecting did not re-open a fresh PC');
+  // WAIT for the re-offer; do not sample it. Flake fixed 2026-08-31
+  // (~65% failure rate, "offers 1 → 1"): since #197 the PC is constructed
+  // ~1ms into open(), well BEFORE the offer POST goes out, so a PC-count
+  // wait returns while the re-offer is still in flight and an immediate
+  // read of offerCount sees the pre-reconnect value. Part 2 of this file
+  // already documents the count-relative hazard for its own loop; part 1
+  // was still sampling. Same shape as the two other flakes fixed today:
+  // waiting on a proxy signal that fires before the thing under test.
+  const offerDeadline = Date.now() + 6_000;
+  while (offerCount <= offersAfterConnect && Date.now() < offerDeadline) {
+    await page.waitForTimeout(50);
+  }
   assert(offerCount > offersAfterConnect, `expected a re-offer on reconnect (offers ${offersAfterConnect} → ${offerCount})`);
   log(`entered reconnecting + re-opened; offers now=${offerCount}, pcs=${await pcCount()}`);
 

@@ -12,7 +12,7 @@
 // auxiliary-models advertises vision:null so the fallback doesn't mask the
 // none tier (a live fallback would make EVERY model accept PDFs).
 
-import { waitForReady, openSettingsSection, assert } from './lib.mjs';
+import { waitForReady, openSettingsSection, assert, pollUntil } from './lib.mjs';
 
 export const NAME = 'composer-attach-pdf-tier-gate';
 export const DESCRIPTION = 'PDF attach is rejected on non-vision/non-pdf models, accepted on image + pdf-native tiers';
@@ -59,6 +59,20 @@ async function attachPdf(page) {
   });
 }
 
+/** Select a model AND wait for its capabilities to have settled.
+ *
+ *  Flake fixed 2026-08-31: call sites used to select, then wait for
+ *  `#btn-attach` to be enabled. That is not a settle signal — the button
+ *  is enabled for BOTH the vision and pdf-native tiers, so on the
+ *  vision→pdf-native switch the predicate was ALREADY true and the wait
+ *  returned instantly, before the capability re-fetch for the new model
+ *  had landed. The following assertions then raced stale caps. Same
+ *  shape as the reconnect-identity flake: polling a flag that flips (or
+ *  is already set) before the work it stands for completes.
+ *
+ *  `capsKnownFor(id)` is the actual discriminator — it is true only once
+ *  this model's caps are resolved. Baked in here so no call site can
+ *  forget it. */
 async function selectModel(page, value) {
   await page.evaluate((v) => {
     const sel = document.querySelector('[data-agent-setting="model"] select');
@@ -66,6 +80,10 @@ async function selectModel(page, value) {
     sel.value = v;
     sel.dispatchEvent(new Event('change', { bubbles: true }));
   }, value);
+  await pollUntil(page, async (v) => {
+    const caps = await import('/build/modelCapabilities.mjs');
+    return caps.currentModelId() === v && caps.capsKnownFor(v);
+  }, value, { label: `model caps never settled for ${value}` });
 }
 
 export default async function run({ page, log }) {
