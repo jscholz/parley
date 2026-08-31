@@ -30,6 +30,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import stt_bridge
 
 
+class _PumpPeer:
+    """_pump_audio takes the peer (not just its id) since it also drives
+    the link-quality watchdog, which publishes over the data channel."""
+
+    def __init__(self, peer_id):
+        self.peer_id = peer_id
+        self.data_channel = None      # no channel: sends no-op
+        self.extra = {}
+
+
 class _FakeResampled:
     def __init__(self, payload):
         self._payload = payload
@@ -77,7 +87,7 @@ async def test_overflow_drops_oldest_and_keeps_the_newest_audio(monkeypatch):
     payloads = [bytes([i % 251 + 1]) * 640 for i in range(total)]
 
     q: asyncio.Queue = asyncio.Queue(maxsize=cap)
-    await stt_bridge._pump_audio(_FakeTrack(payloads), q, "test-peer-backpressure")
+    await stt_bridge._pump_audio(_FakeTrack(payloads), q, _PumpPeer("test-peer-backpressure"))
 
     drained = []
     while not q.empty():
@@ -105,7 +115,7 @@ async def test_overflow_warning_is_rate_limited(monkeypatch, caplog):
     q: asyncio.Queue = asyncio.Queue(maxsize=cap)
 
     with caplog.at_level("WARNING", logger="stt_bridge"):
-        await stt_bridge._pump_audio(_FakeTrack(payloads), q, "test-peer-ratelimit")
+        await stt_bridge._pump_audio(_FakeTrack(payloads), q, _PumpPeer("test-peer-ratelimit"))
 
     full_lines = [r for r in caplog.records if "pcm queue full" in r.getMessage()]
     assert len(full_lines) <= 2, (

@@ -53,6 +53,19 @@
  *                gaps were silently wiping the dictation
  *                buffer; chime + buffer preservation
  *                together make the recovery transparent.
+ *   link-degraded  the CALL is still up but his uplink has  (descending
+ *                stalled — the bridge is receiving no mic     perfect fifth,
+ *                RTP at all, so everything he says is         A5→D5, two
+ *                going nowhere. Fires ONCE per episode        discrete notes)
+ *                (edge, never repeated), driven by the
+ *                bridge's {type:'link-quality'} envelope.
+ *                Means "stop talking and wait".
+ *   link-restored the same link came back                    (ascending
+ *                (Jonathan 2026-08-27: "it will               perfect fifth,
+ *                eventually come back, and I get a chime      D5→A5 — the
+ *                to that effect"). Only ever fires if         exact inverse)
+ *                link-degraded actually sounded, so the
+ *                two are always heard as a pair.
  *
  * ── iOS-PWA constraints ─────────────────────────────────────────────────
  *  - The AudioContext suspends on `visibilitychange=hidden` and resumes on
@@ -76,10 +89,26 @@
 import * as settings from '../../settings.ts';
 import { diag } from '../../util/log.ts';
 
-export type ChimeName =
-  | 'send' | 'receive' | 'error' | 'start'
-  | 'commit' | 'connect' | 'listening' | 'barge'
-  | 'call-dropped' | 'reconnect-tick';
+/**
+ * The catalogue, in ONE place. `ChimeName`, the iOS prime list and the
+ * suites all derive from this array, so they cannot drift apart.
+ *
+ * They used to be three hand-maintained copies. Adding `link-degraded`
+ * / `link-restored` broke primeFeedback's idempotence — the prime loop
+ * never saw a complete set, so `primed` never latched and every gesture
+ * re-played the whole catalogue. That was caught by a suite, but the
+ * shape of the bug (a new async-fired cue silently not unlocked on iOS,
+ * i.e. silent in exactly the field conditions it exists for) is one
+ * that deserves to be impossible rather than tested for.
+ */
+export const ALL_CHIMES = [
+  'send', 'receive', 'error', 'start',
+  'commit', 'connect', 'listening', 'barge',
+  'call-dropped', 'reconnect-tick',
+  'link-degraded', 'link-restored',
+] as const;
+
+export type ChimeName = typeof ALL_CHIMES[number];
 
 // Pre-render at scale=4 so el.volume=userVolume reproduces the legacy
 // oscillator path's amplitude curve.
@@ -106,6 +135,8 @@ function chimeDuration(name: ChimeName): number {
     case 'error':     return 0.36;
     case 'call-dropped': return 0.46;
     case 'reconnect-tick': return 0.16;
+    case 'link-degraded': return 0.34;
+    case 'link-restored': return 0.34;
   }
 }
 
@@ -271,6 +302,47 @@ function scheduleChime(name: ChimeName, ctx: BaseAudioContext, t0: number): void
     gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.14);
     osc.start(t0);
     osc.stop(t0 + 0.14);
+  } else if (name === 'link-degraded' || name === 'link-restored') {
+    // A matched pair: descending perfect fifth for "your uplink stalled",
+    // the same fifth ascending for "it's back". The falling/rising pair
+    // is the universal telephony idiom for lost/regained service, so it
+    // needs no learning — which matters, because the whole point is that
+    // he is on a bike and cannot look at the phone.
+    //
+    // Distinguishing them from the rest of the catalogue by EAR (the
+    // requirement, since he'll usually hear these blind):
+    //   - register: 587/880 Hz. `error` (440/330/260) and `call-dropped`
+    //     (392/294/196) both live an octave lower. Nothing else reaches
+    //     880 Hz except `commit`/`start`, which are ticks, not tones.
+    //   - interval: a perfect fifth. Every other two-note cue is a third
+    //     (`connect` 523→659, `listening` 440→523) or a glide.
+    //   - articulation: two DISCRETE steady notes. `error` and
+    //     `call-dropped` are portamento glides; the difference between a
+    //     leap and a slide is obvious even through wind.
+    // Triangle for wind audibility, baked at attention-cue gain (0.12,
+    // same as error/call-dropped) — this has to cut through traffic.
+    const down = name === 'link-degraded';
+    const hi = 880;   // A5
+    const lo = 587;   // D5
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(down ? hi : lo, t0);
+    gain.gain.setValueAtTime(0.12 * scale, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.14);
+    osc.start(t0);
+    osc.stop(t0 + 0.14);
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.type = 'triangle';
+    // 40 ms of silence between the notes — enough that they read as two
+    // deliberate pitches rather than one warbling tone.
+    const t2 = t0 + 0.18;
+    osc2.frequency.setValueAtTime(down ? lo : hi, t2);
+    gain2.gain.setValueAtTime(0.12 * scale, t2);
+    gain2.gain.exponentialRampToValueAtTime(0.001, t2 + 0.14);
+    osc2.start(t2);
+    osc2.stop(t2 + 0.14);
   } else if (name === 'call-dropped') {
     // Two slow descending notes (G4→D4, then D4→G3), lower/longer than
     // `error`. Reads as a "call ended" disconnect tone, not a
@@ -339,14 +411,12 @@ const players = new Map<ChimeName, HTMLAudioElement>();
 const renderPromises = new Map<ChimeName, Promise<HTMLAudioElement>>();
 
 /** Every chime that can fire OUTSIDE the originating user gesture and so
- *  must be unlocked ahead of time on iOS (see primeFeedback). Kept as the
- *  full catalogue rather than a hand-picked subset — they're tiny, and a
- *  future async-fired cue then can't silently regress. */
-const PRIME_CHIMES: ChimeName[] = [
-  'send', 'receive', 'error', 'start',
-  'commit', 'connect', 'listening', 'barge',
-  'call-dropped', 'reconnect-tick',
-];
+ *  must be unlocked ahead of time on iOS (see primeFeedback). Deliberately
+ *  the WHOLE catalogue rather than a hand-picked subset — they're tiny,
+ *  and a future async-fired cue (the link-quality pair are exactly that:
+ *  they fire from a bridge envelope mid-call, long past the opening
+ *  gesture's activation window) then can't silently regress. */
+const PRIME_CHIMES: readonly ChimeName[] = ALL_CHIMES;
 
 let primed = false;
 

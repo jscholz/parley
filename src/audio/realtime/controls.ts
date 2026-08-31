@@ -20,6 +20,7 @@ import * as dictation from './dictation.ts';
 import * as suppress from './suppress.ts';
 import * as realtimeBarge from './realtimeBarge.ts';
 import * as turnGuard from './turnGuard.ts';
+import * as linkQuality from './linkQuality.ts';
 import * as settings from '../../settings.ts';
 import * as backend from '../../backend.ts';
 import { playFeedback } from '../shared/feedback.ts';
@@ -113,8 +114,44 @@ function btnEl(id: string): HTMLButtonElement | null {
   return document.getElementById(id) as HTMLButtonElement | null;
 }
 
+/** Paint the "your uplink has stalled" indicator.
+ *
+ *  Routed onto whichever button the user actually tapped, exactly like
+ *  the `reconnecting` amber above it — and cleared off the other one
+ *  unconditionally, so a mid-call ownership change can't strand it.
+ *
+ *  It is a SEPARATE class from `reconnecting` (which renders identically
+ *  — see app.css) rather than a reuse of it, because the state listener
+ *  owns that class and toggles it off on every transition: a degraded
+ *  link sharing the class would be wiped by the next unrelated state
+ *  event. Two orthogonal conditions, two independent classes, one
+ *  deliberately identical visual — from the handlebar, both mean the
+ *  same thing ("your voice isn't getting through, wait"), and inventing
+ *  a second amber vocabulary for that would be worse than useless. */
+function paintLinkDegraded(on: boolean): void {
+  const micOwned = !!opts?.isMicOwnedCall?.();
+  const mic = btnEl('btn-mic');
+  if (mic) mic.classList.toggle('link-degraded', on && micOwned);
+  const call = btnEl('btn-call');
+  if (call) call.classList.toggle('link-degraded', on && !micOwned);
+}
+
 export function init(o: ControlsOpts) {
   opts = o;
+
+  // Uplink health → amber indicator + the edge chimes. Registered as a
+  // tap for the same reason the playback heartbeat below is: the
+  // single-slot setDataChannelListener is swapped save-and-restore by
+  // dictate/STTProvider, and "he only gets told his connection died in
+  // some modes" is precisely the bug class this signal exists to fix.
+  // Dictation is in fact the mode where it matters most — that is the
+  // one where he monologues.
+  linkQuality.init({
+    setIndicator: paintLinkDegraded,
+    playCue: (name) => { try { playFeedback(name); } catch { /* best-effort */ } },
+    isTtsPlaying: () => suppress.isTtsPlaying(),
+  });
+  conn.tapEnvelopes((ev: any) => linkQuality.onEnvelope(ev));
 
   // Playback heartbeat → the bound on suppression's ttsPlaying gate.
   // Deliberately a tapEnvelopes subscriber, NOT the single-slot
@@ -223,6 +260,12 @@ export function init(o: ControlsOpts) {
       suppress.reset();
       realtimeBarge.stop();
       turnGuard.stop();
+      // Guarantor 3 for the never-stuck indicator (linkQuality.ts). A
+      // call that ends mid-stall must not leave amber burning on a
+      // button with no call behind it — and 'requesting-mic' is in this
+      // branch too, so a fresh open can never inherit it either.
+      // Deliberately silent: the link did not recover, the call ended.
+      linkQuality.reset(state);
     }
     // 'reconnecting' is INTENTIONALLY split out from the reset branch
     // above — Jonathan field bug 2026-06-23. Pre-fix the dictation

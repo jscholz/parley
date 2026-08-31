@@ -161,13 +161,30 @@ interface TtsPlayingEvent {
   type: 'tts-playing';
   active: boolean;
 }
+/**
+ * Uplink health, as the bridge sees it: `degraded` means inbound mic RTP
+ * has stopped arriving for longer than its threshold — the user is
+ * talking into a void. A LEVEL, republished ~1/s while it persists so
+ * the client can bound itself on a deadline; the user-facing cue is
+ * edge-triggered on top (src/audio/realtime/linkQuality.ts).
+ *
+ * A bridge predating this protocol sends none, and the client keeps
+ * today's behaviour: no indicator, no chime, nothing stuck.
+ */
+interface LinkQualityEvent {
+  type: 'link-quality';
+  state: 'degraded' | 'ok';
+  /** Diagnostic only — how long the uplink had been silent. */
+  stalled_s?: number;
+}
 type DataChannelEvent =
   | TranscriptEvent
   | BargeEvent
   | ListeningEvent
   | SpeechActiveEvent
   | BargeVadEvent
-  | TtsPlayingEvent;
+  | TtsPlayingEvent
+  | LinkQualityEvent;
 
 let onDataChannelEvent: ((ev: DataChannelEvent) => void) | null = null;
 

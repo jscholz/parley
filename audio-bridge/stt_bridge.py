@@ -159,6 +159,96 @@ RTP_GAP_LOG_S = 1.0
 # Rate limit for the "pcm queue full" warning (see _pump_audio).
 DROP_RELOG_S = 2.0
 
+# ── User-facing link quality ({type:'link-quality'}) ──────────────────
+#
+# Jonathan, 2026-08-27, after losing minutes of speech on a bike ride:
+#
+#   "If it was a real phone call, number one, I would have gotten
+#    feedback after a minute from WhatsApp or whatever service that the
+#    audio was weak. And second, it will eventually come back, and I get
+#    a chime to that effect."
+#
+# The bridge already DETECTED every one of those stalls and told nobody
+# but the journal. This is the envelope that closes that loop.
+#
+# ── Why the RTP gap and NOT the STT hole ─────────────────────────────
+# Two detectors live in this file. Only one of them is honest evidence
+# about HIS radio link:
+#
+#   • RTP gap — `track.recv()` produced nothing for N seconds. No
+#     packets arrived. "Your connection is weak" is then literally true,
+#     and the action it implies ("stop talking and wait") is the correct
+#     one. This is the signal we surface.
+#   • STT HOLE — mic audio IS arriving but no transcript comes back.
+#     The uplink is fine; the fault is at the provider hop. Telling him
+#     his connection is weak would be a lie, and stopping talking would
+#     not help. It also has a field record of crying wolf (see the
+#     2026-08-28 11:21 walk test in STALL_VOICE_RECENT_S's note above) —
+#     a heuristic with known false positives is exactly the wrong thing
+#     to wire to a chime on a handlebar. It stays a journal diagnostic.
+#
+# ── Why a watchdog and not the existing gap log ──────────────────────
+# The `inbound mic RTP GAP` line is emitted RETROACTIVELY, from the
+# frame that ends the gap (see _pump_audio). That is fine for forensics
+# and useless for the user: by the time it fires he has already
+# finished monologuing into the void. Telling him IN the stall requires
+# a timer that fires while `track.recv()` is still blocked, which is
+# what _LinkQualityMonitor's watchdog task is for.
+#
+# ── Thresholds, from the field ───────────────────────────────────────
+# Every RTP gap in the airport session (2026-08-28 21:45–21:56, three
+# consecutive calls, the worst connectivity on record), in seconds:
+#
+#   1.0  1.2  1.2  1.9  2.0  2.0  2.0  2.1  3.0  3.5  4.9  4.9
+#
+# Twelve gaps in eleven minutes. Alerting on all of them is one chime
+# every ~80 s, which is how you train someone to ignore a chime — worse
+# than silence, and the explicit instruction is to bias against crying
+# wolf. The distribution is helpfully bimodal: a dense cluster at
+# 1.0–2.1 (8 of 12) and a tail at 3.0+ (4 of 12).
+#
+# 3.0 s sits in that valley. Below it are the ordinary bike/urban
+# hiccups that cost a word or two and resolve themselves; at and above
+# it are the stalls that ate a whole clause (~2.5 words/s → a 3 s gap
+# is ~7 words, a lost sentence fragment he cannot reconstruct). 3 s is
+# also ~150 missing 20 ms frames, far past any jitter-buffer excuse.
+LINK_DEGRADED_AFTER_S = 3.0
+# How long frames must flow CONTINUOUSLY before we call it recovered.
+#
+# This is the anti-flap knob, and the field data sizes it exactly. The
+# 3.0 s gap ending 21:45:57.596 was followed by the 4.9 s gap ending
+# 21:46:02.637 — which therefore STARTED at 21:45:57.7, one tenth of a
+# second later. With no recovery hold those two would be one
+# degraded/ok/degraded/ok burst in five seconds: four chimes for what
+# the user experienced as a single bad patch. A 2 s hold collapses them
+# into one episode with one chime at each end.
+#
+# Replaying the whole airport session through these two numbers yields
+# THREE degraded/recovered pairs in eleven minutes of the worst link we
+# have ever recorded — roughly one every 3-4 minutes while things are
+# genuinely bad, and nothing at all on an ordinary ride. Pinned by
+# tests/test_link_quality.py::test_airport_session_yields_three_episodes.
+LINK_RECOVERED_AFTER_S = 2.0
+# A gap at least this long breaks the "frames are flowing" run and
+# re-arms the recovery clock. Shared with RTP_GAP_LOG_S deliberately:
+# while we are already degraded, repeated 1 s dropouts mean the link is
+# still bad and the indicator should stay up.
+LINK_RUN_BREAK_S = RTP_GAP_LOG_S
+# Re-send cadence for the degraded envelope while degradation persists.
+# The client turns this into a DEADLINE (src/audio/realtime/
+# linkQuality.ts LINK_EVIDENCE_DEADLINE_MS, 3 s) so a dead bridge or a
+# dropped data channel can never leave the amber indicator stuck on.
+# Same idiom, and the same reasoning, as TTS_PLAYBACK_PING_S.
+#
+# Note this is NOT a repeated user-facing alert: the envelope is a
+# level, the CUE is edge-triggered on the client. Costs ~50 bytes/s of
+# SCTP, and only while the link is already bad.
+LINK_QUALITY_PING_S = 1.0
+# Watchdog wake-up period. Fine enough that the degraded edge lands
+# within a quarter second of LINK_DEGRADED_AFTER_S (imperceptible
+# against a 3 s threshold), coarse enough to be free.
+LINK_WATCHDOG_TICK_S = 0.25
+
 # ── Why there is no barge-window audio replay ─────────────────────────
 #
 # ef904f3 added a ring buffer here: while TTS played, mic frames the
@@ -295,7 +385,7 @@ def attach(peer, *, voice_config: VoiceConfig, api_server: Any = None) -> None:
         pcm_q: "asyncio.Queue[Optional[bytes]]" = asyncio.Queue(maxsize=MAX_PCM_QUEUE)
 
         pump_task = asyncio.create_task(
-            _pump_audio(track, pcm_q, peer.peer_id),
+            _pump_audio(track, pcm_q, peer),
             name=f"webrtc-pump-{peer.peer_id[:8]}",
         )
         stt_task = asyncio.create_task(
@@ -306,8 +396,132 @@ def attach(peer, *, voice_config: VoiceConfig, api_server: Any = None) -> None:
         peer.extra["pump_task"] = pump_task
 
 
-async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: str) -> None:
+class _LinkQualityMonitor:
+    """Edge-triggered `{type:'link-quality'}` publisher for one peer.
+
+    Owns exactly one bit of user-visible state — is his uplink stalled
+    right now — and the hysteresis around it. See the LINK_* constants
+    above for the thresholds and the field data behind them.
+
+    Two inputs, one output:
+
+        note_frame(now)  a mic frame landed
+        tick(now)        time passed (watchdog, ~4 Hz)
+              |
+              +-> {'type':'link-quality','state':'degraded'|'ok', ...}
+
+    `tick` is deliberately a plain synchronous method taking an explicit
+    `now`, so the whole state machine can be tested by handing it a
+    scripted clock instead of sleeping through real thresholds.
+    """
+
+    def __init__(
+        self,
+        peer,
+        *,
+        degrade_after_s: Optional[float] = None,
+        recover_after_s: Optional[float] = None,
+        run_break_s: Optional[float] = None,
+        ping_s: Optional[float] = None,
+    ) -> None:
+        self.peer = peer
+        # Resolved from module globals HERE rather than as default-arg
+        # values, which Python binds once at class-definition time and
+        # which monkeypatching the constants therefore cannot reach.
+        self.degrade_after_s = (
+            LINK_DEGRADED_AFTER_S if degrade_after_s is None else degrade_after_s)
+        self.recover_after_s = (
+            LINK_RECOVERED_AFTER_S if recover_after_s is None else recover_after_s)
+        self.run_break_s = (
+            LINK_RUN_BREAK_S if run_break_s is None else run_break_s)
+        self.ping_s = LINK_QUALITY_PING_S if ping_s is None else ping_s
+        self.degraded = False
+        # None until the first frame: a call whose uplink never starts
+        # is a CONNECT failure, already owned by the call state machine.
+        # Reporting "your link degraded" for it would be a second, worse
+        # explanation of the same event.
+        self.last_frame_at: Optional[float] = None
+        self.healthy_since: Optional[float] = None
+        self.last_ping_at = 0.0
+        self.degraded_at: Optional[float] = None
+
+    def note_frame(self, now: float) -> None:
+        prev = self.last_frame_at
+        if prev is None or now - prev >= self.run_break_s:
+            # First frame, or a real dropout — the "frames are flowing"
+            # run restarts here. While degraded this is what stops a
+            # link that keeps stuttering from being called recovered.
+            self.healthy_since = now
+        self.last_frame_at = now
+
+    def tick(self, now: float) -> None:
+        if self.last_frame_at is None:
+            return
+        stalled_for = now - self.last_frame_at
+        if not self.degraded:
+            if stalled_for >= self.degrade_after_s:
+                self.degraded = True
+                self.degraded_at = now
+                self.last_ping_at = now
+                logger.warning(
+                    "[stt-bridge] peer %s LINK DEGRADED: %.1fs with no inbound "
+                    "mic frames — telling the client his uplink has stalled",
+                    self.peer.peer_id, stalled_for,
+                )
+                self._send(stalled_for)
+            return
+        flowing = stalled_for < self.run_break_s
+        held = (
+            self.healthy_since is not None
+            and now - self.healthy_since >= self.recover_after_s
+        )
+        if flowing and held:
+            self.degraded = False
+            self.degraded_at = None
+            logger.info(
+                "[stt-bridge] peer %s LINK RECOVERED: mic frames flowing for "
+                "%.1fs", self.peer.peer_id, now - (self.healthy_since or now),
+            )
+            _send_data_channel(self.peer, {"type": "link-quality", "state": "ok"})
+            return
+        # Still bad. Republish so the client's evidence deadline can be
+        # renewed — a LEVEL, not a repeated alert (the cue is edge-only).
+        if now - self.last_ping_at >= self.ping_s:
+            self.last_ping_at = now
+            self._send(stalled_for)
+
+    def _send(self, stalled_for: float) -> None:
+        _send_data_channel(self.peer, {
+            "type": "link-quality",
+            "state": "degraded",
+            # Diagnostic only — the client renders a binary indicator.
+            # Present so a "why did it chime" report is answerable.
+            "stalled_s": round(stalled_for, 1),
+        })
+
+
+async def _link_quality_watchdog(monitor: "_LinkQualityMonitor") -> None:
+    """Drive `monitor.tick` on a timer.
+
+    This task exists because the thing we need to report happens while
+    `track.recv()` is BLOCKED — there is no frame to hang the check on,
+    which is precisely why the pre-existing gap log could only ever be
+    retroactive. Cancelled by _pump_audio's `finally`.
+    """
+    try:
+        while True:
+            await asyncio.sleep(LINK_WATCHDOG_TICK_S)
+            try:
+                monitor.tick(time.monotonic())
+            except Exception as e:  # pragma: no cover — never kill the pump
+                logger.debug("[stt-bridge] link watchdog tick failed: %s", e)
+    except asyncio.CancelledError:
+        raise
+
+
+async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer) -> None:
     """Receive Opus-decoded frames from the inbound track, resample to 16 kHz mono int16, push to the queue."""
+    peer_id = peer.peer_id
     try:
         from av.audio.resampler import AudioResampler  # type: ignore
     except ImportError as exc:  # pragma: no cover
@@ -324,10 +538,21 @@ async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: s
     last_frame_at: Optional[float] = None
     frames_dropped = 0
     last_drop_log_at = 0.0
+    # User-facing half of the same observation the gap log below makes.
+    # The watchdog is what can speak DURING a stall; note_frame here is
+    # what ends one.
+    link = _LinkQualityMonitor(peer)
+    peer.extra["link_monitor"] = link
+    watchdog = asyncio.create_task(
+        _link_quality_watchdog(link),
+        name=f"link-quality-{peer_id[:8]}",
+    )
     try:
         while True:
             frame = await track.recv()
             now_mono = time.monotonic()
+            link.note_frame(now_mono)
+            link.tick(now_mono)
             if last_frame_at is not None and now_mono - last_frame_at >= RTP_GAP_LOG_S:
                 logger.warning(
                     "[stt-bridge] peer %s inbound mic RTP GAP: %.1fs with no "
@@ -392,6 +617,7 @@ async def _pump_audio(track, pcm_q: "asyncio.Queue[Optional[bytes]]", peer_id: s
         # the remote half-closes.  Log debug, not warning.
         logger.debug("[stt-bridge] peer %s pump exit: %s", peer_id, e)
     finally:
+        watchdog.cancel()
         # Sentinel so the consumer can exit.
         try:
             pcm_q.put_nowait(None)

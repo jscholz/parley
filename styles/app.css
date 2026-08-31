@@ -3924,7 +3924,10 @@
      soft-reconnecting, and since the call was mic-initiated the amber
      pulse shows HERE — btn-call stays untouched. Declared after .active
      so it overrides the red record state at equal specificity. */
-  .composer #btn-mic.reconnecting {
+  /* .link-degraded rides the SAME rule deliberately — see the note on
+     #btn-call.link-degraded below. */
+  .composer #btn-mic.reconnecting,
+  .composer #btn-mic.link-degraded {
     color: #1a1a1a;
     background: #e0a92e;
     border-radius: 50%;
@@ -3970,7 +3973,18 @@
      disabled connecting state, and the solid-green connected state.
      Stays tappable: a tap hangs up / cancels the reconnect (see
      controls.toggleCall). */
-  .composer #btn-call.reconnecting {
+  /* .link-degraded: the call is UP but the bridge is receiving no mic
+     RTP — he is talking into a void (audio-bridge/stt_bridge.py
+     _LinkQualityMonitor → src/audio/realtime/linkQuality.ts).
+     Technically a different condition from `reconnecting`, rendered
+     identically ON PURPOSE. Both mean the one thing he can act on from
+     a handlebar mount — "your voice isn't getting through, wait" — and
+     at 30 km/h in a glance there is no bandwidth for a second amber
+     vocabulary. Separate CLASS because controls.ts's state listener
+     owns .reconnecting and would toggle a shared one off. Declared
+     after .active so it overrides the connected-green fill. */
+  .composer #btn-call.reconnecting,
+  .composer #btn-call.link-degraded {
     color: #1a1a1a;
     background: #e0a92e;
     animation: call-reconnecting-pulse 1.1s ease-in-out infinite;

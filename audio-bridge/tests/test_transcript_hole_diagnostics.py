@@ -69,6 +69,17 @@ class _FakePeer:
         self.extra = {"tts_track": tts_track}
 
 
+class _PumpPeer:
+    """_pump_audio takes the peer (not just its id) since it also drives
+    the link-quality watchdog, which publishes over the data channel.
+    No channel here — this test only cares about the journal line."""
+
+    def __init__(self, peer_id):
+        self.peer_id = peer_id
+        self.data_channel = None
+        self.extra = {}
+
+
 class _Spec:
     options: dict = {}
 
@@ -381,7 +392,7 @@ async def test_inbound_rtp_gap_is_logged(monkeypatch, caplog):
     monkeypatch.setattr(_res, "AudioResampler", _NoopResampler)
 
     q: asyncio.Queue = asyncio.Queue()
-    await stt_bridge._pump_audio(_GappyTrack(), q, "test-peer-gap")
+    await stt_bridge._pump_audio(_GappyTrack(), q, _PumpPeer("test-peer-gap"))
 
     gaps = [r for r in caplog.records if "RTP GAP" in r.getMessage()]
     assert len(gaps) == 1, f"expected exactly one RTP GAP line, got {len(gaps)}"

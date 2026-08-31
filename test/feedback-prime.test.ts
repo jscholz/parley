@@ -18,15 +18,16 @@ import assert from 'node:assert/strict';
 
 import {
   primeFeedback,
+  ALL_CHIMES,
   __setPlayerForTests,
   __resetFeedbackForTests,
 } from '../src/audio/shared/feedback.ts';
 
-const ALL_CHIMES = [
-  'send', 'receive', 'error', 'start',
-  'commit', 'connect', 'listening', 'barge',
-  'call-dropped', 'reconnect-tick',
-] as const;
+// Imported, not re-listed. A local copy went stale the moment a cue was
+// added (link-degraded / link-restored), and the failure it produced —
+// primeFeedback never latching `primed` — looked like a regression in
+// the prime logic rather than in the list. The catalogue has one
+// definition now; see feedback.ts ALL_CHIMES.
 
 function fakeEl() {
   const calls = { play: 0 };
