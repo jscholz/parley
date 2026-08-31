@@ -163,6 +163,17 @@ export default async function run({ page, log }) {
     const conn = await import('/build/audio/realtime/realtime.mjs');
     conn.setReconnectParamsForTests({ maxAttempts: 8, windowMs: 60_000 });
   });
+  // Remember WHICH peer we are about to fail. Reconnect builds a fresh
+  // FakePC and the constructor overwrites __TEST_FAKE_PC__ — so the
+  // global is only meaningful relative to a generation. Flake fixed
+  // 2026-08-31: this section polled isReconnecting(), which flips true
+  // as soon as the failure is observed, i.e. BEFORE the replacement peer
+  // exists. Recovering by writing 'connected' at that moment lands on
+  // the DEAD peer, the real one never connects, and the section dies at
+  // "C: never recovered to connected" — intermittently, depending on
+  // where the reconnect's async work happened to be. Reproduced against
+  // a pre-change worktree, so it is the test racing, not the product.
+  await page.evaluate(() => { (window).__TEST_PREV_PC__ = (window).__TEST_FAKE_PC__; });
   await page.evaluate(() => (window).__TEST_FAKE_PC__._setConnectionState('failed'));
   await pollUntil(page, async () => {
     const conn = await import('/build/audio/realtime/realtime.mjs');
@@ -170,6 +181,12 @@ export default async function run({ page, log }) {
   }, null, { timeout: 8_000, label: 'C: never entered reconnecting' });
   assert(!(await composerValue(page)).includes('halfway through a thought'),
     'C: a mere reconnect wobble must NOT park the buffer in the composer (the call is still live)');
+  // Wait for the REPLACEMENT peer before recovering it. This is the fix:
+  // identity, not a state flag.
+  await pollUntil(page, () => {
+    const w = (window);
+    return !!w.__TEST_FAKE_PC__ && w.__TEST_FAKE_PC__ !== w.__TEST_PREV_PC__;
+  }, null, { timeout: 8_000, label: 'C: reconnect never built a replacement peer' });
   await page.evaluate(() => (window).__TEST_FAKE_PC__._setConnectionState('connected'));
   await pollUntil(page, async () => {
     const conn = await import('/build/audio/realtime/realtime.mjs');
