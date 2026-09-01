@@ -2495,6 +2495,10 @@
   .doc-shelf-item.doc-shelf-drag-ghost { opacity: 0.35; }
   body > .doc-shelf-drag-floating {
     z-index: 1000;
+    /* Cancel the row's bleed margin (see .doc-shelf-item): Sortable's
+       fallback clone is positioned from left/top, so a -6px margin would
+       shift the dragged row off the pointer. */
+    margin: 0;
     background: var(--surface-2, #222);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
     cursor: grabbing;
@@ -2659,12 +2663,17 @@
     list-style: none; margin: 0; padding: 6px 0;
     overflow-y: auto; flex: 1;
   }
+  /* Rhythm, not rules (B3) — same call as .pin-drawer-item and
+     .doc-shelf-item. These rows already carry a hover tint, a left
+     accent bar when unread, and a background wash for unread/approval;
+     a hairline on top of all three was the fourth way of saying the
+     same thing. */
   .activity-drawer-item {
     padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.12s ease, opacity 0.12s ease;
   }
+  .activity-drawer-item + .activity-drawer-item { margin-top: 2px; }
   .activity-drawer-item:not(.activity-unread):not(.activity-approval) {
     opacity: 0.72;
   }
@@ -3771,9 +3780,15 @@
     font-size: 0.85em;
   }
   .composer-interim.active { max-height: 2.4em; }
+  /* Fill, not frame (B3): the chip lived INSIDE the composer's own
+     border, so a hairline around a 48px thumbnail was a rect drawn
+     inside a rect — and for image/video chips the artwork already has
+     its own edge. --surface-2 is a step off --bg in both themes, so the
+     PDF chip (the only one with no artwork of its own) still reads as a
+     distinct tile without a rule. */
   .attachment-chip {
     position: relative; width: 48px; height: 48px; border-radius: 8px;
-    overflow: hidden; background: var(--surface); border: 1px solid var(--border);
+    overflow: hidden; background: var(--surface-2); border: none;
     flex-shrink: 0;
   }
   .attachment-chip img,
@@ -3782,7 +3797,9 @@
     width: 100%; height: 100%;
     display: flex; align-items: center; justify-content: center;
     font-size: 0.7em; font-weight: 600; letter-spacing: 0.05em;
-    color: var(--muted); background: var(--surface);
+    /* Inherit the chip's own fill — a second surface inside the chip
+       was a redundant layer once the chip stopped being a framed box. */
+    color: var(--muted); background: transparent;
   }
   .attachment-chip .chip-remove {
     position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
@@ -4720,9 +4737,13 @@
     text-transform: uppercase; color: var(--muted);
     text-align: center; margin-top: 6px;
   }
+  /* Fill, not frame (B3): a bordered card inside the bordered widget —
+     and inside the bordered drawer again in the in-drawer variant. The
+     --bg fill is a step off the widget's surface in both themes and
+     already marks "now" apart from the forecast rows. */
   .ambient-widget.expanded .amb-current {
     margin-top: 14px; padding: 10px 12px;
-    background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+    background: var(--bg); border: none; border-radius: 10px;
     display: flex; align-items: center; gap: 12px;
   }
   .ambient-widget.expanded .amb-icon { font-size: 18px; line-height: 1; }
@@ -4874,12 +4895,16 @@
   color: var(--muted, #888);
   font-variant-numeric: tabular-nums;
 }
+/* Fill, not frame (B3): these sit inside .activity-row, which is itself
+   a tinted block with a left accent — so a 5% fill wrapped in an 8%
+   border was two nearly identical edges around the same region, three
+   levels deep in the transcript. The fill alone reads the boundary. */
 .tool-args-block,
 .tool-result-block {
   margin: 4px 0 6px 20px;
   padding: 8px 10px;
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
-  border: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+  border: none;
   border-radius: 6px;
   font-size: 12px;
 }
@@ -4914,6 +4939,11 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* B3 audit note: these two, and .tool-result-truncated-hint above, are
+   DEAD — nothing in src/ ever emits those class names (the lazy-hydrate
+   rewrite of renderToolEntry dropped them). Left byte-for-byte as found:
+   restyling unreachable rules is churn, and deleting them is a code
+   cleanup, not a presentation change. Flagged for a separate pass. */
 .tool-result-more,
 .tool-result-copy {
   appearance: none;
@@ -5172,10 +5202,24 @@
 }
 .doc-shelf-back:hover { text-decoration: underline; }
 .doc-shelf-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+/* Separated by rhythm, not rules — the .pin-drawer-item lesson applied
+   to the docs shelf (B3). Ten open docs drew ten full-width hairlines
+   down a phone screen, which is the same "visually cluttered" note the
+   pinned panel got, at ten times the count. Rows are already distinct
+   two-line blocks; spacing carries the boundary. The hover/active tints
+   are the session-row values (fg 6% / 10%, see .sessions-list li) so the
+   left drawer and the right drawer speak one language — and they also
+   give the shelf a real ACTIVE state, which the green title alone never
+   was. Negative margin + matching padding so the tint bleeds toward the
+   panel edge while the title stays on the same x as the header. */
 .doc-shelf-item {
   display: flex; align-items: center; gap: 6px;
-  border-bottom: 1px solid var(--border);
+  margin: 0 -6px 1px; padding: 0 6px;
+  border-radius: 6px;
+  transition: background 0.12s ease;
 }
+.doc-shelf-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.doc-shelf-item.active { background: color-mix(in srgb, var(--fg) 10%, transparent); }
 .doc-shelf-item.active .doc-shelf-item-title { color: var(--primary); }
 .doc-shelf-item-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
@@ -5250,12 +5294,14 @@
 }
 .recently-deleted-hint { margin-left: auto; font-weight: 400; font-size: 11px; }
 .recently-deleted-list { list-style: none; margin: 0; padding: 0; }
+/* Same rhythm-not-rules treatment as .doc-shelf-item above — this list
+   sits directly under the shelf, so a ruled trash list next to an
+   unruled live one would read as two different components. */
 .recently-deleted-item {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 2px;
-  border-bottom: 1px solid var(--border);
 }
-.recently-deleted-item:last-child { border-bottom: none; }
+.recently-deleted-item + .recently-deleted-item { margin-top: 2px; }
 .recently-deleted-item-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
 }
@@ -5267,15 +5313,20 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .recently-deleted-item-meta { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
-/* Restore — the safe verb: quiet outlined text button, one tap. */
+/* Restore — the safe verb: quiet GHOST text button, one tap. Was a
+   1px-bordered rounded-rect sitting beside a plain text row, which is
+   the exact shape of the "Clear button looks dated" note (pass point 2)
+   — and it gave a rare action more weight than the row it belongs to.
+   Same ghost + neutral-tint idiom as .pin-drawer-clear-btn. */
 .recently-deleted-restore {
-  background: none; border: 1px solid var(--border); border-radius: 7px;
+  background: none; border: none; border-radius: 7px;
   cursor: pointer; font: inherit; font-size: 12px; font-weight: 600;
   color: var(--primary); padding: 4px 10px;
   min-height: 32px; flex: none;
+  transition: background 0.12s ease;
   touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
 }
-.recently-deleted-restore:hover { border-color: var(--primary); background: var(--surface); }
+.recently-deleted-restore:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 /* Purge — the app's ONLY irreversible verb: danger only on hover so a
    collapsed trash list isn't a row of red alarms, and the button never
    acts without its confirmDialog anyway. */
@@ -5626,19 +5677,29 @@
   color: var(--muted, #b5b5b5);
 }
 /* ── Capture player strip (doc reader; §3.6 trust-but-verify) ── */
+/* Fill, not frame (B3). The strip was a bordered rounded-rect inside the
+   bordered drawer holding a bordered rate button — three nested edges to
+   say "these controls belong together". A soft alpha wash says it once,
+   and unlike the old --surface-2 it separates in BOTH themes (surface-2
+   on surface is nearly invisible in dark, which is why the border was
+   carrying the strip there). */
 .doc-player-strip {
   display: flex; align-items: center; gap: 8px;
   margin: 6px 12px 2px; padding: 6px 8px;
-  background: var(--surface-2, #222); border: 1px solid var(--border, #333);
+  background: color-mix(in srgb, var(--fg) 6%, transparent); border: none;
   border-radius: 10px;
 }
 .doc-player-audio { flex: 1; min-width: 0; height: 32px; }
 .doc-player-rate {
-  background: transparent; border: 1px solid var(--border, #333);
+  background: color-mix(in srgb, var(--fg) 8%, transparent); border: none;
   color: var(--muted, #aaa); border-radius: 6px; padding: 4px 7px;
   font: 12px/1 inherit; cursor: pointer; flex: none;
+  transition: background 0.12s ease, color 0.12s ease;
 }
-.doc-player-rate:hover { color: var(--fg, #eee); }
+.doc-player-rate:hover {
+  color: var(--fg, #eee);
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
 /* background/border/cursor resets matter now: this became a <button>
  * when the download menu landed (option B), and UA button chrome gave
  * it a filled box the old <a> never had. */
