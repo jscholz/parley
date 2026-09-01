@@ -49,6 +49,48 @@ export async function enqueue(item) {
   return record.id;
 }
 
+/** Escalation stops mattering past this many recorded failures (see
+ *  transcribeBudget.MAX_ESCALATION_FACTOR), so stop writing the row
+ *  back — each write re-serializes the audio Blob, and a wedged 20MB
+ *  memo must not pay that every 30s forever. */
+export const MAX_TRACKED_ATTEMPTS = 4;
+
+/** Record that one delivery attempt for `id` failed, and return the new
+ *  count. Returns 0 if the row is gone (already drained).
+ *
+ *  WHY THIS IS PERSISTED rather than kept in a Map: the /transcribe
+ *  budget escalates with the attempt count, and the wedge being fixed
+ *  (field 2026-09-01) is a permanent retry loop on a slow link. An
+ *  in-memory counter resets on every reload, so a user who reloads to
+ *  "unstick" the app would reset the escalation and re-enter the exact
+ *  same loop — the reload is the most likely thing they'll try.
+ *
+ *  Read-then-write in two transactions on purpose: awaiting between a
+ *  get and a put inside ONE IndexedDB transaction can hit the
+ *  auto-commit footgun (TransactionInactiveError) on WebKit. The flush
+ *  mutex means there is no concurrent writer to race, and a lost
+ *  increment would only mean one extra retry at the old budget. */
+export async function bumpAttempts(id: string): Promise<number> {
+  if (!id) return 0;
+  const db = await openDB();
+  try {
+    const rec: any = await reqP(tx(db, 'readonly').get(id));
+    if (!rec) return 0;
+    const prior = Number(rec.attempts) || 0;
+    if (prior >= MAX_TRACKED_ATTEMPTS) return prior;
+    const next = prior + 1;
+    rec.attempts = next;
+    await reqP(tx(db, 'readwrite').put(rec));
+    return next;
+  } catch {
+    // A failed counter write must never fail the flush — worst case the
+    // item retries at the same budget it just used.
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
 /** In-process mutex — two concurrent flush() calls would each read the
  *  same pending list and each try to send-then-delete every item,
  *  producing duplicate server-side sends. Real-world race seen on mobile:

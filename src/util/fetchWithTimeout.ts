@@ -13,8 +13,13 @@
  */
 
 export class TimeoutError extends Error {
-  constructor(url: string, ms: number) {
-    super(`fetch timed out after ${ms}ms: ${url}`);
+  /** `detail` overrides the default message for transports that can say
+   *  something more useful than "timed out" — e.g. the stall-aware
+   *  uploader reports how many bytes had moved before it gave up, which
+   *  is the difference between "the link is slow" and "the link is
+   *  dead" in a field log. */
+  constructor(url: string, ms: number, detail?: string) {
+    super(detail ?? `fetch timed out after ${ms}ms: ${url}`);
     this.name = 'TimeoutError';
   }
 }

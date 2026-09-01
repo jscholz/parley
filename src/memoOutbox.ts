@@ -17,7 +17,7 @@
  */
 
 import { log, diag } from './util/log.ts';
-import { fetchWithTimeout, TimeoutError } from './util/fetchWithTimeout.ts';
+import { TimeoutError } from './util/fetchWithTimeout.ts';
 import * as status from './status.ts';
 import * as backend from './backend.ts';
 import * as chat from './chat.ts';
@@ -36,6 +36,8 @@ import {
   needsChunking, decodeToMono16k, slicePcm, encodeWav, stitchTranscripts,
 } from './audio/shared/chunkedTranscribe.ts';
 import { postTranscribe, PermanentTranscribeError } from './audio/shared/postTranscribe.ts';
+import { transcribeBudget } from './audio/shared/transcribeBudget.ts';
+import { StallTimeoutError } from './util/stallTimeoutPost.ts';
 import { apiUrl } from './apiBase.ts';
 
 // Tracks the in-flight /transcribe upload size (bytes) so the periodic
@@ -54,12 +56,45 @@ let uploadInFlightBytes: number | null = null;
 // uploadInFlightBytes.
 let uploadStatusLabel: string | null = null;
 
-// Per-chunk /transcribe budget. 60s in production; the failure-path smoke
-// shrinks it so the chunk-timeout path runs in milliseconds instead of
-// requiring a 60s stall.
+// Bytes actually on the wire so far for the in-flight upload, fed by the
+// transport's upload-progress events. Field bug 2026-09-01: the pill read
+// "Uploading audio (400 KB)…" and then "Stalled — 1 queued (2:28)" with
+// no way to tell a slow link from a dead one. A MOVING byte counter is
+// the cheapest possible answer to "is this actually doing anything."
+let uploadSentBytes = 0;
+
+// Why the last /transcribe attempt failed, in words, or null if the last
+// one succeeded. Surfaced on the queued/stalled header pill so a retry
+// loop announces itself instead of looking like a frozen spinner —
+// the same lesson as the "transient failures were previously SILENT"
+// note further down this file, applied to the user-visible surface.
+let lastFailureReason: string | null = null;
+
+/** Read the current upload-failure narration (null when the last attempt
+ *  succeeded). Exported for the failure-path smokes, which assert the
+ *  reason is legible rather than scraping the header string. */
+export function getLastFailureReason(): string | null {
+  return lastFailureReason;
+}
+
+// Per-chunk /transcribe RESPONSE budget. 60s in production; the
+// failure-path smoke shrinks it so the chunk-timeout path runs in
+// milliseconds instead of requiring a 60s stall. Note this bounds only
+// the post-upload wait — the upload itself is bounded by stall (see
+// transcribeBudget), so a slow link no longer blows the chunk budget.
 let chunkTimeoutMs = 60_000;
 export function setChunkTimeoutMsForTest(ms: number): void {
   if (typeof ms === 'number' && ms > 0) chunkTimeoutMs = ms;
+}
+
+/** "Uploading audio (312/400 KB)…" once bytes start moving, falling back
+ *  to the indeterminate total-only form before the first progress tick. */
+function uploadLabel(): string {
+  const total = Math.round((uploadInFlightBytes ?? 0) / 1024);
+  if (uploadSentBytes > 0 && uploadSentBytes < (uploadInFlightBytes ?? 0)) {
+    return `Uploading audio (${Math.round(uploadSentBytes / 1024)}/${total} KB)…`;
+  }
+  return `Uploading audio (${total} KB)…`;
 }
 
 // Queue items whose transcript already reached its destination once.
@@ -88,7 +123,7 @@ function markDelivered(id: string): void {
  *  to single-shot). Chunk-level transient failures throw — the whole
  *  item stays queued and is redone from chunk 0 next flush (chunks are
  *  fast, partial-progress persistence isn't worth the state). */
-async function chunkedTranscribe(blob: Blob, url: string, toComposer: boolean): Promise<string | null> {
+async function chunkedTranscribe(blob: Blob, url: string, toComposer: boolean, attempts: number): Promise<string | null> {
   let pcm: Float32Array;
   try {
     pcm = await decodeToMono16k(blob);
@@ -105,8 +140,18 @@ async function chunkedTranscribe(blob: Blob, url: string, toComposer: boolean): 
     if (toComposer) composer.setInterim(`Transcribing… (${i + 1}/${slices.length})`);
     const wav = encodeWav(slices[i]);
     const t0 = Date.now();
-    log(`chunked transcribe: chunk ${i + 1}/${slices.length} (${Math.round(wav.size / 1024)}KB)…`);
-    parts.push(await postTranscribe(url, wav, 'audio/wav', chunkTimeoutMs));
+    // Each ~80s slice is ~2.5MB of WAV — the BIGGEST uploads in the whole
+    // pipeline. A flat per-chunk wall clock had the same defect as the
+    // single-shot ceiling (at 25 KB/s a 2.5MB chunk needs ~100s, well past
+    // the 60s budget), so chunks get the stall instrument too.
+    const budget = transcribeBudget({
+      sizeBytes: wav.size, attempts, baseResponseMsOverride: chunkTimeoutMs,
+    });
+    uploadInFlightBytes = wav.size;
+    uploadSentBytes = 0;
+    log(`chunked transcribe: chunk ${i + 1}/${slices.length} (${Math.round(wav.size / 1024)}KB) `
+      + `timeout=${budget.responseMs}ms stall=${budget.stallMs}ms attempt=${attempts + 1}`);
+    parts.push(await postTranscribe(url, wav, 'audio/wav', budget, (sent) => { uploadSentBytes = sent; }));
     log(`chunked transcribe: chunk ${i + 1}/${slices.length} ok in ${Date.now() - t0}ms`);
   }
   return stitchTranscripts(parts);
@@ -195,15 +240,20 @@ export async function flushOutbox() {
         ? `/transcribe?${kt.map(t => 'keyterms=' + encodeURIComponent(t)).join('&')}`
         : '/transcribe');
       let text = '';
-      // Surface "Uploading audio (NKB)…" immediately + via the
-      // periodic refresher (which prefers uploadInFlightBytes when
-      // set). Cleared in finally so success/timeout/error all reset
-      // the indicator. fetchWithTimeout doesn't expose progress
-      // events, so this is indeterminate by design — just enough
-      // to tell the user "stop tapping, it's working."
+      // Prior FAILED attempts for THIS blob, read off the durable queue
+      // row (queue.bumpAttempts writes it). Persisted, not in-memory:
+      // an escalation that resets on reload is the same permanent-retry
+      // loop, and reloading is exactly what a wedged user does.
+      const attempts = Number(item?.attempts) || 0;
+      // Surface "Uploading audio (312/400 KB)…" immediately + via the
+      // periodic refresher (which prefers uploadInFlightBytes when set).
+      // Cleared in finally so success/timeout/error all reset the
+      // indicator. The transport feeds real upload-progress events, so
+      // this counter MOVES — that is what distinguishes "slow link" from
+      // "dead link" for the user.
       uploadInFlightBytes = blob.size;
-      const kb = Math.round(blob.size / 1024);
-      status.setStatus(`Uploading audio (${kb} KB)…`, 'live');
+      uploadSentBytes = 0;
+      status.setStatus(uploadLabel(), 'live');
       try {
         try {
           // Long clips (> ~2.5 min) go through the chunked path: each
@@ -215,26 +265,46 @@ export async function flushOutbox() {
           // next flush. Decode failure → single-shot fallback below.
           let chunked: string | null = null;
           if (needsChunking(durationMs, blob.size)) {
-            chunked = await chunkedTranscribe(blob, url, toComposer);
+            chunked = await chunkedTranscribe(blob, url, toComposer, attempts);
           }
           if (chunked != null) {
             text = chunked;
           } else {
-            // Timeout scales with blob size: small memos under 1MB ≈
-            // minute or less of audio (Deepgram batch returns in 1-3s)
-            // get the snappy 15s budget. Larger blobs get 60s — the
-            // upload alone for a 5MB webm over Tailscale can take
-            // 5-10s, plus Deepgram batch latency grows roughly with
-            // audio length. Earlier 15s flat ceiling wedged 3-minute
-            // memos in permanent-retry: each attempt timed out before
-            // Deepgram could respond, queue never drained. Long clips
-            // that couldn't decode for chunking get 120s — better one
-            // slow attempt than a guaranteed-too-short loop.
-            const timeoutMs = blob.size > 1_000_000
-              ? (needsChunking(durationMs, blob.size) ? 120_000 : 60_000)
-              : 15_000;
-            log(`transcribe: single-shot ${Math.round(blob.size / 1024)}KB ${mimeType} timeout=${timeoutMs}ms`);
-            text = await postTranscribe(url, blob, mimeType, timeoutMs);
+            // Two instruments, because there are two ways to hang.
+            //
+            // The UPLOAD is bounded by STALL ("no bytes moved for
+            // stallMs"), not by a wall clock. The old ceiling picked a
+            // wall clock from blob SIZE — a proxy for upload time that
+            // holds only while bandwidth is good. Field 2026-09-01: a
+            // ~400KB dictation from SF to a London host at ~20-25 KB/s
+            // needs 17-20s and got a flat 15s, so EVERY attempt was
+            // killed mid-upload and the queue never drained (three
+            // consecutive server logs: "request stream error after
+            // 17137ms at 400KB: aborted"). Size ÷ bandwidth is the real
+            // quantity and bandwidth is not knowable up front — but an
+            // upload that is moving bytes is healthy at any speed, so
+            // stall is bandwidth-independent by construction.
+            //
+            // The RESPONSE keeps a wall clock, and keeps the exact
+            // pre-fix ladder (15s / 60s / 120s by size) — nothing is
+            // observable as progress while Deepgram is thinking, and
+            // that ladder is what un-wedged 3-minute memos.
+            //
+            // Both escalate with the persisted attempt count, so even a
+            // failure mode neither instrument can see still gets a
+            // materially larger budget each round and the queue drains.
+            const budget = transcribeBudget({
+              sizeBytes: blob.size,
+              chunkedCandidate: needsChunking(durationMs, blob.size),
+              attempts,
+            });
+            log(`transcribe: single-shot ${Math.round(blob.size / 1024)}KB ${mimeType} `
+              + `timeout=${budget.responseMs}ms stall=${budget.stallMs}ms `
+              + `attempt=${attempts + 1} escalation=${budget.factor}x`);
+            text = await postTranscribe(url, blob, mimeType, budget, (sent) => {
+              uploadSentBytes = sent;
+              if (!uploadStatusLabel) status.setStatus(uploadLabel(), 'live');
+            });
           }
         } catch (e) {
           // Non-timeout transient failures were previously SILENT here
@@ -244,6 +314,23 @@ export async function flushOutbox() {
           if (!(e instanceof TimeoutError) && !(e instanceof PermanentTranscribeError)) {
             log(`transcribe failed (transient, will retry): ${(e as Error)?.name ?? ''} ${(e as Error)?.message ?? e}`);
           }
+          if (!(e instanceof PermanentTranscribeError)) {
+            // Record the failed attempt on the DURABLE row before
+            // rethrowing, so the next flush (this session or after a
+            // reload) reads a bigger budget. This is the guarantee that
+            // the queue drains instead of looping: the retry that
+            // follows is materially more generous than the one that
+            // just failed. Capped inside bumpAttempts.
+            const n = id ? await queue.bumpAttempts(id) : 0;
+            // Name the failure for the header pill. "Stalled — 1 queued"
+            // alone can't distinguish a slow upload from being offline,
+            // which is precisely the ambiguity the field report hit.
+            lastFailureReason = e instanceof StallTimeoutError
+              ? `slow link — retry ${n + 1} with a longer budget`
+              : e instanceof TimeoutError
+                ? `no response — retry ${n + 1} with a longer budget`
+                : `upload failed — retry ${n + 1}`;
+          }
           if (e instanceof TimeoutError) {
             // Surface + chime; blob stays in queue for retry on next
             // reconnect. The card moves to queued(⏳) so the user sees
@@ -251,13 +338,22 @@ export async function flushOutbox() {
             // the durable queue is what saves the bad-connection upload
             // from evaporating, so we just narrate "will retry" and keep
             // the blob; a poller drains it when signal returns.
-            log('transcribe timeout — blob stays queued for retry');
+            log(`transcribe timeout — blob stays queued for retry: ${(e as Error).message}`);
+            // A stall is a DIFFERENT story from "you're offline": the
+            // connection is up, the upload was just too slow for the
+            // budget we gave it. Saying "will retry when connected" to a
+            // connected user is the misleading half of the field bug.
+            const slow = e instanceof StallTimeoutError;
             if (listenTurn) {
               // No card, no composer ghost line — the durable queue holds
               // the turn and the header pill narrates the queued count.
-              status.setStatus('Voice turn queued — will send when connected');
+              status.setStatus(slow
+                ? 'Voice turn queued — link is slow, retrying'
+                : 'Voice turn queued — will send when connected');
             } else if (toComposer) {
-              composer.setInterim('Dictation queued — will retry when connected');
+              composer.setInterim(slow
+                ? 'Dictation queued — link is slow, retrying with more time'
+                : 'Dictation queued — will retry when connected');
             } else {
               const transcriptEl = document.getElementById('transcript');
               const card = id && transcriptEl ? memoCard.find(transcriptEl, id) : null;
@@ -297,7 +393,11 @@ export async function flushOutbox() {
       } finally {
         uploadInFlightBytes = null;
         uploadStatusLabel = null;
+        uploadSentBytes = 0;
       }
+      // Reached only when /transcribe returned — the retry narrative is
+      // over, so stop advertising it on the header pill.
+      lastFailureReason = null;
       const transcriptEl = document.getElementById('transcript');
       const card = id && transcriptEl ? memoCard.find(transcriptEl, id) : null;
 
@@ -461,17 +561,23 @@ export function startBackgroundPollers(): void {
           // instead of clobbering it back to the generic upload line.
           status.setStatus(uploadStatusLabel, 'live');
         } else {
-          const kb = Math.round(uploadInFlightBytes / 1024);
-          status.setStatus(`Uploading audio (${kb} KB)…`, 'live');
+          status.setStatus(uploadLabel(), 'live');
         }
       } else if (!gwConnected) {
         status.setState('reconnecting', { queuedCount: summary.count, queuedAudioMs: summary.totalAudioMs });
       } else if (msIdle > WEAK_SIGNAL_MS && summary.count > 0) {
-        status.setState('stalled', { queuedCount: summary.count, queuedAudioMs: summary.totalAudioMs });
+        // reason: without it this pill reads "Stalled — 1 queued (2:28)"
+        // for BOTH "you are offline" and "the upload keeps timing out",
+        // which is the ambiguity the 2026-09-01 field report ran into.
+        status.setState('stalled', {
+          queuedCount: summary.count, queuedAudioMs: summary.totalAudioMs,
+          reason: lastFailureReason ?? undefined,
+        });
       } else {
         status.setState('connected', {
           queuedCount: summary.count,
           queuedAudioMs: summary.totalAudioMs,
+          reason: lastFailureReason ?? undefined,
         });
       }
     } catch {}

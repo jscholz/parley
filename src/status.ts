@@ -42,6 +42,10 @@ export interface StateContext {
   queuedAudioMs?: number;
   /** Seconds of dictation buffered locally (sttBackfill ring). */
   bufferedSeconds?: number;
+  /** Short reason the queue isn't draining ("slow link — retry 2 with a
+   *  longer budget"). Queued counts alone can't distinguish a slow
+   *  upload from being offline; the user needs to know which. */
+  reason?: string;
 }
 
 export function init(els) {
@@ -92,6 +96,7 @@ export function setState(state: NetworkState, ctx: StateContext = {}) {
       if (ctx.bufferedSeconds && ctx.bufferedSeconds > 1) {
         parts.push(`— ${ctx.bufferedSeconds.toFixed(0)}s buffered`);
       }
+      if (ctx.reason && ctx.queuedCount) parts.push(`· ${ctx.reason}`);
       setStatus(parts.join(' '), 'ok');
       return;
     }
@@ -104,7 +109,8 @@ export function setState(state: NetworkState, ctx: StateContext = {}) {
     case 'weakSignal': setStatus('Weak signal', 'err'); return;
     case 'stalled': {
       const dur = ctx.queuedAudioMs ? ` (${fmtMmSs(ctx.queuedAudioMs)})` : '';
-      setStatus(`Stalled — ${ctx.queuedCount ?? '?'} queued${dur}`, 'err');
+      const why = ctx.reason ? ` · ${ctx.reason}` : '';
+      setStatus(`Stalled — ${ctx.queuedCount ?? '?'} queued${dur}${why}`, 'err');
       return;
     }
     case 'offline': setStatus('Offline', 'err'); return;
