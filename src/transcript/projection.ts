@@ -17,6 +17,11 @@
  *     user → activityRow → assistant for same timestamp (so a tool call
  *     emitted in the same wall-clock ms as the user prompt still slots
  *     in AFTER the user bubble).
+ *   - Causal floor: a locally-minted user bubble (pendingSend, or its
+ *     echo while the send is still optimistic) is floored strictly
+ *     above every user message this client already sent — send order
+ *     is a FACT, wall-clock is only a proxy for it, and the two sides
+ *     are stamped by different clocks. See causalUserFloor.
  *
  * Dedup rule:
  *   - `key` is the join axis. For user/assistant bubbles, durable's
@@ -320,7 +325,14 @@ export function project(state: ChatState): BubbleSpec[] {
           }
           userKeys.add(key);
           inflightUserKeys.add(key);
-          const ts = pend ? pend.sentAt : inflightTs++;
+          // `pend.sentAt` is the CLIENT's clock; everything already
+          // placed may be on the SERVER's. Floor it so a locally-minted
+          // bubble can never sort above a message this client sent
+          // earlier (see causalUserFloor). The no-pend branch is already
+          // floored — `inflightTs` anchors above the durable tail.
+          const ts = pend
+            ? Math.max(pend.sentAt, causalUserFloor(specs, key))
+            : inflightTs++;
           currentTurnTs = ts;
           inflightTs = Math.max(inflightTs, ts + 1);
           specs.push({
@@ -474,6 +486,10 @@ export function project(state: ChatState): BubbleSpec[] {
   }
 
   // ── 3. Pending sends not yet acknowledged
+  // Walked in mint order (the store appends), and each one is pushed
+  // into `specs` before the next is floored — so N optimistic bubbles
+  // in a row stay in strict send order even if every one of them
+  // out-races the server's stamp for its predecessor.
   for (const p of state.pendingSends) {
     if (userKeys.has(p.messageId)) continue;
     userKeys.add(p.messageId);
@@ -481,7 +497,7 @@ export function project(state: ChatState): BubbleSpec[] {
       kind: 'user',
       key: p.messageId,
       text: p.text,
-      timestamp: p.sentAt,
+      timestamp: Math.max(p.sentAt, causalUserFloor(specs, p.messageId)),
       pending: !p.failed,
       failed: p.failed,
       source: p.source,
@@ -825,6 +841,61 @@ function isEnvelopeOnlyCopy(it: ConversationItem, envelopeIdPrefix: string): boo
 function umsgMintMs(key: string): number | null {
   const m = /^umsg_(\d{13})/.exec(key);
   return m ? Number(m[1]) : null;
+}
+
+/** Smallest timestamp a LOCALLY-MINTED user bubble may carry so that it
+ *  still renders BELOW every user message this client already sent.
+ *
+ *  Field 2026-09-01 (walking, dictation early-fire): an utterance
+ *  dispatched, he kept talking, and the new streaming bubble rendered
+ *  ABOVE the one that had just landed — off-screen above the fold, so it
+ *  read exactly like the session had wedged and stopped hearing him.
+ *
+ *  Root cause: ordering between two of the user's own turns is CAUSAL —
+ *  turn N+1 was spoken after turn N was sent — but the sort only has
+ *  wall-clock, and the two sides are stamped by DIFFERENT clocks. An
+ *  optimistic bubble carries the client's `Date.now()` at mint; the
+ *  message before it carries the SERVER's `created_at` once its echo /
+ *  durable row lands. Phone-vs-host skew, or a state.db row stamped at
+ *  turn-END batch write rather than at receipt (the same lag rule 1 of
+ *  pickDuplicateLosers exists for — 91s in the 2026-07-04 report), puts
+ *  the OLDER message LATER on the number line and the two flip.
+ *
+ *  So don't nudge the numbers — remove the flip. A bubble this client is
+ *  minting right now floors strictly above every user bubble already
+ *  placed, EXCEPT the ones it can prove it precedes. "Prove" = both keys
+ *  carry a client mint (`umsg_<epoch-ms>_…`), the one clock both sides
+ *  genuinely share, so an out-of-order durable refresh (a NEWER send
+ *  already persisted while an older echo is still inflight) can't drag
+ *  the older bubble beneath it. Keys with no parseable mint — durable
+ *  rows from another device, heal-minted keys whose embedded mint can
+ *  predate the send, legacy integer ids — count toward the floor: they
+ *  are server-acknowledged history relative to a bubble being minted
+ *  now.
+ *
+ *  Cost is bounded and self-limiting: `Math.max` at the call site means
+ *  the floor only moves a bubble that would otherwise have rendered in
+ *  the wrong place, and only to 1ms past the row it must follow. This is
+ *  an ORDERING rule only — it never adds, drops or re-keys a bubble, so
+ *  the dedup/merge contracts above are untouched.
+ *
+ *  Memory-only by design, and that's sufficient: after a reload every
+ *  bubble is a durable row carrying the SERVER's timestamp, and those
+ *  are all on one clock, so the reloaded order is already consistent. */
+function causalUserFloor(specs: BubbleSpec[], key: string): number {
+  const mint = umsgMintMs(key);
+  let floor = 0;
+  for (const s of specs) {
+    if (s.kind !== 'user') continue;
+    if (mint != null) {
+      const otherMint = umsgMintMs(s.key);
+      // Provably a LATER send by this same client — it belongs below,
+      // so it must not push us down.
+      if (otherMint != null && otherMint > mint) continue;
+    }
+    if (s.timestamp >= floor) floor = s.timestamp + 1;
+  }
+  return floor;
 }
 
 /** Find-and-consume the durable user bubble an uncovered inflight echo is

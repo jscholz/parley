@@ -499,6 +499,149 @@ describe('project: ordering across turns', () => {
   });
 });
 
+describe('project: causal order of the user\'s own turns (field 2026-09-01)', () => {
+  // "I had a dictation early fire... when it's sent and I kept talking, I
+  // thought that the session was wedged and it wasn't recording my input —
+  // until I scrolled up and noticed that the input bubble was actually
+  // ABOVE the bubble that had landed."
+  //
+  // The sort compares wall-clock, but the two sides are stamped by
+  // DIFFERENT clocks: the still-optimistic bubble carries the CLIENT's
+  // Date.now() at mint, the message it follows carries the SERVER's
+  // created_at once its echo / durable row lands. Phone-vs-host skew (or
+  // a state.db row stamped at turn-END batch write) puts the OLDER
+  // message later on the number line and the bubbles flip — which reads
+  // exactly like the app stopped listening.
+  //
+  // Ordering between two of HIS turns is causal, not chronological. These
+  // pin the invariant: a bubble minted after a message was sent renders
+  // BELOW it, whichever way the clocks are skewed.
+  const CLIENT_NOW = T0;
+  const SKEW = 5_000;                                  // server runs ahead
+  const KEY_A = `umsg_${CLIENT_NOW - 2000}_aaaaaaaa`;  // sent 2s ago
+  const KEY_B = `umsg_${CLIENT_NOW}_bbbbbbbb`;         // being spoken now
+  const KEY_C = `umsg_${CLIENT_NOW + 900}_cccccccc`;   // and the one after
+  // A prior turn so the chat isn't fresh (matches the field shape).
+  const prior = (): ConversationItem[] => [
+    u('umsg_prior', 'earlier q', CLIENT_NOW - 120_000),
+    a('msg_prior', 'earlier a', CLIENT_NOW - 115_000),
+  ];
+  const userOrder = (s: ChatState): string[] =>
+    project(s).filter(x => x.kind === 'user').map(x => x.key);
+
+  it('new bubble sits BELOW the just-sent message when the server stamps it LATER than the client clock', () => {
+    const s = state({
+      durable: [
+        ...prior(),
+        // The utterance that landed — server's created_at is 5s ahead of
+        // this device's clock.
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'first utterance', timestamp: CLIENT_NOW + SKEW },
+      ],
+      inflight: [{ type: 'user_message', chat_id: 'c', message_id: KEY_A, text: 'first utterance' }],
+      // He kept talking: bubble minted client-side, before the skewed stamp.
+      pendingSends: [{ messageId: KEY_B, text: 'second utterance', sentAt: CLIENT_NOW, source: 'voice' }],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_A, KEY_B],
+      'the bubble he is still speaking must render below the one that just landed');
+  });
+
+  it('holds once the new utterance has its OWN echo (still optimistic)', () => {
+    // Same shape one hop later: he committed the second utterance too, its
+    // user_message echo is in the buffer, and the pendingSend hasn't
+    // cleared yet — that branch reads pend.sentAt directly.
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'first utterance', timestamp: CLIENT_NOW + SKEW },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: KEY_A, text: 'first utterance' },
+        { type: 'user_message', chat_id: 'c', message_id: KEY_B, text: 'second utterance' },
+      ],
+      pendingSends: [{ messageId: KEY_B, text: 'second utterance', sentAt: CLIENT_NOW, source: 'voice' }],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_A, KEY_B]);
+  });
+
+  it('three utterances in a row with late echoes keep strict send order', () => {
+    // A and B have landed durably (both stamped ahead by the server's
+    // clock), C is still the live bubble. Nth must sit below (N-1)th.
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'one', timestamp: CLIENT_NOW + SKEW },
+        { id: 4, parley_id: KEY_B, role: 'user', content: 'two', timestamp: CLIENT_NOW + SKEW + 6 },
+      ],
+      inflight: [
+        { type: 'user_message', chat_id: 'c', message_id: KEY_A, text: 'one' },
+        { type: 'user_message', chat_id: 'c', message_id: KEY_B, text: 'two' },
+      ],
+      pendingSends: [{ messageId: KEY_C, text: 'three', sentAt: CLIENT_NOW + 900, source: 'voice' }],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_A, KEY_B, KEY_C]);
+  });
+
+  it('two optimistic bubbles in a row stay in mint order behind a late-stamped send', () => {
+    // Nothing durable for B or C yet — both are pendingSends. They must
+    // fall below A AND keep their own order relative to each other.
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'one', timestamp: CLIENT_NOW + SKEW },
+      ],
+      pendingSends: [
+        { messageId: KEY_B, text: 'two', sentAt: CLIENT_NOW, source: 'voice' },
+        { messageId: KEY_C, text: 'three', sentAt: CLIENT_NOW + 900, source: 'voice' },
+      ],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_A, KEY_B, KEY_C]);
+  });
+
+  it('skew the OTHER way (server stamps EARLIER than the client) is still ordered', () => {
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'first utterance', timestamp: CLIENT_NOW - SKEW },
+      ],
+      inflight: [{ type: 'user_message', chat_id: 'c', message_id: KEY_A, text: 'first utterance' }],
+      pendingSends: [{ messageId: KEY_B, text: 'second utterance', sentAt: CLIENT_NOW, source: 'voice' }],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_A, KEY_B]);
+  });
+
+  it('the floor never drags a bubble below a send it PROVABLY precedes', () => {
+    // Guard against over-applying the rule ("float every optimistic bubble
+    // to the tail"). B was minted before C; a durable refresh delivered C
+    // first while B is still optimistic. B stays above C — the client mint
+    // embedded in both keys is the one clock that settles it.
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 4, parley_id: KEY_C, role: 'user', content: 'three', timestamp: CLIENT_NOW + SKEW },
+      ],
+      pendingSends: [{ messageId: KEY_B, text: 'two', sentAt: CLIENT_NOW, source: 'voice' }],
+    });
+    assert.deepEqual(userOrder(s), ['umsg_prior', KEY_B, KEY_C]);
+  });
+
+  it('the floor is ordering-only: no bubble added, dropped or re-keyed', () => {
+    const s = state({
+      durable: [
+        ...prior(),
+        { id: 3, parley_id: KEY_A, role: 'user', content: 'first utterance', timestamp: CLIENT_NOW + SKEW },
+      ],
+      inflight: [{ type: 'user_message', chat_id: 'c', message_id: KEY_A, text: 'first utterance' }],
+      pendingSends: [{ messageId: KEY_B, text: 'second utterance', sentAt: CLIENT_NOW, source: 'voice' }],
+    });
+    const users = project(s).filter(x => x.kind === 'user');
+    assert.equal(users.length, 3, 'the echo must still dedup against its durable row');
+    const b = users[2];
+    assert.ok(b.kind === 'user');
+    assert.equal(b.pending, true, 'still an optimistic bubble');
+    assert.equal(b.source, 'voice', 'pendingSend metadata rides through');
+  });
+});
+
 describe('project: user double-write dedup (time-windowed)', () => {
   it('collapses two identical user rows written seconds apart (the backend double-write)', () => {
     // Field 2026-05-27: native write (44459) + platform-ingest twin (44461),
