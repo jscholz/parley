@@ -112,6 +112,39 @@ for inline. It renders as native MathML. Single `$ … $` is deliberately
 NOT a delimiter (it eats prices). See
 [`docs/AGENT_MATH.md`](docs/AGENT_MATH.md).
 
+## Telling the runtime agent what Parley can do
+
+Everything above is invisible to the agent by default — it will write
+plain text forever unless something tells it that a reply can carry
+typeset math, a video card, or a document push. That "something" is
+[`skills/parley/SKILL.md`](skills/parley/SKILL.md): a single skill
+covering math delimiters, the media register-then-reference lane,
+inline card syntax, `display_doc`, capture control, and the things that
+look available but are not.
+
+**Hermes backends** — add the repo's `skills/` dir as an external skills
+root in `~/.hermes/config.yaml`. One line:
+
+```yaml
+skills:
+  external_dirs:
+    - /path/to/parley/skills      # this repo's skills/ dir
+```
+
+Hermes scans it like `~/.hermes/skills`, so the skill shows up as
+`parley`. Progressive disclosure means only the one-line `description`
+sits in context; the body loads when the agent reaches for it. Nothing
+is copied, so a `git pull` updates it.
+
+**Any other backend** — `skills/parley/SKILL.md` is self-contained and
+about a screen long. Append it to whatever your agent uses for standing
+instructions (system prompt, `CLAUDE.md`, an MCP resource, a RAG doc).
+Strip the YAML frontmatter first; it is hermes-specific. Re-copy it
+after a Parley upgrade — that is the cost of not having a skills loader.
+
+Keep it in sync: the skill's "Source of truth" table maps each section
+to the `docs/*.md` that owns it. Change a protocol, update both.
+
 ## What NOT to do
 
 - Don't modify the proxy (`server.ts` / `proxy/parley/*`) or the PWA

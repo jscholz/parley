@@ -157,6 +157,7 @@ details live in each [backend README](backends/).
 | [Audio bridge protocol](docs/PARLEY_AUDIO_PROTOCOL.md) | WebRTC data-channel events, dispatch path, listening / barge envelopes. Read before forking `audio-bridge/`. |
 | [Architecture](docs/ARCHITECTURE.md) | System diagram, module tree, endpoint inventory. |
 | [Canvas protocol](docs/CANVAS.md) | Inline card envelopes (link previews, YouTube embeds, image grids). |
+| [Parley skill](skills/parley/SKILL.md) | What to give your **runtime** agent so it knows Parley renders math, media cards, and side-panel documents. Hermes: add `skills/` to `skills.external_dirs`. Other backends: paste it into your agent's instructions. See [`AGENTS.md`](AGENTS.md#telling-the-runtime-agent-what-parley-can-do). |
 | [Barge-in](docs/BARGE.md) | Detection algorithm, knobs, file map. Read before tuning sensitivity or debugging false-fires / missed-fires. |
 | [Backend READMEs](backends/) | One per backend — install steps, contract pieces implemented, **backend-specific state details**. |
 
