@@ -1,8 +1,17 @@
 # Mac bootstrap — building the iOS Capacitor shell
 
-First-time setup for building Parley's iOS native shell on macOS. The
-shell is a thin Capacitor wrapper that loads the live PWA over the
-network — there's no JS bundle to ship, just the Swift shell + signing.
+First-time setup for building Parley's iOS native shell on macOS.
+
+**The app ships its own copy of the web assets.** `npm run build:cap`
+compiles `src/` and populates the Capacitor webdir, and that bundle is
+then FROZEN inside the installed app. The shell loads its JS/CSS locally
+(`capacitor://localhost`) for a native-fast cold boot and only reaches the
+network for API calls. The practical consequence, which has bitten us
+repeatedly: **no server-side deploy can change the app's behaviour.** A
+client-side fix reaches the phone only after a rebuild. (An earlier
+version of this document said the shell "loads the live PWA over the
+network — there's no JS bundle to ship". That is wrong and was corrected
+2026-09-01.)
 
 Aimed at someone who has never opened Xcode before. If you've shipped
 iOS apps before, skim — the only project-specific bit is the
@@ -173,15 +182,29 @@ Smoke checklist:
 Once the project's wired:
 
 ```bash
-# PWA code changes (most common):
-#   no Xcode interaction needed — the wrapper just reloads the live URL.
-#   refresh in the app via gesture (pull-down in WKWebView) or kill +
-#   relaunch.
+# Web code changes (most common) — the bundle is frozen in the app, so
+# this IS required; there is no "just reload" path.
+git pull
+npm install             # ONLY skippable if package.json is unchanged.
+                        # Adding a dependency (e.g. temml, 2026-09-01)
+                        # otherwise fails the build with
+                        # `Could not resolve "<pkg>"`.
+npm run build:cap       # NOT `npm run build` — build:cap is what
+                        # repopulates the Capacitor webdir.
+npx cap sync ios
+# Open Xcode, ⌘ R to rebuild + push to device.
 
 # Native shell changes (rare — AppDelegate.swift, Info.plist, etc.):
-npx cap sync ios        # if config.ts changed
-# Open Xcode (already open?), ⌘ R to rebuild + push to device.
+npx cap sync ios        # if capacitor.config.ts changed
+# Xcode, ⌘ R.
 ```
+
+**First run on a device Xcode hasn't seen** will pause on "Copying shared
+cache symbols from <device>". That is a one-time, per-iOS-version symbol
+copy over the device link, it can take several minutes, and cancelling
+restarts it from zero. If it feels slower than the cable should allow,
+check Xcode → Window → Devices and Simulators and untick "Connect via
+network" — a wired device still uses the wireless link while that is on.
 
 ---
 
@@ -202,7 +225,14 @@ If 7-day churn becomes annoying:
   https://sidestore.io
 - **Apple Developer Program** ($99/yr): 1-year certs, no churn at
   all. Same setup as step 4 with `Apple Developer Program` instead
-  of `Personal Team`.
+  of `Personal Team`. It also unlocks **TestFlight**, which is how you
+  get the app to someone else's phone without them owning a Mac:
+  *internal* testers (up to 100) install in minutes with no review but
+  must be added to your App Store Connect team; *external* testers (up
+  to 10,000, invited by email or a public link) need a one-off beta
+  review, typically a day or two, and builds expire after 90 days.
+  Either way you answer an export-compliance question — ordinary HTTPS
+  normally qualifies for the exemption, but it must be declared.
 
 ---
 
