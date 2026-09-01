@@ -5,6 +5,7 @@
  */
 
 import { escapeHtml } from './dom.ts';
+import { renderMathHtml, scheduleMathUpgrade } from './math.ts';
 
 // Inline SVG for the per-block copy button (two overlapping rounded
 // rects). Kept tiny + currentColor so it inherits the muted head color.
@@ -17,7 +18,20 @@ const COPY_ICON =
   '</svg>';
 
 export function miniMarkdown(s) {
-  let t = escapeHtml(s);
+  // Math. Extracted from the RAW source, before escaping and before every
+  // formatting rule, for the same reason fenced code blocks are extracted
+  // early — except math has to come even earlier, because `escapeHtml`
+  // itself would corrupt the LaTeX we need to hand to the renderer
+  // (`x < y` → `x &lt; y`). `^`, `_` and `*` are all live LaTeX
+  // characters that the emphasis rules would otherwise eat.
+  const math = [];
+  let t = extractMath(String(s), math);
+  t = escapeHtml(t);
+  // Display math becomes a block-level placeholder — same `<div>` trick
+  // the code blocks use, so BLOCK_OPENER leaves it unwrapped instead of
+  // burying a block element inside a <p>. Inline math keeps its neutral
+  // sentinel and rides along inside the paragraph.
+  t = t.replace(/\u0000d(\d+)\u0000/g, (_, i) => `\n\n<div data-math="${i}"></div>\n\n`);
   // Fenced code blocks. Extract them FIRST and swap in a block-level
   // placeholder so their content is immune to every downstream line-based
   // rule (paragraph splitting on blank lines, list/table parsing). The
@@ -85,12 +99,119 @@ export function miniMarkdown(s) {
   // like <strong> — a single-newline-separated pair of `**bold**` lines
   // collapsed onto one rendered line.
   const BLOCK_OPENER = /^<(?:pre|table|ul|ol|blockquote|h[1-6]|hr|div)\b/i;
+  // Trim the document's own leading/trailing newlines first: a message
+  // that is nothing but display math is `\n\n<div data-math>\n\n` by this
+  // point, and splitting that unfiltered yields two empty `<p></p>`.
+  t = t.replace(/^\n+|\n+$/g, '');
   t = t.split(/\n\n+/).map(p =>
     BLOCK_OPENER.test(p) ? p : `<p>${p.replace(/\n/g, '<br>')}</p>`
   ).join('');
   // Restore extracted code blocks now that all line-based rules are done.
   t = t.replace(/<div data-code="(\d+)"><\/div>/g, (_, i) => renderCodeBlock(codeBlocks[+i]));
+  // Restore math last, for the same reason: block placeholders first, then
+  // the inline sentinels still sitting in paragraph text.
+  if (math.length) {
+    t = t.replace(/<div data-math="(\d+)"><\/div>/g, (_, i) => renderMathHtml(math[+i]));
+    t = t.replace(/\u0000i(\d+)\u0000/g, (_, i) => renderMathHtml(math[+i]));
+    // Only when a region fell back to its literal source AND is still
+    // retryable (`math-pending`) do we pay for the load + sweep. Once the
+    // bundle is in memory every render emits MathML inline, so the steady
+    // state costs nothing; a permanently-bad expression is marked
+    // `math-raw` without `math-pending` and never re-swept.
+    if (t.includes('math-pending')) scheduleMathUpgrade();
+  }
   return t;
+}
+
+// ── Math extraction ────────────────────────────────────────────────────
+//
+// Supported delimiters:
+//   \[ … \]   display    (what the agent already emits)
+//   $$ … $$   display    (the other common convention)
+//   \( … \)   inline     (what the agent already emits)
+//
+// Single `$ … $` is deliberately NOT a delimiter. It false-positives on
+// money — "it costs $5 to $10 a month" would swallow "5 to " into a math
+// region — and on any two unrelated dollar signs in one message. This is
+// a well-known source of mangled text in chat renderers; the cost of not
+// supporting it is that an agent must write \( … \) instead, which is
+// exactly what ours already does. Do not "fix" this.
+//
+// Every pattern requires its CLOSING delimiter, which is what makes
+// streaming safe: a half-arrived `\[` simply doesn't match, so the rest of
+// the message renders as normal prose and the region becomes math on the
+// delta that completes it. An unterminated delimiter can never swallow the
+// tail of a reply.
+// `[^\u0000]` (not `[\s\S]`) for the body: it still spans newlines, but it
+// cannot span a sentinel already planted by an earlier pattern. Without
+// that guard, `$$ \[x\] $$` would extract the inner region, then have the
+// outer `$$` pattern capture the sentinel as its tex — a nested
+// placeholder that restores into gibberish.
+const MATH_PATTERNS = [
+  { re: /\\\[([^\u0000]+?)\\\]/g, display: true },
+  { re: /\$\$([^\u0000]+?)\$\$/g, display: true },
+  { re: /\\\(([^\u0000]+?)\\\)/g, display: false },
+];
+
+// Placeholder marker. U+0000 can't appear in real message text (it is
+// stripped from the input below), survives escapeHtml untouched, and
+// carries no markdown-active characters, so no downstream rule matches it.
+const MATH_SENTINEL = '\u0000';
+
+/** Replace every math region in `src` with a sentinel, pushing
+ *  `{ tex, display, raw }` into `store`. Regions inside code — fenced
+ *  ``` blocks and inline `spans` — are skipped: someone pasting LaTeX
+ *  source into a code fence expects to SEE it, so code wins. */
+function extractMath(src, store) {
+  const clean = src.includes(MATH_SENTINEL) ? src.split(MATH_SENTINEL).join('') : src;
+  const parts = splitOutsideCode(clean);
+  for (let i = 0; i < parts.length; i += 2) {   // even = outside code
+    let seg = parts[i];
+    if (!seg) continue;
+    for (const { re, display } of MATH_PATTERNS) {
+      re.lastIndex = 0;
+      seg = seg.replace(re, (raw, body) => {
+        const idx = store.length;
+        store.push({ tex: body.trim(), display, raw });
+        return `${MATH_SENTINEL}${display ? 'd' : 'i'}${idx}${MATH_SENTINEL}`;
+      });
+    }
+    parts[i] = seg;
+  }
+  return parts.join('');
+}
+
+/** Split raw source into alternating [outside, code, outside, code, …]
+ *  chunks (even indices are outside code). Code chunks keep their
+ *  delimiters so re-joining is lossless — the existing fenced-code and
+ *  inline-code rules downstream still see exactly what they saw before.
+ *  An UNTERMINATED fence protects the rest of the string: mid-stream a
+ *  ``` block has no closer yet, and briefly rendering math that is about
+ *  to become code body would flicker. */
+function splitOutsideCode(src) {
+  const parts = [];
+  let start = 0;   // start of the current outside-code run
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c !== '`') { i++; continue; }
+    const fence = src.startsWith('```', i);
+    const open = fence ? 3 : 1;
+    let end = src.indexOf(fence ? '```' : '`', i + open);
+    // Inline code doesn't span lines (matches the `/`([^`]+)`/` rule).
+    if (!fence && end >= 0 && src.slice(i + 1, end).includes('\n')) end = -1;
+    if (end < 0) {
+      if (!fence) { i += 1; continue; }   // a lone backtick is just text
+      parts.push(src.slice(start, i), src.slice(i));   // unterminated fence
+      return parts;
+    }
+    const stop = end + open;
+    parts.push(src.slice(start, i), src.slice(i, stop));
+    start = stop;
+    i = stop;
+  }
+  parts.push(src.slice(start));
+  return parts;
 }
 
 /** Render an extracted fenced code block: a head row carrying the optional

@@ -5792,3 +5792,118 @@
    time. Sibling selector works because the edge loader is appended to
    the transcript's parent AFTER it. */
 .transcript.transcript-loading ~ .transcript-edge-loader { visibility: hidden; }
+
+/* ── Math (LaTeX → MathML, src/util/math.ts) ───────────────────────────
+   APPEND-ONLY BLOCK (2026-09-01). Everything math-related lives here so
+   it can be reverted as one unit and does not interleave with the shared
+   markdown rules above.
+
+   Temml emits <math> elements laid out by the browser's native math
+   renderer, so there is no font payload and no JS layout — these rules
+   only handle CONTAINER concerns (block-ness, overflow, rhythm) plus the
+   raw-source fallback. Scoped to the three markdown surfaces the same way
+   `.line .text / .pin-item-body / .doc-drawer-content` are scoped. */
+
+.line .text .math-block,
+.pin-item-body .math-block,
+.doc-drawer-content .math-block {
+  display: block;
+  margin: var(--space-3) 0;
+  /* Long expressions WILL overflow a 390px phone. Scroll the block
+     instead of clipping it or forcing the bubble wide. overflow-y is
+     pinned to hidden so the horizontal scroller can't also grow a
+     vertical one around a single-line formula. */
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* Centre only when it fits; a scrolling expression must start at its
+     left edge or the reader lands mid-formula. `text-align: center` on an
+     overflowing block does exactly the wrong thing in some engines, so
+     centre the math element via auto margins instead. */
+  text-align: initial;
+}
+.line .text .math-block > math,
+.pin-item-body .math-block > math,
+.doc-drawer-content .math-block > math {
+  /* Display math reads small next to 15px body text at the default
+     math-font metrics. */
+  font-size: 1.12em;
+  /* Centre when it fits, left-align when it doesn't: fit-content + auto
+     inline margins does both, where `text-align: center` on the scroller
+     would strand an overflowing formula mid-expression. Temml stamps
+     `display:block math` inline; Safari drops that declaration as invalid
+     and falls back to this `display: block`, which is why it is here and
+     not left to the inline style. */
+  display: block;
+  width: fit-content;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.line .text .math-inline,
+.pin-item-body .math-inline,
+.doc-drawer-content .math-inline {
+  /* Inline math stays in the text flow. No overflow container here: an
+     inline-block scroller inside a sentence breaks line-height and baseline
+     alignment, and inline expressions are short by definition. */
+  display: inline;
+}
+
+/* MathML inherits colour, so both themes come out right for free; state it
+   anyway so a future `math { color: … }` from a vendor stylesheet can't
+   strand white-on-cream.
+
+   font-family is load-bearing, not cosmetic. Stretchy operators (matrix
+   brackets, \left(…\right), the radical over a fraction) are drawn from
+   the font's OpenType MATH glyph-assembly table. Inherit the UI sans and
+   a 4-row bmatrix comes out with two text-height brackets floating at its
+   centre — measured, not assumed (2026-09-01 probe: identical bad output
+   under the body font, Noto Sans Math and the bare `math` keyword;
+   correct stretching under DejaVu Math TeX Gyre).
+
+   So: name fonts that actually carry the assemblies, most-native first.
+   STIX Two Math is the system math font on macOS/iOS (what his phone and
+   Mac will use), Cambria Math on Windows, DejaVu Math TeX Gyre is the
+   common Linux one and is what this build host renders with. The generic
+   `math` keyword is LAST, not first — on this host it resolved to a font
+   without assemblies, so leading with it would have shipped the broken
+   look everywhere the platform guesses badly.
+
+   Note the deliberate absence: Noto Sans Math. Temml's own recommended
+   stack lists it, but the copy on this host has no assemblies and it
+   silently wins over the generic keyword.
+
+   No web font is downloaded. Shipping none was the point of choosing
+   MathML over KaTeX — see docs/AGENT_MATH.md. If a platform ever turns
+   out to have no capable math font, the degradation is "brackets don't
+   stretch", still legible; KaTeX without its woff2 files is tofu. */
+.line .text math,
+.pin-item-body math,
+.doc-drawer-content math {
+  color: inherit;
+  font-style: normal;
+  font-family: 'STIX Two Math', 'STIXTwoMath-Regular', 'Cambria Math',
+    'Latin Modern Math', 'DejaVu Math TeX Gyre', math;
+}
+
+/* Fallback: the literal LaTeX source. Shown while the Temml bundle is
+   still loading, when it can't load at all (offline cold start), and
+   permanently for a malformed or untrusted expression. Deliberately
+   readable rather than hidden — the pre-existing behaviour was to show
+   raw LaTeX, and that is the honest failure mode. Rendered in the mono
+   face so it reads as source, not as broken prose. */
+.line .text .math-raw,
+.pin-item-body .math-raw,
+.doc-drawer-content .math-raw {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.line .text div.math-raw,
+.pin-item-body div.math-raw,
+.doc-drawer-content div.math-raw {
+  display: block;
+}

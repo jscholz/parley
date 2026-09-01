@@ -2,7 +2,7 @@
   "name": "parleyvoo",
   "version": "0.4.0",
   "type": "module",
-  "description": "Parley \u2014 a voice-first portal to your agent. Bring your own backend; speaks the OpenAI Responses API.",
+  "description": "Parley — a voice-first portal to your agent. Bring your own backend; speaks the OpenAI Responses API.",
   "license": "MIT",
   "homepage": "https://github.com/jscholz/parley",
   "repository": {
@@ -76,6 +76,7 @@
     "js-yaml": "^4.1.1",
     "onnxruntime-web": "^1.25.1",
     "sortablejs": "^1.15.7",
+    "temml": "^0.13.5",
     "typescript": "^6.0.2"
   }
 }

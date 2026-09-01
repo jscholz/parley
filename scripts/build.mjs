@@ -99,6 +99,22 @@ async function buildVendorBundles() {
     sourcemap: false,
     logLevel: 'info',
   });
+  // Temml — LaTeX → MathML for math in agent replies (src/util/math.ts).
+  // ~208 KB minified / ~58 KB over the wire, and NO font files: MathML is
+  // laid out by the browser's own math renderer, so unlike KaTeX there is
+  // no woff2 payload to ship into the frozen CAP bundle. Dynamic-imported
+  // on the first math-bearing render — a transcript with no math never
+  // fetches it. Cached by the SW in MATH_CACHE (sw.js).
+  await esbuild.build({
+    entryPoints: [join(ROOT, 'src/vendor/temml-entry.mjs')],
+    outfile: join(OUT, 'vendor/temml.mjs'),
+    format: 'esm',
+    target: 'es2022',
+    bundle: true,
+    minify: true,
+    sourcemap: false,
+    logLevel: 'info',
+  });
 }
 
 /**
@@ -119,9 +135,10 @@ async function buildVendorBundles() {
  * (singleton) hashed module.
  *
  * Excluded from hashing:
- *  - vendor/ — vad-web.mjs is versioned via the SW's VAD_CACHE (bumped only
- *    on lib upgrades) and both vendor bundles are dynamic-imported via
- *    runtime-computed URLs; they change ~never, so hashing buys nothing.
+ *  - vendor/ — vad-web.mjs and temml.mjs are versioned via the SW's
+ *    VAD_CACHE / MATH_CACHE (bumped only on lib upgrades) and all three
+ *    vendor bundles are dynamic-imported via runtime-computed URLs; they
+ *    change ~never, so hashing buys nothing.
  *  - sourcemaps (.map) — left unrenamed; the renamed module's relative
  *    `sourceMappingURL=foo.mjs.map` comment still resolves in the same dir.
  *  - audio-processor.js — worklet loaded out-of-band (.js, not .mjs).

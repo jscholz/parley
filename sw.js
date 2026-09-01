@@ -11,7 +11,7 @@
  * network-first, so first-load pulls anything missed and caches on the
  * way through.
  */
-const CACHE_NAME = 'v0.629';
+const CACHE_NAME = 'v0.630';
 
 // Dedicated cache for VAD assets. Key insight: VAD assets are 14.7 MB
 // and don't change with every app deploy — the Silero model is
@@ -26,6 +26,17 @@ const CACHE_NAME = 'v0.629';
 // the old VAD cache and the next call re-fetches. This is rare;
 // ~once per quarter at most.
 const VAD_CACHE = 'vad-assets-v4';
+
+// Dedicated cache for the Temml (LaTeX → MathML) vendor bundle. Same
+// reasoning as VAD_CACHE, smaller numbers: ~208 KB that changes only when
+// the temml dependency is upgraded, not on every app deploy. Keeping it
+// out of CACHE_NAME means a math-bearing transcript still renders on a
+// cold offline launch after a release, instead of re-downloading — or,
+// offline, falling back to raw LaTeX.
+//
+// Update protocol: bump MATH_CACHE when `temml` is upgraded in
+// package.json. The activate handler prunes the old one.
+const MATH_CACHE = 'math-assets-v1';
 
 // Dedicated cache for content-hashed build modules (#182 / Path C2).
 // build.mjs renames each compiled module foo.mjs → foo.<sha10>.mjs and
@@ -141,7 +152,7 @@ self.addEventListener('activate', (e) => {
   // app version bumps (see their docstrings; BUILD_CACHE entries are
   // content-addressed so they can't go stale, and the page prunes
   // orphans via 'prune-build-cache'). Everything else gets evicted.
-  const keep = new Set([CACHE_NAME, VAD_CACHE, BUILD_CACHE]);
+  const keep = new Set([CACHE_NAME, VAD_CACHE, BUILD_CACHE, MATH_CACHE]);
   e.waitUntil(
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => !keep.has(k)).map(k => caches.delete(k)))
@@ -196,6 +207,24 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname === '/build/vendor/vad-web.mjs') {
     e.respondWith(
       caches.open(VAD_CACHE).then(cache =>
+        cache.match(e.request).then(cached => {
+          if (cached) return cached;
+          return fetch(e.request).then(response => {
+            if (response.ok) cache.put(e.request, response.clone());
+            return response;
+          });
+        }),
+      ),
+    );
+    return;
+  }
+  // Exception: /build/vendor/temml.mjs lives in MATH_CACHE for the same
+  // reason — it is versioned by the temml dependency, not by the deploy.
+  // Cache-first also means a math bubble on a cold offline launch renders
+  // real MathML rather than degrading to raw LaTeX.
+  if (url.pathname === '/build/vendor/temml.mjs') {
+    e.respondWith(
+      caches.open(MATH_CACHE).then(cache =>
         cache.match(e.request).then(cached => {
           if (cached) return cached;
           return fetch(e.request).then(response => {

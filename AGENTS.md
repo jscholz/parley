@@ -105,6 +105,13 @@ every backend: register the file, then reference the returned URL in
 reply text as a markdown image. See
 [`docs/AGENT_MEDIA.md`](docs/AGENT_MEDIA.md).
 
+## Math in replies
+
+Reply text may carry LaTeX: `\[ … \]` or `$$ … $$` for display, `\( … \)`
+for inline. It renders as native MathML. Single `$ … $` is deliberately
+NOT a delimiter (it eats prices). See
+[`docs/AGENT_MATH.md`](docs/AGENT_MATH.md).
+
 ## What NOT to do
 
 - Don't modify the proxy (`server.ts` / `proxy/parley/*`) or the PWA
