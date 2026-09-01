@@ -98,24 +98,29 @@ export default async function run({ page, log, url }) {
     });
   }, { chatId: CHAT_ID });
 
-  await page.waitForFunction(() => true, null, { timeout: 100 });
-  const model = await page.evaluate(async ({ timeoutMs }) => {
-    const tts = await import('/build/audio/turn-based/tts.mjs');
-    const t0 = Date.now();
-    while (!tts.getActiveReplyId() && Date.now() - t0 < timeoutMs) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    return tts.getActiveReplyId();
-  }, { timeoutMs: 8_000 });
-  assert(model, 'autoplay never started (getActiveReplyId stayed null)');
-
-  // Give the /tts fetch a beat to fire.
-  await page.waitForFunction(
-    () => true, null, { timeout: 50 },
-  );
-  await page.waitForTimeout(500);
+  // Wait on the /tts REQUEST, which is durable, not on
+  // tts.getActiveReplyId(), which is TRANSIENT. Flake fixed 2026-09-01
+  // (measured 4 failures in 6 runs, ~67% — not the "occasional" flake it
+  // was assumed to be): getActiveReplyId() is set while a reply is
+  // playing and cleared the moment it finishes, and against the mocked
+  // /tts the whole round can begin and end well inside the 100ms poll
+  // interval. The poll was sampling a value that flickers, so it caught
+  // it or missed it by luck, and reported "autoplay never started" for a
+  // playback that had already been and gone.
+  //
+  // ttsModels is pushed by the page.route interceptor above and only
+  // grows — it can only become true AFTER the synthesis this test is
+  // actually about, and it is the very thing the assertions below read.
+  // Same defect family as the three flakes fixed 2026-08-31: waiting on a
+  // proxy signal instead of the work itself.
+  const ttsDeadline = Date.now() + 8_000;
+  while (ttsModels.length === 0 && Date.now() < ttsDeadline) {
+    await page.waitForTimeout(50);
+  }
   assert(ttsModels.length > 0,
     'no /tts POST captured — autoplay did not synthesize');
+  // Brief settle so a multi-chunk reply's later POSTs are counted too.
+  await page.waitForTimeout(300);
   assert(ttsModels.every((m) => m === SESSION_VOICE),
     `every /tts POST should use the session voice ${SESSION_VOICE}; got ${JSON.stringify(ttsModels)}`);
   log(`threading ✓ /tts used session voice ${SESSION_VOICE} (${ttsModels.length} chunk(s))`);
