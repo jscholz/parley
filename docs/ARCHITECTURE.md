@@ -128,10 +128,8 @@ Every HTTP+SSE endpoint parley speaks, with a one-line purpose and a classificat
 | `GET /weather` | proxy-utility | Open-Meteo proxy, ambient-clock card. |
 | `GET /link-preview` | proxy-utility | OG metadata for a URL (link cards). |
 | `GET /screenshot` | proxy-utility | Persistent-Chromium screenshot for sites with no OG. |
-| `POST /canvas/show` | proxy-utility | CanvasCard JSON broadcast → `/ws/canvas` clients. |
 | `GET /config` | proxy-utility | Runtime config (gateway token, app name, theme, model picker prefs). |
 | `GET /api/keyterms` | proxy-utility | First-boot STT keyterm seed list (yaml-backed). |
-| `GET /ws/canvas` | proxy-utility | Inline-card WebSocket fan-out. |
 
 ## Information flow
 

@@ -1546,10 +1546,13 @@ const ZC_UPSTREAM = cfgVal('PARLEY_ZEROCLAW_WS', 'backend.zeroclaw.ws_url',
   'ws://127.0.0.1:42617/ws/chat') as string;
 const ZC_TOKEN = readEnv('PARLEY_ZEROCLAW_TOKEN') || '';  // secret — env only
 
-// Canvas card delivery: agents emit `tool_event` envelopes with
-// `kind: 'canvas.show'` through the normal SSE channel — see
-// proxyClient.ts's stream router + main.ts:handleToolEvent. The
-// previous `POST /canvas/show` + `/ws/canvas` standalone-panel path
+// Canvas card delivery: NOT IMPLEMENTED — see docs/CANVAS.md.
+// This comment previously claimed agents emit `tool_event` envelopes
+// with `kind: 'canvas.show'` over SSE. They cannot: `ParleyEnvelope`
+// (proxy/parley/upstream.ts) has no such member, so the handler in
+// backendEventHandlers.ts is unreachable. Cards reaching users today
+// are derived from reply markdown by src/cards/fallback.ts, not pushed.
+// The previous `POST /canvas/show` + `/ws/canvas` standalone-panel path
 // was a leftover from openclaw's deployment model where the canvas
 // rendered in its own browser window separate from the chat shell.
 // Parley never wired a `/ws/canvas` subscriber, so every POST to

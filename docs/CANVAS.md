@@ -1,5 +1,29 @@
 # Canvas Protocol v1
 
+> **STATUS (2026-09-01): the card *kinds* below are live; the `canvas.show`
+> emit path is NOT.** There are two lanes and only one of them works.
+>
+> - **Text lane — live.** Cards are derived from markdown in the agent's
+>   reply body by `parseCardsFromText` (`src/cards/fallback.ts`). This
+>   covers image, video, audio, youtube, spotify and link previews. To push
+>   media, register the file and reference it as `![caption](url)` — see
+>   `docs/AGENT_MEDIA.md`. **This is the mechanism agents should use.**
+> - **`canvas.show` push — not implemented.** No wire envelope carries it.
+>   `ParleyEnvelope` (`proxy/parley/upstream.ts`) has no `canvas_show` or
+>   `tool_event` member, so nothing an agent emits can reach the client
+>   handler that exists in `src/backendEventHandlers.ts`. The standalone
+>   `POST /canvas/show` + `/ws/canvas` path was removed 2026-05-11 and the
+>   SSE replacement was never built.
+>
+> Consequences: the `markdown` and `loading` kinds are unreachable (the
+> text lane cannot produce them), and **`id`/`meta.replaces`
+> replace-in-place does not exist** — `src/cards/attach.ts` appends and
+> dedups by content hash, with no id index. Treat the "ID and replace
+> semantics" section below as a design sketch, not behaviour.
+>
+> Kept as the spec for whoever builds the push lane. Agent-facing guidance
+> lives in `skills/parley/SKILL.md`, which correctly says not to emit these.
+
 The Parley canvas is a visual pane alongside the chat. When the agent emits
 a `canvas.show` payload, the client validates it and renders a card.
 
@@ -101,6 +125,12 @@ a visual representation.
 
 ## Adding new kinds
 
-New card kinds are added in `src/canvas/cards/<kind>.ts`.
+New card kinds are added in `src/cards/kinds/<kind>.ts`.
 Each module exports `{ kind, icon, label, validate, render }`.
-Register it in `src/canvas/registry.ts`. The agent docs (this file) are updated to match.
+Register it in `src/cards/registry.ts`. The agent docs (this file) are updated to match.
+
+A new kind is only reachable if some lane can produce it. Today that means
+adding a pattern to `parseCardsFromText` (`src/cards/fallback.ts`), and — for
+it to survive a reload — to `HISTORICAL_CARD_KINDS` in `src/cards/attach.ts`,
+since cards live in an in-memory map and are re-derived from message bodies
+on load.
