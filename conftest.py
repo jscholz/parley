@@ -48,7 +48,39 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
         base = types.ModuleType("gateway.platforms.base")
 
         class BasePlatformAdapter:
-            pass
+            """Minimal stand-in for the real gateway base adapter.
+
+            Carries the media-delivery surface the plugin actually calls:
+            ``validate_media_delivery_path`` (the path guard) and the
+            ``send_image_file`` / ``send_document`` fallbacks a subclass
+            delegates to when native delivery is unavailable. The real
+            base answers with a "⚠️ Couldn't deliver…" notice rather than
+            echoing the host path; here we just record the delegation so
+            a test can assert that degradation happened. Records onto
+            ``self.fallbacks`` when the instance provides that list.
+            """
+
+            @staticmethod
+            def validate_media_delivery_path(path):
+                import os
+
+                return os.path.realpath(path) if os.path.isfile(path) else None
+
+            def _record_fallback(self, kind, path):
+                sink = getattr(self, "fallbacks", None)
+                if sink is not None:
+                    sink.append((kind, path))
+
+            async def send_image_file(self, chat_id, image_path, caption=None,
+                                      reply_to=None, metadata=None, **kwargs):
+                self._record_fallback("image", image_path)
+                return SendResult(success=True)
+
+            async def send_document(self, chat_id, file_path, caption=None,
+                                    file_name=None, reply_to=None,
+                                    metadata=None, **kwargs):
+                self._record_fallback("document", file_path)
+                return SendResult(success=True)
 
         class MessageEvent:
             pass

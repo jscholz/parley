@@ -2439,6 +2439,132 @@ class ParleyAdapter(BasePlatformAdapter):
         )
         return SendResult(success=ok)
 
+    # ------------------------------------------------------------------
+    # Native file sends — `MEDIA:/abs/path` delivery
+    #
+    # Every other adapter (telegram, whatsapp, slack, matrix) implements
+    # these. Parley did not, so `MEDIA:` markers fell through to
+    # BasePlatformAdapter's fallback notice ("⚠️ Couldn't deliver the
+    # image attachment") and the file was simply lost. That cost a real
+    # deliverable on 2026-09-01: three deck assets produced, all dropped.
+    #
+    # No new envelope goes on the wire. We register the local file with
+    # the parley proxy's media registry (proxy/parley/media.ts, whose
+    # contract names "hermes plugin session" as a first-class caller) and
+    # hand the resulting URL to the existing send_image path. The client
+    # cannot distinguish this from an agent that embedded the markdown
+    # reference by hand — which is the point: one delivery lane, not two.
+    #
+    # Failure is always non-fatal and falls back to super(), i.e. the
+    # pre-existing notice. A split-host deployment whose proxy cannot see
+    # our filesystem therefore behaves exactly as it does today.
+    # ------------------------------------------------------------------
+
+    def _proxy_origin(self) -> str:
+        """Origin of the parley proxy that owns the media registry.
+
+        The plugin's own HTTP port (DEFAULT_PORT) is the /v1/responses
+        server — a different process from the Node proxy, hence a
+        separate knob rather than a reuse.
+        """
+        return (env_get("PARLEY_PROXY_ORIGIN") or "http://127.0.0.1:3001").rstrip("/")
+
+    async def _register_media(self, raw_path: str) -> Optional[Dict[str, Any]]:
+        """Register a local file with the proxy; return its entry or None.
+
+        Deliberately does NOT duplicate the proxy's extension allowlist.
+        The registry is the single source of truth for what is servable
+        and we interpret its error rather than second-guessing it — so
+        widening the allowlist there needs no change here. It refuses
+        true documents (.pdf, .svg) on purpose: that route reads the
+        filesystem, and SVG in particular is scriptable and renders
+        inline.
+        """
+        safe = self.validate_media_delivery_path(raw_path)
+        if not safe:
+            logger.warning(
+                "[%s] media path rejected by the delivery guard: %s", self.name, raw_path
+            )
+            return None
+        try:
+            import aiohttp  # guarded — unit tests stub the runtime install
+        except ImportError:
+            logger.warning("[%s] aiohttp unavailable; cannot register media", self.name)
+            return None
+        url = f"{self._proxy_origin()}/api/parley/media/register"
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json={"path": safe}) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status != 200 or not (body or {}).get("url"):
+                        logger.warning(
+                            "[%s] media register refused %s: HTTP %s %s",
+                            self.name, safe, resp.status, (body or {}).get("error", ""),
+                        )
+                        return None
+                    return body
+        except Exception as exc:  # proxy down, network, bad JSON — all non-fatal
+            logger.warning(
+                "[%s] media register failed for %s: %s", self.name, safe, exc
+            )
+            return None
+
+    async def send_image_file(
+        self,
+        chat_id: str,
+        image_path: str,
+        caption: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> SendResult:
+        """Deliver a local image by registering it, then reusing send_image."""
+        entry = await self._register_media(image_path)
+        if not entry:
+            return await super().send_image_file(
+                chat_id, image_path, caption=caption,
+                reply_to=reply_to, metadata=metadata, **kwargs,
+            )
+        return await self.send_image(
+            chat_id, entry["url"], caption=caption,
+            reply_to=reply_to, metadata=metadata,
+        )
+
+    async def send_document(
+        self,
+        chat_id: str,
+        file_path: str,
+        caption: Optional[str] = None,
+        file_name: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> SendResult:
+        """Deliver a local file when the registry will serve it.
+
+        The registry is a *media* lane, so true documents (.pdf, .svg,
+        .csv) are refused and we fall back to the base notice — which
+        names the file, so the user can still retrieve it themselves.
+        Media that hermes happened to route as a document (an .mp4 or
+        .png selected by mimetype) does get through: the markdown
+        reference rides plain reply text and the client's card fallback
+        parser classifies it by extension.
+        """
+        entry = await self._register_media(file_path)
+        if not entry:
+            return await super().send_document(
+                chat_id, file_path, caption=caption, file_name=file_name,
+                reply_to=reply_to, metadata=metadata, **kwargs,
+            )
+        label = caption or file_name or entry.get("filename") or "attachment"
+        return await self.send(
+            chat_id=chat_id,
+            content=f"![{label}]({entry['url']})",
+            reply_to=reply_to,
+            metadata=metadata,
+        )
+
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         return {"name": chat_id, "type": "parley", "chat_id": chat_id}
 
