@@ -36,11 +36,112 @@ gates on the session platform so other surfaces never list it.
 import json
 import logging
 import os
+import re
 import time
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict
 
 logger = logging.getLogger(__name__)
+
+# ── HTML image rewriting ──────────────────────────────────────────────
+# The Docs panel renders HTML in `<iframe sandbox="…" srcdoc=…>`. A
+# LOCAL image reference can never load there: relative paths have no
+# usable base (the frame's document is `about:srcdoc`), and `file:` URLs
+# are blocked outright. Measured 2026-09-04 in the real frame:
+#
+#   sandbox=""                  every subresource → NO request at all
+#   sandbox="allow-same-origin" fully-qualified proxy URL → 200 ✓
+#
+# So a doc that references `assets/stills/tile-inspect-grade.jpg`
+# renders as broken-image icons no matter how correct the file on disk
+# is (field 2026-09-04, the ITAD mosaic mockup — all six tiles present,
+# all six broken in the panel).
+#
+# Fix both halves: the client relaxes the sandbox to allow-same-origin
+# (WITHOUT allow-scripts — the combination to avoid is both together;
+# with scripts still blocked there is no script to abuse the origin),
+# and here we resolve each local <img src> against the document's own
+# directory and swap in a media-registry URL the proxy can serve.
+#
+# Scope is deliberately `<img src>`: it is what the deck workflow emits.
+# CSS `url(...)` backgrounds are NOT rewritten — they will still break,
+# which is worth knowing before someone debugs it twice.
+_IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])(.*?)\2', re.I | re.S)
+
+# Already-absolute schemes we must never touch. `data:` in particular is
+# the one thing that has always worked; rewriting it would be a
+# regression.
+_ABSOLUTE_SRC = ("http://", "https://", "data:", "//")
+
+
+def _proxy_origin() -> str:
+    """Origin of the parley proxy that owns the media registry."""
+    return (os.environ.get("PARLEY_PROXY_ORIGIN")
+            or "http://127.0.0.1:3001").rstrip("/")
+
+
+def _register_media_sync(path: Path):
+    """Register a local file with the proxy; return its URL or None.
+
+    Blocking on purpose — display_doc's handler is sync and already runs
+    on a worker thread. Any failure returns None and leaves the original
+    reference untouched, so a doc degrades to today's broken image
+    rather than failing to display at all.
+    """
+    try:
+        body = json.dumps({"path": str(path)}).encode()
+        req = urllib.request.Request(
+            f"{_proxy_origin()}/api/parley/media/register",
+            data=body, headers={"content-type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode())
+        return payload.get("url") or None
+    except Exception as exc:
+        logger.warning("[parley-doc] media register failed for %s: %s", path, exc)
+        return None
+
+
+def _rewrite_local_images(html: str, doc_path: Path) -> tuple:
+    """Point every local <img src> at the media registry.
+
+    Returns ``(html, rewritten, skipped)``. Unresolvable or
+    unregisterable references are left exactly as they were.
+    """
+    rewritten = 0
+    skipped = 0
+    cache: Dict[str, str] = {}
+
+    def _sub(m):
+        nonlocal rewritten, skipped
+        head, quote, src = m.group(1), m.group(2), m.group(3)
+        raw = src.strip()
+        if not raw or raw.lower().startswith(_ABSOLUTE_SRC):
+            return m.group(0)
+        if raw in cache:
+            return f"{head}{quote}{cache[raw]}{quote}"
+        target = Path(raw[7:] if raw.lower().startswith("file://") else raw)
+        if not target.is_absolute():
+            target = (doc_path.parent / target)
+        try:
+            target = target.resolve()
+        except Exception:
+            skipped += 1
+            return m.group(0)
+        if not target.is_file():
+            logger.warning("[parley-doc] image not found: %s (from %r)", target, raw)
+            skipped += 1
+            return m.group(0)
+        url = _register_media_sync(target)
+        if not url:
+            skipped += 1
+            return m.group(0)
+        cache[raw] = url
+        rewritten += 1
+        return f"{head}{quote}{url}{quote}"
+
+    return _IMG_SRC_RE.sub(_sub, html), rewritten, skipped
 
 # Content rides one SSE envelope through the events ring; cap so a stray
 # "display this 40MB log" can't bloat the ring / the PWA's localStorage
@@ -126,6 +227,13 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
             return json.dumps({"error": "parley adapter is not running"})
 
         fmt = _FORMAT_BY_SUFFIX.get(path.suffix.lower(), "text")
+        if fmt == "html" and "<img" in content.lower():
+            content, _rw, _sk = _rewrite_local_images(content, path)
+            if _rw or _sk:
+                logger.info(
+                    "[parley-doc] rewrote %d local image ref(s) to media URLs "
+                    "(%d left as-is) in %s", _rw, _sk, path,
+                )
         title = (args.get("title") or "").strip() or path.name
         # Shelf identity (v2 PWA "doc shelf"): the client dedups by a djb2
         # hash of the path — mirror it here so the tool result's doc_id

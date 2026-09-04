@@ -345,8 +345,18 @@ export function createDocModule(opts: {
     if (doc.format === 'html') {
       const frame = document.createElement('iframe');
       frame.className = 'doc-drawer-frame';
-      // Empty sandbox = no scripts, no same-origin, no forms, no popups.
-      frame.setAttribute('sandbox', '');
+      // No scripts, no forms, no popups — but DO allow same-origin, or
+      // the frame gets an opaque origin and the browser refuses every
+      // subresource load, so no image in an agent-authored HTML doc can
+      // ever render. Measured in the real frame (2026-09-04):
+      //   sandbox=""                  → no network request at all
+      //   sandbox="allow-same-origin" → proxy image URL loads, 200
+      // The dangerous combination is `allow-scripts allow-same-origin`
+      // together, which lets framed script reach the parent origin.
+      // Scripts stay blocked here, so there is nothing to abuse it.
+      // Local paths still cannot resolve — the doc tool rewrites them
+      // to /api/parley/media/<id> URLs before the content ships.
+      frame.setAttribute('sandbox', 'allow-same-origin');
       frame.srcdoc = doc.content;
       opts.body.appendChild(frame);
     } else if (doc.format === 'markdown') {
