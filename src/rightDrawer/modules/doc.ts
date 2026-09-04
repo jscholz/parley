@@ -22,9 +22,17 @@
 //
 // Rendering is unchanged from v1: markdown through the shared XSS-safe
 // miniMarkdown (styled by the `.line .text / .pin-item-body /
-// .doc-drawer-content` group in app.css), HTML in a fully sandboxed
-// iframe (sandbox="" — no scripts, no same-origin; agent-pushed content
-// is untrusted), everything else plain text.
+// .doc-drawer-content` group in app.css), HTML in a sandboxed iframe,
+// everything else plain text.
+//
+// The iframe is `sandbox="allow-same-origin"` — scripts, forms and
+// popups stay blocked, but the origin must NOT be opaque or the browser
+// refuses every subresource load and no image in an agent-authored HTML
+// doc can render at all (measured 2026-09-04; see the comment at the
+// frame construction). Agent-pushed content is still untrusted: the
+// combination that would matter is `allow-scripts allow-same-origin`
+// together, and scripts remain blocked. Guarded by the
+// `doc-html-images-render` smoke, which asserts both halves.
 
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
