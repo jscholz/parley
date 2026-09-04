@@ -64,10 +64,22 @@ logger = logging.getLogger(__name__)
 # and here we resolve each local <img src> against the document's own
 # directory and swap in a media-registry URL the proxy can serve.
 #
-# Scope is deliberately `<img src>`: it is what the deck workflow emits.
-# CSS `url(...)` backgrounds are NOT rewritten — they will still break,
-# which is worth knowing before someone debugs it twice.
+# Covers `<img src>` plus CSS `url(...)`. One regex over the whole
+# document catches url() in both <style> blocks and inline style=""
+# attributes, so background images work too.
+#
+# Not covered, and deliberately: <source srcset> (multi-candidate
+# syntax), <link href> stylesheets, and @import. Those would each need
+# their own grammar and none appear in the deck workflow's output.
 _IMG_SRC_RE = re.compile(r'(<img\b[^>]*?\bsrc\s*=\s*)(["\'])(.*?)\2', re.I | re.S)
+
+# url( 'x' ) / url( "x" ) / url( x ). Group 1 keeps `url(` plus any
+# leading space, 2 is the quote (empty when bare), 3 is the reference.
+# The bare form stops at the closing paren, which is why a raw path
+# containing ')' is not supported — quote it.
+_CSS_URL_RE = re.compile(
+    r'(url\(\s*)(["\']?)([^"\')]+)\2\s*\)', re.I,
+)
 
 # Already-absolute schemes we must never touch. `data:` in particular is
 # the one thing that has always worked; rewriting it would be a
@@ -103,45 +115,84 @@ def _register_media_sync(path: Path):
         return None
 
 
-def _rewrite_local_images(html: str, doc_path: Path) -> tuple:
-    """Point every local <img src> at the media registry.
+def _resolve_ref(raw: str, doc_path: Path, cache: Dict[str, Any]):
+    """Local reference → media-registry URL, or None to leave it alone.
 
-    Returns ``(html, rewritten, skipped)``. Unresolvable or
-    unregisterable references are left exactly as they were.
+    ``cache`` memoizes per document so a still used in six tiles costs
+    one registration, and a miss is remembered as a miss (``None``)
+    rather than retried per occurrence.
+    """
+    ref = (raw or "").strip()
+    if not ref or ref.lower().startswith(_ABSOLUTE_SRC):
+        return None
+    if ref in cache:
+        return cache[ref]
+    target = Path(ref[7:] if ref.lower().startswith("file://") else ref)
+    if not target.is_absolute():
+        target = doc_path.parent / target
+    try:
+        target = target.resolve()
+    except Exception:
+        cache[ref] = None
+        return None
+    if not target.is_file():
+        logger.warning("[parley-doc] asset not found: %s (from %r)", target, ref)
+        cache[ref] = None
+        return None
+    url = _register_media_sync(target)
+    cache[ref] = url or None
+    return cache[ref]
+
+
+def _rewrite_local_assets(html: str, doc_path: Path) -> tuple:
+    """Point every local asset reference at the media registry.
+
+    Covers ``<img src>`` and CSS ``url(...)`` — the latter in both
+    ``<style>`` blocks and inline ``style=""`` attributes, since one
+    regex over the whole document catches both. Returns
+    ``(html, rewritten, skipped)``; anything unresolvable or
+    unregisterable is left exactly as it was.
     """
     rewritten = 0
     skipped = 0
-    cache: Dict[str, str] = {}
+    cache: Dict[str, Any] = {}
 
-    def _sub(m):
+    def _count(url) -> None:
         nonlocal rewritten, skipped
-        head, quote, src = m.group(1), m.group(2), m.group(3)
-        raw = src.strip()
-        if not raw or raw.lower().startswith(_ABSOLUTE_SRC):
-            return m.group(0)
-        if raw in cache:
-            return f"{head}{quote}{cache[raw]}{quote}"
-        target = Path(raw[7:] if raw.lower().startswith("file://") else raw)
-        if not target.is_absolute():
-            target = (doc_path.parent / target)
-        try:
-            target = target.resolve()
-        except Exception:
+        if url:
+            rewritten += 1
+        else:
             skipped += 1
-            return m.group(0)
-        if not target.is_file():
-            logger.warning("[parley-doc] image not found: %s (from %r)", target, raw)
-            skipped += 1
-            return m.group(0)
-        url = _register_media_sync(target)
-        if not url:
-            skipped += 1
-            return m.group(0)
-        cache[raw] = url
-        rewritten += 1
-        return f"{head}{quote}{url}{quote}"
 
-    return _IMG_SRC_RE.sub(_sub, html), rewritten, skipped
+    def _sub_img(m):
+        head, quote, src = m.group(1), m.group(2), m.group(3)
+        if not (src or "").strip() or (src or "").strip().lower().startswith(_ABSOLUTE_SRC):
+            return m.group(0)
+        url = _resolve_ref(src, doc_path, cache)
+        _count(url)
+        return f"{head}{quote}{url}{quote}" if url else m.group(0)
+
+    def _sub_url(m):
+        quote, ref = m.group(2), m.group(3)
+        if not (ref or "").strip() or (ref or "").strip().lower().startswith(_ABSOLUTE_SRC):
+            return m.group(0)
+        url = _resolve_ref(ref, doc_path, cache)
+        _count(url)
+        # PRESERVE the original quoting, including "none". Emitting a
+        # double quote for a bare `url(x)` inside an inline
+        # style="…" attribute terminates the attribute early and the
+        # rule silently dies — caught by rendering, not by review, on
+        # 2026-09-04. A registry URL is bare-safe (hex id + extension),
+        # so the source's own choice is always the safe one.
+        return f"{m.group(1)}{quote}{url}{quote})" if url else m.group(0)
+
+    out = _IMG_SRC_RE.sub(_sub_img, html)
+    out = _CSS_URL_RE.sub(_sub_url, out)
+    return out, rewritten, skipped
+
+
+# Back-compat alias: the earlier name shipped one commit ago.
+_rewrite_local_images = _rewrite_local_assets
 
 # Content rides one SSE envelope through the events ring; cap so a stray
 # "display this 40MB log" can't bloat the ring / the PWA's localStorage
@@ -227,13 +278,15 @@ def _make_display_doc_handler(get_adapter: Callable[[], Any]):
             return json.dumps({"error": "parley adapter is not running"})
 
         fmt = _FORMAT_BY_SUFFIX.get(path.suffix.lower(), "text")
-        if fmt == "html" and "<img" in content.lower():
-            content, _rw, _sk = _rewrite_local_images(content, path)
-            if _rw or _sk:
-                logger.info(
-                    "[parley-doc] rewrote %d local image ref(s) to media URLs "
-                    "(%d left as-is) in %s", _rw, _sk, path,
-                )
+        if fmt == "html":
+            low = content.lower()
+            if "<img" in low or "url(" in low:
+                content, _rw, _sk = _rewrite_local_assets(content, path)
+                if _rw or _sk:
+                    logger.info(
+                        "[parley-doc] rewrote %d local asset ref(s) to media "
+                        "URLs (%d left as-is) in %s", _rw, _sk, path,
+                    )
         title = (args.get("title") or "").strip() or path.name
         # Shelf identity (v2 PWA "doc shelf"): the client dedups by a djb2
         # hash of the path — mirror it here so the tool result's doc_id
