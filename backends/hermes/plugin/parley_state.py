@@ -734,7 +734,7 @@ def list_messages_for_chat(
             "id": ts_ms,
             "object": "message",
             "role": r["role"],
-            "content": r["content"] or "",
+            "content": _decode_multimodal_content(r["content"]),
             "created_at": int(r["created_at"]) if r["created_at"] else 0,
             "parley_id": r["parley_id"],
         }
@@ -771,6 +771,68 @@ _COMPACTION_SEED_PREFIXES = ("[CONTEXT COMPACTION", "[PRIOR CONTEXT —")
 def _is_compaction_seed(content) -> bool:
     text = content or ""
     return any(text.startswith(p) for p in _COMPACTION_SEED_PREFIXES)
+
+
+# hermes-core stores a MULTIMODAL user turn (text + N images) as a
+# NUL-sentinel-prefixed JSON content-parts array rather than a plain
+# string: ``\x00json:[{"type":"text",...},{"type":"image_url",...}]``.
+# For a PDF upload those image parts are inlined base64, and parley
+# rasterizes a PDF to one PNG per page — so a deck becomes a single
+# message tens of megabytes wide.
+#
+# Field 2026-09-04, chat [pitch deck]: two decks → 71 rasterized pages →
+# a 12.8 MB user row, which hermes then re-persisted in full on EVERY
+# agent iteration of a long turn — six copies (76.8 MB) in eight
+# minutes, still growing. All of it was served verbatim to the PWA,
+# which tried to render 12.8 MB of JSON into one chat bubble and locked
+# the browser. Restarting the app recovered it only until the
+# transcript reloaded the same rows.
+#
+# Note the sentinel is a NUL: sqlite's `length()` stops at the first NUL
+# byte, so these rows report length 0 and read as "empty messages" in
+# any SQL-side size audit. Measure with python `len()` instead.
+#
+# The images are not renderable from here anyway (the transcript shows
+# user attachments via their own lane), so reads serve the text parts
+# and elide the rest with a marker the PWA can show as a plain line.
+_MULTIMODAL_SENTINEL = "\x00json:"
+
+
+def _decode_multimodal_content(content):
+    """Return display text for a stored content value.
+
+    Plain strings pass through untouched. A ``\\x00json:`` parts array is
+    reduced to its text parts plus an ``[N image(s)]`` marker. Anything
+    that fails to parse falls back to the raw string minus the sentinel,
+    so a shape we do not understand degrades to today's behaviour rather
+    than vanishing from the transcript.
+    """
+    text = content or ""
+    if not text.startswith(_MULTIMODAL_SENTINEL):
+        return text
+    payload = text[len(_MULTIMODAL_SENTINEL):]
+    try:
+        parts = json.loads(payload)
+    except Exception:
+        return payload
+    if not isinstance(parts, list):
+        return payload
+    texts: list = []
+    others = 0
+    for p in parts:
+        if not isinstance(p, dict):
+            continue
+        # Both the OpenAI content-part spelling and hermes' internal one.
+        val = p.get("text")
+        if isinstance(val, str) and val:
+            texts.append(val)
+        elif p.get("type") not in (None, "text"):
+            others += 1
+    out = "\n".join(texts)
+    if others:
+        marker = f"[{others} image{'s' if others != 1 else ''}]"
+        out = f"{out}\n\n{marker}" if out else marker
+    return out
 
 
 # Max |timestamp − flush-anchor timestamp| for a relaxed-identity match
@@ -1406,7 +1468,7 @@ def _build_chronological_items(
             "id": int(r["id"]),
             "object": "message",
             "role": r["role"],
-            "content": r["content"] or "",
+            "content": _decode_multimodal_content(r["content"]),
             "created_at": int(r["timestamp"]) if r["timestamp"] else 0,
         }
         link = link_by_state_id.get(str(r["id"]))
@@ -1456,7 +1518,7 @@ def _build_chronological_items(
             "id": int(ts * 1000) if ts else 0,
             "object": "message",
             "role": r["role"],
-            "content": r["content"] or "",
+            "content": _decode_multimodal_content(r["content"]),
             "created_at": int(ts) if ts else 0,
             "parley_id": r["id"],
         }
@@ -1695,7 +1757,9 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
             "id": item_id,
             "object": "message",
             "role": r["role"],
-            "content": content,
+            # Decode AFTER the seed check above, which must test the raw
+            # prefix.
+            "content": _decode_multimodal_content(content),
             "created_at": int(ts) if ts else 0,
             "parley_id": r["parley_id"],
         }

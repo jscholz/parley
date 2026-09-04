@@ -154,12 +154,19 @@ _CRON_RESPONSE_RE = re.compile(
 #
 # Tunable via env at adapter startup. Defaults chosen for a Pi 5 host:
 #  * 150 DPI keeps PNGs readable for body text without ballooning bytes.
-#  * 50-page cap avoids 100-page-deck wedge times (50 pages ≈ 10s).
+#  * 100-page cap. Was 50, chosen for a Pi 5 — but a real slide deck
+#    runs past it, and hitting the cap silently truncates the document
+#    the agent reasons about (field 2026-09-04: a deck was cut at
+#    exactly 50 and nothing said so). Raising it is NOT free: each page
+#    becomes an inlined base64 image part in the user message, so 71
+#    pages already produced a 12.8 MB message row. Treat this as a
+#    ceiling on how much deck a single turn can carry, not a target —
+#    the durable fix is to stop inlining page images per turn.
 #  * 30s timeout is the hard ceiling per upload.
 #  * 100 MB file-size cap (task #158) rejects abusive uploads before we
 #    shell out; matches the client cap + the upload route ceiling.
 PARLEY_PDF_DPI = int(env_get("PARLEY_PDF_DPI", "150"))
-PARLEY_PDF_MAX_PAGES = int(env_get("PARLEY_PDF_MAX_PAGES", "50"))
+PARLEY_PDF_MAX_PAGES = int(env_get("PARLEY_PDF_MAX_PAGES", "100"))
 PARLEY_PDF_RASTERIZE_TIMEOUT_S = int(
     env_get("PARLEY_PDF_RASTERIZE_TIMEOUT_S", "30")
 )
@@ -1119,9 +1126,43 @@ class ParleyAdapter(BasePlatformAdapter):
             )
             return []
 
+        # Truncation must be LOUD. `-l MAX_PAGES` silently stops at the
+        # cap and nothing downstream can tell a 50-page deck from the
+        # first 50 pages of a 120-page one, so the agent reasons over a
+        # partial document and answers with full confidence. Field
+        # 2026-09-04: a deck hit the cap exactly, the remaining slides
+        # were never rasterized, and the only trace was an INFO line
+        # reading "rasterized 50 pages" — indistinguishable from a deck
+        # that really had 50. Ask pdfinfo for the true count so we can
+        # say so. Best-effort: a pdfinfo failure must not fail the
+        # upload, it just costs us the warning.
+        total_pages = None
+        try:
+            info = subprocess.run(
+                ["pdfinfo", str(path)],
+                capture_output=True, timeout=10, check=True,
+            )
+            for line in (info.stdout or b"").decode(errors="ignore").splitlines():
+                if line.startswith("Pages:"):
+                    total_pages = int(line.split(":", 1)[1].strip())
+                    break
+        except Exception:
+            pass
+
+        if total_pages is not None and total_pages > len(pages):
+            logger.warning(
+                "[hermes-plugin] PDF TRUNCATED: %s has %d pages, rasterized "
+                "only %d (PARLEY_PDF_MAX_PAGES=%d) — the agent will not see "
+                "pages %d-%d",
+                path, total_pages, len(pages), PARLEY_PDF_MAX_PAGES,
+                len(pages) + 1, total_pages,
+            )
+
         logger.info(
-            "[hermes-plugin] rasterized %d pages from %s (%dp, %dB)",
-            len(pages), path, len(pages), file_size,
+            "[hermes-plugin] rasterized %d pages from %s (%sp, %dB)",
+            len(pages), path,
+            len(pages) if total_pages is None else f"{len(pages)}/{total_pages}",
+            file_size,
         )
         return pages
 
