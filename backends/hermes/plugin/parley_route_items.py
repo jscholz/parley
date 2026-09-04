@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
+from .parley_state import _is_compaction_seed
 
 
 # Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
@@ -305,7 +306,19 @@ def _items_by_user_id(
         # may contain an internal compaction marker after real content;
         # those earlier root rows are user-visible and must survive.
         drop_through = compaction_head_end_per_session.get(session_id)
-        if text.startswith("[CONTEXT COMPACTION"):
+        # Both compaction-machinery prefixes, via the shared predicate.
+        # This used to test `[CONTEXT COMPACTION` inline and so missed
+        # the compressor's `[PRIOR CONTEXT —` merged-summary header,
+        # which an in-place (non-child) compaction re-persists into the
+        # SAME session on every post-compaction flush. Field 2026-09-04:
+        # one 55 KB `[PRIOR CONTEXT —` blob had accumulated SIXTEEN
+        # copies in a single chat and all sixteen were served to the
+        # PWA, which is a large part of why that transcript ground the
+        # browser to a halt. Every other consumer (chat migration, the
+        # transcript monitor, the turn linker) already routed through
+        # _is_compaction_seed; this read path — the one the PWA
+        # actually hits — was the only place still open-coding it.
+        if _is_compaction_seed(text):
             continue
         if drop_through is not None and row_id <= drop_through:
             continue
