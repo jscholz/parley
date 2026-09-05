@@ -106,6 +106,10 @@ export class FakeAgent {
    *  proxy forwarded the right body. */
   public lastSettingsPost: { id: string; body: unknown } | null = null;
 
+  /** Scheduled-jobs extension — null = agent has no scheduler (404). */
+  private jobs: any[] | null = [];
+  public lastJobPost: { id: string; action: 'update' | 'run'; body: unknown } | null = null;
+
   setMode(mode: FakeMode): void { this.mode = mode; }
 
   setSessions(rows: FakeConversationSummary[]): void {
@@ -144,6 +148,12 @@ export class FakeAgent {
   setSettingsSchema(schema: SettingDef[] | null): void {
     this.settingsSchema = schema;
     this.lastSettingsPost = null;
+  }
+
+  /** Configure the jobs served at GET /v1/jobs; `null` = 404 (no scheduler). */
+  setJobs(jobs: any[] | null): void {
+    this.jobs = jobs;
+    this.lastJobPost = null;
   }
 
   /** Number of /v1/events SSE subscribers currently attached. Tests
@@ -242,7 +252,47 @@ export class FakeAgent {
       void this.handleSettingsUpdate(req, res, settingsPostMatch[1]);
       return;
     }
+    if (url.pathname === '/v1/jobs' && method === 'GET') {
+      if (this.jobs === null) { this.json(res, 404, { error: { message: 'no scheduler' } }); return; }
+      this.json(res, 200, {
+        object: 'list', data: this.jobs,
+        options: { deliver: [{ value: 'origin', label: 'Origin', group: 'Routing' }], model: [{ value: '', label: 'Follow default (x)', group: 'Default' }] },
+        default_model: 'x',
+      });
+      return;
+    }
+    const jobMatch = url.pathname.match(/^\/v1\/jobs\/([^/]+)(\/run|\/runs)?$/);
+    if (jobMatch) {
+      void this.handleJob(req, res, method, jobMatch[1], jobMatch[2] || '');
+      return;
+    }
     this.json(res, 404, { error: 'no route' });
+  }
+
+  private async handleJob(
+    req: http.IncomingMessage, res: http.ServerResponse, method: string | undefined, id: string, tail: string,
+  ): Promise<void> {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    let body: any;
+    try { body = raw ? JSON.parse(raw) : {}; } catch { body = {}; }
+    if (this.jobs === null) { this.json(res, 404, { error: { message: 'no scheduler' } }); return; }
+    const job = this.jobs.find((j) => j.id === id);
+    if (tail === '/runs' && method === 'GET') {
+      this.json(res, 200, { object: 'list', data: job ? [{ id: 'e1', status: 'completed', source: 'scheduler' }] : [] });
+      return;
+    }
+    if (method !== 'POST') { this.json(res, 405, { error: { message: 'method' } }); return; }
+    this.lastJobPost = { id, action: tail === '/run' ? 'run' : 'update', body };
+    if (!job) { this.json(res, 404, { error: { type: 'not_found', message: 'no such job' } }); return; }
+    if (tail === '/run') { job.state = 'scheduled'; job.enabled = true; this.json(res, 200, job); return; }
+    if (body && typeof body.deliver === 'string' && body.deliver.includes('!')) {
+      this.json(res, 400, { error: { type: 'invalid_request_error', message: 'deliver target not understood' } });
+      return;
+    }
+    Object.assign(job, body);
+    if (typeof body.enabled === 'boolean') job.state = body.enabled ? 'scheduled' : 'paused';
+    this.json(res, 200, job);
   }
 
   private async handleSettingsUpdate(
@@ -385,6 +435,16 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     if (method === 'GET' && path === '/api/parley/settings/schema') {
       return parley.handleParleySettingsSchema(req, res);
     }
+    // Scheduled-jobs extension — mirrors server.ts ordering (run/runs before bare id).
+    if (method === 'GET' && path === '/api/parley/jobs') {
+      return parley.handleParleyJobsList(req, res);
+    }
+    const jobRun = method === 'POST' && path.match(/^\/api\/parley\/jobs\/([^/]+)\/run$/);
+    if (jobRun) return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));
+    const jobRuns = method === 'GET' && path.match(/^\/api\/parley\/jobs\/([^/]+)\/runs$/);
+    if (jobRuns) return parley.handleParleyJobRuns(req, res, decodeURIComponent(jobRuns[1]));
+    const jobUpd = method === 'POST' && path.match(/^\/api\/parley\/jobs\/([^/]+)$/);
+    if (jobUpd) return parley.handleParleyJobUpdate(req, res, decodeURIComponent(jobUpd[1]));
     const setMatch = method === 'POST'
       && path.match(/^\/api\/parley\/settings\/([^/]+)$/);
     if (setMatch) {

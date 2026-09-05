@@ -134,6 +134,17 @@ function replyIdFor(env: any, chatId: string): string {
   return msgId ? `sk-${msgId}` : `sk-chat-${chatId}`;
 }
 
+/** Extract the agent's error.message from a non-2xx response. */
+async function errorMessage(r: Response): Promise<string> {
+  let msg = `HTTP ${r.status}`;
+  try {
+    const j: any = await r.json();
+    if (j?.error?.message) msg = j.error.message;
+    else if (typeof j?.error === 'string') msg = j.error;
+  } catch {}
+  return msg;
+}
+
 function apiBase(): string {
   return `${apiOrigin()}/api/parley`;
 }
@@ -984,6 +995,7 @@ export const proxyClientAdapter = {
     sessions: true,           // chat_id provides multi-session semantics
     models: false,            // legacy hardcoded picker — superseded by `agentSettings`
     agentSettings: true,      // /api/parley/settings/* schema-driven panel (model picker etc.)
+    cronJobs: true,           // /api/parley/jobs — Settings › Cron (scheduled-jobs extension)
     toolEvents: true,         // tool_call / tool_result envelopes (Phase 3); image is also tool-like
 
     history: true,            // /api/parley/sessions/<chat_id>/messages
@@ -1595,6 +1607,37 @@ export const proxyClientAdapter = {
       throw err;
     }
     return await r.json();
+  },
+
+  /** Scheduled-jobs extension (Settings › Cron). GET /api/parley/jobs →
+   *  JobsPayload, or null when the agent has no scheduler (404). */
+  async listJobs(): Promise<any | null> {
+    try {
+      const r = await fetch(`${apiBase()}/jobs`);
+      if (r.status === 404) return null;
+      if (!r.ok) { diag(`proxy-client.listJobs: HTTP ${r.status}`); return null; }
+      return await r.json();
+    } catch (e: any) {
+      diag(`proxy-client.listJobs failed: ${e.message}`);
+      return null;
+    }
+  },
+
+  /** POST /api/parley/jobs/{id} {enabled?, deliver?, model?} → updated JobDef.
+   *  Throws with the agent's message on rejection so the panel can revert. */
+  async updateJob(id: string, body: Record<string, unknown>): Promise<any> {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+
+  /** POST /api/parley/jobs/{id}/run → JobDef (queued for the next tick). */
+  async runJob(id: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/run`, { method: 'POST' });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
   },
 
   async renameSession(id: string, title: string) {

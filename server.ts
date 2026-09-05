@@ -1371,6 +1371,23 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (req.method === 'GET' && /^\/api\/parley\/settings\/schema(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleySettingsSchema(req, res);
     }
+    // Scheduled-jobs extension (Settings › Cron). Order matters: the
+    // two-segment `/run` and `/runs` routes must match before the bare id.
+    if (req.method === 'GET' && /^\/api\/parley\/jobs(?:\?.*)?$/.test(req.url)) {
+      return parley.handleParleyJobsList(req, res);
+    }
+    const jobRun = req.method === 'POST' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/run(?:\?.*)?$/);
+    if (jobRun) {
+      return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));
+    }
+    const jobRuns = req.method === 'GET' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/runs(?:\?.*)?$/);
+    if (jobRuns) {
+      return parley.handleParleyJobRuns(req, res, decodeURIComponent(jobRuns[1]));
+    }
+    const jobUpdate = req.method === 'POST' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)(?:\?.*)?$/);
+    if (jobUpdate) {
+      return parley.handleParleyJobUpdate(req, res, decodeURIComponent(jobUpdate[1]));
+    }
     if (req.method === 'GET' && /^\/api\/parley\/commands(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleyCommands(req, res);
     }

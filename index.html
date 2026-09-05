@@ -356,6 +356,7 @@
       <button type="button" class="settings-nav-btn active" data-target="notifications">Notifications</button>
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
+      <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
       <button type="button" class="settings-nav-btn" data-target="voice-input">Voice input</button>
       <button type="button" class="settings-nav-btn" data-target="voice-output">Voice output</button>
       <button type="button" class="settings-nav-btn" data-target="voice-phrases">Voice phrases</button>
@@ -505,6 +506,18 @@
          and rendered by agentSettings.ts. -->
   </div>
 
+  <div class="settings-group" id="settings-group-cron" data-section="cron" hidden>
+    <div class="group-label">Cron</div>
+    <!--
+      Scheduled jobs the agent declares over the optional /v1/jobs
+      extension (docs/ABSTRACT_AGENT_PROTOCOL.md). Rendered at runtime
+      by src/cronSettings.ts: one card per job with enable toggle,
+      delivery target, model pin, Run now, and a link to the chat it
+      reports to. The placeholder stays until a successful response.
+    -->
+    <div class="row row-wide" data-cron-placeholder><span class="hint">Loading scheduled jobs…</span></div>
+    <div id="cron-jobs-host" class="cron-jobs"></div>
+  </div>
   <div class="settings-group" data-section="voice-input" hidden>
     <div class="group-label">Voice input</div>
     <div class="row">

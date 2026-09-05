@@ -5907,3 +5907,25 @@
 .doc-drawer-content div.math-raw {
   display: block;
 }
+
+/* ── Settings › Cron (scheduled-jobs extension) ─────────────────────── */
+.cron-jobs { display: flex; flex-direction: column; gap: 10px; }
+.cron-summary { margin: 4px 0 2px; }
+.cron-job { border: 1px solid var(--border, rgba(127,127,127,.35)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cron-job-busy { opacity: .6; pointer-events: none; }
+.cron-job-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cron-job-title { font-weight: 600; }
+.cron-job-meta { font-size: .85em; opacity: .8; }
+.cron-job-error { font-size: .85em; color: var(--danger, #d33); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cron-job-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: .9em; }
+.cron-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.cron-ctl select { max-width: 220px; }
+.cron-btn { padding: 3px 10px; border-radius: 8px; }
+.cron-link { text-decoration: underline; }
+.cron-pill { font-size: .75em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; text-transform: lowercase; }
+.cron-pill-ok { color: var(--ok, #2a9d5c); }
+.cron-pill-warn { color: var(--warn, #c98a00); }
+.cron-pill-bad { color: var(--danger, #d33); }
+.cron-pill-muted { color: inherit; opacity: .55; }
+.cron-job-prompt summary { cursor: pointer; font-size: .85em; opacity: .8; }
+.cron-job-prompt pre { white-space: pre-wrap; font-size: .8em; max-height: 220px; overflow: auto; margin: 6px 0 0; }

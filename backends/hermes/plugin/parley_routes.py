@@ -555,6 +555,12 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_post("/v1/transcript/adopt-orphans", lambda r: handle_transcript_adopt(ctx, r))
 
     app.router.add_get("/v1/user-settings", lambda r: handle_user_settings(ctx, r))
+    # Scheduled-jobs extension (Parley "Cron" settings section) — see parley_route_jobs.py.
+    try:
+        from .parley_route_jobs import register_jobs_routes
+    except ImportError:
+        from parley_route_jobs import register_jobs_routes  # type: ignore
+    register_jobs_routes(app, ctx)
     app.router.add_post("/v1/user-settings", lambda r: handle_user_settings(ctx, r))
 
     app.router.add_get("/v1/unread", lambda r: handle_unread(ctx, r))

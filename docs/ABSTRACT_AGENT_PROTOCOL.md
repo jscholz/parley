@@ -484,6 +484,112 @@ the agent doesn't validate, malformed values land in agent state.
 
 ---
 
+## Optional scheduled-jobs extension — `/v1/jobs/*`
+
+Lets an agent that runs scheduled work (cron-style jobs, reminders,
+recurring syncs) expose those jobs so parley can render a **Cron**
+section in Settings: what is scheduled, when it last ran and how it
+went, where it reports to, which model it uses, plus pause/resume, a
+manual run, and a redirect of its delivery target. The agent owns the
+job list, the option catalogs AND validation; parley is a thin
+renderer and never encodes agent-specific concepts (hermes' cron store
+is one implementation; a reminders service is another).
+
+Strictly optional: agents without a scheduler return 404 on
+`GET /v1/jobs` and parley shows "This agent does not expose scheduled
+jobs." in the Cron section.
+
+### `GET /v1/jobs`
+
+**Response (200):**
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "c06b4603e054",
+      "name": "Press radar — daily briefing",
+      "schedule": "45 3 * * *",
+      "enabled": true,
+      "state": "scheduled",
+      "next_run_at": "2026-09-06T03:45:00+01:00",
+      "last_run_at": "2026-09-05T03:45:12+01:00",
+      "last_status": "ok",
+      "last_error": null,
+      "prompt": "Collect overnight press mentions…",
+      "deliver": "parley:c31cd523-15fa-4758-822b-c1159b595b1c",
+      "model": "",
+      "provider": "",
+      "skills": ["gog"],
+      "origin": { "platform": "parley", "chat_id": "e50f5646-…", "label": "parley:e50f5646" }
+    }
+  ],
+  "options": {
+    "deliver": [
+      { "value": "origin", "label": "Origin chat (where the job was created)", "group": "Routing" },
+      { "value": "local",  "label": "Save only — no delivery", "group": "Routing" },
+      { "value": "parley:c31cd523-…", "label": "Press radar", "group": "Parley chats" }
+    ],
+    "model": [
+      { "value": "", "label": "Follow default (gpt-6-astra via openai-codex)", "group": "Default" },
+      { "value": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "group": "OpenAI Codex" }
+    ]
+  },
+  "default_model": "gpt-6-astra via openai-codex"
+}
+```
+
+**Job fields:**
+
+- `id` (string, required) — opaque, `[A-Za-z0-9_-]{1,64}`; the URL
+  fragment on the write endpoints.
+- `name`, `schedule` (strings) — display only. `schedule` is whatever
+  the agent shows its users (cron expression, "every 2h", …).
+- `enabled` (bool) and `state` (string) — `state` is free-form but the
+  UI recognises `scheduled`, `paused`, `running`, `error`, `done`.
+- `next_run_at`, `last_run_at` (ISO-8601 or null); `last_status`,
+  `last_error` (strings or null). A non-null `last_error` renders as a
+  red line under the job.
+- `prompt` (string) — what the job does; the agent may truncate.
+- `deliver` (string) — where results go. Must be one of the
+  `options.deliver[].value`s, or an agent-accepted target the agent
+  ALSO lists (agents should always include a job's current value so
+  the picker can show the truth).
+- `model` (string) — `""` when the job follows the agent's default;
+  otherwise a pinned model id present in `options.model`.
+- `origin` (object or null) — `{platform, chat_id, label}` of the chat
+  the job was created from. When `platform` is `"parley"` the UI
+  deep-links to it (`?chat=<chat_id>`), likewise for a `deliver` value
+  of the form `parley:<chat_id>`.
+
+`options.deliver` / `options.model` follow the settings-extension
+option shape (`value`, `label`, optional `group` → `<optgroup>`).
+
+### `POST /v1/jobs/{id}`
+
+Body: any subset of `{ "enabled": bool, "deliver": string, "model": string }`
+(`"model": ""` clears a pin). Returns the updated job object (200).
+`404` when the id is unknown; `400` with `{"error":{"type":
+"invalid_request_error","message":…}}` when the agent rejects a value
+— parley reverts the control and shows the message.
+
+### `POST /v1/jobs/{id}/run`
+
+Queue the job to run at the agent's next opportunity (results deliver
+through the agent's normal path). Returns the updated job (200).
+
+### `GET /v1/jobs/{id}/runs?limit=N`
+
+Recent executions, newest first: `{"object":"list","data":[{"id",
+"status","source","claimed_at","started_at","finished_at","error"}]}`.
+Optional; parley tolerates 404.
+
+Reference implementation: `backends/hermes/plugin/parley_route_jobs.py`
+over hermes' `cron.jobs` store (the same store `hermes cron …` and the
+hermes dashboard mutate). Proxy forwarders: `proxy/parley/jobs.ts`
+(`/api/parley/jobs*`). Renderer: `src/cronSettings.ts`.
+
 ## Errors
 
 Errors use the OpenAI shape:

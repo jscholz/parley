@@ -68,6 +68,12 @@ export {
   handleParleySettingsSchema,
   handleParleySettingsUpdate,
 } from './settings.ts';
+export {
+  handleParleyJobsList,
+  handleParleyJobUpdate,
+  handleParleyJobRun,
+  handleParleyJobRuns,
+} from './jobs.ts';
 export { handleParleyCommands } from './commands.ts';
 export { handleParleySearch } from './search.ts';
 export {

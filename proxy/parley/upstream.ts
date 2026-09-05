@@ -264,6 +264,13 @@ export interface UpstreamAgent {
    *  with the upstream's response body included on `.cause` so the
    *  proxy can pass status + body through to the PWA. */
   updateSetting(id: string, value: unknown): Promise<SettingDef>;
+  /** Optional scheduled-jobs extension (/v1/jobs/*). listJobs → null when
+   *  the upstream has no scheduler (404); mutations throw UpstreamHTTPError
+   *  with the upstream's status + body on rejection. */
+  listJobs(): Promise<any | null>;
+  updateJob(id: string, body: unknown): Promise<any>;
+  runJob(id: string): Promise<any>;
+  listJobRuns(id: string, limit?: number): Promise<any>;
 
   /** Optional slash-command catalog. Returns null when the upstream
    *  doesn't implement /v1/commands (404); the proxy surfaces 404 to
@@ -462,6 +469,47 @@ export class HTTPAgentUpstream implements UpstreamAgent {
       throw new UpstreamHTTPError(r.status, body);
     }
     return body as SettingDef;
+  }
+
+  // ── Scheduled-jobs extension (/v1/jobs/*) — same forwarding rules as
+  // settings: 404 → null (agent has no scheduler), other non-2xx →
+  // UpstreamHTTPError so the proxy mirrors status + body verbatim.
+  async listJobs(): Promise<any | null> {
+    const r = await fetch(`${this.url}/v1/jobs`, { headers: this.headers() });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`upstream listJobs: HTTP ${r.status}`);
+    return await r.json();
+  }
+
+  private async postJob(path: string, body?: unknown): Promise<any> {
+    const r = await fetch(`${this.url}${path}`, {
+      method: 'POST',
+      headers: this.headers({ 'content-type': 'application/json' }),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let parsed: any;
+    try { parsed = await r.json(); } catch { parsed = null; }
+    if (!r.ok) throw new UpstreamHTTPError(r.status, parsed);
+    return parsed;
+  }
+
+  updateJob(id: string, body: unknown): Promise<any> {
+    return this.postJob(`/v1/jobs/${encodeURIComponent(id)}`, body);
+  }
+
+  runJob(id: string): Promise<any> {
+    return this.postJob(`/v1/jobs/${encodeURIComponent(id)}/run`);
+  }
+
+  async listJobRuns(id: string, limit = 20): Promise<any> {
+    const r = await fetch(
+      `${this.url}/v1/jobs/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(String(limit))}`,
+      { headers: this.headers() },
+    );
+    let parsed: any;
+    try { parsed = await r.json(); } catch { parsed = null; }
+    if (!r.ok) throw new UpstreamHTTPError(r.status, parsed);
+    return parsed;
   }
 
   async deleteConversation(chatId: string): Promise<void> {

@@ -844,6 +844,61 @@ export async function installMockBackend(page) {
    *  tests can assert the body shape forwarded matches what they
    *  expected. */
   let lastSettingsPost = null;
+  // /api/parley/jobs* — scheduled-jobs extension (Settings › Cron).
+  // Tests configure via mock.setJobs([...]); null = agent has no
+  // scheduler (404, section shows "not supported").
+  let jobs = null;                       // null | JobDef[]
+  let lastJobPost = null;                // { id, action: 'update'|'run', body }
+  await page.route(/.*\/api\/parley\/jobs(?:\/.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const notSupported = () => route.fulfill({ status: 404, contentType: 'application/json',
+      body: JSON.stringify({ error: { message: 'agent does not implement /v1/jobs' } }) });
+    if (method === 'GET' && /\/jobs\/?$/.test(url.pathname)) {
+      if (jobs === null) return notSupported();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        object: 'list', data: jobs,
+        options: {
+          deliver: [
+            { value: 'origin', label: 'Origin chat', group: 'Routing' },
+            { value: 'local', label: 'Save only', group: 'Routing' },
+            { value: 'parley:chat-press', label: 'Press radar chat', group: 'Parley chats' },
+          ],
+          model: [
+            { value: '', label: 'Follow default (gpt-6-astra)', group: 'Default' },
+            { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', group: 'OpenAI Codex' },
+          ],
+        },
+        default_model: 'gpt-6-astra',
+      }) });
+      return;
+    }
+    const m = url.pathname.match(/\/jobs\/([^/]+)(\/run|\/runs)?$/);
+    if (!m) return route.fallback();
+    const id = decodeURIComponent(m[1]);
+    if (jobs === null) return notSupported();
+    const job = jobs.find((j) => j.id === id);
+    if (m[2] === '/runs') {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ object: 'list', data: [] }) });
+      return;
+    }
+    let body = {};
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch {}
+    lastJobPost = { id, action: m[2] === '/run' ? 'run' : 'update', body };
+    if (!job) {
+      await route.fulfill({ status: 404, contentType: 'application/json',
+        body: JSON.stringify({ error: { type: 'not_found', message: 'no such job' } }) });
+      return;
+    }
+    if (m[2] === '/run') { job.enabled = true; job.state = 'scheduled'; }
+    else {
+      Object.assign(job, body);
+      if (typeof body.enabled === 'boolean') job.state = body.enabled ? 'scheduled' : 'paused';
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(job) });
+  });
+
   await page.route(/.*\/api\/parley\/settings(?:\/.*)?/, async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -1604,6 +1659,9 @@ export async function installMockBackend(page) {
      *  returns 404). The handler also recognizes POST /settings/{id}
      *  with an enum-validation pass; getLastSettingsPost() returns
      *  what the PWA most recently sent. */
+    /** Scheduled jobs served at /api/parley/jobs (null = 404). */
+    setJobs(list) { jobs = list; lastJobPost = null; },
+    getLastJobPost() { return lastJobPost; },
     setSettingsSchema(schema) {
       settingsSchema = schema;
       lastSettingsPost = null;

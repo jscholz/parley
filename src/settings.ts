@@ -4,6 +4,7 @@
 
 import * as backend from './backend.ts';
 import * as agentSettings from './agentSettings.ts';
+import * as cronSettings from './cronSettings.ts';
 import { log } from './util/log.ts';
 import {
   isPushSupported,
@@ -1450,6 +1451,7 @@ export function hydrate(handlers: {
     // Replaces the legacy refreshModelState path; the agent now declares
     // what's user-tunable via /v1/settings/schema.
     agentSettings.load().catch(() => {});
+    cronSettings.load().catch(() => {});
     modelHandlers.reloadKeyterms?.();
   };
   const closePanel = () => {
@@ -1458,6 +1460,7 @@ export function hydrate(handlers: {
     // one HTTP roundtrip; runs after the close animation starts so it
     // doesn't block the dismiss.
     agentSettings.load().catch(() => {});
+    cronSettings.load().catch(() => {});
     // Suppress toolbar clicks for a brief delay AFTER close to cover the
     // remainder of the iOS touch sequence (touchend → click). 350ms is
     // long enough for the synthetic click to fire and be ignored, short
