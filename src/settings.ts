@@ -1490,18 +1490,17 @@ export function hydrate(handlers: {
   // CSS overrides this and shows them all stacked. See index.html
   // `.settings-shell` and styles/app.css `.settings-nav-btn`.
   const navBtns = panel ? Array.from(panel.querySelectorAll<HTMLButtonElement>('.settings-nav-btn')) : [];
-  const groupsByTarget = new Map<string, HTMLElement>();
-  if (panel) {
-    for (const g of Array.from(panel.querySelectorAll<HTMLElement>('.settings-group[data-section]'))) {
-      groupsByTarget.set(g.dataset.section!, g);
-    }
-  }
+  // A nav button can own several groups: `data-nav-target` on a group names the
+  // button that reveals it (the three voice groups share the "Voice" tab); groups
+  // without it are shown by the button whose target equals their data-section.
+  const groups = panel ? Array.from(panel.querySelectorAll<HTMLElement>('.settings-group[data-section]')) : [];
+  const navTargetOf = (g: HTMLElement) => g.dataset.navTarget || g.dataset.section!;
   const showSection = (target: string) => {
     for (const btn of navBtns) {
       btn.classList.toggle('active', btn.dataset.target === target);
     }
-    for (const [name, group] of groupsByTarget) {
-      group.hidden = name !== target;
+    for (const group of groups) {
+      group.hidden = navTargetOf(group) !== target;
     }
   };
   for (const btn of navBtns) {

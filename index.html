@@ -358,10 +358,8 @@
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
       <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
       <button type="button" class="settings-nav-btn" data-target="health">Health</button>
-      <button type="button" class="settings-nav-btn" data-target="voice-input">Voice input</button>
-      <button type="button" class="settings-nav-btn" data-target="voice-output">Voice output</button>
-      <button type="button" class="settings-nav-btn" data-target="voice-phrases">Voice phrases</button>
-      <button type="button" class="settings-nav-btn" data-target="interaction">Interaction</button>
+      <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
+      <button type="button" class="settings-nav-btn" data-target="interaction">Hotkeys</button>
       <button type="button" class="settings-nav-btn" data-target="meetings">Meetings</button>
     </nav>
     <div class="settings-content">
@@ -525,7 +523,7 @@
     <div class="row row-wide" data-health-placeholder><span class="hint">Loading health checks…</span></div>
     <div id="health-checks-host" class="cron-jobs"></div>
   </div>
-  <div class="settings-group" data-section="voice-input" hidden>
+  <div class="settings-group" data-section="voice-input" data-nav-target="voice" hidden>
     <div class="group-label">Voice input</div>
     <div class="row">
       <label for="set-mic">Microphone</label>
@@ -562,7 +560,7 @@
     </div>
   </div>
 
-  <div class="settings-group" data-section="voice-output" hidden>
+  <div class="settings-group" data-section="voice-output" data-nav-target="voice" hidden>
     <div class="group-label">Voice output</div>
     <div class="row">
       <label for="set-tts-engine">TTS engine</label>
@@ -593,7 +591,7 @@
     </div>
   </div>
 
-  <div class="settings-group" data-section="voice-phrases" hidden>
+  <div class="settings-group" data-section="voice-phrases" data-nav-target="voice" hidden>
     <div class="group-label">Voice phrases</div>
     <div class="row">
       <label for="set-commit-phrase">Send word</label>
@@ -630,7 +628,7 @@
   </div>
 
   <div class="settings-group" data-section="interaction" hidden>
-    <div class="group-label">Interaction</div>
+    <div class="group-label">Hotkeys</div>
     <!-- Barge moved to the call-mode menu (chevron next to btn-call).
          Slider 0 = OFF, 5-100 = ON + sensitivity. iOS speakerphone
          hides the slider entirely (acoustically can't barge there). -->

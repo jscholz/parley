@@ -153,22 +153,25 @@ function renderCard(job: JobDef, card: HTMLElement, notice?: string) {
   modelWrap.appendChild(modelSel);
   controls.appendChild(modelWrap);
 
-  const run = el('button', 'cron-btn', 'Run now');
+  const actions = el('div', 'cron-actions');
+  const run = el('button', 'cron-btn cron-btn-primary', 'Run now');
   run.type = 'button'; run.dataset.role = 'run';
   run.onclick = () => void runNow(job, card);
-  controls.appendChild(run);
-
-  const del = el('button', 'cron-btn cron-btn-danger', 'Delete');
-  del.type = 'button'; del.dataset.role = 'delete';
-  del.onclick = () => void deleteJob(job, card);
-  controls.appendChild(del);
+  actions.appendChild(run);
 
   const link = chatLinkFor(job);
   if (link) {
     const a = el('a', 'cron-link', link.label);
     a.href = link.href; a.dataset.role = 'chat-link';
-    controls.appendChild(a);
+    actions.appendChild(a);
   }
+
+  const del = el('button', 'cron-btn cron-btn-danger', 'Delete');
+  del.type = 'button'; del.dataset.role = 'delete';
+  del.onclick = () => void deleteJob(job, card);
+  actions.appendChild(del);
+
+  controls.appendChild(actions);
   card.appendChild(controls);
 
   if (job.prompt) {

@@ -5908,33 +5908,76 @@
   display: block;
 }
 
-/* ── Settings › Cron (scheduled-jobs extension) ─────────────────────── */
+/* ── Settings › Cron + Health cards (scheduled-jobs / health extensions) ──
+   One card language for both sections: quiet surface, hairline border, the
+   app's sage as the only accent, ghost buttons (no browser bezels), and a
+   red text button for destructive actions. */
 .cron-jobs { display: flex; flex-direction: column; gap: 10px; }
-.cron-summary { margin: 4px 0 2px; }
-.cron-job { border: 1px solid var(--border, rgba(127,127,127,.35)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
-.cron-job-busy { opacity: .6; pointer-events: none; }
-.cron-job-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cron-job-title { font-weight: 600; }
-.cron-job-meta { font-size: .85em; opacity: .8; }
-.cron-job-error { font-size: .85em; color: var(--danger, #d33); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cron-job-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; font-size: .9em; }
-.cron-ctl { display: inline-flex; align-items: center; gap: 6px; }
-.cron-ctl select { max-width: 220px; }
-.cron-btn { padding: 3px 10px; border-radius: 8px; }
-.cron-link { text-decoration: underline; }
-.cron-btn-danger { color: var(--danger, #d33); border-color: currentColor; margin-left: auto; }
-.cron-pill { font-size: .75em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; text-transform: lowercase; }
-.cron-pill-ok { color: var(--ok, #2a9d5c); }
-.cron-pill-warn { color: var(--warn, #c98a00); }
-.cron-pill-bad { color: var(--danger, #d33); }
-.cron-pill-muted { color: inherit; opacity: .55; }
-.cron-job-prompt summary { cursor: pointer; font-size: .85em; opacity: .8; }
-.cron-job-prompt pre { white-space: pre-wrap; font-size: .8em; max-height: 220px; overflow: auto; margin: 6px 0 0; }
-
-/* ── Settings › Health ─────────────────────────────────────────────── */
-.health-report summary { cursor: pointer; font-size: .85em; opacity: .8; }
-.health-report-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78em; max-height: 320px; overflow: auto; margin-top: 6px; }
+.cron-summary { margin: 4px 0 6px; }
+.cron-job {
+  background: var(--surface-subtle); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.cron-job-busy { opacity: .55; pointer-events: none; }
+.cron-job-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cron-job-title { font-weight: 600; font-size: var(--content-size); letter-spacing: .01em; }
+.cron-job-meta { font-size: calc(var(--content-size) - 2px); color: var(--muted); font-family: var(--font-mono); }
+.cron-job-error {
+  font-size: calc(var(--content-size) - 2px); color: var(--danger);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cron-job-controls {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+  gap: 8px 14px; font-size: calc(var(--content-size) - 1px);
+}
+.cron-ctl { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
+.cron-ctl select {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 5px 10px; font: inherit; font-size: calc(var(--content-size) - 1px); max-width: 260px; min-width: 0;
+}
+.cron-ctl select:focus { outline: none; border-color: var(--primary); }
+.cron-ctl input[type=checkbox] { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; }
+.cron-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cron-btn {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; color: var(--fg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 12px; font: inherit; font-size: calc(var(--content-size) - 1px);
+  cursor: pointer; line-height: 1.3; transition: background .12s, border-color .12s, color .12s;
+}
+.cron-btn:hover { background: var(--primary-soft); border-color: var(--primary); }
+.cron-btn:disabled { opacity: .45; cursor: default; }
+.cron-btn-primary { color: var(--primary); border-color: var(--primary-soft); background: var(--primary-soft); }
+.cron-btn-primary:hover { background: var(--primary-glow); }
+.cron-btn-danger { color: var(--danger); border-color: transparent; margin-left: auto; }
+.cron-btn-danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); border-color: var(--danger); }
+.cron-link { color: var(--primary); text-decoration: none; font-size: calc(var(--content-size) - 1px); }
+.cron-link:hover { text-decoration: underline; }
+.cron-pill {
+  font-size: calc(var(--content-size) - 4px); padding: 2px 9px; border-radius: var(--radius-pill);
+  border: 1px solid transparent; text-transform: lowercase; letter-spacing: .02em; white-space: nowrap;
+}
+.cron-pill-ok { color: var(--primary); background: var(--primary-soft); }
+.cron-pill-warn { color: #c98a00; background: rgba(201,138,0,.12); }
+.cron-pill-bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.cron-pill-muted { color: var(--muted); background: var(--surface-subtle); border-color: var(--border-subtle); }
+.cron-job-prompt summary, .health-report summary { cursor: pointer; font-size: calc(var(--content-size) - 2px); color: var(--muted); }
+.cron-job-prompt pre {
+  white-space: pre-wrap; font-family: var(--font-mono); font-size: calc(var(--content-size) - 3px);
+  max-height: 220px; overflow: auto; margin: 6px 0 0; color: var(--fg); opacity: .85;
+}
+.health-report-body { font-family: var(--font-mono); font-size: calc(var(--content-size) - 3px); max-height: 320px; overflow: auto; margin-top: 6px; }
 .health-line { white-space: pre-wrap; padding: 1px 0; }
-.health-line-fail { color: var(--danger, #d33); }
-.health-line-warn { color: var(--warn, #c98a00); }
-.health-line-ok { opacity: .75; }
+.health-line-fail { color: var(--danger); }
+.health-line-warn { color: #c98a00; }
+.health-line-ok { opacity: .7; }
+@media (max-width: 640px) {
+  .cron-job-controls { grid-template-columns: 1fr; }
+  .cron-btn-danger { margin-left: 0; }
+}
+
+/* Merged "Voice" tab: the three groups stack, so their labels come back as
+   sub-headings (the desktop shell hides group labels elsewhere). */
+#settings .settings-shell .settings-group[data-nav-target] .group-label {
+  display: block; font-size: calc(var(--content-size) - 2px); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em; margin: 4px 0 2px;
+}

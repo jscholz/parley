@@ -40,7 +40,7 @@ function renderCard(c: HealthCheck, card: HTMLElement, notice?: string) {
   card.appendChild(meta);
 
   const controls = el('div', 'cron-job-controls');
-  const run = el('button', 'cron-btn', 'Run now');
+  const run = el('button', 'cron-btn cron-btn-primary', 'Run now');
   run.type = 'button'; run.dataset.role = 'run'; run.disabled = !c.can_run;
   run.title = c.can_run ? 'Re-run this check now (takes up to a few minutes)' : 'Read-only here';
   run.onclick = async () => {

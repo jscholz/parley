@@ -381,6 +381,10 @@ export async function openSidebar(page, { timeout = 3_000 } = {}) {
  *  `[data-section]` on `.settings-group` and `[data-target]` on the
  *  nav buttons: notifications, display, agent, voice-input,
  *  voice-output, voice-phrases, interaction. */
+/** Sections that share one nav tab (data-nav-target in index.html). Scenarios
+ *  keep addressing the group by its data-section; we click the owning tab. */
+const NAV_TARGET_FOR_SECTION = { 'voice-input': 'voice', 'voice-output': 'voice', 'voice-phrases': 'voice' };
+
 export async function openSettingsSection(page, section, { timeout = 3_000 } = {}) {
   await page.click('#sb-settings');
   await page.waitForFunction(
@@ -388,7 +392,7 @@ export async function openSettingsSection(page, section, { timeout = 3_000 } = {
     null,
     { timeout },
   );
-  await page.click(`.settings-nav-btn[data-target="${section}"]`);
+  await page.click(`.settings-nav-btn[data-target="${NAV_TARGET_FOR_SECTION[section] || section}"]`);
   await page.waitForSelector(`.settings-group[data-section="${section}"]:not([hidden])`, { timeout });
 }
 
