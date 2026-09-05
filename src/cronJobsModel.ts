@@ -97,6 +97,15 @@ export function groupOptions(options: JobOption[]): Array<[string, JobOption[]]>
   return Array.from(groups.entries());
 }
 
+/** Ensure `value` is selectable: agents SHOULD list a job's current value
+ *  (the contract says so), but a select whose value is missing from its
+ *  options silently shows the first option — a lie about the job's state.
+ *  Append a "(current)" option when needed; '' never needs one. */
+export function withCurrentOption(options: JobOption[], value: string): JobOption[] {
+  if (!value || options.some((o) => o.value === value)) return options;
+  return [...options, { value, label: `${value} (current)`, group: 'Current' }];
+}
+
 /** Replace a job in the list by id (server response wins), preserving order. */
 export function mergeJob(jobs: JobDef[], updated: JobDef): JobDef[] {
   return jobs.map((j) => (j.id === updated.id ? updated : j));

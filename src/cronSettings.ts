@@ -17,7 +17,7 @@
 import * as backend from './backend.ts';
 import {
   type JobDef, type JobOption, type JobsPayload,
-  chatLinkFor, groupOptions, mergeJob, relativeTime, statusText, statusTone,
+  chatLinkFor, groupOptions, mergeJob, relativeTime, statusText, statusTone, withCurrentOption,
 } from './cronJobsModel.ts';
 
 let payload: JobsPayload | null = null;
@@ -37,7 +37,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 function select(id: string, options: JobOption[], value: string, onChange: (v: string) => void): HTMLSelectElement {
   const sel = el('select');
   sel.id = id;
-  for (const [group, opts] of groupOptions(options)) {
+  for (const [group, opts] of groupOptions(withCurrentOption(options, value))) {
     const og = document.createElement('optgroup');
     og.label = group;
     for (const o of opts) {

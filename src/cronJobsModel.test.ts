@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob } from './cronJobsModel.ts';
+import { statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob, withCurrentOption } from './cronJobsModel.ts';
 
 const base = { state: 'scheduled', enabled: true, last_status: 'ok', last_error: null, deliver: 'origin', origin: null } as any;
 
@@ -46,4 +46,13 @@ test('groupOptions + mergeJob', () => {
   assert.deepEqual(groups.map(([g, o]) => [g, o.length]), [['Routing', 2], ['Parley chats', 1], ['Other', 1]]);
   const jobs = [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] as any;
   assert.deepEqual(mergeJob(jobs, { id: 'b', name: 'B2' } as any).map((j: any) => j.name), ['A', 'B2']);
+});
+
+test('withCurrentOption — appends a missing current value, leaves listed/empty alone', () => {
+  const opts = [{ value: 'origin', label: 'Origin', group: 'Routing' }];
+  assert.equal(withCurrentOption(opts, 'origin'), opts);
+  assert.equal(withCurrentOption(opts, ''), opts);
+  const out = withCurrentOption(opts, 'sidekick:old');
+  assert.equal(out.length, 2);
+  assert.deepEqual(out[1], { value: 'sidekick:old', label: 'sidekick:old (current)', group: 'Current' });
 });
