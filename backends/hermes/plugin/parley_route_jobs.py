@@ -331,6 +331,14 @@ def _err(web, status: int, err_type: str, message: str):
     return web.json_response({"error": {"type": err_type, "message": message}}, status=status)
 
 
+def _unauthorized(ctx, request) -> bool:
+    """The plugin's HTTP app authenticates at the middleware layer; ``register_routes``
+    receives a lightweight context, not the adapter. Honour an explicit checker when the
+    caller provides one (tests, direct adapter use), otherwise defer to the middleware."""
+    check = getattr(ctx, "check_http_auth", None) or getattr(ctx, "_check_http_auth", None)
+    return bool(check) and not check(request)
+
+
 def _job_id_from(request) -> str:
     job_id = request.match_info.get("job_id", "")
     if not _JOB_ID_RE.match(job_id):
@@ -348,7 +356,7 @@ async def _in_executor(fn, *args):
 
 async def handle_jobs_list(adapter, request):
     from aiohttp import web
-    if not adapter._check_http_auth(request):
+    if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
         payload = await _in_executor(build_jobs_payload)
@@ -360,7 +368,7 @@ async def handle_jobs_list(adapter, request):
 
 async def handle_job_update(adapter, request):
     from aiohttp import web
-    if not adapter._check_http_auth(request):
+    if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
         job_id = _job_id_from(request)
@@ -380,7 +388,7 @@ async def handle_job_update(adapter, request):
 
 async def handle_job_run(adapter, request):
     from aiohttp import web
-    if not adapter._check_http_auth(request):
+    if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
         job_id = _job_id_from(request)
@@ -397,7 +405,7 @@ async def handle_job_run(adapter, request):
 
 async def handle_job_runs(adapter, request):
     from aiohttp import web
-    if not adapter._check_http_auth(request):
+    if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
         job_id = _job_id_from(request)

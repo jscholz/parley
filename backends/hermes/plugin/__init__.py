@@ -604,6 +604,10 @@ class ParleyAdapter(BasePlatformAdapter):
             emit_envelope=lambda env: _route_events.publish_out_of_turn(self, env),
             send_envelope=self._safe_send_envelope,
             vapid_subject=vapid_subject,
+            # Bearer-token check for routes that mutate agent state (the
+            # scheduled-jobs extension); the push/unread siblings stay
+            # loopback-only + unauthenticated as before.
+            check_http_auth=self._check_http_auth,
         )
         _sroutes.register_routes(self._app, ctx)
 
