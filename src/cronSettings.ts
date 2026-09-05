@@ -159,7 +159,7 @@ function renderCard(job: JobDef, card: HTMLElement, notice?: string) {
 
 function setPlaceholder(host: HTMLElement, text: string) {
   const ph = host.querySelector<HTMLElement>('[data-cron-placeholder]');
-  if (ph) { ph.textContent = text; ph.hidden = false; }
+  if (ph) { ph.textContent = text; ph.hidden = false; ph.style.display = ''; }
 }
 
 /** Fetch + render. Idempotent; errors leave the previous render in place. */
@@ -178,7 +178,8 @@ export async function load() {
   }
   payload = fresh;
   const ph = group.querySelector<HTMLElement>('[data-cron-placeholder]');
-  if (ph) ph.hidden = true;
+  // `.row` is display:flex, which beats the `hidden` attribute — hide explicitly.
+  if (ph) { ph.hidden = true; ph.style.display = 'none'; }
   host.innerHTML = '';
   if (payload.data.length === 0) {
     setPlaceholder(group, 'No scheduled jobs yet.');
