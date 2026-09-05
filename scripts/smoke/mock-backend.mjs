@@ -844,6 +844,31 @@ export async function installMockBackend(page) {
    *  tests can assert the body shape forwarded matches what they
    *  expected. */
   let lastSettingsPost = null;
+  // /api/parley/health* — health extension (Settings › Health).
+  let health = null;                     // null | HealthCheck[]
+  let lastHealthRun = null;
+  await page.route(/.*\/api\/parley\/health(?:\/.*)?$/, async (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const notSupported = () => route.fulfill({ status: 404, contentType: 'application/json',
+      body: JSON.stringify({ error: { message: 'agent does not implement /v1/health' } }) });
+    if (health === null) return notSupported();
+    if (method === 'GET' && /\/health\/?$/.test(url.pathname)) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ object: 'list', data: health }) });
+      return;
+    }
+    const m = url.pathname.match(/\/health\/([^/]+)\/run$/);
+    if (m && method === 'POST') {
+      const id = decodeURIComponent(m[1]); lastHealthRun = id;
+      const c = health.find((x) => x.id === id);
+      if (!c) { await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'no such check' } }) }); return; }
+      Object.assign(c, { worst: 'OK', report: '✅ mock health — later — 0 FAIL · 0 WARN · 1 OK\nOK   all — good', counts: { fail: 0, warn: 0, ok: 1 }, last_run_at: new Date().toISOString() });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(c) });
+      return;
+    }
+    return route.fallback();
+  });
+
   // /api/parley/jobs* — scheduled-jobs extension (Settings › Cron).
   // Tests configure via mock.setJobs([...]); null = agent has no
   // scheduler (404, section shows "not supported").
@@ -1666,6 +1691,9 @@ export async function installMockBackend(page) {
      *  returns 404). The handler also recognizes POST /settings/{id}
      *  with an enum-validation pass; getLastSettingsPost() returns
      *  what the PWA most recently sent. */
+    /** Health checks served at /api/parley/health (null = 404). */
+    setHealth(list) { health = list; lastHealthRun = null; },
+    getLastHealthRun() { return lastHealthRun; },
     /** Scheduled jobs served at /api/parley/jobs (null = 404). */
     setJobs(list) { jobs = list; lastJobPost = null; },
     getLastJobPost() { return lastJobPost; },

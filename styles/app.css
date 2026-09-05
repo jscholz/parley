@@ -5930,3 +5930,11 @@
 .cron-pill-muted { color: inherit; opacity: .55; }
 .cron-job-prompt summary { cursor: pointer; font-size: .85em; opacity: .8; }
 .cron-job-prompt pre { white-space: pre-wrap; font-size: .8em; max-height: 220px; overflow: auto; margin: 6px 0 0; }
+
+/* ── Settings › Health ─────────────────────────────────────────────── */
+.health-report summary { cursor: pointer; font-size: .85em; opacity: .8; }
+.health-report-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78em; max-height: 320px; overflow: auto; margin-top: 6px; }
+.health-line { white-space: pre-wrap; padding: 1px 0; }
+.health-line-fail { color: var(--danger, #d33); }
+.health-line-warn { color: var(--warn, #c98a00); }
+.health-line-ok { opacity: .75; }

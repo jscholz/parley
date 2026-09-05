@@ -284,6 +284,14 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   last_used_at  REAL
 );
 
+CREATE TABLE IF NOT EXISTS push_native_tokens (
+  token         TEXT PRIMARY KEY,   -- APNs device token, 64 hex chars, lower-case
+  platform      TEXT NOT NULL,      -- 'ios'
+  user_agent    TEXT,
+  created_at    REAL NOT NULL,
+  last_used_at  REAL
+);
+
 CREATE TABLE IF NOT EXISTS push_mutes (
   chat_id   TEXT PRIMARY KEY,
   muted_at  REAL NOT NULL

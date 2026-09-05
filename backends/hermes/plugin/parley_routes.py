@@ -94,6 +94,34 @@ async def handle_unsubscribe(ctx, request: web.Request) -> web.Response:
     return _json({"ok": True, **result, "total": total})
 
 
+async def handle_subscribe_native(ctx, request: web.Request) -> web.Response:
+    """Capacitor iOS shell registers its APNs device token: {platform:"ios", token, userAgent?}."""
+    try:
+        from .parley_apns import is_valid_device_token
+    except ImportError:
+        from parley_apns import is_valid_device_token  # type: ignore
+    body = await _read_json(request)
+    token = body.get("token")
+    platform = (body.get("platform") or "ios").strip().lower()
+    user_agent = body.get("userAgent") or body.get("user_agent") or ""
+    if not is_valid_device_token(token):
+        return _json({"error": "invalid_request", "message": "token must be 64 hex characters"}, status=400)
+    if platform != "ios":
+        return _json({"error": "invalid_request", "message": "only platform 'ios' is supported"}, status=400)
+    result = state.upsert_native_token(ctx.db, token=token, platform=platform, user_agent=str(user_agent)[:200])
+    total = len(state.list_native_tokens(ctx.db))
+    return _json({"ok": True, **result, "total": total}, status=201 if result["created"] else 200)
+
+
+async def handle_unsubscribe_native(ctx, request: web.Request) -> web.Response:
+    body = await _read_json(request)
+    token = body.get("token")
+    if not isinstance(token, str) or not token:
+        return _json({"error": "invalid_request"}, status=400)
+    result = state.remove_native_token(ctx.db, token)
+    return _json({"ok": True, **result, "total": len(state.list_native_tokens(ctx.db))})
+
+
 async def handle_list_mutes(ctx, request: web.Request) -> web.Response:
     return _json({"mutes": state.list_mutes(ctx.db)})
 
@@ -542,6 +570,8 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_get("/v1/push/vapid-public-key", lambda r: handle_vapid_public_key(ctx, r))
     app.router.add_post("/v1/push/subscribe", lambda r: handle_subscribe(ctx, r))
     app.router.add_post("/v1/push/unsubscribe", lambda r: handle_unsubscribe(ctx, r))
+    app.router.add_post("/v1/push/subscribe-native", lambda r: handle_subscribe_native(ctx, r))
+    app.router.add_post("/v1/push/unsubscribe-native", lambda r: handle_unsubscribe_native(ctx, r))
     app.router.add_get("/v1/push/mutes", lambda r: handle_list_mutes(ctx, r))
     app.router.add_post("/v1/push/mute", lambda r: handle_mute(ctx, r))
     app.router.add_get("/v1/push/prefs", lambda r: handle_prefs(ctx, r))
@@ -561,6 +591,12 @@ def register_routes(app: web.Application, ctx) -> None:
     except ImportError:
         from parley_route_jobs import register_jobs_routes  # type: ignore
     register_jobs_routes(app, ctx)
+    # Health extension (Parley "Health" settings section) — see parley_route_health.py.
+    try:
+        from .parley_route_health import register_health_routes
+    except ImportError:
+        from parley_route_health import register_health_routes  # type: ignore
+    register_health_routes(app, ctx)
     app.router.add_post("/v1/user-settings", lambda r: handle_user_settings(ctx, r))
 
     app.router.add_get("/v1/unread", lambda r: handle_unread(ctx, r))

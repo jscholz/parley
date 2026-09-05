@@ -34,6 +34,7 @@ import { getRecentDecisions } from './diagnostics.ts';
 import {
   isPushOwnedByPlugin,
   delegateVapid, delegateSubscribe, delegateUnsubscribe,
+  delegateSubscribeNative, delegateUnsubscribeNative,
   delegateListMutes, delegateSetMute,
   delegateGetPrefs, delegateSetPrefs,
   delegateVisibility, delegateTest,
@@ -130,6 +131,22 @@ export async function handleParleyUnsubscribe(req: any, res: any): Promise<void>
   }
   const removed = await removeSubscription(body.endpoint);
   sendJson(res, 200, { ok: true, removed });
+}
+
+/** POST /api/parley/notifications/subscribe-native
+ *  Capacitor iOS shell registers its APNs device token:
+ *    { platform: "ios", token: "<64 hex>", userAgent? }
+ *  Only the hermes plugin can send APNs (it owns the token store + key), so this
+ *  route exists solely in plugin-owned mode; otherwise 503. */
+export async function handleParleySubscribeNative(req: any, res: any): Promise<void> {
+  if (isPushOwnedByPlugin()) return delegateSubscribeNative(req, res);
+  return sendJson(res, 503, { error: 'native_push_requires_plugin' });
+}
+
+/** POST /api/parley/notifications/unsubscribe-native  { token } */
+export async function handleParleyUnsubscribeNative(req: any, res: any): Promise<void> {
+  if (isPushOwnedByPlugin()) return delegateUnsubscribeNative(req, res);
+  return sendJson(res, 503, { error: 'native_push_requires_plugin' });
 }
 
 /** GET /api/parley/notifications/mutes

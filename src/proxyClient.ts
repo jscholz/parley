@@ -996,6 +996,7 @@ export const proxyClientAdapter = {
     models: false,            // legacy hardcoded picker — superseded by `agentSettings`
     agentSettings: true,      // /api/parley/settings/* schema-driven panel (model picker etc.)
     cronJobs: true,           // /api/parley/jobs — Settings › Cron (scheduled-jobs extension)
+    healthChecks: true,       // /api/parley/health — Settings › Health (health extension)
     toolEvents: true,         // tool_call / tool_result envelopes (Phase 3); image is also tool-like
 
     history: true,            // /api/parley/sessions/<chat_id>/messages
@@ -1629,6 +1630,23 @@ export const proxyClientAdapter = {
     const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+
+  /** GET /api/parley/health → {data: HealthCheck[]} or null when unsupported (404). */
+  async listHealth(): Promise<any | null> {
+    try {
+      const r = await fetch(`${apiBase()}/health`);
+      if (r.status === 404) return null;
+      if (!r.ok) { diag(`proxy-client.listHealth: HTTP ${r.status}`); return null; }
+      return await r.json();
+    } catch (e: any) { diag(`proxy-client.listHealth failed: ${e.message}`); return null; }
+  },
+
+  /** POST /api/parley/health/{id}/run → fresh HealthCheck. May take minutes. */
+  async runHealth(id: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/health/${encodeURIComponent(id)}/run`, { method: 'POST' });
     if (!r.ok) throw new Error(await errorMessage(r));
     return r.json();
   },

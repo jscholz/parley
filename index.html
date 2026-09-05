@@ -357,6 +357,7 @@
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
       <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
+      <button type="button" class="settings-nav-btn" data-target="health">Health</button>
       <button type="button" class="settings-nav-btn" data-target="voice-input">Voice input</button>
       <button type="button" class="settings-nav-btn" data-target="voice-output">Voice output</button>
       <button type="button" class="settings-nav-btn" data-target="voice-phrases">Voice phrases</button>
@@ -517,6 +518,12 @@
     -->
     <div class="row row-wide" data-cron-placeholder><span class="hint">Loading scheduled jobs…</span></div>
     <div id="cron-jobs-host" class="cron-jobs"></div>
+  </div>
+  <div class="settings-group" id="settings-group-health" data-section="health" hidden>
+    <div class="group-label">Health</div>
+    <!-- Agent health checks over the optional /v1/health extension; rendered by src/healthSettings.ts. -->
+    <div class="row row-wide" data-health-placeholder><span class="hint">Loading health checks…</span></div>
+    <div id="health-checks-host" class="cron-jobs"></div>
   </div>
   <div class="settings-group" data-section="voice-input" hidden>
     <div class="group-label">Voice input</div>

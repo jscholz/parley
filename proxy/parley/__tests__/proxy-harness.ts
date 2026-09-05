@@ -106,6 +106,11 @@ export class FakeAgent {
    *  proxy forwarded the right body. */
   public lastSettingsPost: { id: string; body: unknown } | null = null;
 
+  /** Health extension — null = unsupported (404). */
+  private health: any[] | null = [];
+  public lastHealthRun: string | null = null;
+  setHealth(checks: any[] | null): void { this.health = checks; this.lastHealthRun = null; }
+
   /** Scheduled-jobs extension — null = agent has no scheduler (404). */
   private jobs: any[] | null = [];
   public lastJobPost: { id: string; action: 'update' | 'run' | 'delete'; body: unknown } | null = null;
@@ -250,6 +255,22 @@ export class FakeAgent {
     const settingsPostMatch = url.pathname.match(/^\/v1\/settings\/([^/]+)$/);
     if (method === 'POST' && settingsPostMatch) {
       void this.handleSettingsUpdate(req, res, settingsPostMatch[1]);
+      return;
+    }
+    if (url.pathname === '/v1/health' && method === 'GET') {
+      if (this.health === null) { this.json(res, 404, { error: { message: 'no health' } }); return; }
+      this.json(res, 200, { object: 'list', data: this.health });
+      return;
+    }
+    const healthRun = url.pathname.match(/^\/v1\/health\/([^/]+)\/run$/);
+    if (healthRun && method === 'POST') {
+      if (this.health === null) { this.json(res, 404, { error: { message: 'no health' } }); return; }
+      const c = this.health.find((x) => x.id === healthRun[1]);
+      this.lastHealthRun = healthRun[1];
+      if (!c) { this.json(res, 404, { error: { type: 'not_found', message: 'no such check' } }); return; }
+      if (!c.can_run) { this.json(res, 400, { error: { type: 'invalid_request_error', message: 'read-only' } }); return; }
+      c.worst = 'OK'; c.report = '✅ fixed\nOK   all — good\n'; c.counts = { fail: 0, warn: 0, ok: 1 }; c.last_run_at = new Date().toISOString();
+      this.json(res, 200, c);
       return;
     }
     if (url.pathname === '/v1/jobs' && method === 'GET') {
@@ -443,6 +464,9 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
       return parley.handleParleySettingsSchema(req, res);
     }
     // Scheduled-jobs extension — mirrors server.ts ordering (run/runs before bare id).
+    if (method === 'GET' && path === '/api/parley/health') return parley.handleParleyHealthList(req, res);
+    const healthRun = method === 'POST' && path.match(/^\/api\/parley\/health\/([^/]+)\/run$/);
+    if (healthRun) return parley.handleParleyHealthRun(req, res, decodeURIComponent(healthRun[1]));
     if (method === 'GET' && path === '/api/parley/jobs') {
       return parley.handleParleyJobsList(req, res);
     }
@@ -476,6 +500,8 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
       const r = await import('../notifications/routes.ts');
       return r.handleParleyUnsubscribe(req, res);
     }
+    if (method === 'POST' && path === '/api/parley/notifications/subscribe-native') return parley.handleParleySubscribeNative(req, res);
+    if (method === 'POST' && path === '/api/parley/notifications/unsubscribe-native') return parley.handleParleyUnsubscribeNative(req, res);
     if (method === 'POST' && path === '/api/parley/notifications/test') {
       const r = await import('../notifications/routes.ts');
       return r.handleParleyTest(req, res);

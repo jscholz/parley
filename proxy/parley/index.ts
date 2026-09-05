@@ -75,12 +75,15 @@ export {
   handleParleyJobRuns,
   handleParleyJobDelete,
 } from './jobs.ts';
+export { handleParleyHealthList, handleParleyHealthRun } from './health.ts';
 export { handleParleyCommands } from './commands.ts';
 export { handleParleySearch } from './search.ts';
 export {
   handleParleyVapidPublicKey,
   handleParleySubscribe,
   handleParleyUnsubscribe,
+  handleParleySubscribeNative,
+  handleParleyUnsubscribeNative,
   handleParleyTest,
   handleParleyListMutes,
   handleParleySetMute,

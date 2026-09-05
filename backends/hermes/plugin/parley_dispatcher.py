@@ -28,10 +28,15 @@ from typing import Callable, Deque, Dict, Optional, Tuple
 from urllib.parse import quote
 
 from pywebpush import webpush, WebPushException  # type: ignore
+try:
+    from . import parley_apns as apns
+except ImportError:  # loaded as a top-level module
+    import parley_apns as apns  # type: ignore
 
 from .parley_state import (
     ensure_vapid_keys,
     list_subscriptions,
+    list_native_tokens, mark_native_token_used, remove_native_token,
     is_muted,
     get_pref,
     mark_subscription_used,
@@ -495,6 +500,8 @@ def build_push_health(db, dispatcher: Optional["PushDispatcher"] = None) -> Dict
         "all_kinds_disabled": len(disabled) == len(kinds),
         "quiet_hours": get_pref(db, "quiet_hours"),
         "subscriptions": len(list_subscriptions(db)),
+        "native_tokens": len(list_native_tokens(db)),
+        "apns_configured": apns.config_from_env() is not None,
     }
     if dispatcher is not None and getattr(dispatcher, "health", None) is not None:
         out["monitor"] = dispatcher.health.snapshot()
@@ -546,6 +553,12 @@ class PushDispatcher:
         # payloads simply omit badge and sw.js leaves the OS badge to
         # the page-side reconciler.
         self.unread_total_fn = unread_total_fn
+        # Native (APNs) lane for the iOS shell. Config is read lazily on the first
+        # dispatch (env may be completed after the gateway started); tests inject
+        # a fake sender via ``apns_send``.
+        self.apns_send = apns.send_via_curl
+        self._apns_cfg = None
+        self._apns_cfg_loaded = False
         # Aggregate skip observability (field incident 2026-07: all
         # push kinds silently disabled for days). The startup check
         # emits its one loud line right here, before the first
@@ -587,6 +600,39 @@ class PushDispatcher:
             return self.reply_buffer.take_and_clear(chat_id)
         return None
 
+    def _apns_config(self):
+        if not self._apns_cfg_loaded:
+            self._apns_cfg = apns.config_from_env()
+            self._apns_cfg_loaded = True
+            if self._apns_cfg is not None:
+                logger.warning("[parley] APNs configured (env=%s, topic=%s)", self._apns_cfg.env, self._apns_cfg.bundle_id)
+        return self._apns_cfg
+
+    def _dispatch_native(self, payload_dict: Dict, env_type: str, chat_id: str) -> Dict[str, int]:
+        """Fan the same payload out to APNs device tokens. Dead tokens are pruned like web 410s."""
+        cfg = self._apns_config()
+        tokens = list_native_tokens(self.db)
+        if cfg is None or not tokens:
+            if tokens and cfg is None:
+                logger.warning("skip native type=%s chat=%s reason=apns_unconfigured (%d tokens)", env_type, chat_id, len(tokens))
+            return {"delivered": 0, "pruned": 0, "tokens": len(tokens)}
+        delivered = pruned = 0
+        for row in tokens:
+            tok = row["token"]
+            try:
+                self.apns_send(cfg, tok, payload_dict)
+                mark_native_token_used(self.db, tok)
+                delivered += 1
+            except apns.ApnsError as err:
+                if err.prune:
+                    remove_native_token(self.db, tok)
+                    pruned += 1
+                else:
+                    logger.warning("apns send failed (%s %s)", err.status, err.reason)
+            except Exception as err:  # curl missing / unexpected
+                logger.warning("apns send error: %s", err)
+        return {"delivered": delivered, "pruned": pruned, "tokens": len(tokens)}
+
     def dispatch_envelope(self, env: Dict, *, body_override: Optional[str] = None) -> Dict:
         """Fire push for a single envelope. Synchronous (called inside
         the aiohttp worker, but pywebpush itself is sync-blocking;
@@ -617,11 +663,12 @@ class PushDispatcher:
             logger.warning("skip type=%s chat=%s reason=muted", env_type, chat_id)
             self.health.record_skip("muted")
             return {"delivered": 0, "pruned": 0, "skipped": "muted"}
-        vapid = self._ensure_vapid()
         subs = list_subscriptions(self.db)
-        if not subs:
+        native_tokens = list_native_tokens(self.db)
+        if not subs and not native_tokens:
             logger.warning("skip type=%s chat=%s reason=no_subscribers", env_type, chat_id)
             return {"delivered": 0, "pruned": 0, "skipped": "no_subscribers"}
+        vapid = self._ensure_vapid() if subs else None
         # Badge = unread total, floored at 1: the push being dispatched
         # IS an unread-worthy event, and the msg_links write-through may
         # not have landed yet when the (TTL-cached) count is computed.
@@ -632,7 +679,8 @@ class PushDispatcher:
                 badge = max(1, int(self.unread_total_fn()))
             except Exception as err:
                 logger.debug("badge compute failed (push proceeds): %s", err)
-        payload = json.dumps(_build_payload(env, body_override=body_override, badge=badge))
+        payload_dict = _build_payload(env, body_override=body_override, badge=badge)
+        payload = json.dumps(payload_dict)
         delivered = 0
         pruned = 0
         for sub in subs:
@@ -659,8 +707,10 @@ class PushDispatcher:
                     logger.warning("push send failed (%s): %s", code, err)
             except Exception as err:  # network / unexpected
                 logger.warning("push send error: %s", err)
+        native = self._dispatch_native(payload_dict, env_type, chat_id)
         logger.warning(
-            "dispatch type=%s chat=%s delivered=%d pruned=%d (of %d subs)",
-            env_type, chat_id, delivered, pruned, len(subs),
+            "dispatch type=%s chat=%s delivered=%d pruned=%d (of %d subs) native=%d/%d pruned=%d",
+            env_type, chat_id, delivered, pruned, len(subs), native["delivered"], native["tokens"], native["pruned"],
         )
-        return {"delivered": delivered, "pruned": pruned}
+        return {"delivered": delivered + native["delivered"], "pruned": pruned + native["pruned"],
+                "web": delivered, "native": native["delivered"]}

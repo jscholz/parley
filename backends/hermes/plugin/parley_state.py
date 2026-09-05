@@ -145,6 +145,32 @@ def mark_subscription_used(db, endpoint: str) -> None:
     db.exec("UPDATE push_subscriptions SET last_used_at = ? WHERE endpoint = ?", (time.time(), endpoint))
 
 
+# ── Native (APNs) device tokens — the iOS shell's counterpart to push_subscriptions ──
+
+def upsert_native_token(db, *, token: str, platform: str = "ios", user_agent: str = "") -> Dict[str, Any]:
+    token = token.lower()
+    existing = db.fetchone("SELECT created_at FROM push_native_tokens WHERE token = ?", (token,))
+    if existing:
+        db.exec("UPDATE push_native_tokens SET user_agent = ?, platform = ? WHERE token = ?", (user_agent, platform, token))
+        return {"created": False}
+    db.exec("INSERT INTO push_native_tokens (token, platform, user_agent, created_at, last_used_at) VALUES (?, ?, ?, ?, NULL)",
+            (token, platform, user_agent, time.time()))
+    return {"created": True}
+
+
+def remove_native_token(db, token: str) -> Dict[str, Any]:
+    cur = db.exec("DELETE FROM push_native_tokens WHERE token = ?", (token.lower(),))
+    return {"removed": bool(cur.rowcount)}
+
+
+def list_native_tokens(db) -> List[Dict[str, Any]]:
+    rows = db.fetchall("SELECT token, platform, user_agent, created_at, last_used_at FROM push_native_tokens ORDER BY created_at ASC")
+    return [dict(r) if not isinstance(r, dict) else r for r in rows]
+
+
+def mark_native_token_used(db, token: str) -> None:
+    db.exec("UPDATE push_native_tokens SET last_used_at = ? WHERE token = ?", (time.time(), token.lower()))
+
 # ── Mutes / prefs ─────────────────────────────────────────────────────
 
 def set_mute(db, chat_id: str, muted: bool) -> None:

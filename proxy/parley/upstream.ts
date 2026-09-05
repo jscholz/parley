@@ -272,6 +272,9 @@ export interface UpstreamAgent {
   runJob(id: string): Promise<any>;
   listJobRuns(id: string, limit?: number): Promise<any>;
   deleteJob(id: string): Promise<any>;
+  /** Optional health extension (/v1/health/*). listHealth → null when unsupported (404). */
+  listHealth(): Promise<any | null>;
+  runHealth(id: string): Promise<any>;
 
   /** Optional slash-command catalog. Returns null when the upstream
    *  doesn't implement /v1/commands (404); the proxy surfaces 404 to
@@ -510,6 +513,19 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     try { parsed = await r.json(); } catch { parsed = null; }
     if (!r.ok) throw new UpstreamHTTPError(r.status, parsed);
     return parsed;
+  }
+
+  async listHealth(): Promise<any | null> {
+    const r = await fetch(`${this.url}/v1/health`, { headers: this.headers() });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`upstream listHealth: HTTP ${r.status}`);
+    return await r.json();
+  }
+
+  async runHealth(id: string): Promise<any> {
+    // Re-running a check can take a few minutes (real probes); no fetch timeout here —
+    // the upstream enforces PARLEY_HEALTH_RUN_TIMEOUT and answers 400 when exceeded.
+    return this.postJob(`/v1/health/${encodeURIComponent(id)}/run`);
   }
 
   async listJobRuns(id: string, limit = 20): Promise<any> {

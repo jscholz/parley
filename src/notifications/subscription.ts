@@ -22,12 +22,14 @@
 
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
+import { hasNativePush, storedNativeToken, subscribeNative, unsubscribeNative } from './native.ts';
 
 /** Feature probe — `serviceWorker` + `PushManager` + `Notification`
  *  all need to exist. iOS Safari only exposes these inside an installed
  *  PWA (manifest "display": "standalone"), which matches our deployment
  *  target. */
 export function isPushSupported(): boolean {
+  if (hasNativePush()) return true;   // Capacitor shell → APNs path (native.ts)
   if (typeof navigator === 'undefined') return false;
   if (!('serviceWorker' in navigator)) return false;
   if (!('PushManager' in self)) return false;
@@ -39,6 +41,11 @@ export function isPushSupported(): boolean {
  *  or null if none. Does NOT prompt for permission. Use as a passive
  *  check (e.g. "should the settings toggle render as on or off?"). */
 export async function getActiveSubscription(): Promise<PushSubscription | null> {
+  if (hasNativePush()) {
+    // Not a real PushSubscription, but enough for the settings toggle ("on"/"off").
+    const tok = storedNativeToken();
+    return tok ? ({ endpoint: `apns:${tok}` } as unknown as PushSubscription) : null;
+  }
   if (!isPushSupported()) return null;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
@@ -67,6 +74,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
  *  Resolves with the PushSubscription on success, throws on any step.
  *  Caller is responsible for catching + surfacing failure to the UI. */
 export async function subscribe(): Promise<PushSubscription> {
+  if (hasNativePush()) {
+    const tok = await subscribeNative();
+    return { endpoint: `apns:${tok}` } as unknown as PushSubscription;
+  }
   if (!isPushSupported()) {
     throw new Error('Push notifications not supported on this browser');
   }
@@ -124,6 +135,7 @@ export async function subscribe(): Promise<PushSubscription> {
  *  proxy so the stored row is removed. Idempotent — no-op + no throw if
  *  there's no active subscription. */
 export async function unsubscribe(): Promise<void> {
+  if (hasNativePush()) { await unsubscribeNative(); return; }
   if (!isPushSupported()) return;
   const sub = await getActiveSubscription();
   if (!sub) return;

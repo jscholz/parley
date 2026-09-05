@@ -595,6 +595,45 @@ over hermes' `cron.jobs` store (the same store `hermes cron …` and the
 hermes dashboard mutate). Proxy forwarders: `proxy/parley/jobs.ts`
 (`/api/parley/jobs*`). Renderer: `src/cronSettings.ts`.
 
+## Optional health extension — `/v1/health/*`
+
+Lets the agent expose its own health checks so parley can render a
+**Health** section in Settings: each check's latest report, when it ran,
+its worst status, and a "Run now" button. The agent owns the check
+list, the reports and how a check is re-run; parley only renders.
+
+Strictly optional: agents without health checks return 404 on
+`GET /v1/health` and the section says so.
+
+### `GET /v1/health`
+
+```json
+{ "object": "list", "data": [
+  { "id": "hermes", "name": "hermes health", "worst": "FAIL",
+    "last_run_at": "2026-09-05T07:11:34+00:00",
+    "report": "🔴 hermes health — galatea — …\nFAIL hindsight_llm — …\nOK   gateway — …",
+    "can_run": true, "counts": { "fail": 1, "warn": 2, "ok": 15 } }
+] }
+```
+
+- `id` — `[a-z0-9_-]{1,32}`, the URL fragment on the run endpoint.
+- `worst` — `OK` | `WARN` | `FAIL` | `CRASHED` | `UNKNOWN`.
+- `report` — plain text; lines starting with `FAIL `, `WARN `, `OK ` are
+  colour-coded by the UI, everything else renders verbatim.
+- `can_run` — whether `POST …/run` is available for this check.
+
+### `POST /v1/health/{id}/run`
+
+Re-run the check synchronously (may take minutes) and return the fresh
+check object. `400` when the check is read-only or timed out, `404` for
+an unknown id.
+
+Reference implementation: `backends/hermes/plugin/parley_route_health.py`
+reads the digest state written by hermes-agent-private's
+`scripts/lib/health.sh` (`<name>.last-run`, `<name>.report.txt`) and
+re-runs the configured scripts with `--no-alert`
+(`PARLEY_HEALTH_STATE_DIR`, `PARLEY_HEALTH_RUNNERS`).
+
 ## Errors
 
 Errors use the OpenAI shape:

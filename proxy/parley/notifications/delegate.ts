@@ -149,6 +149,23 @@ export async function delegateUnsubscribe(req: http.IncomingMessage, res: http.S
   } catch (e: any) { sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
 }
 
+/** Native (APNs) device tokens from the Capacitor shell — plugin-owned store + sender. */
+export async function delegateSubscribeNative(req: http.IncomingMessage, res: http.ServerResponse) {
+  try {
+    const body = await readBody(req);
+    const r = await forwardRaw('/v1/push/subscribe-native', 'POST', body);
+    sendJson(res, r.status, r.body ?? {});
+  } catch (e: any) { sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
+}
+
+export async function delegateUnsubscribeNative(req: http.IncomingMessage, res: http.ServerResponse) {
+  try {
+    const body = await readBody(req);
+    const r = await forwardRaw('/v1/push/unsubscribe-native', 'POST', body);
+    sendJson(res, r.status, r.body ?? {});
+  } catch (e: any) { sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
+}
+
 export async function delegateListMutes(req: http.IncomingMessage, res: http.ServerResponse) {
   const r = await forwardRaw('/v1/push/mutes', 'GET', null);
   // PWA expects `{muted_chats: string[]}` shape; plugin returns

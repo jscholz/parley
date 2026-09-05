@@ -1373,6 +1373,14 @@ const requestHandler: http.RequestListener = async (req, res) => {
     }
     // Scheduled-jobs extension (Settings › Cron). Order matters: the
     // two-segment `/run` and `/runs` routes must match before the bare id.
+    // Health extension (Settings › Health).
+    if (req.method === 'GET' && /^\/api\/parley\/health(?:\?.*)?$/.test(req.url)) {
+      return parley.handleParleyHealthList(req, res);
+    }
+    const healthRun = req.method === 'POST' && req.url.match(/^\/api\/parley\/health\/([^/?]+)\/run(?:\?.*)?$/);
+    if (healthRun) {
+      return parley.handleParleyHealthRun(req, res, decodeURIComponent(healthRun[1]));
+    }
     if (req.method === 'GET' && /^\/api\/parley\/jobs(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleyJobsList(req, res);
     }
@@ -1413,6 +1421,12 @@ const requestHandler: http.RequestListener = async (req, res) => {
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/subscribe') {
       return parley.handleParleySubscribe(req, res);
+    }
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/subscribe-native') {
+      return parley.handleParleySubscribeNative(req, res);
+    }
+    if (req.method === 'POST' && req.url === '/api/parley/notifications/unsubscribe-native') {
+      return parley.handleParleyUnsubscribeNative(req, res);
     }
     if (req.method === 'POST' && req.url === '/api/parley/notifications/unsubscribe') {
       return parley.handleParleyUnsubscribe(req, res);
