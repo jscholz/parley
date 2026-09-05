@@ -5930,7 +5930,7 @@
   display: grid; grid-template-columns: auto 1fr auto; align-items: center;
   gap: 8px 14px; font-size: calc(var(--content-size) - 1px);
 }
-.cron-ctl { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; }
+.cron-ctl { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); min-width: 0; white-space: nowrap; }
 .cron-ctl select {
   background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 8px;
   padding: 5px 10px; font: inherit; font-size: calc(var(--content-size) - 1px); max-width: 260px; min-width: 0;
