@@ -3128,28 +3128,45 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
        connect(); when no adapter is live the callbacks are silent
        no-ops.
     """
+    # hermes ≥ 0.21 validates cron delivery targets before dispatch and only
+    # treats a PLUGIN platform as a valid ``deliver=parley:<chat>`` target when
+    # its PlatformEntry declares ``cron_deliver_env_var`` (the home-channel env
+    # var, PARLEY_HOME_CHANNEL). Without it every cron job delivering to a
+    # Parley chat is BLOCKED with "not a known cron delivery target"
+    # (2026-09-05: the three Press Radar jobs). Older hermes rejects the
+    # unknown kwarg with TypeError, so retry without it there.
+    _platform_kwargs = dict(
+        name="parley",
+        label="Parley",
+        adapter_factory=lambda cfg: ParleyAdapter(cfg),
+        check_fn=check_parley_requirements,
+        required_env=["PARLEY_PLATFORM_TOKEN"],
+        install_hint="aiohttp ships with hermes-agent — no extra packages needed",
+        env_enablement_fn=_parley_env_enablement,
+        allowed_users_env="PARLEY_PLATFORM_ALLOWED_USERS",
+        allow_all_env="PARLEY_PLATFORM_ALLOW_ALL_USERS",
+        emoji="🎙️",
+        pii_safe=False,
+        allow_update_command=True,
+        platform_hint=(
+            "You are chatting via the Parley PWA — a same-browser "
+            "interface with full markdown + image rendering. Replies "
+            "are streamed token-by-token. The user can also speak to "
+            "you via the audio bridge (Deepgram STT → text → reply → "
+            "TTS), so when audio is in flight, prefer concise replies."
+        ),
+    )
     try:
-        ctx.register_platform(
-            name="parley",
-            label="Parley",
-            adapter_factory=lambda cfg: ParleyAdapter(cfg),
-            check_fn=check_parley_requirements,
-            required_env=["PARLEY_PLATFORM_TOKEN"],
-            install_hint="aiohttp ships with hermes-agent — no extra packages needed",
-            env_enablement_fn=_parley_env_enablement,
-            allowed_users_env="PARLEY_PLATFORM_ALLOWED_USERS",
-            allow_all_env="PARLEY_PLATFORM_ALLOW_ALL_USERS",
-            emoji="🎙️",
-            pii_safe=False,
-            allow_update_command=True,
-            platform_hint=(
-                "You are chatting via the Parley PWA — a same-browser "
-                "interface with full markdown + image rendering. Replies "
-                "are streamed token-by-token. The user can also speak to "
-                "you via the audio bridge (Deepgram STT → text → reply → "
-                "TTS), so when audio is in flight, prefer concise replies."
-            ),
-        )
+        try:
+            ctx.register_platform(cron_deliver_env_var="PARLEY_HOME_CHANNEL", **_platform_kwargs)
+        except TypeError as exc:
+            if "cron_deliver_env_var" not in str(exc):
+                raise
+            logger.warning(
+                "[parley] this hermes predates PlatformEntry.cron_deliver_env_var — "
+                "cron jobs with deliver=parley:<chat> will not validate here"
+            )
+            ctx.register_platform(**_platform_kwargs)
     except AttributeError:
         # Older hermes-agent without ctx.register_platform — fall back to
         # the patch-driven path (a hardcoded Platform entry + _create_adapter
