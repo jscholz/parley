@@ -51,6 +51,15 @@ const config: CapacitorConfig = {
     cleartext: false,
     allowNavigation: ['*'],
   },
+  plugins: {
+    // Show APNs pushes as banners even while the app is in the foreground.
+    // Without this iOS hands a foreground push to the app silently and the
+    // user sees nothing (first field test 2026-09-05: sends returned 200,
+    // phone showed nothing, app was open).
+    PushNotifications: {
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
+  },
 };
 
 export default config;
