@@ -5922,6 +5922,7 @@
 .cron-ctl select { max-width: 220px; }
 .cron-btn { padding: 3px 10px; border-radius: 8px; }
 .cron-link { text-decoration: underline; }
+.cron-btn-danger { color: var(--danger, #d33); border-color: currentColor; margin-left: auto; }
 .cron-pill { font-size: .75em; padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor; text-transform: lowercase; }
 .cron-pill-ok { color: var(--ok, #2a9d5c); }
 .cron-pill-warn { color: var(--warn, #c98a00); }

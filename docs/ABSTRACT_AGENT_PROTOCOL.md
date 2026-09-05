@@ -579,6 +579,11 @@ Body: any subset of `{ "enabled": bool, "deliver": string, "model": string }`
 Queue the job to run at the agent's next opportunity (results deliver
 through the agent's normal path). Returns the updated job (200).
 
+### `DELETE /v1/jobs/{id}`
+
+Remove the job permanently. Returns `{"deleted": true, "id": …}` (200)
+or `404`. Parley asks the user to confirm before calling this.
+
 ### `GET /v1/jobs/{id}/runs?limit=N`
 
 Recent executions, newest first: `{"object":"list","data":[{"id",

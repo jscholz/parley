@@ -151,3 +151,13 @@ def test_handlers_status_codes(store):
     assert r.status == 200 and _body(r)["enabled"] is True
     r = _run(jobs_route.handle_job_runs(_Adapter(), _Request(store["b"], query={"limit": "3"})))
     assert r.status == 200 and _body(r)["object"] == "list"
+
+
+def test_delete_removes_job(store):
+    assert jobs_route.delete_job(store["b"]) is True
+    assert store["jobs"].get_job(store["b"]) is None
+    assert jobs_route.delete_job(store["b"]) is False
+    r = _run(jobs_route.handle_job_delete(_Adapter(), _Request(store["a"])))
+    assert r.status == 200 and _body(r)["deleted"] is True
+    assert _run(jobs_route.handle_job_delete(_Adapter(), _Request(store["a"]))).status == 404
+    assert _run(jobs_route.handle_job_delete(_Adapter(ok=False), _Request(store["a"]))).status == 401

@@ -76,3 +76,17 @@ test('jobs — 404 when the agent has no scheduler; bad ids rejected at the prox
     assert.equal(rig.fakeAgent.lastJobPost, null);
   } finally { await rig.stop(); }
 });
+
+test('jobs — delete forwards and the job disappears from the list', async () => {
+  const rig = await startRig();
+  try {
+    rig.fakeAgent.setJobs([structuredClone(JOB)]);
+    const del = await fetch(`${rig.proxyUrl}/api/parley/jobs/c06b4603e054`, { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    assert.deepEqual(await del.json(), { deleted: true, id: 'c06b4603e054' });
+    assert.equal(rig.fakeAgent.lastJobPost?.action, 'delete');
+    const list = await (await fetch(`${rig.proxyUrl}/api/parley/jobs`)).json();
+    assert.equal(list.data.length, 0);
+    assert.equal((await fetch(`${rig.proxyUrl}/api/parley/jobs/c06b4603e054`, { method: 'DELETE' })).status, 404);
+  } finally { await rig.stop(); }
+});

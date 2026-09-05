@@ -13,6 +13,7 @@
 //      and the deep link now points at the target chat.
 //   5. Pin the model → POST {model:…}; card meta shows the pin.
 //   6. Click "Run now" → POST …/run; a notice appears.
+//   7. Delete (confirm dialog accepted) → DELETE …/{id}; the card disappears.
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
 export const NAME = 'settings-cron-panel';
@@ -87,4 +88,12 @@ export default async function run({ page, log, mock }) {
   post = mock.getLastJobPost();
   assert(post.id === 'job-sync' && post.action === 'run', `run POST: ${JSON.stringify(post)}`);
   log('Run now posts to /run and shows the queued notice');
+
+  // 7. delete (confirm dialog auto-accepted)
+  page.once('dialog', (d) => d.accept());
+  await page.click('#cron-jobs-host .cron-job[data-cron-job="job-brief"] [data-role="delete"]');
+  await page.waitForFunction(() => !document.querySelector('.cron-job[data-cron-job="job-brief"]'), null, { timeout: 3_000 });
+  post = mock.getLastJobPost();
+  assert(post.id === 'job-brief' && post.action === 'delete', `delete: ${JSON.stringify(post)}`);
+  log('Delete confirms, DELETEs, and removes the card');
 }

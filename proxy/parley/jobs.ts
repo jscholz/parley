@@ -4,6 +4,7 @@
 //   POST /api/parley/jobs/{id}           → upstream POST /v1/jobs/{id}   {enabled?, deliver?, model?}
 //   POST /api/parley/jobs/{id}/run       → upstream POST /v1/jobs/{id}/run
 //   GET  /api/parley/jobs/{id}/runs      → upstream GET  /v1/jobs/{id}/runs?limit=N
+//   DELETE /api/parley/jobs/{id}         → upstream DELETE /v1/jobs/{id}
 //
 // Contract: docs/ABSTRACT_AGENT_PROTOCOL.md "Optional scheduled-jobs
 // extension". Thin forward, same shape as settings.ts: the agent owns
@@ -89,4 +90,12 @@ export async function handleParleyJobRuns(req: any, res: any, id: string) {
   const limit = Number(new URL(req.url, 'http://x').searchParams.get('limit') || '20');
   try { json(res, 200, await upstream.listJobRuns(id, Number.isFinite(limit) ? limit : 20)); }
   catch (e: any) { forwardError(res, e, `job runs ${id}`); }
+}
+
+/** DELETE /api/parley/jobs/{id} */
+export async function handleParleyJobDelete(_req: any, res: any, id: string) {
+  const upstream = requireUpstream(res); if (!upstream) return;
+  if (!validId(res, id)) return;
+  try { json(res, 200, await upstream.deleteJob(id)); }
+  catch (e: any) { forwardError(res, e, `job delete ${id}`); }
 }

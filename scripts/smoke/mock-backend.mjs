@@ -883,6 +883,13 @@ export async function installMockBackend(page) {
         body: JSON.stringify({ object: 'list', data: [] }) });
       return;
     }
+    if (method === 'DELETE' && !m[2]) {
+      lastJobPost = { id, action: 'delete', body: null };
+      if (!job) { await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'no such job' } }) }); return; }
+      jobs = jobs.filter((j) => j.id !== id);
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ deleted: true, id }) });
+      return;
+    }
     let body = {};
     try { body = JSON.parse(route.request().postData() || '{}'); } catch {}
     lastJobPost = { id, action: m[2] === '/run' ? 'run' : 'update', body };

@@ -1633,6 +1633,13 @@ export const proxyClientAdapter = {
     return r.json();
   },
 
+  /** DELETE /api/parley/jobs/{id} → {deleted:true}. Permanent. */
+  async deleteJob(id: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+
   /** POST /api/parley/jobs/{id}/run → JobDef (queued for the next tick). */
   async runJob(id: string): Promise<any> {
     const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/run`, { method: 'POST' });

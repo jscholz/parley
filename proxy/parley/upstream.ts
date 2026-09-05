@@ -271,6 +271,7 @@ export interface UpstreamAgent {
   updateJob(id: string, body: unknown): Promise<any>;
   runJob(id: string): Promise<any>;
   listJobRuns(id: string, limit?: number): Promise<any>;
+  deleteJob(id: string): Promise<any>;
 
   /** Optional slash-command catalog. Returns null when the upstream
    *  doesn't implement /v1/commands (404); the proxy surfaces 404 to
@@ -499,6 +500,16 @@ export class HTTPAgentUpstream implements UpstreamAgent {
 
   runJob(id: string): Promise<any> {
     return this.postJob(`/v1/jobs/${encodeURIComponent(id)}/run`);
+  }
+
+  async deleteJob(id: string): Promise<any> {
+    const r = await fetch(`${this.url}/v1/jobs/${encodeURIComponent(id)}`, {
+      method: 'DELETE', headers: this.headers(),
+    });
+    let parsed: any;
+    try { parsed = await r.json(); } catch { parsed = null; }
+    if (!r.ok) throw new UpstreamHTTPError(r.status, parsed);
+    return parsed;
   }
 
   async listJobRuns(id: string, limit = 20): Promise<any> {

@@ -1384,6 +1384,10 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (jobRuns) {
       return parley.handleParleyJobRuns(req, res, decodeURIComponent(jobRuns[1]));
     }
+    const jobDelete = req.method === 'DELETE' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)(?:\?.*)?$/);
+    if (jobDelete) {
+      return parley.handleParleyJobDelete(req, res, decodeURIComponent(jobDelete[1]));
+    }
     const jobUpdate = req.method === 'POST' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)(?:\?.*)?$/);
     if (jobUpdate) {
       return parley.handleParleyJobUpdate(req, res, decodeURIComponent(jobUpdate[1]));

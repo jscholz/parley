@@ -108,7 +108,7 @@ export class FakeAgent {
 
   /** Scheduled-jobs extension — null = agent has no scheduler (404). */
   private jobs: any[] | null = [];
-  public lastJobPost: { id: string; action: 'update' | 'run'; body: unknown } | null = null;
+  public lastJobPost: { id: string; action: 'update' | 'run' | 'delete'; body: unknown } | null = null;
 
   setMode(mode: FakeMode): void { this.mode = mode; }
 
@@ -282,6 +282,13 @@ export class FakeAgent {
       this.json(res, 200, { object: 'list', data: job ? [{ id: 'e1', status: 'completed', source: 'scheduler' }] : [] });
       return;
     }
+    if (method === 'DELETE' && !tail) {
+      if (!job) { this.json(res, 404, { error: { type: 'not_found', message: 'no such job' } }); return; }
+      this.jobs = this.jobs.filter((j) => j.id !== id);
+      this.lastJobPost = { id, action: 'delete', body: null };
+      this.json(res, 200, { deleted: true, id });
+      return;
+    }
     if (method !== 'POST') { this.json(res, 405, { error: { message: 'method' } }); return; }
     this.lastJobPost = { id, action: tail === '/run' ? 'run' : 'update', body };
     if (!job) { this.json(res, 404, { error: { type: 'not_found', message: 'no such job' } }); return; }
@@ -443,6 +450,8 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     if (jobRun) return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));
     const jobRuns = method === 'GET' && path.match(/^\/api\/parley\/jobs\/([^/]+)\/runs$/);
     if (jobRuns) return parley.handleParleyJobRuns(req, res, decodeURIComponent(jobRuns[1]));
+    const jobDel = method === 'DELETE' && path.match(/^\/api\/parley\/jobs\/([^/]+)$/);
+    if (jobDel) return parley.handleParleyJobDelete(req, res, decodeURIComponent(jobDel[1]));
     const jobUpd = method === 'POST' && path.match(/^\/api\/parley\/jobs\/([^/]+)$/);
     if (jobUpd) return parley.handleParleyJobUpdate(req, res, decodeURIComponent(jobUpd[1]));
     const setMatch = method === 'POST'

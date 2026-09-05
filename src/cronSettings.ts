@@ -81,6 +81,27 @@ async function runNow(job: JobDef, card: HTMLElement) {
   }
 }
 
+async function deleteJob(job: JobDef, card: HTMLElement) {
+  // Permanent and not undoable from here — always confirm. Tests accept the dialog.
+  let ok = true;
+  try { ok = window.confirm(`Delete the scheduled job "${job.name}"? This cannot be undone.`); } catch {}
+  if (!ok) return;
+  card.classList.add('cron-job-busy');
+  try {
+    const adapter = await getAdapter();
+    await adapter.deleteJob(job.id);
+    if (payload) payload.data = payload.data.filter((j) => j.id !== job.id);
+    card.remove();
+    if (payload && payload.data.length === 0) {
+      const group = document.getElementById('settings-group-cron');
+      if (group) setPlaceholder(group, 'No scheduled jobs yet.');
+    }
+  } catch (e: any) {
+    card.classList.remove('cron-job-busy');
+    try { window.alert(`Couldn't delete ${job.name}: ${e?.message ?? e}`); } catch {}
+  }
+}
+
 function renderCard(job: JobDef, card: HTMLElement, notice?: string) {
   card.innerHTML = '';
   card.dataset.cronJob = job.id;
@@ -136,6 +157,11 @@ function renderCard(job: JobDef, card: HTMLElement, notice?: string) {
   run.type = 'button'; run.dataset.role = 'run';
   run.onclick = () => void runNow(job, card);
   controls.appendChild(run);
+
+  const del = el('button', 'cron-btn cron-btn-danger', 'Delete');
+  del.type = 'button'; del.dataset.role = 'delete';
+  del.onclick = () => void deleteJob(job, card);
+  controls.appendChild(del);
 
   const link = chatLinkFor(job);
   if (link) {

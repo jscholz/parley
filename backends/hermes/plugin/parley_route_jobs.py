@@ -19,6 +19,7 @@ Routes (aiohttp, same auth as the rest of the adapter):
                                        "default_model": "<label>"}
   POST /v1/jobs/{id}               {"enabled"?:bool,"deliver"?:str,"model"?:str} -> JobDef
   POST /v1/jobs/{id}/run           -> JobDef  (queued for the next scheduler tick)
+  DELETE /v1/jobs/{id}             -> {"deleted": true}  (permanent; the UI confirms first)
   GET  /v1/jobs/{id}/runs?limit=N  -> {"object":"list","data":[RunDef…]}
 
 JobDef.model is "" when the job follows the agent default (no pin);
@@ -315,6 +316,12 @@ def run_job(job_id: str) -> Optional[Dict[str, Any]]:
     return _job_view(job) if job else None
 
 
+def delete_job(job_id: str) -> bool:
+    """Remove the job permanently (hermes keeps its run history / output dir)."""
+    from cron.jobs import remove_job
+    return bool(remove_job(job_id))
+
+
 def job_runs(job_id: str, limit: int = 20) -> List[Dict[str, Any]]:
     from cron.executions import list_executions
     rows = list_executions(job_id=job_id, limit=max(1, min(int(limit), 100)))
@@ -403,6 +410,23 @@ async def handle_job_run(adapter, request):
     return web.json_response(view)
 
 
+async def handle_job_delete(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    try:
+        job_id = _job_id_from(request)
+        ok = await _in_executor(delete_job, job_id)
+    except JobsValidationError as e:
+        return _err(web, 400, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] job delete failed")
+        return _err(web, 500, "server_error", str(e))
+    if not ok:
+        return _err(web, 404, "not_found", "no such job")
+    return web.json_response({"deleted": True, "id": job_id})
+
+
 async def handle_job_runs(adapter, request):
     from aiohttp import web
     if _unauthorized(adapter, request):
@@ -424,3 +448,4 @@ def register_jobs_routes(app, adapter) -> None:
     app.router.add_post("/v1/jobs/{job_id}", lambda r: handle_job_update(adapter, r))
     app.router.add_post("/v1/jobs/{job_id}/run", lambda r: handle_job_run(adapter, r))
     app.router.add_get("/v1/jobs/{job_id}/runs", lambda r: handle_job_runs(adapter, r))
+    app.router.add_delete("/v1/jobs/{job_id}", lambda r: handle_job_delete(adapter, r))

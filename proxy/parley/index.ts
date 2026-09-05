@@ -73,6 +73,7 @@ export {
   handleParleyJobUpdate,
   handleParleyJobRun,
   handleParleyJobRuns,
+  handleParleyJobDelete,
 } from './jobs.ts';
 export { handleParleyCommands } from './commands.ts';
 export { handleParleySearch } from './search.ts';
