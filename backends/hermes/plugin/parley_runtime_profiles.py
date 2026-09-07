@@ -42,6 +42,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from . import parley_hindsight_config as hc
+
 logger = logging.getLogger(__name__)
 
 # ── config addresses ────────────────────────────────────────────────────
@@ -136,12 +138,14 @@ LOCAL_SKILLS_HIDDEN_PARLEY = [
     "pii-scrub-public-sync",
 ]
 
-# hindsight recall knobs (~/.hindsight/config.json, NOT hermes config — see
-# apply-memory-recall.sh in hermes-agent-private). Defaults used to fill in
-# whichever half of the pair a profile omits.
-DEFAULT_RECALL_MAX_TOKENS = 4096
-DEFAULT_RECALL_BUDGET = "mid"
-_RECALL_BUDGETS = ("low", "mid", "high")
+# hindsight's OWN recall/retain knobs (parley_hindsight_config.py, NOT
+# hermes config.yaml/.env). Re-exported here so this module's public
+# constants keep meaning what they said before that file existed; the
+# validation itself now lives in parley_hindsight_config so the Settings
+# panel and a profile switch agree on one set of rules.
+DEFAULT_RECALL_MAX_TOKENS = hc.DEFAULT_RECALL_MAX_TOKENS
+DEFAULT_RECALL_BUDGET = hc.DEFAULT_RECALL_BUDGET
+_RECALL_BUDGETS = hc.RECALL_BUDGETS
 
 
 class ProfileError(ValueError):
@@ -220,9 +224,9 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
     ``cloud`` is a photograph of what this box is running RIGHT NOW —
     model block, the vision auxiliary, the fallback chain and hindsight's
     current LLM env. Hardcoding the doc's example values here would have
-    silently rewritten a host whose live model differs (galatea runs
-    gpt-5.6-sol, the doc says gpt-6-astra), which is exactly the class of
-    bug a "seed from live" rule exists to prevent.
+    silently rewritten a host whose live model differs (a real box might
+    run gpt-5.6-sol while the doc's example says gpt-6-astra), which is
+    exactly the class of bug a "seed from live" rule exists to prevent.
 
     ``local`` is the doc's YAML, the only place literals are legitimate:
     there is nothing live to copy until the profile has been used once.
@@ -359,26 +363,56 @@ def read_active_profile(cfg: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class MemorySpec:
-    """hindsight's LLM routing for a profile — the script's three args.
+    """hindsight's routing AND behaviour for a profile.
 
-    ``recall_max_tokens``/``recall_budget`` are a SEPARATE hindsight knob
-    (``~/.hindsight/config.json``, not the LLM env) carried on the same
-    dataclass because they travel with the same profile switch; they are
-    filled with hermes' defaults (4096 / mid) by plan_apply whenever the
-    profile names only one of the pair, so this class only ever sees a
-    complete pair or ``None, None`` (recall untouched this switch).
+    ``provider``/``model``/``base_url`` are the LLM-routing half — hermes'
+    ``.env`` (``HINDSIGHT_API_LLM_*``), applied by the ops script and
+    requiring a hindsight-server restart (``restart_memory``).
+
+    ``recall_max_tokens``/``recall_budget``/``auto_recall``/``auto_retain``/
+    ``retain_every_n_turns`` are a SEPARATE hindsight knob — the JSON file
+    ``parley_hindsight_config.py`` owns, not the LLM env — carried on the
+    same dataclass because they travel with the same profile switch. No
+    restart: hindsight rereads that file fresh per new agent/session.
+    ``recall_max_tokens``/``recall_budget`` are filled with hermes' defaults
+    by plan_apply whenever the profile names only one of the pair, so those
+    two only ever arrive as a complete pair or ``None, None``. The other
+    three are independent optionals — a profile may set any subset.
     """
     provider: str
     model: str
     base_url: str = ""
     recall_max_tokens: Optional[int] = None
     recall_budget: Optional[str] = None
+    auto_recall: Optional[bool] = None
+    auto_retain: Optional[bool] = None
+    retain_every_n_turns: Optional[int] = None
 
     def as_args(self) -> List[str]:
         return [self.provider, self.model] + ([self.base_url] if self.base_url else [])
 
     def recall_args(self) -> List[str]:
         return [str(self.recall_max_tokens), str(self.recall_budget)]
+
+    def hindsight_file_updates(self) -> Dict[str, Any]:
+        """The subset of `parley_hindsight_config`'s keys THIS spec names,
+        ready to hand to ``hc.plan_updates``. Empty when the profile named
+        none of them (LLM-routing-only switch)."""
+        updates: Dict[str, Any] = {}
+        if self.recall_max_tokens is not None:
+            updates[hc.KEY_RECALL_MAX_TOKENS] = self.recall_max_tokens
+        if self.recall_budget is not None:
+            updates[hc.KEY_RECALL_BUDGET] = self.recall_budget
+        if self.auto_recall is not None:
+            updates[hc.KEY_AUTO_RECALL] = self.auto_recall
+        if self.auto_retain is not None:
+            updates[hc.KEY_AUTO_RETAIN] = self.auto_retain
+        if self.retain_every_n_turns is not None:
+            updates[hc.KEY_RETAIN_EVERY_N_TURNS] = self.retain_every_n_turns
+        return updates
+
+    def has_hindsight_file_updates(self) -> bool:
+        return bool(self.hindsight_file_updates())
 
 
 @dataclass(frozen=True)
@@ -424,6 +458,9 @@ class ApplyPlan:
                 "base_url": self.memory.base_url,
                 "recall_max_tokens": self.memory.recall_max_tokens,
                 "recall_budget": self.memory.recall_budget,
+                "auto_recall": self.memory.auto_recall,
+                "auto_retain": self.memory.auto_retain,
+                "retain_every_n_turns": self.memory.retain_every_n_turns,
             },
             "restart_memory": self.restart_memory,
             "touched_config_paths": self.touched_config_paths(),
@@ -438,31 +475,20 @@ def _parsed_recall(profile_name: str, mem: Mapping[str, Any]) -> Tuple[Optional[
     switch). Either key present -> BOTH are returned, filling the missing
     half with hermes' own defaults (4096 / mid) and logging that it did —
     a profile that means to cap tokens but forgets budget must not leave
-    the script guessing.
+    it half-configured. Validation itself is delegated to
+    ``parley_hindsight_config`` so a profile switch and a Settings-panel
+    edit reject the same bad values the same way.
     """
     has_tokens = "recall_max_tokens" in mem
     has_budget = "recall_budget" in mem
     if not has_tokens and not has_budget:
         return None, None
 
-    tokens = mem.get("recall_max_tokens", DEFAULT_RECALL_MAX_TOKENS)
     try:
-        tokens = int(tokens)
-    except (TypeError, ValueError):
-        raise ProfileError(
-            f"profile {profile_name!r} memory.recall_max_tokens must be an integer, got {tokens!r}"
-        )
-    if not (200 <= tokens <= 16000):
-        raise ProfileError(
-            f"profile {profile_name!r} memory.recall_max_tokens must be 200..16000, got {tokens}"
-        )
-
-    budget = str(mem.get("recall_budget", DEFAULT_RECALL_BUDGET) or "").strip().lower()
-    if budget not in _RECALL_BUDGETS:
-        raise ProfileError(
-            f"profile {profile_name!r} memory.recall_budget must be one of "
-            f"{'/'.join(_RECALL_BUDGETS)}, got {mem.get('recall_budget')!r}"
-        )
+        tokens = hc.validate_recall_max_tokens(mem.get("recall_max_tokens", DEFAULT_RECALL_MAX_TOKENS))
+        budget = hc.validate_recall_budget(mem.get("recall_budget", DEFAULT_RECALL_BUDGET))
+    except hc.HindsightConfigError as e:
+        raise ProfileError(f"profile {profile_name!r} memory.{e}")
 
     if not has_tokens:
         logger.info(
@@ -475,6 +501,34 @@ def _parsed_recall(profile_name: str, mem: Mapping[str, Any]) -> Tuple[Optional[
             "filling recall_budget=%r (hermes default)", profile_name, budget,
         )
     return tokens, budget
+
+
+_BOOL_FLAG_VALIDATORS = {
+    hc.KEY_AUTO_RECALL: hc.validate_auto_recall,
+    hc.KEY_AUTO_RETAIN: hc.validate_auto_retain,
+}
+
+
+def _parsed_bool_flag(profile_name: str, mem: Mapping[str, Any], key: str) -> Optional[bool]:
+    """Validate an independent hindsight boolean the profile MAY carry
+    (``auto_recall``/``auto_retain``) — unlike the recall pair, these have
+    no "fill the other half" partner: a profile can set either, both, or
+    neither."""
+    if key not in mem:
+        return None
+    try:
+        return _BOOL_FLAG_VALIDATORS[key](mem[key])
+    except hc.HindsightConfigError as e:
+        raise ProfileError(f"profile {profile_name!r} memory.{e}")
+
+
+def _parsed_retain_every_n_turns(profile_name: str, mem: Mapping[str, Any]) -> Optional[int]:
+    if hc.KEY_RETAIN_EVERY_N_TURNS not in mem:
+        return None
+    try:
+        return hc.validate_retain_every_n_turns(mem[hc.KEY_RETAIN_EVERY_N_TURNS])
+    except hc.HindsightConfigError as e:
+        raise ProfileError(f"profile {profile_name!r} memory.{e}")
 
 
 def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> ApplyPlan:
@@ -598,20 +652,29 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
     model = str(mem.get("llm_model") or "").strip()
     base_url = str(mem.get("llm_base_url") or "").strip()
 
-    # 3b. hindsight recall knobs (~/.hindsight/config.json — a DIFFERENT file
-    #     than the env above, applied by a sibling script). A profile may
-    #     name either or both; naming only one fills the other with hermes'
-    #     defaults rather than leaving recall half-configured.
+    # 3b. hindsight's OWN config file (parley_hindsight_config.py — a
+    #     DIFFERENT file than the env above, no restart). A profile may
+    #     name any subset of these five; the recall pair fills its missing
+    #     half with hermes' defaults (see _parsed_recall), the other three
+    #     are independent optionals.
     recall_max_tokens, recall_budget = _parsed_recall(name, mem)
+    auto_recall = _parsed_bool_flag(name, mem, hc.KEY_AUTO_RECALL)
+    auto_retain = _parsed_bool_flag(name, mem, hc.KEY_AUTO_RETAIN)
+    retain_every_n_turns = _parsed_retain_every_n_turns(name, mem)
+    has_hindsight_file_updates = any(x is not None for x in (
+        recall_max_tokens, auto_recall, auto_retain, retain_every_n_turns,
+    ))
 
     if provider or model:
         env_updates[ENV_MEMORY_PROVIDER] = provider
         env_updates[ENV_MEMORY_MODEL] = model
         env_updates[ENV_MEMORY_BASE_URL] = base_url or None
-    if provider or model or recall_max_tokens is not None:
+    if provider or model or has_hindsight_file_updates:
         memory = MemorySpec(
             provider=provider, model=model, base_url=base_url,
             recall_max_tokens=recall_max_tokens, recall_budget=recall_budget,
+            auto_recall=auto_recall, auto_retain=auto_retain,
+            retain_every_n_turns=retain_every_n_turns,
         )
 
     # Restart only when hindsight would actually see something new: a
@@ -764,7 +827,7 @@ def apply_runtime_profile(
     Order is the doc's, and each step is its own durable write:
 
       preflight -> snapshot(+seed) -> target config -> env + restart
-                -> recall script -> active-profile marker LAST
+                -> hindsight file (recall/retain) -> active-profile marker LAST
 
     Three ``write_config`` calls rather than one is deliberate. save_config
     is atomic, so each step lands or doesn't; a crash after the env write
@@ -773,12 +836,12 @@ def apply_runtime_profile(
     from correct. The reverse (marker first) would report a mode the agent
     is not in, which is the failure the doc's rule 5 exists to prevent.
 
-    The recall script runs unconditionally whenever the profile named either
-    recall knob (unlike ``restart_memory``, which only fires when the LLM
-    env would actually change): recall lives in a different file
-    (``~/.hindsight/config.json``, apply-memory-recall.sh) with no restart
-    to avoid bouncing pointlessly, so re-running it with the same values is
-    just an idempotent no-op, not a cost worth guarding against.
+    ``apply_memory_recall`` runs whenever the profile named ANY of the five
+    hindsight-file keys (unlike ``restart_memory``, which only fires when
+    the LLM env would actually change): that file
+    (``parley_hindsight_config.py``) needs no restart, so re-running it
+    with the same values is just an idempotent no-op, not a cost worth
+    guarding against.
 
     Returns the plan that was executed, for logging and for the route's
     response.
@@ -798,16 +861,16 @@ def apply_runtime_profile(
         write_env(plan.env_updates)
     if plan.restart_memory and plan.memory is not None:
         restart_memory(plan.memory)
-    if plan.memory is not None and plan.memory.recall_max_tokens is not None:
+    if plan.memory is not None and plan.memory.has_hindsight_file_updates():
         apply_memory_recall(plan.memory)
 
     cfg = apply_config_updates(cfg, plan.marker_updates)
     write_config(cfg)
 
     logger.info(
-        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s recall=%s)",
+        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s hindsight=%s)",
         plan.leaving, plan.target, plan.touched_config_paths(),
         plan.touched_env_keys(), plan.restart_memory,
-        None if plan.memory is None or plan.memory.recall_max_tokens is None else plan.memory.recall_args(),
+        None if plan.memory is None else plan.memory.hindsight_file_updates() or None,
     )
     return plan

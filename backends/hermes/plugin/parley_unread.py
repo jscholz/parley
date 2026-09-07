@@ -313,8 +313,8 @@ def _compute_unread_uncached(
     # ── BATCH state.db query ───────────────────────────────────────
     #
     # Previously: a per-chat recursive-CTE + COUNT(*) was issued in a
-    # Python for-loop (N queries for N chats — ~9s on Jonathan's
-    # production data with ~170 chats). Each invocation reset the cache
+    # Python for-loop (N queries for N chats — ~9s on real production
+    # data with ~170 chats). Each invocation reset the cache
     # TTL clock before the next one could land, so the TTL cache from
     # commit 13d8815 effectively never served.
     #

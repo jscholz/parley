@@ -4,9 +4,11 @@ Generic contract (docs/ABSTRACT_AGENT_PROTOCOL.md "Optional health extension"):
 the agent lists named health checks with their latest report and lets the
 UI re-run one on demand. Parley knows nothing about what the checks are.
 
-hermes' implementation reads the daily digest state that
-hermes-agent-private's ``scripts/lib/health.sh`` writes and re-runs those
-scripts with ``--no-alert`` (report + heartbeat, no Telegram/push):
+hermes' implementation reads the daily digest state that a deployment's
+OWN health-check scripts write (an ops-repo concern, outside this
+contract — the reference deployment keeps its at ``scripts/lib/health.sh``
+in a private repo) and re-runs those scripts with ``--no-alert`` (report +
+heartbeat, no Telegram/push):
 
   PARLEY_HEALTH_STATE_DIR  dir holding <name>.last-run ("<epoch> <WORST>") and <name>.report.txt
                            (default ~/.hermes/logs/health)

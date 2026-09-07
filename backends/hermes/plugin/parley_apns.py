@@ -11,7 +11,7 @@ Config (env, read on first use; see docs/APNS_SETUP.md):
   APNS_KEY_P8_PATH  AuthKey_<KEYID>.p8 from the Apple developer portal
   APNS_KEY_ID       10-char key id
   APNS_TEAM_ID      10-char team id
-  APNS_BUNDLE_ID    com.jscholz.parley  (the apns-topic)
+  APNS_BUNDLE_ID    com.example.parley  (the apns-topic — your app's bundle id)
   APNS_ENV          sandbox (Xcode dev builds) | production (TestFlight / App Store)
 """
 from __future__ import annotations

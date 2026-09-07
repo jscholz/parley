@@ -141,16 +141,24 @@ Rules:
    4. *Write hindsight's env* (`HINDSIGHT_API_LLM_PROVIDER`, `_LLM_MODEL`,
       `_LLM_BASE_URL`) through hermes' own `.env` writer (`_write_env_lines`,
       also `atomic_replace`-based) and restart `hindsight-server.service`. Do
-      this through a small repo script (`scripts/apply-memory-profile.sh` in
-      hermes-agent-private) invoked by the plugin, so process control lives
-      with the ops scripts, not in Parley.
-   5. *Apply hindsight's recall cap* (`recall_max_tokens`, `recall_budget` —
-      §2) via a SIBLING script, `scripts/apply-memory-recall.sh <tokens>
-      <budget>`, writing `~/.hindsight/config.json` directly — a different
-      file than step 4's `.env`, and no restart. Runs whenever the profile
-      names either half of the pair (naming only one fills the other with
-      hermes' defaults, 4096 / mid, and logs which); idempotent, so it is not
-      gated on "would this change anything" the way step 4's restart is.
+      this through a small script SHIPPED IN THIS REPO
+      (`backends/hermes/scripts/apply-memory-profile.sh`, overridable via
+      `PARLEY_MEMORY_PROFILE_SCRIPT`) invoked by the plugin, so process
+      control lives with one ops script rather than scattered through
+      Parley's Python — and a third-party install never needs anyone's
+      private ops repo for it to exist.
+   5. *Apply hindsight's recall/retain knobs* (`recall_max_tokens`,
+      `recall_budget`, `auto_recall`, `auto_retain`, `retain_every_n_turns` —
+      §2, §3) via `parley_hindsight_config.py`, writing
+      `~/.hermes/hindsight/config.json` directly — a DIFFERENT file than
+      step 4's `.env`, and no restart: hindsight rereads it fresh per new
+      agent/session, so this runs in-process rather than through a script.
+      Fires whenever the profile names ANY of the five (the
+      `recall_max_tokens`/`recall_budget` pair still fills its missing half
+      with hermes' defaults, 4096 / mid, and logs which; the other three are
+      independent optionals — a profile may set any subset); idempotent, so
+      it is not gated on "would this change anything" the way step 4's
+      restart is.
    6. *Record* `parley.runtime_profile = <target>` last, so a crash mid-apply
       leaves the setting reporting the profile that is actually live.
 3. **The model picker stays.** In `cloud` it behaves as today and additionally
@@ -251,7 +259,7 @@ What the `local` profile's diet does about all of the above, in order:
 3. **A capped, cheaper memory recall.** `memory.recall_max_tokens: 1500` /
    `recall_budget: low` (vs cloud's 4096 / mid) bounds the per-turn injection
    that would otherwise eat back whatever the first two points saved —
-   applied via `scripts/apply-memory-recall.sh`, no restart.
+   applied via `parley_hindsight_config.py`, in-process, no restart.
 4. **Compact earlier and pin the output reservation.** `compression.threshold:
    0.6` and `model.max_tokens: 8192` (the math above) keep `threshold_tokens`
    comfortably above head + tail instead of right at the edge.
@@ -261,15 +269,45 @@ What the `local` profile's diet does about all of the above, in order:
 ## 3. Settings › Memory
 
 Category `Memory` (new). Backend-declared; the PWA adds only a section shell
-and the category mapping. Fields, all from the hermes plugin:
+and the category mapping. Two groups, so hermes' own file-based memory is
+never confused with hindsight (the actual memory server) again — the
+original single-group layout used generic labels ("Memory", "User
+profile") for the FILE toggles with no mention that hindsight was a
+different system entirely, which is what this split fixes.
+
+**`Built-in files`** — hermes' MEMORY.md/USER.md, unrelated to hindsight:
 
 | id | type | notes |
 |---|---|---|
-| `memory_enabled` | toggle | hermes `memory.memory_enabled` |
-| `memory_user_profile` | toggle | hermes `memory.user_profile_enabled` |
-| `memory_llm` | text, `readonly: true` | e.g. `openai-codex · gpt-5.4-mini` — follows the runtime profile; not editable here by design |
-| `memory_embeddings` | text, `readonly: true` | e.g. `openai · text-embedding-3-small` |
-| `memory_status` | text, `readonly: true` | `hindsight-server active · last retain 3 min ago · 0 LLM errors / 24h`, from the server's journal + `/v1/default/banks/default/stats` (or the health kv) |
+| `memory_enabled` | toggle | hermes `memory.memory_enabled` — labeled "Notes file (MEMORY.md)" |
+| `memory_user_profile` | toggle | hermes `memory.user_profile_enabled` — labeled "User profile file (USER.md)" |
+
+**`Hindsight`** — the memory server's own behaviour, backed by
+`parley_hindsight_config.py` reading/writing `~/.hermes/hindsight/config.json`
+directly (a DIFFERENT file than hermes' `config.yaml`/`.env`; see §1 rule
+2.5). hindsight rereads this file fresh whenever a `MemoryManager` is
+constructed — per new agent/session, not once at process start — so every
+writable field below takes effect on the NEXT chat, never mid-session, and
+needs no restart:
+
+| id | type | JSON key | notes |
+|---|---|---|---|
+| `memory_recall` | toggle | `auto_recall` (default `true`) | recall runs in the background after a turn and injects up to the token cap into the NEXT turn's prompt — its cost is context tokens, not latency; the injected copy is replayed with that turn until the next compaction |
+| `memory_recall_max_tokens` | slider, 200..16000 | `recall_max_tokens` (default `4096`) | cap on the per-turn injection |
+| `memory_recall_budget` | enum `low`/`mid`/`high` | `recall_budget` (default `mid`) | recall thoroughness |
+| `memory_retain` | toggle | `auto_retain` (default `true`) | the EXPENSIVE one — each save runs fact extraction + consolidation on the memory server's own LLM, which in local mode is the SAME GPU chat uses (measured 42s of LLM time for one consolidation pass); it competes with turns, not just tokens |
+| `memory_retain_every_n_turns` | slider, 1..50 | `retain_every_n_turns` (default `1`) | frequency knob; higher = fewer, larger (and cheaper) saves |
+| `memory_llm` | text, `readonly: true` | — | e.g. `openai-codex · gpt-5.4-mini` — follows the runtime profile; not editable here by design |
+| `memory_embeddings` | text, `readonly: true` | — | e.g. `openai · text-embedding-3-small` |
+| `memory_status` | text, `readonly: true` | — | `hindsight-server active · last retain 3 min ago · 0 LLM errors / 24h`, from the server's journal + `/v1/default/banks/default/stats` (or the health kv) |
+| `memory_hindsight_state` | text, `readonly: true` | — | compact recall/retain summary, e.g. `recall on · 1500 tok · low \| retain on · every 1 turn`; reads `hindsight config not found at <path>` on a fresh install that has never written the file |
+
+Runtime profiles carry the same five JSON keys under a profile's `memory:`
+block (§1 rule 2.5) through the identical validate/write path — a profile
+switch and a Settings-panel edit can never disagree about what a value
+means. Seeded profile values are unchanged by this feature: `local` still
+only seeds `recall_max_tokens: 1500` / `recall_budget: low`; retain
+frequency is left to the toggle, not baked into a profile.
 
 Protocol addition (small, generic, documented in
 `ABSTRACT_AGENT_PROTOCOL.md`): an optional boolean `readonly` on any setting.
@@ -281,6 +319,7 @@ Health); the Memory section is *what memory is doing and with what*, one glance.
 
 - Local embeddings + re-index (fully off-grid memory).
 - A per-profile toolset editor in the UI (profile YAML is the editor for now).
-- Vision on the standby host; the local profile is galatea-only, like the
-  server it points at. On the standby the preflight fails and the toggle
-  refuses — correct behaviour.
+- Vision on the standby host; the local profile only works on whichever box
+  is actually running the local model server (single-GPU deployments
+  today). On the standby the preflight fails and the toggle refuses —
+  correct behaviour.

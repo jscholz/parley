@@ -452,6 +452,66 @@ def test_recall_budget_rejects_an_unknown_value():
         rp.plan_apply(cfg, LIVE_ENV, "cloud")
 
 
+# ── D: hindsight auto_recall/auto_retain/retain_every_n_turns ────────────
+# (parley_hindsight_config.py's other three keys — independent optionals,
+# no "fill the other half" pairing like recall_max_tokens/recall_budget.)
+
+def test_auto_recall_and_auto_retain_are_independent_optionals():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"memory": {"auto_retain": False}}},
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "cloud")
+    assert plan.memory.auto_retain is False
+    assert plan.memory.auto_recall is None       # not named by this profile
+    assert plan.memory.recall_max_tokens is None  # unrelated pair, untouched
+
+
+def test_retain_every_n_turns_passes_through_and_validates_range():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"memory": {"retain_every_n_turns": 10}}},
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "cloud")
+    assert plan.memory.retain_every_n_turns == 10
+
+
+@pytest.mark.parametrize("bad", [0, 51, "five"])
+def test_retain_every_n_turns_out_of_range_or_unparseable_is_rejected(bad):
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"memory": {"retain_every_n_turns": bad}}},
+    })
+    with pytest.raises(rp.ProfileError, match="retain_every_n_turns"):
+        rp.plan_apply(cfg, LIVE_ENV, "cloud")
+
+
+@pytest.mark.parametrize("key,bad", [("auto_recall", "yes"), ("auto_retain", 1)])
+def test_auto_recall_and_auto_retain_reject_non_booleans(key, bad):
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"memory": {key: bad}}},
+    })
+    with pytest.raises(rp.ProfileError, match="true or false"):
+        rp.plan_apply(cfg, LIVE_ENV, "cloud")
+
+
+def test_a_profile_naming_only_retain_every_n_turns_still_triggers_the_hindsight_write():
+    """None of the recall pair, but a MemorySpec must still be built and
+    apply_memory_recall must still fire — has_hindsight_file_updates()
+    is what the runtime-profile apply loop actually gates on."""
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {
+            "cloud": {"memory": {"retain_every_n_turns": 3}},
+            "local": {"model": {"default": "qwen3.6-35b-a3b", "provider": "custom:local-fallback"}},
+        },
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "cloud")
+    assert plan.memory is not None
+    assert plan.memory.has_hindsight_file_updates()
+    assert plan.memory.hindsight_file_updates() == {"retain_every_n_turns": 3}
+
+    r = _Recorder(cfg=cfg)
+    r.apply("cloud")
+    assert [c[1] for c in r.calls if c[0] == "apply_memory_recall"] == [{"retain_every_n_turns": 3}]
+
+
 def test_apply_skips_the_recall_script_when_the_profile_names_no_recall():
     cfg = rp.apply_config_updates(LIVE_CFG, {
         "parley.runtime_profiles": {
@@ -544,7 +604,10 @@ class _Recorder:
         self.calls.append(("restart_memory", spec.as_args()))
 
     def apply_memory_recall(self, spec):
-        self.calls.append(("apply_memory_recall", spec.recall_args()))
+        # hindsight_file_updates() rather than recall_args() — it's the
+        # complete, self-describing set of keys THIS spec actually names
+        # (the recall pair plus the three independent booleans/int).
+        self.calls.append(("apply_memory_recall", spec.hindsight_file_updates()))
 
     def apply(self, target):
         return rp.apply_runtime_profile(
@@ -574,8 +637,8 @@ def test_apply_order_is_preflight_snapshot_config_env_restart_marker():
     # 3. the marker is LAST — a crash before it reports the profile actually live
     assert marker_write["marker"] == "local"
     assert r.calls[4][1] == ["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]
-    # 4. the recall script runs after the LLM-routing restart, still before the marker
-    assert r.calls[5][1] == ["1500", "low"]
+    # 4. the hindsight-file write runs after the LLM-routing restart, still before the marker
+    assert r.calls[5][1] == {"recall_max_tokens": 1500, "recall_budget": "low"}
     assert plan.target == "local"
 
 
@@ -596,7 +659,9 @@ def test_apply_skips_the_restart_when_the_memory_env_is_already_right():
         "preflight", "write_config", "write_config",
         "write_env", "apply_memory_recall", "write_config",
     ]
-    assert [c[1] for c in r.calls if c[0] == "apply_memory_recall"] == [["4096", "mid"]]
+    assert [c[1] for c in r.calls if c[0] == "apply_memory_recall"] == [
+        {"recall_max_tokens": 4096, "recall_budget": "mid"},
+    ]
 
 
 def test_apply_rejects_an_unknown_profile_without_touching_anything():

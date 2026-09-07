@@ -421,7 +421,7 @@ def test_drawer_includes_compression_forks_via_user_id(plugin, state_db):
 
 
 _PARLEY_PROMPT = (
-    "# SOUL.md - Who You Are (Clawdian)\n\n"
+    "# SOUL.md - Who You Are (Aria)\n\n"
     "## Core Truths\n\n"
     "**Be concise by default.** Skip preamble.\n\n"
     "## Voice\n\n"

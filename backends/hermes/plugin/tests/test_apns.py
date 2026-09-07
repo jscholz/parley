@@ -18,7 +18,7 @@ def cfg(tmp_path):
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
     p = tmp_path / "AuthKey_ABC1234567.p8"; p.write_text(pem)
-    return {"path": str(p), "pub": key.public_key(), "cfg": apns.ApnsConfig(pem, "ABC1234567", "7BWJRMNR96", "com.jscholz.parley", "sandbox")}
+    return {"path": str(p), "pub": key.public_key(), "cfg": apns.ApnsConfig(pem, "ABC1234567", "7BWJRMNR96", "com.example.parley", "sandbox")}
 
 
 def _b64url_decode(s: str) -> bytes:
@@ -43,9 +43,9 @@ def test_provider_token_is_a_valid_es256_jwt(cfg):
 
 
 def test_build_payload_maps_web_push_shape():
-    out = apns.build_payload({"title": "Clawdian", "body": "done", "chat_id": "parley:abc", "tag": "chat:abc",
+    out = apns.build_payload({"title": "Aria", "body": "done", "chat_id": "parley:abc", "tag": "chat:abc",
                               "url": "/?chat=parley%3Aabc", "badge": 3})
-    assert out["aps"]["alert"] == {"title": "Clawdian", "body": "done"}
+    assert out["aps"]["alert"] == {"title": "Aria", "body": "done"}
     assert out["aps"]["thread-id"] == "chat:abc" and out["aps"]["badge"] == 3 and out["aps"]["sound"] == "default"
     assert out["url"] == "/?chat=parley%3Aabc" and out["chat_id"] == "parley:abc"
     assert "badge" not in apns.build_payload({"title": "x", "body": "y"})["aps"]
@@ -60,7 +60,7 @@ def test_error_prune_classification():
 
 def test_config_from_env_gates_on_all_fields_and_readable_key(cfg):
     base = {"APNS_KEY_P8_PATH": cfg["path"], "APNS_KEY_ID": "ABC1234567", "APNS_TEAM_ID": "7BWJRMNR96",
-            "APNS_BUNDLE_ID": "com.jscholz.parley"}
+            "APNS_BUNDLE_ID": "com.example.parley"}
     c = apns.config_from_env(base)
     assert c and c.env == "sandbox" and c.host.startswith("https://api.sandbox")
     assert apns.config_from_env({**base, "APNS_ENV": "production"}).host == "https://api.push.apple.com"

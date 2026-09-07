@@ -19,16 +19,23 @@ Plus the helpers:
   - apply_preferred_models    persist the glob list
   - apply_model_setting       persist model.default + provider
   - apply_runtime_profile_setting   switch runtime profiles (LOCAL_MODE.md §1)
-  - apply_memory_toggle       hermes memory.* booleans
+  - apply_memory_toggle       hermes' BUILT-IN file-memory booleans (MEMORY.md/USER.md)
+  - apply_hindsight_setting   hindsight's OWN recall/retain knobs (parley_hindsight_config.py)
 
-Two feature groups landed here 2026-09-07 (docs/LOCAL_MODE.md):
+Two feature groups landed here 2026-09-07 (docs/LOCAL_MODE.md), plus a
+2026-09 relabel of the Memory section itself:
 
   * ``runtime_profile`` — an enum that reroutes EVERY model call (chat,
     auxiliary, crons, hindsight) between the cloud stack and the local
     llama.cpp server. The mechanics live in parley_runtime_profiles.py;
     this file only declares the setting and injects the side effects.
-  * category ``Memory`` — two hermes toggles plus three ``readonly``
-    text fields describing what memory is doing and with what.
+  * category ``Memory``, group ``Built-in files`` — hermes' own
+    MEMORY.md/USER.md toggles (unrelated to hindsight; labeled honestly so
+    the two are not confused).
+  * category ``Memory``, group ``Hindsight`` — the actual memory server's
+    recall/retain behaviour, backed by ``parley_hindsight_config.py``
+    (``~/.hermes/hindsight/config.json``), plus the pre-existing readonly
+    LLM/embeddings/status lines.
 
 And the exception classes that route _apply_setting failures to
 HTTP 400 / 404 in the handler.
@@ -53,6 +60,7 @@ from pathlib import Path
 from .parley_env import env_get
 from typing import Any, Dict, List, Optional, Set
 
+from . import parley_hindsight_config as hc
 from . import parley_runtime_profiles as rp
 
 # Guarded aiohttp import — see parley_route_conversations for why.
@@ -342,26 +350,56 @@ def _runtime_profile_setting(
     }
 
 
-# hermes config paths behind the two writable Memory toggles.
+# hermes config paths behind the two writable "Built-in files" toggles.
+# These are hermes' OWN file-based memory (MEMORY.md / USER.md) — NOT
+# hindsight. Kept distinct from the `_HINDSIGHT_*` maps below so the two
+# systems can never be confused at the dispatch layer either.
 _MEMORY_TOGGLES = {
     "memory_enabled": "memory.memory_enabled",
     "memory_user_profile": "memory.user_profile_enabled",
 }
+
+# Settings ids -> parley_hindsight_config.py JSON keys. All five are backed
+# by ~/.hermes/hindsight/config.json, read fresh per new agent/session (no
+# restart) — see that module's docstring.
+_HINDSIGHT_SETTINGS = {
+    "memory_recall": hc.KEY_AUTO_RECALL,
+    "memory_recall_max_tokens": hc.KEY_RECALL_MAX_TOKENS,
+    "memory_recall_budget": hc.KEY_RECALL_BUDGET,
+    "memory_retain": hc.KEY_AUTO_RETAIN,
+    "memory_retain_every_n_turns": hc.KEY_RETAIN_EVERY_N_TURNS,
+}
+
 # Declared but never accepted on POST. The PWA renders `readonly: true` as a
 # value line and never submits it; apply_setting rejects one anyway, because
 # "the client won't do that" is not a validation strategy.
-_MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status")
+_MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state")
+
+# hindsight rereads its config file per NEW agent/session, not mid-session —
+# repeated verbatim on every writable Hindsight field's description so the
+# Settings panel doesn't imply an in-flight chat changes behaviour.
+_APPLIES_TO_NEW_CHATS = "Applies to new chats — an already-open conversation keeps what it read until it resets."
 
 
 def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str, Any]]:
-    """Settings › Memory (LOCAL_MODE.md §3): what memory is doing, with what,
-    and the two switches that turn it off."""
+    """Settings › Memory: two groups.
+
+    ``Built-in files`` — hermes' own MEMORY.md/USER.md notes, unrelated to
+    hindsight (a common source of confusion this relabel exists to fix).
+
+    ``Hindsight`` — the actual memory SERVER's recall/retain behaviour,
+    backed by ``parley_hindsight_config.py``, plus the pre-existing readonly
+    LLM/embeddings/status lines (docs/LOCAL_MODE.md §3).
+    """
     mem = cfg.get("memory") if isinstance(cfg.get("memory"), dict) else {}
+    hs_path = hc.config_path()
+    hs_cfg = hc.read_config(hs_path)
+    hs = hc.effective_values(hs_cfg)
 
     def _txt(sid: str, label: str, value: str, description: str) -> Dict[str, Any]:
         return {
             "id": sid, "label": label, "description": description,
-            "category": "Memory", "type": "text", "value": value,
+            "category": "Memory", "group": "Hindsight", "type": "text", "value": value,
             "readonly": True,
         }
 
@@ -378,22 +416,109 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
         (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL") or "").strip(),
     ) if x) or "not configured"
 
+    hindsight_state = (
+        f"hindsight config not found at {hs_path}" if not hs_path.exists()
+        else hc.summary_line(hs_cfg)
+    )
+
     return [
+        # ── Built-in files: hermes' own MEMORY.md/USER.md, NOT hindsight ──
         {
             "id": "memory_enabled",
-            "label": "Memory",
-            "description": "Retain facts from conversations and recall them later.",
+            "label": "Notes file (MEMORY.md)",
+            "description": (
+                "Hermes' built-in file memory — free-form notes hermes writes "
+                "to MEMORY.md. Separate from Hindsight below, which is the "
+                "actual memory server."
+            ),
             "category": "Memory",
+            "group": "Built-in files",
             "type": "toggle",
             "value": bool(mem.get("memory_enabled", True)),
         },
         {
             "id": "memory_user_profile",
-            "label": "User profile",
-            "description": "Maintain a running profile of the user from retained facts.",
+            "label": "User profile file (USER.md)",
+            "description": (
+                "Hermes' built-in file memory — a running profile of the user "
+                "hermes writes to USER.md. Separate from Hindsight below, "
+                "which is the actual memory server."
+            ),
             "category": "Memory",
+            "group": "Built-in files",
             "type": "toggle",
             "value": bool(mem.get("user_profile_enabled", True)),
+        },
+        # ── Hindsight: the actual memory server ───────────────────────────
+        {
+            "id": "memory_recall",
+            "label": "Recall",
+            "description": (
+                "Recall runs in the background after each turn and injects up "
+                "to the token cap (below) into the NEXT turn's prompt — its "
+                "cost is context tokens, not latency. The injected copy is "
+                "replayed with that turn on every later turn until the next "
+                "compaction. " + _APPLIES_TO_NEW_CHATS
+            ),
+            "category": "Memory",
+            "group": "Hindsight",
+            "type": "toggle",
+            "value": hs[hc.KEY_AUTO_RECALL],
+        },
+        {
+            "id": "memory_recall_max_tokens",
+            "label": "Recall token cap",
+            "description": (
+                "Maximum tokens of recalled memory injected per turn. "
+                + _APPLIES_TO_NEW_CHATS
+            ),
+            "category": "Memory",
+            "group": "Hindsight",
+            "type": "slider",
+            "value": hs[hc.KEY_RECALL_MAX_TOKENS],
+            "min": hc.RECALL_MAX_TOKENS_RANGE[0],
+            "max": hc.RECALL_MAX_TOKENS_RANGE[1],
+            "step": 100,
+        },
+        {
+            "id": "memory_recall_budget",
+            "label": "Recall budget",
+            "description": "How thoroughly hindsight searches for recall candidates. " + _APPLIES_TO_NEW_CHATS,
+            "category": "Memory",
+            "group": "Hindsight",
+            "type": "enum",
+            "value": hs[hc.KEY_RECALL_BUDGET],
+            "options": [{"value": b, "label": b.capitalize()} for b in hc.RECALL_BUDGETS],
+        },
+        {
+            "id": "memory_retain",
+            "label": "Retain",
+            "description": (
+                "The EXPENSIVE one: each save runs fact extraction and "
+                "consolidation on the memory server's own LLM — in local mode "
+                "that is the SAME GPU chat uses (measured 42s of LLM time for "
+                "one consolidation pass), so it competes with turns rather "
+                "than just costing tokens. " + _APPLIES_TO_NEW_CHATS
+            ),
+            "category": "Memory",
+            "group": "Hindsight",
+            "type": "toggle",
+            "value": hs[hc.KEY_AUTO_RETAIN],
+        },
+        {
+            "id": "memory_retain_every_n_turns",
+            "label": "Retain frequency",
+            "description": (
+                "Retain every N turns. Higher = fewer, larger (and cheaper) "
+                "saves. " + _APPLIES_TO_NEW_CHATS
+            ),
+            "category": "Memory",
+            "group": "Hindsight",
+            "type": "slider",
+            "value": hs[hc.KEY_RETAIN_EVERY_N_TURNS],
+            "min": hc.RETAIN_EVERY_N_TURNS_RANGE[0],
+            "max": hc.RETAIN_EVERY_N_TURNS_RANGE[1],
+            "step": 1,
         },
         _txt("memory_llm", "Extraction model", llm,
              "Follows the runtime profile — change it there, not here."),
@@ -402,6 +527,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
              "1536-d, so changing the embedder needs a full re-index."),
         _txt("memory_status", "Status", memory_status_text(),
              "hindsight-server, its last retain, and LLM errors in 24h."),
+        _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
+             "Current hindsight recall/retain settings, compactly."),
     ]
 
 
@@ -516,6 +643,8 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
         return apply_runtime_profile_setting(value)
     if sid in _MEMORY_TOGGLES:
         return apply_memory_toggle(sid, value)
+    if sid in _HINDSIGHT_SETTINGS:
+        return apply_hindsight_setting(sid, value)
     if sid in _MEMORY_READONLY:
         # Declared with ``readonly: true``; the PWA never POSTs one, but a
         # 400 beats silently accepting a write we have nowhere to put.
@@ -794,10 +923,10 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
 # ── Memory status (Settings › Memory, LOCAL_MODE.md §3) ─────────────────
 
 # The unit hindsight runs under, and the grep patterns that decide whether it
-# is healthy. Both are lifted verbatim from hermes-agent-private's
-# scripts/health-hermes.sh (`c_hindsight_server` / `c_hindsight_llm`) so the
-# Memory section and the daily digest cannot disagree about what "an LLM
-# error" is — two definitions of the same thing is how a check silently
+# is healthy. Both are lifted verbatim from the reference deployment's own
+# health-check script (its `c_hindsight_server` / `c_hindsight_llm` checks)
+# so the Memory section and its daily digest cannot disagree about what "an
+# LLM error" is — two definitions of the same thing is how a check silently
 # stops covering the failure it was written for.
 _MEMORY_UNIT = "hindsight-server"
 _MEMORY_ERROR_RE = re.compile(
@@ -892,25 +1021,19 @@ def memory_status_text(now: Optional[datetime] = None) -> str:
 # ── runtime profile: the injected side effects ──────────────────────────
 
 # Ops lives with the ops scripts (LOCAL_MODE.md §1 rule 2.4): Parley does not
-# own process control. Overridable so tests can point at a stub — they must
-# never restart the owner's memory server.
-_DEFAULT_MEMORY_SCRIPT = "~/code/hermes-agent-private/scripts/apply-memory-profile.sh"
-
-# The recall knobs live in a DIFFERENT file (~/.hindsight/config.json, not
-# hermes' .env) and need no restart — a separate script, same resolution
-# pattern and the same "point tests at a stub" override.
-_DEFAULT_MEMORY_RECALL_SCRIPT = "~/code/hermes-agent-private/scripts/apply-memory-recall.sh"
+# own process control. Shipped IN this repo (backends/hermes/scripts/) so a
+# third-party install never needs to reach into anyone's private ops repo —
+# resolved relative to this file's own directory, not a hardcoded home path.
+# Overridable so tests can point at a stub — they must never restart a real
+# memory server.
+_DEFAULT_MEMORY_SCRIPT = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "apply-memory-profile.sh"
+)
 
 
 def _memory_profile_script() -> Path:
     return Path(
         os.environ.get("PARLEY_MEMORY_PROFILE_SCRIPT") or _DEFAULT_MEMORY_SCRIPT
-    ).expanduser()
-
-
-def _memory_recall_script() -> Path:
-    return Path(
-        os.environ.get("PARLEY_MEMORY_RECALL_SCRIPT") or _DEFAULT_MEMORY_RECALL_SCRIPT
     ).expanduser()
 
 
@@ -925,10 +1048,10 @@ def _write_hermes_config(cfg: Dict[str, Any]) -> None:
     """Persist config.yaml through hermes' own writer.
 
     save_config -> utils._atomic_write -> atomic_replace, which resolves a
-    symlink before os.replace. That is load-bearing here: ~/.hermes/config.yaml
-    is a symlink into the hermes-agent-private repo, and any writer that
-    renames over the LINK turns it into a plain file and silently orphans the
-    repo copy."""
+    symlink before os.replace. That is load-bearing here: on the reference
+    deployment ~/.hermes/config.yaml is a symlink into the owner's own config
+    repo, and any writer that renames over the LINK turns it into a plain
+    file and silently orphans the repo copy."""
     from hermes_cli.config import save_config
     save_config(cfg)
 
@@ -955,7 +1078,8 @@ def _restart_memory_server(spec: "rp.MemorySpec") -> None:
     if not script.exists():
         raise SettingsValidationError(
             f"memory profile script not found at {script}; set "
-            f"PARLEY_MEMORY_PROFILE_SCRIPT or install it from hermes-agent-private"
+            f"PARLEY_MEMORY_PROFILE_SCRIPT or check backends/hermes/scripts/ "
+            f"in this repo"
         )
     argv = [str(script)] + spec.as_args()
     started = time.time()
@@ -980,35 +1104,26 @@ def _restart_memory_server(spec: "rp.MemorySpec") -> None:
 
 
 def _apply_memory_recall(spec: "rp.MemorySpec") -> None:
-    """Hand hindsight's recall cap to the sibling script. No restart: the
-    contract (see LOCAL_MODE.md §1 / the plugin module docstring) is that
-    this knob takes effect without bouncing hindsight-server."""
-    script = _memory_recall_script()
-    if not script.exists():
-        raise SettingsValidationError(
-            f"memory recall script not found at {script}; set "
-            f"PARLEY_MEMORY_RECALL_SCRIPT or install it from hermes-agent-private"
-        )
-    argv = [str(script)] + spec.recall_args()
-    started = time.time()
+    """Hand a profile switch's recall/retain knobs to
+    ``parley_hindsight_config`` directly — no subprocess, no restart:
+    hindsight rereads that file fresh per new agent/session (module
+    docstring). Runs whenever *spec* names ANY of the five hindsight-file
+    keys; a no-op MemorySpec (LLM-routing-only switch) never reaches here
+    (see ``rp.MemorySpec.has_hindsight_file_updates`` / the caller in
+    ``parley_runtime_profiles.apply_runtime_profile``)."""
+    updates = spec.hindsight_file_updates()
+    if not updates:
+        return
+    cfg = hc.read_config()
     try:
-        proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=_memory_script_timeout(),
-        )
-    except subprocess.TimeoutExpired:
-        raise SettingsValidationError(
-            f"memory recall script did not finish within {_memory_script_timeout():.0f}s"
-        )
-    except OSError as e:
-        raise SettingsValidationError(f"could not run {script}: {e}")
-    logger.info(
-        "[parley] memory recall script rc=%s in %.1fs", proc.returncode, time.time() - started,
-    )
-    if proc.returncode != 0:
-        tail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
-        raise SettingsValidationError(
-            "memory recall apply failed: " + (tail[-1] if tail else f"exit {proc.returncode}")
-        )
+        updated = hc.plan_updates(cfg, updates)
+    except hc.HindsightConfigError as e:
+        raise SettingsValidationError(str(e))
+    try:
+        hc.write_config(updated)
+    except Exception as e:
+        logger.exception("[parley] hindsight recall/retain persist failed")
+        raise SettingsValidationError(f"failed to write hindsight config: {e}")
 
 
 def _preflight_runtime_profile(target: str, profile: Dict[str, Any]) -> None:
@@ -1075,6 +1190,33 @@ def apply_memory_toggle(sid: str, value: Any) -> Dict[str, Any]:
         raise SettingsValidationError(f"failed to write hermes config: {e}")
     return _updated_def(sid, {
         "id": sid, "label": sid, "category": "Memory", "type": "toggle", "value": value,
+    })
+
+
+def apply_hindsight_setting(sid: str, value: Any) -> Dict[str, Any]:
+    """The five writable Hindsight settings — hindsight's OWN
+    recall/retain knobs, in ``~/.hermes/hindsight/config.json``
+    (``parley_hindsight_config.py``), NOT hermes' config.yaml.
+
+    Reads-modifies-writes so an unknown key already in the file (or one a
+    future hindsight version adds) survives untouched. Creates the file
+    cleanly on a box that has never had one — a fresh install must not
+    require hand-seeding it before the first Settings-panel edit."""
+    key = _HINDSIGHT_SETTINGS.get(sid)
+    if key is None:
+        raise SettingsNotFoundError(f"unknown setting: {sid}")
+    cfg = hc.read_config()
+    try:
+        updated = hc.plan_update(cfg, key, value)
+    except hc.HindsightConfigError as e:
+        raise SettingsValidationError(str(e))
+    try:
+        hc.write_config(updated)
+    except Exception as e:
+        logger.exception("[parley] hindsight config persist failed")
+        raise SettingsValidationError(f"failed to write hindsight config: {e}")
+    return _updated_def(sid, {
+        "id": sid, "label": sid, "category": "Memory", "group": "Hindsight", "value": value,
     })
 
 

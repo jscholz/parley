@@ -1,6 +1,6 @@
 """HTTP route handler for ``POST /v1/parley/upload`` — large-file staging.
 
-Task #158. Big PDFs (Jonathan hit a 57 MB file) can't ride the
+Task #158. Big PDFs (the owner hit a 57 MB file) can't ride the
 base64-in-JSON ``attachments`` field on ``/v1/responses``: base64
 inflates ~33% and the whole body buffers in memory, blowing the 50 MB
 proxy + aiohttp body limits. This route accepts the RAW file bytes

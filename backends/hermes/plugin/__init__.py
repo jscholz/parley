@@ -295,7 +295,7 @@ def _serialize_command_registry() -> List[Dict[str, Any]]:
          dispatches commands without ``cli_only=True`` (or with a
          ``gateway_config_gate``). Exposing a ``cli_only`` command in
          the slash popover gives the user a discoverable trap: pick
-         it, send it, and Clawdian replies "Unknown command" because
+         it, send it, and the agent replies "Unknown command" because
          gateway/run.py rejects the dispatch. Align the catalog with what
          the gateway will actually run, so the popover only lists
          things that work end-to-end.
@@ -573,7 +573,10 @@ class ParleyAdapter(BasePlatformAdapter):
             _sstate.migrate_legacy_push_prefs(self._parley_db)
         except Exception as _mig_err:
             logger.warning("[parley] legacy push_prefs migration failed: %s", _mig_err)
-        vapid_subject = os.environ.get("VAPID_SUBJECT") or "mailto:jscholz@reimaginerobotics.ai"
+        # Operators SHOULD set VAPID_SUBJECT to a real contact address (the
+        # push spec wants one push services can reach); this placeholder
+        # only covers a fresh install that hasn't set it yet.
+        vapid_subject = os.environ.get("VAPID_SUBJECT") or "mailto:admin@example.com"
         # unread_total_fn: server-truth badge count for push payloads
         # (sw.js → setAppBadge). Deferred closure — _state_db_path is
         # set above; compute_unread is TTL-cached so per-dispatch cost

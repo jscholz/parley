@@ -1,7 +1,7 @@
 """Unit tests for native file delivery (``send_image_file`` / ``send_document``).
 
-Field report (2026-09-01): Jonathan asked for a diagram for slide 4 of the
-raise deck. The agent produced three assets and referenced them with
+Field report (2026-09-01): the owner asked for a diagram for slide 4 of a
+deck. The agent produced three assets and referenced them with
 ``MEDIA:/abs/path`` — hermes' universal attachment convention, which works
 on telegram/whatsapp/slack/matrix because those adapters implement native
 file upload. Parley did not: it implemented only ``send``, ``send_typing``

@@ -10,8 +10,8 @@ dashboard mutate, so every surface sees one truth.
 
 Why: 2026-09-05 — the model switch to Astra silently skipped four cron
 jobs (drift guard), and three jobs had been delivering to a dead
-platform name for two weeks. Jonathan never uses the CLI; the only way
-he could have seen or fixed either was a settings surface in Parley.
+platform name for two weeks. The owner never uses the CLI; the only way
+they could have seen or fixed either was a settings surface in Parley.
 
 Routes (aiohttp, same auth as the rest of the adapter):
   GET  /v1/jobs                    -> {"object":"list","data":[JobDef…],

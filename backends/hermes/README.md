@@ -150,7 +150,7 @@ Owned by the `ParleyAdapter` singleton in `plugin/__init__.py`:
 | `HERMES_STATE_DIR` | `parley.db` location | `~/.hermes` |
 | `PARLEY_PLATFORM_TOKEN` | Bearer for `/v1/*` routes (fatal if missing) | — |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | One-time bootstrap into `vapid_keys` table (raw base64url, NOT PEM) | Generated fresh if absent on first run |
-| `VAPID_SUBJECT` | WebPush subject line | `mailto:jscholz@reimaginerobotics.ai` |
+| `VAPID_SUBJECT` | WebPush subject line — set this to your own contact address | `mailto:admin@example.com` |
 | `PARLEY_PDF_*` | PDF rasterization knobs (DPI, max pages, timeout, max bytes) | 150 / 50 / 30s / 20MB |
 
 The plugin does NOT read `~/.hermes/*.json` dotfiles. Push subs /

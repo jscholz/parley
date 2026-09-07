@@ -626,7 +626,7 @@ Strictly optional: agents without health checks return 404 on
 { "object": "list", "data": [
   { "id": "hermes", "name": "hermes health", "worst": "FAIL",
     "last_run_at": "2026-09-05T07:11:34+00:00",
-    "report": "🔴 hermes health — galatea — …\nFAIL hindsight_llm — …\nOK   gateway — …",
+    "report": "🔴 hermes health — myhost — …\nFAIL hindsight_llm — …\nOK   gateway — …",
     "can_run": true, "counts": { "fail": 1, "warn": 2, "ok": 15 } }
 ] }
 ```
@@ -644,9 +644,10 @@ check object. `400` when the check is read-only or timed out, `404` for
 an unknown id.
 
 Reference implementation: `backends/hermes/plugin/parley_route_health.py`
-reads the digest state written by hermes-agent-private's
-`scripts/lib/health.sh` (`<name>.last-run`, `<name>.report.txt`) and
-re-runs the configured scripts with `--no-alert`
+reads the digest state written by your OWN health-check scripts
+(`<name>.last-run`, `<name>.report.txt` — an ops-repo concern outside this
+contract; the reference deployment's live at `scripts/lib/health.sh` in a
+private repo) and re-runs the configured scripts with `--no-alert`
 (`PARLEY_HEALTH_STATE_DIR`, `PARLEY_HEALTH_RUNNERS`).
 
 ## Errors

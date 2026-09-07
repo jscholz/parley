@@ -293,8 +293,8 @@ def _pin_created_at(db, second_offsets):
     written by one loop land in however many distinct milliseconds the
     host was fast or slow enough to produce. Pagination is millisecond-
     keyed, so that made these tests pass or fail by machine speed
-    (test_pagination_load_earlier failed ~7 runs in 12 on galatea and
-    passed on fontbrain). Offsets are whole seconds so ``created_at *
+    (test_pagination_load_earlier failed ~7 runs in 12 on one dev box and
+    passed on another). Offsets are whole seconds so ``created_at *
     1000`` is exact in double precision; repeat an offset to put two
     rows in the same millisecond deliberately.
     """

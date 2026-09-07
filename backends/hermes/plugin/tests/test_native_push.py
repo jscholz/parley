@@ -12,7 +12,7 @@ from .. import parley_state as state
 from ..parley_db import ParleyDB
 from ..parley_dispatcher import PushDispatcher
 
-CFG = apns.ApnsConfig("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n", "KEY1234567", "7BWJRMNR96", "com.jscholz.parley", "sandbox")
+CFG = apns.ApnsConfig("-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n", "KEY1234567", "7BWJRMNR96", "com.example.parley", "sandbox")
 TOK_A, TOK_B = "a" * 64, "b" * 64
 
 

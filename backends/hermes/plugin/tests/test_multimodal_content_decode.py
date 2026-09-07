@@ -1,6 +1,6 @@
 """Unit tests for ``_decode_multimodal_content``.
 
-Field report (2026-09-04, chat [pitch deck]): Jonathan uploaded two PDF
+Field report (2026-09-04, chat [pitch deck]): the owner uploaded two PDF
 decks in one turn. Parley rasterizes a PDF to one PNG per page, so the
 two decks became 71 images, and hermes-core stored that turn as a
 NUL-sentinel-prefixed JSON content-parts array with every page inlined
