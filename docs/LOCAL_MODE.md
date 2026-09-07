@@ -36,13 +36,19 @@ parley:
       memory:     { llm_provider: openai-codex, llm_model: gpt-5.4-mini }
     local:
       model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1 }
-      auxiliary:  { vision: { provider: custom:local-fallback, model: qwen3.6-35b-a3b } }   # server runs --mmproj
+      auxiliary:  { vision: {…local…}, compression: {…local…}, web_extract: {…local…}, session_search: {…local…},
+                  skills_hub: {…local…}, approval: {…local…}, mcp: {…local…}, title_generation: {…local…},
+                  triage_specifier: {…local…}, curator: {…local…}, flush_memories: {…local…} }
+                  # EVERY auxiliary model, not just vision. Field 2026-09-07: only vision was rerouted, so
+                  # the compression SUMMARIZER still called openai-codex, aborted on the exhausted quota,
+                  # and the session overflowed + auto-reset. The server runs --mmproj for vision.
       fallback_providers:                             # the local server as its OWN fallback: a conversation opened
         - { provider: custom:local-fallback, model: qwen3.6-35b-a3b, base_url: http://127.0.0.1:8000/v1, api_mode: chat_completions }
                                                       # before the switch still holds a cloud agent until eviction; on a
                                                       # quota 429 hermes re-reads this chain and lands here, not in an error
       memory:     { llm_provider: lmstudio, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b }   # NOT `llamacpp` — see rule 4
-      compression: { threshold: 0.6 }                  # compact earlier on the small window
+      compression: { threshold: 0.6, threshold_tokens: 30000 }   # the ratio is floored at 0.75 for sub-512K windows
+                  # (~49k on 64K — too close to the usable budget once output is reserved); the absolute cap wins.
 ```
 
 Rules:
