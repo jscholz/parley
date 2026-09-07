@@ -12,7 +12,28 @@
 //       the user only ever wheels up) by > threshold.
 //
 // Usage: node /tmp/scroll-jump-repro.mjs [--headed] [--no-disable-smooth]
-//        [--stop-mid-flight]
+//        [--stop-mid-flight] [--wheel-dy=N] [--wheel-interval=N]
+//        [--settle-wait=N]
+//
+// --wheel-dy / --wheel-interval (field 2026-09-05, laptop PWA race):
+//   the defaults (-160px every 45ms) fling through the whole document
+//   fast enough to catch MANY settle-driven jumps quickly, but each CDP
+//   dispatch is a coarse, discrete tick — good for the content-visibility
+//   settle-storm case, but unlikely to land inside the narrow synchronous
+//   window between prependHistory's pre-render snapshot and its
+//   restoreDomAnchor write. A gentler, higher-frequency drive
+//   (--wheel-dy=-28 --wheel-interval=8, ~60Hz) trades traversal speed for
+//   many more chances to land a tick inside that window — this is what
+//   reproduced the reported laptop/Chromium jump (55px residual on a
+//   tracked bubble, restoreDomAnchor writing scrollTop 0→9300 mid-drive).
+// --settle-wait: ms to wait after the initial replay completes before the
+//   drive starts (default 4500, calibrated for the default drive). The
+//   initial multi-pass resume cascade this mock chat needs to reach
+//   msg 320 can itself take >10s of page-time; if the drive/recorder
+//   attaches before that cascade's own restoreDomAnchor calls finish, they
+//   get misattributed to the synthetic drive. Bump this if `dbg` lines
+//   show resume-cascade restoreDomAnchor calls landing after the drive
+//   starts.
 
 import { chromium } from '/home/jscholz/code/parley/node_modules/playwright-core/index.mjs';
 import {
@@ -21,6 +42,11 @@ import {
 } from '/home/jscholz/code/parley/scripts/smoke/lib.mjs';
 import { installMockBackend } from '/home/jscholz/code/parley/scripts/smoke/mock-backend.mjs';
 import { writeFileSync } from 'node:fs';
+
+function argNum(flag, dflt) {
+  const arg = process.argv.find(a => a.startsWith(`${flag}=`));
+  return arg ? Number(arg.slice(flag.length + 1)) : dflt;
+}
 
 const HEADED = process.argv.includes('--headed');
 const DISABLE_SMOOTH = !process.argv.includes('--no-disable-smooth');
@@ -35,8 +61,9 @@ const CHAT_ID = 'mock-scroll-jump-repro';
 const TOTAL_MSGS = 320;
 const FIRST_PAGE = 40;      // rows on the initial tail page
 const FETCH_DELAY_MS = 700; // slow-link /messages latency
-const WHEEL_DY = -160;      // px per tick, negative = scroll up
-const WHEEL_INTERVAL_MS = 45;
+const WHEEL_DY = argNum('--wheel-dy', -160);          // px per tick, negative = scroll up
+const WHEEL_INTERVAL_MS = argNum('--wheel-interval', 45);
+const SETTLE_WAIT_MS = argNum('--settle-wait', 4500);
 const DRIVE_MS = 9_000;
 
 function makeMessages(count) {
@@ -124,7 +151,7 @@ async function main() {
   // attributable to the backfill-during-scroll path under test.
   // NOTE: variant 1 (drive at 1.4s) caught the scheduleAtBottomRepin RO
   // yanking against the user when the slow server render lands mid-scroll.
-  await page.waitForTimeout(4500);
+  await page.waitForTimeout(SETTLE_WAIT_MS);
 
   if (NO_ANCHOR) {
     await page.addStyleTag({ content: '#transcript { overflow-anchor: none; }' });
@@ -249,7 +276,47 @@ async function main() {
     for (const d of data.dbg.slice(-60)) console.log(`  dbg@${Math.round(d.t)}: ${d.line}`);
   }
 
+  // ── MAX_DEVIATION_PX — the acceptance metric ────────────────────────
+  // For every consecutive frame pair where the SAME bubble (anchor OR
+  // center) is tracked, the residual = |Δy| beyond what the wheel input
+  // in that window could explain. The max across the whole run is "how
+  // far did a bubble move under the user's eye, net of their own
+  // scrolling" — the number the acceptance criterion ("never move the
+  // text under the eye") is actually asking about. 0 kinds compensation
+  // is invisible; the JUMPS list above uses a wider +60px slack tuned to
+  // suppress noise, so this can be nonzero even when JUMPS DETECTED=0.
+  let maxDeviation = 0;
+  let maxDeviationDetail = null;
+  for (let i = 1; i < frames.length; i++) {
+    const f0 = frames[i - 1], f1 = frames[i];
+    const input = wheelInputBetween(f0.t - 25, f1.t);
+    if (f0.key && f0.key === f1.key) {
+      const residual = Math.max(0, Math.abs(f1.y - f0.y) - input);
+      if (residual > maxDeviation) {
+        maxDeviation = residual;
+        maxDeviationDetail = { t: f1.t, key: f1.key, from: f0.y, to: f1.y, input };
+      }
+    }
+  }
+  console.log(`\nMAX_DEVIATION_PX=${Math.round(maxDeviation)}`);
+  if (maxDeviationDetail) {
+    console.log('  detail:', JSON.stringify(maxDeviationDetail));
+    for (const d of data.dbg) {
+      if (Math.abs(d.t - maxDeviationDetail.t) < 150) console.log(`    dbg@${Math.round(d.t)}: ${d.line}`);
+    }
+  }
+
   await browser.close();
+
+  const assertMaxPx = argNum('--assert-max-px', null);
+  if (assertMaxPx !== null && maxDeviation > assertMaxPx) {
+    console.error(`\nFAIL: MAX_DEVIATION_PX=${Math.round(maxDeviation)} exceeds --assert-max-px=${assertMaxPx}`);
+    process.exit(1);
+  }
+  // Playwright/CDP can leave a handle open that keeps the event loop
+  // alive past browser.close() — exit explicitly so a passing run (no
+  // --assert-max-px violation) doesn't need a timeout(1) to reap it.
+  process.exit(0);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });

@@ -253,6 +253,38 @@ let lastUserGestureAt = 0;
 export function lastUserScrollGestureAt(): number { return lastUserGestureAt; }
 export function cancelPendingScrollRestores(): void { _restoreAnchorGen++; }
 
+/** Pure decision, no DOM: should a scroll-position correction computed
+ *  from a layout snapshot taken BEFORE a render be written as an ABSOLUTE
+ *  scrollTop right now (field 2026-09-05, laptop PWA — see prependHistory)?
+ *
+ *  False when the last user scroll gesture is fresh enough that it could
+ *  still be live: an absolute write is computed from a snapshot that
+ *  predates whatever the user's wheel/trackpad has done since, so writing
+ *  it now can silently cancel the user's own, still-in-flight scroll
+ *  delta (the exact race — see prependHistory's comment). `freshMs` is
+ *  the same window the file already uses to decide "is this gesture
+ *  still live" elsewhere (UPWARD_GESTURE_FRESH_MS) — kept as a parameter
+ *  here rather than a closed-over constant so the decision is testable
+ *  in isolation.
+ *
+ *  `atTopEdge` overrides the gesture check to always seat (regression,
+ *  scroll-load-page-size-capped smoke, field 2026-09-05): Chromium's own
+ *  scroll-anchoring implementation excludes the case where the scroller
+ *  is AT its literal start edge — being pinned to position 0 is treated
+ *  as intentional, like the existing bottom-edge exclusion in the settle
+ *  compensator (bottomFollowOwns), so the browser does NOT bump scrollTop
+ *  to compensate content inserted above. There is also no live gesture to
+ *  protect there: scrolling further "up" from 0 is physically clamped, so
+ *  the user's continuing momentum cannot be moving scrollTop at all. Both
+ *  premises behind skipping the seat (browser already compensated / would
+ *  clobber a live delta) are false at the edge — seat unconditionally. */
+export function shouldSeatAbsolutely(
+  lastGestureAt: number, now: number, freshMs: number, atTopEdge: boolean,
+): boolean {
+  if (atTopEdge) return true;
+  return now - lastGestureAt >= freshMs;
+}
+
 /** ── [scroll-jump] Relative settle compensator (field 2026-07-27) ──────
  *  "when I'm scrolling in sessions the scroll often JUMPS … goes away
  *  when everything is loaded."
@@ -272,6 +304,22 @@ export function cancelPendingScrollRestores(): void { _restoreAnchorGen++; }
  *  jumps, repeatedly, until every row has rendered once (measured 19×/run
  *  by scripts/scroll-jump-diag-harness.mjs --no-anchor; 0× with Chromium
  *  anchoring on).
+ *
+ *  Addendum (field 2026-09-05, laptop PWA / Chromium): "0× with Chromium
+ *  anchoring on" held for the case above (an uncancelled convergence loop
+ *  with no concurrent gesture), but restoreDomAnchor's FIRST synchronous
+ *  seat is not itself gesture-cancelled — only the loop's later frames
+ *  are (#202 fires on the gesture event, which can't preempt JS already
+ *  running). While a gesture is live, that seat races the browser's own
+ *  in-flight scroll: Chromium's anchoring has by then already compensated
+ *  the insertion, so the seat's delta degenerates to "minus whatever the
+ *  gesture moved scrollTop by since the snapshot" — it cancels the user's
+ *  own scroll instead of finishing a compensation. prependHistory now
+ *  skips that seat while a gesture is fresh, deferring to this same loop
+ *  (see shouldSeatAbsolutely) — except at the literal top edge, where
+ *  Chromium's anchoring excludes itself (pinned-to-start) and the user's
+ *  continuing "scroll up" is clamped to a no-op anyway, so the seat is
+ *  both safe and necessary there regardless of gesture freshness.
  *
  *  This loop is the RELATIVE compensator that survives gestures: track
  *  the first-visible bubble's CONTENT-SPACE offset (rect.top − transcript
@@ -325,6 +373,18 @@ export function cancelPendingScrollRestores(): void { _restoreAnchorGen++; }
 const NATIVE_ANCHORING_SUPPORTED =
   typeof CSS !== 'undefined' && typeof CSS.supports === 'function'
   && CSS.supports('overflow-anchor: auto');
+
+/** True when the browser will absorb a content-above-the-viewport height
+ *  change itself (CSS scroll anchoring), so an app-level compensation
+ *  would double-count. A per-frame computed-style check, not a boot-time
+ *  capability probe, so a harness's injected `overflow-anchor: none`
+ *  engages app-level compensation on Chromium too (see the settle
+ *  compensator's header below). Exported so prependHistory can reuse the
+ *  SAME probe instead of growing a second one. */
+export function isNativeScrollAnchoringActive(el: HTMLElement): boolean {
+  return NATIVE_ANCHORING_SUPPORTED
+    && getComputedStyle(el).getPropertyValue('overflow-anchor') !== 'none';
+}
 
 let _absoluteSeatGen = 0;
 /** Called by every ABSOLUTE scroll re-seat that compensates a layout shift
@@ -414,8 +474,7 @@ function ensureSettleCompensator(): void {
       ro?.disconnect();
       return;
     }
-    nativeAnchoringActive = NATIVE_ANCHORING_SUPPORTED
-      && getComputedStyle(el).getPropertyValue('overflow-anchor') !== 'none';
+    nativeAnchoringActive = isNativeScrollAnchoringActive(el);
     if (nativeAnchoringActive) {
       // Browser owns settle compensation; drop state so a later flip to
       // `none` (harness emulation) re-baselines fresh instead of applying
@@ -1737,6 +1796,11 @@ export function onJumpToLatest(cb: () => void) {
   jumpToLatestCb = cb;
 }
 
+/** Mirrors the bottom-edge slack in the settle compensator's
+ *  bottomFollowOwns() (`<= 8`) — see shouldSeatAbsolutely's `atTopEdge`
+ *  parameter. */
+const TOP_EDGE_PX = 8;
+
 /** Batch-prepend historical messages while preserving the user's scroll
  *  position. renderFn should call addLine(..., {prepend: true, batch: true})
  *  per message, iterating oldest→newest so chronological order is
@@ -1756,11 +1820,40 @@ export function prependHistory(renderFn: () => void, opts: { deferPersist?: bool
   const oldScrollTop = transcriptEl.scrollTop;
   const oldScrollHeight = transcriptEl.scrollHeight;
   renderFn();
-  if (!(anchor && restoreDomAnchor(anchor))) {
-    // scrollHeight-diff fallback is itself an absolute compensation for
-    // the prepend's layout shift — re-baseline the settle compensator.
-    noteAbsoluteScrollSeat();
-    transcriptEl.scrollTop = oldScrollTop + (transcriptEl.scrollHeight - oldScrollHeight);
+  // [scroll-jump race, field 2026-09-05 (laptop PWA / Chromium)] Both
+  // restoreDomAnchor and the scrollHeight-diff fallback below are
+  // ABSOLUTE re-seats computed from oldScrollTop/oldScrollHeight/anchor —
+  // a layout snapshot taken BEFORE renderFn(). If the user's wheel or
+  // trackpad is live RIGHT NOW, an absolute write races the browser's own
+  // in-flight scroll: on Chromium, native CSS scroll anchoring has by now
+  // already compensated the inserted content itself (see the settle
+  // compensator's header above), so restoreDomAnchor's own delta math
+  // degenerates to "minus whatever the user's continuing gesture moved
+  // scrollTop by since the snapshot" — an absolute seat here doesn't
+  // finish a compensation, it CANCELS the user's own scroll. Skip the
+  // absolute seat while a gesture is fresh; the relative settle
+  // compensator (gesture-IMMUNE by design) is already armed by the same
+  // gesture (wheel/touchstart/pointerdown → ensureSettleCompensator) and
+  // applies the equivalent correction as scrollTop += delta on the next
+  // frame(s), which composes with a live scroll instead of fighting it.
+  // On WebKit/CAP (no native anchoring) this trades one uncorrected frame
+  // for not stomping the gesture — ensureSettleCompensator catches up on
+  // the very next tick. Not gesture-live (the common case: initial
+  // replay, drill, programmatic restores): unchanged, absolute seat as
+  // before.
+  if (shouldSeatAbsolutely(lastUserGestureAt, Date.now(), UPWARD_GESTURE_FRESH_MS, oldScrollTop <= TOP_EDGE_PX)) {
+    if (!(anchor && restoreDomAnchor(anchor))) {
+      // scrollHeight-diff fallback is itself an absolute compensation for
+      // the prepend's layout shift — re-baseline the settle compensator.
+      noteAbsoluteScrollSeat();
+      transcriptEl.scrollTop = oldScrollTop + (transcriptEl.scrollHeight - oldScrollHeight);
+    }
+  } else if (!isNativeScrollAnchoringActive(transcriptEl)) {
+    // No browser compensation on this path (WebKit/CAP) — make sure the
+    // gesture-immune compensator is running rather than assuming the
+    // gesture listener that normally arms it already fired for THIS
+    // prepend's render.
+    ensureSettleCompensator();
   }
   // deferPersist: the time-sliced backfill pump prepends a batch per
   // frame — a synchronous full-DOM clone+serialize per batch would eat
