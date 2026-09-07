@@ -38,6 +38,13 @@ export interface AgentSettingDef {
   label: string;
   description?: string;
   category?: string;
+  /** Optional sub-heading within a category's section, e.g. hermes'
+   *  `runtime_profile` declares category "Agent", group "Runtime" so it
+   *  renders under a small "Runtime" sub-label instead of loose among
+   *  the top-level Agent rows (docs/LOCAL_MODE.md §1). Purely cosmetic
+   *  grouping — unlike `category`, an unrecognized `group` never hides
+   *  the row, it just renders without a heading. */
+  group?: string;
   type: 'enum' | 'slider' | 'toggle' | 'text' | 'string-list';
   value: string | number | boolean | string[];
   options?: AgentSettingOption[];
@@ -45,16 +52,26 @@ export interface AgentSettingDef {
   max?: number;
   step?: number;
   placeholder?: string;
+  /** When true, render a value line (label + current value, muted,
+   *  selectable — same treatment as Cron/Health card text) instead of
+   *  an input, for ANY `type`. Never POSTed back. Protocol addition:
+   *  docs/ABSTRACT_AGENT_PROTOCOL.md "Optional settings extension".
+   *  hermes' Memory section uses this for `memory_llm` /
+   *  `memory_embeddings` / `memory_status` — values that follow the
+   *  active runtime profile and aren't independently editable here
+   *  (docs/LOCAL_MODE.md §3). */
+  readonly?: boolean;
 }
 
 let lastSchema: AgentSettingDef[] = [];
 
-/** Strip rows we previously injected. Match by data-agent-setting
- *  attr so we never touch hand-authored markup or the static
- *  placeholder (which uses data-agent-setting-placeholder — kept
- *  visible until a SUCCESSFUL schema response arrives). */
+/** Strip rows (and group-sub-headings) we previously injected. Match by
+ *  data-agent-setting / data-agent-setting-group attrs so we never touch
+ *  hand-authored markup or the static placeholder (which uses
+ *  data-agent-setting-placeholder — kept visible until a SUCCESSFUL
+ *  schema response arrives). */
 function clearInjectedRows(host: HTMLElement) {
-  for (const el of Array.from(host.querySelectorAll('[data-agent-setting]'))) {
+  for (const el of Array.from(host.querySelectorAll('[data-agent-setting], [data-agent-setting-group]'))) {
     el.remove();
   }
 }
@@ -70,6 +87,31 @@ function clearPlaceholderRows(host: HTMLElement) {
   }
 }
 
+/** Render a readonly SettingDef's `value` as display text, one branch
+ *  per `type` so every existing widget kind degrades to a value line
+ *  the same way it would render its input (enum → the matching
+ *  option's label, not the raw id; toggle → On/Off; string-list →
+ *  comma-joined). Falls through to String(value) for slider/text and
+ *  as the default for any future type. */
+function formatReadonlyValue(def: AgentSettingDef): string {
+  switch (def.type) {
+    case 'toggle':
+      return def.value ? 'On' : 'Off';
+    case 'enum': {
+      const opt = (def.options ?? []).find((o) => o.value === def.value);
+      return opt ? opt.label : String(def.value ?? '');
+    }
+    case 'string-list': {
+      const list = Array.isArray(def.value) ? def.value as string[] : [];
+      return list.length ? list.join(', ') : '(none)';
+    }
+    case 'slider':
+    case 'text':
+    default:
+      return String(def.value ?? '');
+  }
+}
+
 /** Render one SettingDef into a `.row` element. Returns null when the
  *  type is unknown so the caller can skip silently — forks may declare
  *  new types we don't render here (no harm done; they just don't show). */
@@ -80,9 +122,30 @@ function renderRow(def: AgentSettingDef): HTMLElement | null {
 
   const label = document.createElement('label');
   label.textContent = def.label;
-  label.htmlFor = `agent-set-${def.id}`;
   row.appendChild(label);
 
+  if (def.readonly) {
+    // Value line, never an input: whatever `type` says, we only ever
+    // need a display string here (formatReadonlyValue covers all five).
+    // No htmlFor — a <span> isn't labelable and there's nothing to
+    // focus. `agent-setting-value` + `cron-job-meta` for the exact
+    // muted/mono treatment the Cron and Health cards already use for
+    // "here's a fact, not a control" text.
+    const val = document.createElement('span');
+    val.className = 'agent-setting-value cron-job-meta';
+    val.dataset.agentSettingValue = def.id;
+    val.textContent = formatReadonlyValue(def);
+    row.appendChild(val);
+    if (def.description) {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = def.description;
+      row.appendChild(hint);
+    }
+    return row;
+  }
+
+  label.htmlFor = `agent-set-${def.id}`;
   let input: HTMLElement | null = null;
 
   switch (def.type) {
@@ -348,7 +411,12 @@ async function getAdapter(): Promise<any> {
  *  Hermes plugin emits "Agent" / "Plugins" / "Session" today; all three
  *  are agent-internal concerns and slot into the Agent section. If a
  *  future category genuinely belongs in Voice input (e.g. an STT-related
- *  agent setting), add the mapping here. */
+ *  agent setting), add the mapping here.
+ *
+ *  "Memory" (docs/LOCAL_MODE.md §3) gets its own section rather than
+ *  folding into Agent — it's "what hindsight is doing and with what",
+ *  a different question than "how does the model behave", and the
+ *  fields are almost all readonly status lines rather than knobs. */
 function categoryToSection(category: string | undefined): string {
   if (!category) return 'agent';
   switch (category.toLowerCase()) {
@@ -356,6 +424,7 @@ function categoryToSection(category: string | undefined): string {
     case 'plugins':
     case 'session':
       return 'agent';
+    case 'memory': return 'memory';
     case 'voice input':
     case 'voice-input': return 'voice-input';
     case 'voice output':
@@ -402,39 +471,89 @@ export async function load() {
   clearPlaceholderRows(agentHost);
   const allHosts = document.querySelectorAll<HTMLElement>('.settings-group[data-section]');
   for (const host of Array.from(allHosts)) clearInjectedRows(host);
-  if (schema.length === 0) {
-    lastSchema = [];
-    return;
-  }
-  lastSchema = schema;
-  // Resolve target host per row by category. Cache lookups so we don't
-  // re-querySelector the panel for every row.
+  // Resolve target host per row by category up front — needed even for
+  // an empty schema so the Memory empty-state toggle below has a host
+  // to act on.
   const hostBySection = new Map<string, HTMLElement>();
   for (const host of Array.from(allHosts)) {
     const s = host.dataset.section;
     if (s) hostBySection.set(s, host);
   }
+  if (schema.length === 0) {
+    lastSchema = [];
+    updateMemoryEmptyState(hostBySection.get('memory'));
+    return;
+  }
+  lastSchema = schema;
+  // Insertion cursor per host: the node the NEXT row for that host should
+  // land after. Starts at the section's `.group-label` (rows go right
+  // below the heading) and advances to each row/heading as it's placed,
+  // so multi-row sections render in schema order. (A prior version
+  // re-anchored to `.group-label` on every iteration, which inserted
+  // each new row immediately after the label — i.e. BEFORE whatever
+  // had just been inserted — silently reversing the order of any
+  // section with more than one row. Harmless while every section only
+  // ever carried "model", but `group` sub-headings need real ordering
+  // to mean anything.)
+  const cursorByHost = new Map<HTMLElement, HTMLElement>();
+  // Last `group` rendered per host, so we only emit a sub-heading on
+  // the first row of each named group (consecutive same-group rows in
+  // the schema share one heading; the agent controls this by keeping
+  // grouped settings adjacent, same convention as `category`).
+  const lastGroupByHost = new Map<HTMLElement, string | undefined>();
+  const insertAfterCursor = (host: HTMLElement, node: HTMLElement) => {
+    const cursor = cursorByHost.get(host) ?? (host.querySelector('.group-label') as HTMLElement | null);
+    if (cursor && cursor.parentElement === host) cursor.after(node);
+    else host.appendChild(node);
+    cursorByHost.set(host, node);
+  };
   for (const def of schema) {
     const sectionKey = categoryToSection(def.category);
     const host = hostBySection.get(sectionKey) || agentHost;
+    if (def.group !== lastGroupByHost.get(host)) {
+      lastGroupByHost.set(host, def.group);
+      if (def.group) {
+        const heading = document.createElement('div');
+        heading.className = 'agent-setting-group-heading';
+        heading.dataset.agentSettingGroup = def.group;
+        heading.textContent = def.group;
+        insertAfterCursor(host, heading);
+      }
+    }
     const row = renderRow(def);
     if (!row) continue;
-    // Insert AFTER the group label so the section heading stays first.
-    // (Group label is hidden on desktop via CSS, but still drives the
-    // mobile-stacked label and the DOM-order convention.)
-    const anchor = host.querySelector('.group-label') as HTMLElement | null;
-    if (anchor && anchor.nextSibling) {
-      host.insertBefore(row, anchor.nextSibling);
-    } else {
-      host.appendChild(row);
-    }
+    insertAfterCursor(host, row);
   }
+  // Memory is the one section whose absence needs to say something
+  // (Cron/Health have their own "not supported" 404 path via a
+  // dedicated endpoint; Memory rides the shared settings schema, so
+  // "zero Memory-category rows" is the only signal we get — could mean
+  // the plugin doesn't build the section yet, or the user disabled
+  // memory upstream entirely).
+  updateMemoryEmptyState(hostBySection.get('memory'));
   // Notify subscribers (composer attach-button gate, etc.) that the
   // agent settings schema is now populated. Fired once per successful
   // load — listeners read getCurrentValue() to react.
   try {
     window.dispatchEvent(new CustomEvent('agent-schema-loaded'));
   } catch { /* SSR-safe */ }
+}
+
+/** Toggle the Memory section's static empty-state row (index.html,
+ *  `[data-memory-empty]`) based on whether any Memory-category rows
+ *  actually landed in the host this load(). Called both when the whole
+ *  schema is empty and after a normal render, so re-declaring (or
+ *  fully removing) Memory settings on a later load flips it back. */
+function updateMemoryEmptyState(memoryHost: HTMLElement | undefined) {
+  if (!memoryHost) return;
+  const emptyEl = memoryHost.querySelector<HTMLElement>('[data-memory-empty]');
+  if (!emptyEl) return;
+  const hasRows = memoryHost.querySelectorAll('[data-agent-setting]').length > 0;
+  emptyEl.hidden = hasRows;
+  // `.row` is display:flex, which beats the `hidden` attribute alone —
+  // same fix cronSettings.ts/healthSettings.ts already apply to their
+  // placeholders.
+  emptyEl.style.display = hasRows ? 'none' : '';
 }
 
 /** Read the most recently-loaded value for an agent setting. Returns

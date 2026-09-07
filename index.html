@@ -364,6 +364,7 @@
       <button type="button" class="settings-nav-btn active" data-target="notifications">Notifications</button>
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
+      <button type="button" class="settings-nav-btn" data-target="memory">Memory</button>
       <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
       <button type="button" class="settings-nav-btn" data-target="health">Health</button>
       <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
@@ -511,6 +512,24 @@
     <!-- "Preferred models" chip input was hardcoded here; now declared
          by the agent via /v1/settings/schema as a `string-list` setting
          and rendered by agentSettings.ts. -->
+  </div>
+
+  <div class="settings-group" id="settings-group-memory" data-section="memory" hidden>
+    <div class="group-label">Memory</div>
+    <!--
+      "What memory is doing and with what" (docs/LOCAL_MODE.md §3) — not
+      a new extension, just a new `category: "Memory"` value on the same
+      /v1/settings/schema rows Agent uses, so this group is section
+      shell only. Rendered by src/agentSettings.ts alongside Agent rows;
+      most fields here are `readonly: true` status lines (LLM/embeddings
+      backing hindsight, last-retain summary) since they follow the
+      active runtime profile rather than being independently editable.
+      The row below is the empty state, toggled by agentSettings.ts'
+      updateMemoryEmptyState() — visible until the agent declares at
+      least one Memory-category setting (or if it declares none at all,
+      e.g. an older plugin build).
+    -->
+    <div class="row row-wide" data-memory-empty><span class="hint">This agent has not declared any memory settings.</span></div>
   </div>
 
   <div class="settings-group" id="settings-group-cron" data-section="cron" hidden>

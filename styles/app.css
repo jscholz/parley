@@ -1528,6 +1528,19 @@
     letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--primary); opacity: 0.7; padding: 4px 0 8px;
   }
+  /* Sub-heading for an agent-declared `group` within one settings
+   * section (docs/LOCAL_MODE.md §1 — hermes' runtime_profile sits under
+   * "Runtime" inside Agent). Deliberately NOT hidden by the desktop
+   * two-column @media rule below that hides `.group-label` — unlike the
+   * section label (redundant with the nav on desktop), this is the only
+   * place the sub-grouping is visible at all. Same font/case treatment
+   * as `.group-label`, muted instead of primary-tinted so it reads as
+   * subordinate to the section it's inside. */
+  #settings .agent-setting-group-heading {
+    font: 600 calc(var(--content-size) - 3px)/1 var(--font-mono);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); padding: 10px 0 4px;
+  }
   /* ── Two-column shell (desktop only) ────────────────────────────────
    * Left nav lists section names, clicking swaps which group is
    * visible. Active group is the only one without [hidden]; the rest

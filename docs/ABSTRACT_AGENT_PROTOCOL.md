@@ -438,6 +438,13 @@ by other clients changing the same agent state).
 - `min`, `max`, `step` (slider only, required).
 - `placeholder` (text/string-list only, optional) — hint text in
   the input box.
+- `readonly` (boolean, optional, default `false`) — renders as a value
+  line (label + current value) instead of an input, whatever `type`
+  says. Parley never POSTs a readonly setting. For a value the agent
+  derives or forwards from elsewhere rather than accepts edits on
+  directly (e.g. hermes' Memory section shows which LLM backs memory
+  extraction, which follows the active runtime profile rather than
+  being independently editable there).
 
 **Response (404):** Agent doesn't implement the extension. Parley
 hides the "Agent" settings group entirely.
