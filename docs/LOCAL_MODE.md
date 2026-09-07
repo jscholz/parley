@@ -37,7 +37,10 @@ parley:
     local:
       model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1 }
       auxiliary:  { vision: { provider: custom:local-fallback, model: qwen3.6-35b-a3b } }   # server runs --mmproj
-      fallback_providers: []                          # off-grid: nothing to fall back to
+      fallback_providers:                             # the local server as its OWN fallback: a conversation opened
+        - { provider: custom:local-fallback, model: qwen3.6-35b-a3b, base_url: http://127.0.0.1:8000/v1, api_mode: chat_completions }
+                                                      # before the switch still holds a cloud agent until eviction; on a
+                                                      # quota 429 hermes re-reads this chain and lands here, not in an error
       memory:     { llm_provider: lmstudio, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b }   # NOT `llamacpp` — see rule 4
       compression: { threshold: 0.6 }                  # compact earlier on the small window
 ```
