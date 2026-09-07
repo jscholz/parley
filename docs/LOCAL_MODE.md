@@ -38,7 +38,7 @@ parley:
       model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1 }
       auxiliary:  { vision: { provider: custom:local-fallback, model: qwen3.6-35b-a3b } }   # server runs --mmproj
       fallback_providers: []                          # off-grid: nothing to fall back to
-      memory:     { llm_provider: llamacpp, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b }
+      memory:     { llm_provider: lmstudio, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b }   # NOT `llamacpp` — see rule 4
       compression: { threshold: 0.6 }                  # compact earlier on the small window
 ```
 
@@ -77,7 +77,16 @@ Rules:
    updates `runtime_profiles.cloud.model`. In `local` its options are the local
    server's `/v1/models`. A profile switch never silently forgets a picker
    choice.
-4. **Embeddings stay on OpenAI in both profiles** for now. Hindsight's stored
+4. **Hindsight's provider for a local server is `lmstudio`, not `llamacpp`.**
+   Found during implementation: hindsight's `llamacpp` provider does not talk
+   to an external server — it spawns its own llama-cpp-python subprocess and
+   downloads a second GGUF, ignoring `base_url`, which on a single 24 GB card
+   would fight the model we are routing to. `lmstudio` is hindsight's generic
+   "OpenAI-compatible local server, no auth" provider and honours `base_url`.
+   Trade-off: it does not send `response_format: json_object`; if retain JSON
+   proves flaky, switch to provider `openai` with the same `base_url` (adds the
+   grammar, requires an api key).
+5. **Embeddings stay on OpenAI in both profiles** for now. Hindsight's stored
    vectors are `text-embedding-3-small` (1536-d); switching the embedder to the
    local `bge-small` (384-d) changes the schema and requires re-embedding the
    whole store. That is a separate, deliberate migration, not a toggle. So
