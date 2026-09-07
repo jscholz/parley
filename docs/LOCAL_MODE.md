@@ -33,9 +33,17 @@ parley:
       auxiliary:  { vision: { provider: openai-codex, model: gpt-5.5 } }
       fallback_providers:
         - { provider: custom:local-fallback, model: qwen3.6-35b-a3b, base_url: http://127.0.0.1:8000/v1, api_mode: chat_completions }
-      memory:     { llm_provider: openai-codex, llm_model: gpt-5.4-mini }
+      memory:     { llm_provider: openai-codex, llm_model: gpt-5.4-mini, recall_max_tokens: 4096, recall_budget: mid }
+      tools:      { tool_search: {} }               # {} = explicit "use hermes defaults" (still a real write)
+      skills:     { platform_disabled: { parley: [] } }
     local:
-      model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1 }
+      model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1,
+                  max_tokens: 8192 }
+                  # NOT 12000: hermes derives the compaction threshold from (context_length - max_tokens) *
+                  # threshold_percent. At 12000 on the 64K allocated window that lands at 45,505 tokens, which the
+                  # ~26k measured head plus the hard-coded 10k lean-tail floor can barely clear before the
+                  # ineffective-compression breaker (below) trips again; at 8192 it is 48,742. Verified 2026-09-07
+                  # by constructing an agent.
       auxiliary:  { vision: {…local…}, compression: {…local…}, web_extract: {…local…}, session_search: {…local…},
                   skills_hub: {…local…}, approval: {…local…}, mcp: {…local…}, title_generation: {…local…},
                   triage_specifier: {…local…}, curator: {…local…}, flush_memories: {…local…} }
@@ -46,9 +54,43 @@ parley:
         - { provider: custom:local-fallback, model: qwen3.6-35b-a3b, base_url: http://127.0.0.1:8000/v1, api_mode: chat_completions }
                                                       # before the switch still holds a cloud agent until eviction; on a
                                                       # quota 429 hermes re-reads this chain and lands here, not in an error
-      memory:     { llm_provider: lmstudio, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b }   # NOT `llamacpp` — see rule 4
+      memory:     { llm_provider: lmstudio, llm_base_url: http://127.0.0.1:8000/v1, llm_model: qwen3.6-35b-a3b,   # NOT `llamacpp` — see rule 4
+                  recall_max_tokens: 1500, recall_budget: low }   # hindsight's OWN config (~/.hindsight/config.json,
+                                                      # not hermes config) — applied by scripts/apply-memory-recall.sh,
+                                                      # no restart needed. §2 below.
       compression: { threshold: 0.6, threshold_tokens: 30000 }   # the ratio is floored at 0.75 for sub-512K windows
                   # (~49k on 64K — too close to the usable budget once output is reserved); the absolute cap wins.
+      tools:
+        tool_search:
+          enabled: on
+          listing: on
+          listing_max_tokens: 1200
+          defer: [computer_use, session_search, image_generate, todo_list, process_manage, cronjob_manage,
+                  drive_preview, gui_tour, desktop_preview, annotate_preview, show_tip, setup_mcp, desktop_project,
+                  close_terminal, apply_layout, read_terminal, read_window_below, focus_pane,
+                  browser_back, browser_cdp, browser_click, browser_console, browser_dialog, browser_exec,
+                  browser_get_images, browser_navigate, browser_press, browser_scroll, browser_snapshot, browser_type,
+                  delegate_task, text_to_speech, skill_manage]
+          # `defer` REPLACES hermes' curated `_DEFAULT_DEFERRED_TOOLS` wholesale, so this list carries every one of
+          # those defaults PLUS the browser/delegate/voice tools that cost schema space but are rarely used from a
+          # phone chat. MCP tools (Notion's 24 included) are always deferrable and need no entry here.
+      skills:
+        platform_disabled:
+          parley: [architecture-diagram, ascii-art, ascii-video, baoyu-article-illustrator, baoyu-comic,
+                   baoyu-infographic, claude-design, comfyui, design-md, excalidraw, humanizer, ideation,
+                   iterative-website-design, manim-video, p5js, pixel-art, minecraft-modpack-server, pokemon-player,
+                   gif-search, heartmula, songsee, spotify, video-rough-cutting, youtube-content,
+                   social-media-sweep, xurl, yuanbao, openhue, godmode, evaluating-llms-harness,
+                   weights-and-biases, huggingface-hub, llama-cpp, obliteratus, outlines, serving-llms-vllm,
+                   audiocraft-audio-generation, segment-anything-model, dspy, axolotl, fine-tuning-with-trl,
+                   unsloth, agent-client-bridges, claude-code, codex, computer-use, hermes-agent,
+                   kanban-codex-lane, opencode, github-auth, github-code-review, github-issues,
+                   github-pr-workflow, github-repo-management, kanban-orchestrator, kanban-worker,
+                   private-static-site-publishing, webhook-subscriptions, static-intelligence-dashboards,
+                   pii-scrub-public-sync]
+          # Names taken from the live skills index on 2026-09-07. The `software-development` CATEGORY is
+          # deliberately NOT named here — the list above hides individual creative/media/ops-tooling/ML-training
+          # skills, not the software-development group as a whole; that call is the owner's, not this diet's.
 ```
 
 Rules:
@@ -66,21 +108,50 @@ Rules:
    2. *Snapshot the leaving profile.* Copy the live `model:` block into
       `runtime_profiles.<leaving>.model` so a later switch back restores the
       user's most recent choice, not the profile's stale default.
-   3. *Write hermes config* from the target profile: `model:`, the
-      `auxiliary.*` keys the profile names (only those), `fallback_providers`,
-      and any `compression.*` overrides — via `hermes_cli.config.save_config`,
-      which is symlink-preserving (verified: `utils._atomic_write` →
-      `atomic_replace`). The gateway resolves `model:` per agent create, so new
-      conversations pick it up immediately; cached agents on open sessions keep
-      the old model until evicted (same caveat the model picker already has —
-      say so in the setting's description).
+   3. *Write hermes config* from the target profile — via
+      `hermes_cli.config.save_config`, which is symlink-preserving (verified:
+      `utils._atomic_write` → `atomic_replace`). Two different write shapes,
+      by design:
+      - `model:` and `fallback_providers` are **wholesale replaces**: the
+        profile's exact block/list lands, in full. A key the live `model:`
+        had that the target profile never names (e.g. a `max_tokens` or
+        `context_length` the previous profile pinned) is REMOVED, not left
+        behind — a merge here would route the new provider with the old
+        profile's leftover cap. This is why step 2 snapshots the WHOLE live
+        `model:` block rather than just the keys the leaving profile names:
+        a later switch back restores it exactly, quirks included.
+      - `auxiliary.<name>.*`, `compression.*` and
+        `skills.platform_disabled.<platform>` are **leaf-level merges**: only
+        the keys/platforms the profile names are overwritten; every sibling
+        key hermes maintains on that entry (`auxiliary.vision.timeout`,
+        `compression.protect_last_n`, another platform's disabled list, the
+        GLOBAL `skills.disabled`) survives untouched. `compression` in
+        particular has never been wholesale — a profile that names only
+        `threshold` leaves `enabled`/`protect_last_n` exactly as hermes had
+        them; this is existing, tested behaviour, not new.
+      - `tools.tool_search` is a **wholesale replace of that one subtree**
+        (siblings under `tools.*` are untouched): a profile names the WHOLE
+        tool-search config or none of it. `{}` is a real write — "use
+        hermes defaults" — not "leave whatever was there," so a switch back
+        to `cloud` actually undoes the local diet.
+      The gateway resolves `model:` per agent create, so new conversations
+      pick it up immediately; cached agents on open sessions keep the old
+      model until evicted (same caveat the model picker already has — say
+      so in the setting's description).
    4. *Write hindsight's env* (`HINDSIGHT_API_LLM_PROVIDER`, `_LLM_MODEL`,
       `_LLM_BASE_URL`) through hermes' own `.env` writer (`_write_env_lines`,
       also `atomic_replace`-based) and restart `hindsight-server.service`. Do
       this through a small repo script (`scripts/apply-memory-profile.sh` in
       hermes-agent-private) invoked by the plugin, so process control lives
       with the ops scripts, not in Parley.
-   5. *Record* `parley.runtime_profile = <target>` last, so a crash mid-apply
+   5. *Apply hindsight's recall cap* (`recall_max_tokens`, `recall_budget` —
+      §2) via a SIBLING script, `scripts/apply-memory-recall.sh <tokens>
+      <budget>`, writing `~/.hindsight/config.json` directly — a different
+      file than step 4's `.env`, and no restart. Runs whenever the profile
+      names either half of the pair (naming only one fills the other with
+      hermes' defaults, 4096 / mid, and logs which); idempotent, so it is not
+      gated on "would this change anything" the way step 4's restart is.
+   6. *Record* `parley.runtime_profile = <target>` last, so a crash mid-apply
       leaves the setting reporting the profile that is actually live.
 3. **The model picker stays.** In `cloud` it behaves as today and additionally
    updates `runtime_profiles.cloud.model`. In `local` its options are the local
@@ -101,6 +172,14 @@ Rules:
    whole store. That is a separate, deliberate migration, not a toggle. So
    "off-grid" today means every *LLM* call is local while embeddings still need
    the (non-quota-bound) OpenAI key. Documented as the known gap.
+6. **`tools` and `skills` are widened roots, not open ones.** A profile may
+   set `tools.tool_search` and `skills.platform_disabled.<platform>` and
+   nothing else under either root — `plan_apply` raises a `ProfileError` for
+   any other `tools.*`/`skills.*` key a profile tries to carry (e.g. the
+   GLOBAL `skills.disabled` list, or a hypothetical `tools.mcp_servers`).
+   Same rationale as the original five-root allow-list: a setting that
+   reroutes every model call the owner's agent makes must not quietly grow
+   the blast radius of what "switching profiles" can touch.
 
 ## 2. Guard rails for the local model
 
@@ -124,16 +203,60 @@ exceeds 64K after compaction. The lever against that is context, not crashes:
 
 ### "Low-context mode" — what actually helps, in order
 
-1. **Fewer tools.** The tool schemas are the largest fixed cost in the system
-   prompt (54 Parley tools plus MCP servers). The `local` profile should carry a
-   slimmer `toolsets:` list; measure a real turn's `prompt_tokens` on the local
-   server first and set the target from the number, not a guess.
-2. **Compact earlier and prune tool output.** `compression.threshold: 0.6` and
-   `proactive_prune_tokens` in the local profile.
-3. **Lower reasoning effort** for the local model (`--reasoning low` /
-   per-model reasoning config) — shorter thinking, shorter turns.
-4. **Habits** (`/reset`, `/new`) remain the manual lever and are not a
-   substitute for the three above.
+Measured 2026-09-07 on the running local server, on a 64K allocated window:
+the fixed prompt **head is ≈26k real tokens**, before a single turn of
+conversation:
+
+- **System prompt: 15.8k** — `AGENTS.md` 7.1k, the skills index 4.8k, memory
+  files 1.2k, `SOUL.md` 0.9k, hermes' own base prompt ~1.8k.
+- **Visible tool schemas: 9.8k** for 23 tools — the `tool_search` bridge
+  tool's OWN description alone is 1.3k, because it embeds the full catalog of
+  35 deferred tools, including Notion's 24. (Notion is already deferred by
+  hermes' tool-search bridge by default — it needs no entry in a profile's
+  `defer` list.)
+
+hindsight's memory recall then injects up to `recall_max_tokens` into every
+non-trivial user turn — observed **4,072 tokens = 38 facts** at the (then)
+default budget — and the injected copy is REPLAYED on every later turn until
+the next compaction, not just the turn that triggered recall. hermes' own
+rough prompt-size estimator (bytes / 4) **undercounts this tokenizer by
+30–40%**, so anything sized off that estimator runs hotter than it looks.
+
+Compaction is judged "effective" only if the REAL (not estimated)
+post-compaction prompt is under `compression.threshold_tokens` — and the lean
+tail is a **hard-coded 10k floor** (`LEAN_TAIL_FLOOR_TOKENS` in
+`agent/context_compressor.py`), so `threshold_tokens` must clear
+head + ~14k or compaction fires and immediately looks ineffective again.
+This is also why the local profile's `model.max_tokens` is **8192, not a
+rounder 12000**: hermes derives `threshold_tokens` from
+`(context_length - max_tokens) * threshold_percent`. On this 64K window,
+12000 computes a threshold of 45,505 tokens — too close to head + floor to
+survive a real turn without immediately re-tripping; 8192 computes 48,742,
+which clears it with room. (Both numbers assume `context_length` is llama.cpp's
+allocated `n_ctx`, per the guard-rail above, not the model's training window.)
+
+What the `local` profile's diet does about all of the above, in order:
+
+1. **Fewer tools, loaded on demand.** `tools.tool_search` in the local
+   profile turns on the bridge (`enabled: on`, `listing: on`) with a 1200-token
+   listing budget and a `defer` list built from hermes' curated defaults PLUS
+   the browser/desktop/delegate/voice tools — the ones that cost schema space
+   but are rarely invoked from a phone chat. MCP tools defer automatically and
+   need no entry.
+2. **A slimmer skills index.** `skills.platform_disabled.parley` hides
+   creative/media/ops-tooling/ML-training skill categories from the index for
+   the `parley` platform only (names taken from the live index on 2026-09-07).
+   The `software-development` category is deliberately NOT named — that call
+   is the owner's, not this diet's.
+3. **A capped, cheaper memory recall.** `memory.recall_max_tokens: 1500` /
+   `recall_budget: low` (vs cloud's 4096 / mid) bounds the per-turn injection
+   that would otherwise eat back whatever the first two points saved —
+   applied via `scripts/apply-memory-recall.sh`, no restart.
+4. **Compact earlier and pin the output reservation.** `compression.threshold:
+   0.6` and `model.max_tokens: 8192` (the math above) keep `threshold_tokens`
+   comfortably above head + tail instead of right at the edge.
+5. **Habits** (`/reset`, `/new`) remain the manual lever and are not a
+   substitute for the four above.
 
 ## 3. Settings › Memory
 

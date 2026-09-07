@@ -17,9 +17,9 @@ active one recorded at ``parley.runtime_profile``. That is deliberate:
 profiles are backend data, and the PWA only ever sees an enum setting.
 
 Everything here is pure except :func:`apply_runtime_profile`, which takes
-all four side effects (preflight probe, config write, env write, memory
-restart) as injected callables so tests never touch disk, the network or
-systemd. :func:`plan_apply` computes the *entire* change — the exact
+all five side effects (preflight probe, config write, env write, memory
+restart, memory-recall script) as injected callables so tests never touch
+disk, the network or systemd. :func:`plan_apply` computes the *entire* change — the exact
 config keys, the exact env keys, and the snapshot of the profile being
 left — before anything is written, so the audit question "what does this
 touch?" is answerable without running it.
@@ -65,7 +65,18 @@ MEMORY_ENV_KEYS = (ENV_MEMORY_PROVIDER, ENV_MEMORY_MODEL, ENV_MEMORY_BASE_URL)
 # of a setting that reroutes every model call the owner's agent makes.
 ALLOWED_CONFIG_ROOTS = frozenset({
     "model", "auxiliary", "fallback_providers", "compression", PARLEY_KEY,
+    "tools", "skills",
 })
+
+# `tools` and `skills` are widened roots (the local diet: fewer tool schemas,
+# fewer skills in the index), but only ONE sub-path each is a profile's to
+# touch — everything else under them is hermes/owner territory a runtime
+# profile has no business rerouting. Enforced in plan_apply, not just by the
+# root check above, so a profile that sneaks in e.g. `tools.mcp_servers` or
+# `skills.disabled` (the GLOBAL list, as opposed to the per-platform one) is
+# rejected outright rather than silently applied.
+ALLOWED_TOOLS_SUBKEY = "tool_search"
+ALLOWED_SKILLS_SUBKEY = "platform_disabled"
 
 _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
@@ -75,6 +86,62 @@ _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 LOCAL_SERVER_BASE_URL = "http://127.0.0.1:8000/v1"
 LOCAL_PROVIDER = "custom:local-fallback"      # `providers.local-fallback` in hermes config
 LOCAL_MODEL = "qwen3.6-35b-a3b"               # llama-server --alias
+
+# 8192, not a rounder 12000: hermes derives the compaction threshold from
+# (context_length - max_tokens) * threshold_percent. At 12000 on the 64K
+# allocated window that lands at 45,505 tokens, which the ~26k measured head
+# plus the hard-coded 10k lean-tail floor can barely clear before the
+# ineffective-compression breaker trips again; at 8192 it is 48,742 — see
+# docs/LOCAL_MODE.md §2. Verified 2026-09-07 by constructing an agent.
+LOCAL_MODEL_MAX_TOKENS = 8192
+
+# The local diet (docs/LOCAL_MODE.md §2 "Low-context mode"): the fixed prompt
+# head on a 64K window measures ~26k real tokens, most of it tool schemas and
+# the skills index. `tool_search.defer` REPLACES hermes' curated default
+# wholesale (tools/tool_search.py `_DEFAULT_DEFERRED_TOOLS`), so this list
+# carries every one of those defaults plus the browser/delegate/voice tools
+# that cost schema space but are rarely used from a phone chat. MCP tools
+# (e.g. Notion's 24) are always deferrable and need no entry here.
+LOCAL_TOOL_SEARCH = {
+    "enabled": "on",
+    "listing": "on",
+    "listing_max_tokens": 1200,
+    "defer": [
+        "computer_use", "session_search", "image_generate", "todo_list", "process_manage",
+        "cronjob_manage", "drive_preview", "gui_tour", "desktop_preview", "annotate_preview",
+        "show_tip", "setup_mcp", "desktop_project", "close_terminal", "apply_layout",
+        "read_terminal", "read_window_below", "focus_pane", "browser_back", "browser_cdp",
+        "browser_click", "browser_console", "browser_dialog", "browser_exec", "browser_get_images",
+        "browser_navigate", "browser_press", "browser_scroll", "browser_snapshot", "browser_type",
+        "delegate_task", "text_to_speech", "skill_manage",
+    ],
+}
+
+# Skill names hidden from the parley platform's skills index only (taken from
+# the live skills index on 2026-09-07). Deliberately does NOT touch the
+# software-development category — that call is the owner's, not this diet's.
+LOCAL_SKILLS_HIDDEN_PARLEY = [
+    "architecture-diagram", "ascii-art", "ascii-video", "baoyu-article-illustrator", "baoyu-comic",
+    "baoyu-infographic", "claude-design", "comfyui", "design-md", "excalidraw", "humanizer",
+    "ideation", "iterative-website-design", "manim-video", "p5js", "pixel-art",
+    "minecraft-modpack-server", "pokemon-player", "gif-search", "heartmula", "songsee", "spotify",
+    "video-rough-cutting", "youtube-content", "social-media-sweep", "xurl", "yuanbao", "openhue",
+    "godmode", "evaluating-llms-harness", "weights-and-biases", "huggingface-hub", "llama-cpp",
+    "obliteratus", "outlines", "serving-llms-vllm", "audiocraft-audio-generation",
+    "segment-anything-model", "dspy", "axolotl", "fine-tuning-with-trl", "unsloth",
+    "agent-client-bridges", "claude-code", "codex", "computer-use", "hermes-agent",
+    "kanban-codex-lane", "opencode", "github-auth", "github-code-review", "github-issues",
+    "github-pr-workflow", "github-repo-management", "kanban-orchestrator", "kanban-worker",
+    "private-static-site-publishing", "webhook-subscriptions", "static-intelligence-dashboards",
+    "pii-scrub-public-sync",
+]
+
+# hindsight recall knobs (~/.hindsight/config.json, NOT hermes config — see
+# apply-memory-recall.sh in hermes-agent-private). Defaults used to fill in
+# whichever half of the pair a profile omits.
+DEFAULT_RECALL_MAX_TOKENS = 4096
+DEFAULT_RECALL_BUDGET = "mid"
+_RECALL_BUDGETS = ("low", "mid", "high")
 
 
 class ProfileError(ValueError):
@@ -168,7 +235,14 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
             "llm_provider": (env.get(ENV_MEMORY_PROVIDER) or "").strip(),
             "llm_model": (env.get(ENV_MEMORY_MODEL) or "").strip(),
             "llm_base_url": (env.get(ENV_MEMORY_BASE_URL) or "").strip(),
+            "recall_max_tokens": DEFAULT_RECALL_MAX_TOKENS,
+            "recall_budget": DEFAULT_RECALL_BUDGET,
         },
+        # `{}` is not "no override" here, it is the explicit statement "use
+        # hermes defaults" — plan_apply writes it wholesale either way, so a
+        # switch back to cloud undoes whatever the local diet configured.
+        "tools": {"tool_search": {}},
+        "skills": {"platform_disabled": {"parley": []}},
     }
     # Only carry a compression override when the box actually sets one, so
     # switching back to cloud restores the value the user had rather than
@@ -182,6 +256,11 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
             "default": LOCAL_MODEL,
             "provider": LOCAL_PROVIDER,
             "base_url": LOCAL_SERVER_BASE_URL,
+            # Wholesale model replace (plan_apply writes the whole `model:`
+            # block): a `max_tokens`/`context_length` a cloud model left
+            # behind must NOT survive the switch, or the compaction math
+            # below computes against the wrong output reservation.
+            "max_tokens": LOCAL_MODEL_MAX_TOKENS,
         },
         # The server runs with --mmproj, so the same endpoint answers vision.
         # base_url is spelled out even though hermes can resolve it from the
@@ -210,9 +289,16 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
             "llm_provider": "lmstudio",
             "llm_model": LOCAL_MODEL,
             "llm_base_url": LOCAL_SERVER_BASE_URL,
+            # hindsight injects up to this many tokens of recalled facts into
+            # every non-trivial turn (docs/LOCAL_MODE.md §2); capped lower
+            # than cloud's default so recall does not eat the diet's savings.
+            "recall_max_tokens": 1500,
+            "recall_budget": "low",
         },
         # 64K allocated window: compact earlier than the cloud default.
         "compression": {"threshold": 0.6},
+        "tools": {"tool_search": copy.deepcopy(LOCAL_TOOL_SEARCH)},
+        "skills": {"platform_disabled": {"parley": list(LOCAL_SKILLS_HIDDEN_PARLEY)}},
     }
     return {DEFAULT_PROFILE: cloud, LOCAL_PROFILE: local}
 
@@ -273,13 +359,26 @@ def read_active_profile(cfg: Mapping[str, Any]) -> str:
 
 @dataclass(frozen=True)
 class MemorySpec:
-    """hindsight's LLM routing for a profile — the script's three args."""
+    """hindsight's LLM routing for a profile — the script's three args.
+
+    ``recall_max_tokens``/``recall_budget`` are a SEPARATE hindsight knob
+    (``~/.hindsight/config.json``, not the LLM env) carried on the same
+    dataclass because they travel with the same profile switch; they are
+    filled with hermes' defaults (4096 / mid) by plan_apply whenever the
+    profile names only one of the pair, so this class only ever sees a
+    complete pair or ``None, None`` (recall untouched this switch).
+    """
     provider: str
     model: str
     base_url: str = ""
+    recall_max_tokens: Optional[int] = None
+    recall_budget: Optional[str] = None
 
     def as_args(self) -> List[str]:
         return [self.provider, self.model] + ([self.base_url] if self.base_url else [])
+
+    def recall_args(self) -> List[str]:
+        return [str(self.recall_max_tokens), str(self.recall_budget)]
 
 
 @dataclass(frozen=True)
@@ -323,11 +422,59 @@ class ApplyPlan:
                 "provider": self.memory.provider,
                 "model": self.memory.model,
                 "base_url": self.memory.base_url,
+                "recall_max_tokens": self.memory.recall_max_tokens,
+                "recall_budget": self.memory.recall_budget,
             },
             "restart_memory": self.restart_memory,
             "touched_config_paths": self.touched_config_paths(),
             "touched_env_keys": self.touched_env_keys(),
         }
+
+
+def _parsed_recall(profile_name: str, mem: Mapping[str, Any]) -> Tuple[Optional[int], Optional[str]]:
+    """Validate & default-fill the profile's hindsight recall knobs.
+
+    Neither key present -> ``(None, None)`` (recall untouched by this
+    switch). Either key present -> BOTH are returned, filling the missing
+    half with hermes' own defaults (4096 / mid) and logging that it did —
+    a profile that means to cap tokens but forgets budget must not leave
+    the script guessing.
+    """
+    has_tokens = "recall_max_tokens" in mem
+    has_budget = "recall_budget" in mem
+    if not has_tokens and not has_budget:
+        return None, None
+
+    tokens = mem.get("recall_max_tokens", DEFAULT_RECALL_MAX_TOKENS)
+    try:
+        tokens = int(tokens)
+    except (TypeError, ValueError):
+        raise ProfileError(
+            f"profile {profile_name!r} memory.recall_max_tokens must be an integer, got {tokens!r}"
+        )
+    if not (200 <= tokens <= 16000):
+        raise ProfileError(
+            f"profile {profile_name!r} memory.recall_max_tokens must be 200..16000, got {tokens}"
+        )
+
+    budget = str(mem.get("recall_budget", DEFAULT_RECALL_BUDGET) or "").strip().lower()
+    if budget not in _RECALL_BUDGETS:
+        raise ProfileError(
+            f"profile {profile_name!r} memory.recall_budget must be one of "
+            f"{'/'.join(_RECALL_BUDGETS)}, got {mem.get('recall_budget')!r}"
+        )
+
+    if not has_tokens:
+        logger.info(
+            "[parley] profile %r names recall_budget but not recall_max_tokens; "
+            "filling recall_max_tokens=%d (hermes default)", profile_name, tokens,
+        )
+    if not has_budget:
+        logger.info(
+            "[parley] profile %r names recall_max_tokens but not recall_budget; "
+            "filling recall_budget=%r (hermes default)", profile_name, budget,
+        )
+    return tokens, budget
 
 
 def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> ApplyPlan:
@@ -384,6 +531,62 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
         for key, value in comp.items():
             config_updates[f"compression.{key}"] = copy.deepcopy(value)
 
+    # 2b. tools.tool_search — wholesale replace of that ONE subtree. `{}`
+    #     restores hermes defaults; any other key under `tools` is refused
+    #     (widening `tools`/`skills` must not silently widen past the one
+    #     sub-path each was widened for).
+    tools = profile.get("tools")
+    if isinstance(tools, Mapping):
+        extra = set(tools) - {ALLOWED_TOOLS_SUBKEY}
+        if extra:
+            raise ProfileError(
+                f"profile {name!r} may only set tools.{ALLOWED_TOOLS_SUBKEY!r}; "
+                f"found unexpected tools.* key(s): {', '.join(sorted(extra))}"
+            )
+        if ALLOWED_TOOLS_SUBKEY in tools:
+            tool_search = tools[ALLOWED_TOOLS_SUBKEY]
+            if not isinstance(tool_search, Mapping):
+                raise ProfileError(
+                    f"profile {name!r} tools.{ALLOWED_TOOLS_SUBKEY} must be a mapping "
+                    f"(use {{}} for hermes defaults), got {type(tool_search).__name__}"
+                )
+            config_updates[f"tools.{ALLOWED_TOOLS_SUBKEY}"] = copy.deepcopy(dict(tool_search))
+    elif tools is not None:
+        raise ProfileError(f"profile {name!r} tools must be a mapping, got {type(tools).__name__}")
+
+    # 2c. skills.platform_disabled.<platform> — leaf-level, like auxiliary:
+    #     only the named platform's list is replaced, siblings (other
+    #     platforms, the GLOBAL skills.disabled list) survive untouched.
+    skills = profile.get("skills")
+    if isinstance(skills, Mapping):
+        extra = set(skills) - {ALLOWED_SKILLS_SUBKEY}
+        if extra:
+            raise ProfileError(
+                f"profile {name!r} may only set skills.{ALLOWED_SKILLS_SUBKEY!r}; "
+                f"found unexpected skills.* key(s): {', '.join(sorted(extra))}"
+            )
+        if ALLOWED_SKILLS_SUBKEY in skills:
+            platform_disabled = skills[ALLOWED_SKILLS_SUBKEY]
+            if not isinstance(platform_disabled, Mapping):
+                raise ProfileError(
+                    f"profile {name!r} skills.{ALLOWED_SKILLS_SUBKEY} must be a mapping "
+                    f"of platform -> skill names, got {type(platform_disabled).__name__}"
+                )
+            for platform, names in platform_disabled.items():
+                if not isinstance(platform, str) or not platform.strip():
+                    raise ProfileError(
+                        f"profile {name!r} skills.{ALLOWED_SKILLS_SUBKEY} has an invalid "
+                        f"platform key: {platform!r}"
+                    )
+                if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+                    raise ProfileError(
+                        f"profile {name!r} skills.{ALLOWED_SKILLS_SUBKEY}[{platform!r}] must "
+                        f"be a list of skill names"
+                    )
+                config_updates[f"skills.{ALLOWED_SKILLS_SUBKEY}.{platform}"] = copy.deepcopy(list(names))
+    elif skills is not None:
+        raise ProfileError(f"profile {name!r} skills must be a mapping, got {type(skills).__name__}")
+
     # 3. hindsight env. An absent/blank base_url is written as None =
     #    REMOVE THE KEY: hindsight reads `os.getenv(...) or None`, so an
     #    empty line is equivalent, but removing it keeps .env honest about
@@ -394,11 +597,22 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
     provider = str(mem.get("llm_provider") or "").strip()
     model = str(mem.get("llm_model") or "").strip()
     base_url = str(mem.get("llm_base_url") or "").strip()
+
+    # 3b. hindsight recall knobs (~/.hindsight/config.json — a DIFFERENT file
+    #     than the env above, applied by a sibling script). A profile may
+    #     name either or both; naming only one fills the other with hermes'
+    #     defaults rather than leaving recall half-configured.
+    recall_max_tokens, recall_budget = _parsed_recall(name, mem)
+
     if provider or model:
-        memory = MemorySpec(provider=provider, model=model, base_url=base_url)
         env_updates[ENV_MEMORY_PROVIDER] = provider
         env_updates[ENV_MEMORY_MODEL] = model
         env_updates[ENV_MEMORY_BASE_URL] = base_url or None
+    if provider or model or recall_max_tokens is not None:
+        memory = MemorySpec(
+            provider=provider, model=model, base_url=base_url,
+            recall_max_tokens=recall_max_tokens, recall_budget=recall_budget,
+        )
 
     # Restart only when hindsight would actually see something new: a
     # pointless restart drops in-flight retains and shows up in the health
@@ -542,6 +756,7 @@ def apply_runtime_profile(
     write_config: Callable[[Dict[str, Any]], None],
     write_env: Callable[[Mapping[str, Optional[str]]], None],
     restart_memory: Callable[[MemorySpec], None],
+    apply_memory_recall: Callable[[MemorySpec], None],
     load: Callable[[], Tuple[Dict[str, Any], Dict[str, str]]],
 ) -> ApplyPlan:
     """Switch runtime profiles. Every side effect is injected.
@@ -549,7 +764,7 @@ def apply_runtime_profile(
     Order is the doc's, and each step is its own durable write:
 
       preflight -> snapshot(+seed) -> target config -> env + restart
-                -> active-profile marker LAST
+                -> recall script -> active-profile marker LAST
 
     Three ``write_config`` calls rather than one is deliberate. save_config
     is atomic, so each step lands or doesn't; a crash after the env write
@@ -557,6 +772,13 @@ def apply_runtime_profile(
     the setting still reporting the old one — visibly wrong and one click
     from correct. The reverse (marker first) would report a mode the agent
     is not in, which is the failure the doc's rule 5 exists to prevent.
+
+    The recall script runs unconditionally whenever the profile named either
+    recall knob (unlike ``restart_memory``, which only fires when the LLM
+    env would actually change): recall lives in a different file
+    (``~/.hindsight/config.json``, apply-memory-recall.sh) with no restart
+    to avoid bouncing pointlessly, so re-running it with the same values is
+    just an idempotent no-op, not a cost worth guarding against.
 
     Returns the plan that was executed, for logging and for the route's
     response.
@@ -576,13 +798,16 @@ def apply_runtime_profile(
         write_env(plan.env_updates)
     if plan.restart_memory and plan.memory is not None:
         restart_memory(plan.memory)
+    if plan.memory is not None and plan.memory.recall_max_tokens is not None:
+        apply_memory_recall(plan.memory)
 
     cfg = apply_config_updates(cfg, plan.marker_updates)
     write_config(cfg)
 
     logger.info(
-        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s)",
+        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s recall=%s)",
         plan.leaving, plan.target, plan.touched_config_paths(),
         plan.touched_env_keys(), plan.restart_memory,
+        None if plan.memory is None or plan.memory.recall_max_tokens is None else plan.memory.recall_args(),
     )
     return plan

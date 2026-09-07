@@ -43,7 +43,7 @@ DOWN = rp.ServerProbe(False, "http://127.0.0.1:8000 is not answering")
 def sandbox(monkeypatch):
     """A settings module whose every hermes/OS touchpoint is fake."""
     state = {"cfg": json.loads(json.dumps(CFG)), "env": dict(ENV),
-             "probe": READY, "saved": [], "env_writes": [], "script": []}
+             "probe": READY, "saved": [], "env_writes": [], "script": [], "recall_script": []}
     monkeypatch.setattr(st, "read_hermes_config", lambda: json.loads(json.dumps(state["cfg"])))
     monkeypatch.setattr(st, "read_hermes_env", lambda: dict(state["env"]))
     monkeypatch.setattr(st, "_probe_local_server", lambda profile: state["probe"])
@@ -64,6 +64,8 @@ def sandbox(monkeypatch):
             state["env"].pop(k, None) if v is None else state["env"].update({k: v})
     monkeypatch.setattr(st, "_write_hermes_env", _env)
     monkeypatch.setattr(st, "_restart_memory_server", lambda spec: state["script"].append(spec.as_args()))
+    monkeypatch.setattr(st, "_apply_memory_recall",
+                         lambda spec: state["recall_script"].append(spec.recall_args()))
     return state
 
 
@@ -146,10 +148,13 @@ def test_apply_runtime_profile_switches_config_env_and_memory(sandbox):
     assert out["id"] == "runtime_profile" and out["value"] == "local"
     final = sandbox["cfg"]
     assert final["model"]["provider"] == "custom:local-fallback"
+    assert final["model"]["max_tokens"] == 8192
     assert final["auxiliary"]["vision"]["provider"] == "custom:local-fallback"
     assert final["auxiliary"]["vision"]["timeout"] == 120        # sibling survives
     assert final["fallback_providers"] == []
     assert final["compression"] == {"enabled": True, "threshold": 0.6}
+    assert final["tools"]["tool_search"]["listing_max_tokens"] == 1200
+    assert final["skills"]["platform_disabled"]["parley"] == rp.LOCAL_SKILLS_HIDDEN_PARLEY
     assert final["parley"]["runtime_profile"] == "local"
     assert final["parley"]["preferred_models"] == ["anthropic/*"]  # untouched
     assert sandbox["env_writes"] == [{
@@ -158,6 +163,7 @@ def test_apply_runtime_profile_switches_config_env_and_memory(sandbox):
         "HINDSIGHT_API_LLM_BASE_URL": "http://127.0.0.1:8000/v1",
     }]
     assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
+    assert sandbox["recall_script"] == [["1500", "low"]]
     # the marker is the LAST thing written
     assert (sandbox["saved"][0].get("parley") or {}).get("runtime_profile") is None
     assert sandbox["saved"][-1]["parley"]["runtime_profile"] == "local"
@@ -214,10 +220,8 @@ def test_model_switch_mirrors_into_the_active_profile(sandbox, monkeypatch):
     sandbox["probe"] = rp.ServerProbe(True, "ready", ("qwen3.6-35b-a3b", "another-local"))
     out = st.apply_setting("model", "another-local")
     assert out["value"] == "another-local"
-    assert sandbox["cfg"]["model"] == {
-        "default": "another-local", "provider": "custom:local-fallback",
-        "base_url": "http://127.0.0.1:8000/v1",
-    }
+    assert sandbox["cfg"]["model"]["default"] == "another-local"
+    assert sandbox["cfg"]["model"]["provider"] == "custom:local-fallback"
     assert sandbox["cfg"]["parley"]["runtime_profiles"]["local"]["model"]["default"] == "another-local"
     assert sandbox["cfg"]["parley"]["runtime_profiles"]["cloud"]["model"]["default"] == "gpt-5.6-sol"
 

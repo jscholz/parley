@@ -300,6 +300,12 @@ def _runtime_profile_setting(
         prov = str(model.get("provider") or "").strip()
         return " · ".join(x for x in (prov, mid) if x)
 
+    # docs/LOCAL_MODE.md §2 "Low-context mode", in one sentence for the enum.
+    _LOCAL_DIET_NOTE = (
+        "Heavy tools load on demand via tool search, some skill categories "
+        "are hidden, and memory recall is capped."
+    )
+
     options = []
     for name in sorted(profiles):
         desc = _summary(name)
@@ -307,6 +313,7 @@ def _runtime_profile_setting(
             # The doc's rule: you cannot toggle into a dead mode, so say up
             # front whether it is alive. The preflight enforces it; this is
             # only so the user is not guessing before they click.
+            desc = " ".join(x for x in (desc, _LOCAL_DIET_NOTE) if x)
             desc = f"{desc} — {'ready' if probe.ok else 'server not responding'}".strip(" —")
         elif name == rp.DEFAULT_PROFILE:
             desc = f"{desc} — needs the internet".strip(" —")
@@ -889,10 +896,21 @@ def memory_status_text(now: Optional[datetime] = None) -> str:
 # never restart the owner's memory server.
 _DEFAULT_MEMORY_SCRIPT = "~/code/hermes-agent-private/scripts/apply-memory-profile.sh"
 
+# The recall knobs live in a DIFFERENT file (~/.hindsight/config.json, not
+# hermes' .env) and need no restart — a separate script, same resolution
+# pattern and the same "point tests at a stub" override.
+_DEFAULT_MEMORY_RECALL_SCRIPT = "~/code/hermes-agent-private/scripts/apply-memory-recall.sh"
+
 
 def _memory_profile_script() -> Path:
     return Path(
         os.environ.get("PARLEY_MEMORY_PROFILE_SCRIPT") or _DEFAULT_MEMORY_SCRIPT
+    ).expanduser()
+
+
+def _memory_recall_script() -> Path:
+    return Path(
+        os.environ.get("PARLEY_MEMORY_RECALL_SCRIPT") or _DEFAULT_MEMORY_RECALL_SCRIPT
     ).expanduser()
 
 
@@ -961,6 +979,38 @@ def _restart_memory_server(spec: "rp.MemorySpec") -> None:
         )
 
 
+def _apply_memory_recall(spec: "rp.MemorySpec") -> None:
+    """Hand hindsight's recall cap to the sibling script. No restart: the
+    contract (see LOCAL_MODE.md §1 / the plugin module docstring) is that
+    this knob takes effect without bouncing hindsight-server."""
+    script = _memory_recall_script()
+    if not script.exists():
+        raise SettingsValidationError(
+            f"memory recall script not found at {script}; set "
+            f"PARLEY_MEMORY_RECALL_SCRIPT or install it from hermes-agent-private"
+        )
+    argv = [str(script)] + spec.recall_args()
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, timeout=_memory_script_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        raise SettingsValidationError(
+            f"memory recall script did not finish within {_memory_script_timeout():.0f}s"
+        )
+    except OSError as e:
+        raise SettingsValidationError(f"could not run {script}: {e}")
+    logger.info(
+        "[parley] memory recall script rc=%s in %.1fs", proc.returncode, time.time() - started,
+    )
+    if proc.returncode != 0:
+        tail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
+        raise SettingsValidationError(
+            "memory recall apply failed: " + (tail[-1] if tail else f"exit {proc.returncode}")
+        )
+
+
 def _preflight_runtime_profile(target: str, profile: Dict[str, Any]) -> None:
     """Preflight through the SAME probe the schema describes with.
 
@@ -988,6 +1038,7 @@ def apply_runtime_profile_setting(value: Any) -> Dict[str, Any]:
             write_config=_write_hermes_config,
             write_env=_write_hermes_env,
             restart_memory=_restart_memory_server,
+            apply_memory_recall=_apply_memory_recall,
             load=lambda: (read_hermes_config(), read_hermes_env()),
         )
     except rp.ProfileError as e:
