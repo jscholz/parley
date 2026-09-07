@@ -988,7 +988,7 @@ function handleConfig(_req, res) {
     // then default. See config.example.yaml.
     appName: cfgVal('PARLEY_APP_NAME', 'app.name', 'Parley'),
     appSubtitle: cfgVal('PARLEY_APP_SUBTITLE', 'app.subtitle', 'Agent Portal'),
-    agentLabel: cfgVal('PARLEY_AGENT_LABEL', 'app.agent_label', 'Clawdian'),
+    agentLabel: cfgVal('PARLEY_AGENT_LABEL', 'app.agent_label', 'Agent'),
     // Any valid CSS color (hex, rgb(), hsl()). Empty = keep stylesheet default.
     themePrimary: cfgVal('PARLEY_THEME_PRIMARY', 'app.theme_primary', ''),
     // Which BackendAdapter the client loads. Always 'hermes-gateway'

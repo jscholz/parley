@@ -21,7 +21,7 @@
 app:
   name: Parley
   subtitle: Agent Portal
-  agent_label: Clawdian
+  agent_label: Agent
   # Optional override for the --primary CSS variable. Any CSS color
   # (hex / rgb() / hsl()). Empty/null = stylesheet default (sage).
   theme_primary: ~
