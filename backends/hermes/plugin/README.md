@@ -45,6 +45,7 @@ modifying the plugin.
 | `parley_state.py` | All CRUD against `parley.db` — push subs, mutes, prefs, VAPID, pins, unread, msg_links. Plus `record_envelope()` (write-through) + `reconcile_from_state_db()` (linker + self-heal). |
 | `parley_route_items.py` | `GET /v1/conversations/{id}/items` — reads from parley.db, opportunistically reconciles from state.db on enter. |
 | `parley_route_*.py` | Other route handlers (responses, events, conversations, settings, push). |
+| `parley_runtime_profiles.py` | Runtime profiles — one named bundle of "where every model call goes" (cloud / local llama.cpp). Pure planner + injected side effects; see `docs/LOCAL_MODE.md` §1. |
 | `parley_dispatcher.py` | Plugin-owned web-push dispatch (engagement gate, kind toggles, body shaping). |
 | `parley_turn_buffer.py` | In-memory mid-turn buffer for mid-flight reload (transient). |
 | `plugin.yaml` | Hermes plugin manifest. |
