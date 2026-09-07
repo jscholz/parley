@@ -45,7 +45,7 @@
     "start": "npm run build && node scripts/start-all.mjs",
     "start:proxy": "npm run build && node --experimental-strip-types --disable-warning=ExperimentalWarning server.ts",
     "start:dev": "node scripts/build.mjs --watch & node --experimental-strip-types --disable-warning=ExperimentalWarning --watch server.ts",
-    "test": "node --test --experimental-strip-types --disable-warning=ExperimentalWarning 'test/**/*.test.ts' 'src/**/*.test.ts' 'proxy/**/*.test.ts'",
+    "test": "node --test --experimental-strip-types --experimental-test-module-mocks --disable-warning=ExperimentalWarning 'test/**/*.test.ts' 'src/**/*.test.ts' 'proxy/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "smoke": "node scripts/run-smoke.mjs",
     "smoke:isolated": "node scripts/run-smoke-isolated.mjs",
