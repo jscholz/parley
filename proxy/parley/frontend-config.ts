@@ -17,6 +17,7 @@
 // localStorage — their values can't be deployment-defaults.
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import YAML from 'yaml';
 
 /** Each setting's category in the yaml + its built-in default. The
@@ -156,9 +157,22 @@ export function writeOne(
 }
 
 /** Write the YAML document to `target`, atomically (tmp + rename
- *  to avoid a partial-file read by a concurrent reader). */
+ *  to avoid a partial-file read by a concurrent reader).
+ *
+ *  Symlink-preserving on purpose: a deployment commonly points
+ *  `parley.config.yaml` at a file kept in a separate ops/config repo via
+ *  a symlink. `rename()` onto a symlink REPLACES the link with a regular
+ *  file, so every later settings write lands on a private copy and the
+ *  real file silently stops changing — the failure is invisible until
+ *  someone notices their config repo has gone stale (field, 2026-09-07).
+ *  So resolve the link first and stage the temp file beside the REAL
+ *  target, which also keeps the rename on one filesystem. */
 export async function persist(doc: YAML.Document.Parsed, target: string): Promise<void> {
-  const tmp = `${target}.tmp-${process.pid}`;
+  let real = target;
+  try { real = await fs.realpath(target); } catch { /* not created yet: write through `target` */ }
+  const tmp = path.join(path.dirname(real), `.${path.basename(real)}.tmp-${process.pid}`);
   await fs.writeFile(tmp, doc.toString(), 'utf8');
-  await fs.rename(tmp, target);
+  // Carry the original's mode across the replace (rename keeps the tmp file's).
+  try { await fs.chmod(tmp, (await fs.stat(real)).mode); } catch { /* new file: default mode */ }
+  await fs.rename(tmp, real);
 }
