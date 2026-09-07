@@ -12,11 +12,23 @@ refactor — ~700 LOC):
 Plus the helpers:
 
   - read_hermes_config        snapshot ~/.hermes/config.yaml
+  - read_hermes_env           snapshot ~/.hermes/.env
   - read_preferred_models     resolve the model-picker glob filter
   - build_settings_schema     compose the SettingDef[] list
   - apply_setting             dispatch by setting id
   - apply_preferred_models    persist the glob list
   - apply_model_setting       persist model.default + provider
+  - apply_runtime_profile_setting   switch runtime profiles (LOCAL_MODE.md §1)
+  - apply_memory_toggle       hermes memory.* booleans
+
+Two feature groups landed here 2026-09-07 (docs/LOCAL_MODE.md):
+
+  * ``runtime_profile`` — an enum that reroutes EVERY model call (chat,
+    auxiliary, crons, hindsight) between the cloud stack and the local
+    llama.cpp server. The mechanics live in parley_runtime_profiles.py;
+    this file only declares the setting and injects the side effects.
+  * category ``Memory`` — two hermes toggles plus three ``readonly``
+    text fields describing what memory is doing and with what.
 
 And the exception classes that route _apply_setting failures to
 HTTP 400 / 404 in the handler.
@@ -33,8 +45,15 @@ import asyncio
 import json
 import logging
 import os
+import re
+import subprocess
+import time
+from datetime import datetime
+from pathlib import Path
 from .parley_env import env_get
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
+
+from . import parley_runtime_profiles as rp
 
 # Guarded aiohttp import — see parley_route_conversations for why.
 try:
@@ -91,39 +110,51 @@ def read_preferred_models(cfg: Dict[str, Any]) -> List[str]:
     return []
 
 
-def build_settings_schema() -> List[Dict[str, Any]]:
-    """Build the SettingDef[] list. Reads hermes config.yaml for
-    the current model + the preferred-models glob filter (under
-    ``parley.preferred_models:``). Picker options merge OpenRouter
-    (filtered by user's preferred-globs) with EVERY other
-    authenticated provider's curated model list (e.g. openai-codex
-    OAuth, copilot, anthropic). Provider is encoded into the option
-    value: OpenRouter entries stay bare (vendor/model), every other
-    provider prefixes with ``<slug>:`` (e.g. ``openai-codex:gpt-5.5``).
-    apply_model_setting parses the prefix back to route the switch
-    to the right provider."""
+# Probing the local model server on every schema build is deliberate: the
+# `local` option's description has to tell the truth about whether the box
+# can serve it right now, and a stale cached answer is exactly how you get a
+# toggle that says "ready" for a server that died an hour ago. Loopback, so
+# both the up and the connection-refused answers are effectively instant; the
+# timeout only bounds a HUNG server.
+_LOCAL_PROBE_TIMEOUT = 1.5
+
+
+def read_hermes_env() -> Dict[str, str]:
+    """Snapshot of ~/.hermes/.env as a dict (or {} on failure).
+
+    Deliberately the dotenv file rather than ``os.environ``: the .env is what
+    ``hindsight-server.service`` loads via ``EnvironmentFile=`` and what the
+    memory-profile script writes, so it is the only view that agrees with
+    what a restart would pick up. A value inherited into the gateway's
+    process environment at boot can be arbitrarily stale.
+    """
+    try:
+        from hermes_cli.config import load_env
+        return dict(load_env() or {})
+    except Exception as e:
+        logger.warning("[parley] settings: read hermes env failed: %s", e)
+        return {}
+
+
+def _probe_local_server(profile: Dict[str, Any]) -> "rp.ServerProbe":
+    """Readiness of the local model server described by *profile*.
+    Split out as a module-level seam so tests can inject an answer without
+    a socket."""
+    return rp.probe_model_server(
+        rp.local_base_url(profile), rp.local_model_id(profile),
+        timeout=_LOCAL_PROBE_TIMEOUT,
+    )
+
+
+def _cloud_model_catalog(
+    cfg: Dict[str, Any], preferred: List[str],
+    current_provider: str, model_cfg: Any,
+) -> List[Dict[str, Any]]:
+    """Model-picker options for cloud-routed profiles — unchanged behaviour,
+    lifted out of build_settings_schema 2026-09-07 so the local profile can
+    swap in a different catalog without paying for OpenRouter round-trips it
+    cannot reach while off-grid."""
     import fnmatch
-    cfg = read_hermes_config()
-
-    # Current model + provider — hermes stores model as scalar
-    # (``model: google/gemma-4-26b-a4b-it``) or dict (``model:
-    # {default: ..., provider: ...}``); handle both. Default
-    # provider when unset is "openrouter" (matches hermes default).
-    current_model = ""
-    current_provider = "openrouter"
-    model_cfg = cfg.get("model")
-    if isinstance(model_cfg, dict):
-        current_model = (model_cfg.get("default") or "").strip()
-        current_provider = (model_cfg.get("provider") or "openrouter").strip()
-    elif isinstance(model_cfg, str):
-        current_model = model_cfg.strip()
-    if current_provider == "openrouter" or not current_model:
-        current_value = current_model
-    else:
-        current_value = f"{current_provider}:{current_model}"
-
-    preferred = read_preferred_models(cfg)
-
     # Openrouter catalog. Defensive parse: shape can be tuple,
     # dict, or string depending on hermes version. Degrade to "no
     # options" instead of 500ing the whole settings panel.
@@ -231,6 +262,194 @@ def build_settings_schema() -> List[Dict[str, Any]]:
             "[parley] settings: list_authenticated_providers failed: %s", e,
         )
 
+    # Ordering + the "always show the current value" insert are the
+    # caller's job now: both are shared with the local catalog.
+    return catalog
+
+
+def _local_model_catalog(
+    profile: Dict[str, Any], probe: "rp.ServerProbe",
+) -> List[Dict[str, Any]]:
+    """Model-picker options in the ``local`` profile: whatever the local
+    server actually lists (LOCAL_MODE.md §1 rule 3). Values are bare model
+    ids — the provider comes from the profile, not from a ``<slug>:`` prefix,
+    because the local provider slug (``custom:local-fallback``) already
+    contains a colon and would not survive apply_model_setting's decoder."""
+    ids = list(probe.models)
+    if not ids:
+        # Server down: still show what the profile is pinned to, so the
+        # picker reports the truth rather than an empty dropdown.
+        pinned = rp.local_model_id(profile)
+        ids = [pinned] if pinned else []
+    return [{"value": mid, "label": mid, "group": "Local server"} for mid in ids]
+
+
+def _runtime_profile_setting(
+    active: str, profiles: Dict[str, Any], probe: "rp.ServerProbe",
+) -> Dict[str, Any]:
+    """The one enum that reroutes every model call (LOCAL_MODE.md §1 rule 1).
+
+    Option descriptions are built from the profiles' OWN values, so a box
+    whose cloud profile points somewhere unusual describes itself correctly.
+    """
+    def _summary(name: str) -> str:
+        model = (profiles.get(name) or {}).get("model") or {}
+        if not isinstance(model, dict):
+            return ""
+        mid = str(model.get("default") or "").strip()
+        prov = str(model.get("provider") or "").strip()
+        return " · ".join(x for x in (prov, mid) if x)
+
+    options = []
+    for name in sorted(profiles):
+        desc = _summary(name)
+        if name == rp.LOCAL_PROFILE:
+            # The doc's rule: you cannot toggle into a dead mode, so say up
+            # front whether it is alive. The preflight enforces it; this is
+            # only so the user is not guessing before they click.
+            desc = f"{desc} — {'ready' if probe.ok else 'server not responding'}".strip(" —")
+        elif name == rp.DEFAULT_PROFILE:
+            desc = f"{desc} — needs the internet".strip(" —")
+        options.append({
+            "value": name,
+            "label": name.capitalize(),
+            "description": desc or name,
+        })
+    return {
+        "id": "runtime_profile",
+        "label": "Runtime profile",
+        "description": (
+            "Where every model call goes — chat, auxiliary models, crons and "
+            "memory. New conversations pick the change up immediately; a "
+            "conversation that is already open keeps its current model until "
+            "the agent is evicted (same caveat as the model picker)."
+        ),
+        "category": "Agent",
+        # Sub-heading within the Agent category (LOCAL_MODE.md §1 rule 1).
+        # The PWA renders `group` as a heading above the first setting
+        # carrying it — see the protocol's Setting fields.
+        "group": "Runtime",
+        "type": "enum",
+        "value": active,
+        "options": options,
+    }
+
+
+# hermes config paths behind the two writable Memory toggles.
+_MEMORY_TOGGLES = {
+    "memory_enabled": "memory.memory_enabled",
+    "memory_user_profile": "memory.user_profile_enabled",
+}
+# Declared but never accepted on POST. The PWA renders `readonly: true` as a
+# value line and never submits it; apply_setting rejects one anyway, because
+# "the client won't do that" is not a validation strategy.
+_MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status")
+
+
+def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Settings › Memory (LOCAL_MODE.md §3): what memory is doing, with what,
+    and the two switches that turn it off."""
+    mem = cfg.get("memory") if isinstance(cfg.get("memory"), dict) else {}
+
+    def _txt(sid: str, label: str, value: str, description: str) -> Dict[str, Any]:
+        return {
+            "id": sid, "label": label, "description": description,
+            "category": "Memory", "type": "text", "value": value,
+            "readonly": True,
+        }
+
+    llm = " · ".join(x for x in (
+        (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(),
+        (env.get(rp.ENV_MEMORY_MODEL) or "").strip(),
+    ) if x) or "not configured"
+    base = (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip()
+    if base:
+        llm = f"{llm} @ {base}"
+
+    embeddings = " · ".join(x for x in (
+        (env.get("HINDSIGHT_API_EMBEDDINGS_PROVIDER") or "").strip(),
+        (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL") or "").strip(),
+    ) if x) or "not configured"
+
+    return [
+        {
+            "id": "memory_enabled",
+            "label": "Memory",
+            "description": "Retain facts from conversations and recall them later.",
+            "category": "Memory",
+            "type": "toggle",
+            "value": bool(mem.get("memory_enabled", True)),
+        },
+        {
+            "id": "memory_user_profile",
+            "label": "User profile",
+            "description": "Maintain a running profile of the user from retained facts.",
+            "category": "Memory",
+            "type": "toggle",
+            "value": bool(mem.get("user_profile_enabled", True)),
+        },
+        _txt("memory_llm", "Extraction model", llm,
+             "Follows the runtime profile — change it there, not here."),
+        _txt("memory_embeddings", "Embeddings", embeddings,
+             "Stays on OpenAI in every profile: the stored vectors are "
+             "1536-d, so changing the embedder needs a full re-index."),
+        _txt("memory_status", "Status", memory_status_text(),
+             "hindsight-server, its last retain, and LLM errors in 24h."),
+    ]
+
+
+def build_settings_schema() -> List[Dict[str, Any]]:
+    """Build the SettingDef[] list. Reads hermes config.yaml for
+    the current model + the preferred-models glob filter (under
+    ``parley.preferred_models:``). Picker options merge OpenRouter
+    (filtered by user's preferred-globs) with EVERY other
+    authenticated provider's curated model list (e.g. openai-codex
+    OAuth, copilot, anthropic). Provider is encoded into the option
+    value: OpenRouter entries stay bare (vendor/model), every other
+    provider prefixes with ``<slug>:`` (e.g. ``openai-codex:gpt-5.5``).
+    apply_model_setting parses the prefix back to route the switch
+    to the right provider.
+
+    In the ``local`` runtime profile the picker instead lists the local
+    server's own /v1/models (LOCAL_MODE.md §1 rule 3) — the cloud catalog
+    is not just wrong there, it is unreachable off-grid."""
+    cfg = read_hermes_config()
+    env = read_hermes_env()
+
+    # Current model + provider — hermes stores model as scalar
+    # (``model: google/gemma-4-26b-a4b-it``) or dict (``model:
+    # {default: ..., provider: ...}``); handle both. Default
+    # provider when unset is "openrouter" (matches hermes default).
+    current_model = ""
+    current_provider = "openrouter"
+    model_cfg = cfg.get("model")
+    if isinstance(model_cfg, dict):
+        current_model = (model_cfg.get("default") or "").strip()
+        current_provider = (model_cfg.get("provider") or "openrouter").strip()
+    elif isinstance(model_cfg, str):
+        current_model = model_cfg.strip()
+    if current_provider == "openrouter" or not current_model:
+        current_value = current_model
+    else:
+        current_value = f"{current_provider}:{current_model}"
+
+    preferred = read_preferred_models(cfg)
+
+    active_profile = rp.read_active_profile(cfg)
+    profiles = rp.read_profiles(cfg, env)
+    local_profile = profiles.get(rp.LOCAL_PROFILE) or {}
+    probe = _probe_local_server(local_profile)
+
+    if active_profile == rp.LOCAL_PROFILE:
+        # The local picker's values are bare model ids (the local provider
+        # slug already contains a colon and cannot be prefix-encoded), so
+        # the current value has to be bare too or nothing matches and the
+        # picker shows a phantom "Current" row.
+        current_value = current_model
+        catalog = _local_model_catalog(local_profile, probe)
+    else:
+        catalog = _cloud_model_catalog(cfg, preferred, current_provider, model_cfg)
+
     # Always include the current model in options[] so the picker
     # can show "what's set now" even if the catalog filter excluded
     # it. Use the encoded value (with provider prefix for non-
@@ -242,7 +461,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
             "group": "Current",
         })
 
-    _GROUP_RANK = {"Current": 0, "OpenRouter": 1}
+    _GROUP_RANK = {"Current": 0, "Local server": 0, "OpenRouter": 1}
     catalog.sort(key=lambda e: (
         _GROUP_RANK.get(e.get("group", ""), 2),
         (e.get("group") or "").lower(),
@@ -272,6 +491,8 @@ def build_settings_schema() -> List[Dict[str, Any]]:
             "value": preferred,
             "placeholder": "e.g. anthropic/* + Enter",
         },
+        _runtime_profile_setting(active_profile, profiles, probe),
+        *_memory_settings(cfg, env),
     ]
 
 
@@ -284,7 +505,24 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
         return apply_model_setting(value)
     if sid == "preferred_models":
         return apply_preferred_models_setting(value)
+    if sid == "runtime_profile":
+        return apply_runtime_profile_setting(value)
+    if sid in _MEMORY_TOGGLES:
+        return apply_memory_toggle(sid, value)
+    if sid in _MEMORY_READONLY:
+        # Declared with ``readonly: true``; the PWA never POSTs one, but a
+        # 400 beats silently accepting a write we have nowhere to put.
+        raise SettingsValidationError(f"{sid} is read-only")
     raise SettingsNotFoundError(f"unknown setting: {sid}")
+
+
+def _updated_def(sid: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    """Re-derive the schema and return one def — the contract's "return the
+    full def so the agent can surface side-effects"."""
+    for s_def in build_settings_schema():
+        if s_def.get("id") == sid:
+            return s_def
+    return fallback
 
 
 def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
@@ -342,6 +580,61 @@ def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
     }
 
 
+def _mirror_model_into_active_profile(cfg: Dict[str, Any]) -> None:
+    """Copy the just-resolved ``model:`` block into the ACTIVE profile.
+
+    LOCAL_MODE.md §1 rule 3: "a profile switch never silently forgets a
+    picker choice". The leaving-profile snapshot in apply_runtime_profile
+    covers the switch itself; this covers the other order — pick a model,
+    switch away, switch back — without depending on the snapshot having run.
+
+    Seeds the whole profiles block when it is missing, from live values, so
+    the mirror has somewhere to land on a box that has never switched.
+    """
+    try:
+        env = read_hermes_env()
+        # strict: refuse to invent a cloud profile out of local routing.
+        profiles = rp.read_profiles(cfg, env, strict=True)
+        active = rp.read_active_profile(cfg)
+        if active in profiles:
+            profiles[active]["model"] = dict(cfg.get("model") or {})
+        rp.set_path(cfg, rp.PROFILES_PATH, profiles)
+    except Exception as e:  # never fail a model switch over the mirror
+        logger.warning("[parley] runtime-profile model mirror skipped: %s", e)
+
+
+def _apply_local_model_setting(model_id: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Model switch inside the ``local`` profile.
+
+    switch_model is deliberately bypassed. Its provider resolution is built
+    around catalogs and ``<slug>:<model>`` encodings; the local endpoint has
+    neither (its slug contains a colon, and its catalog is the one live
+    /v1/models answer we already validated the value against). Writing the
+    profile's own provider/base_url with the chosen id is both simpler and
+    the only thing that can be correct here — the profile IS the authority
+    for where local calls go.
+    """
+    profile = rp.read_profiles(cfg, read_hermes_env()).get(rp.LOCAL_PROFILE) or {}
+    block = profile.get("model") if isinstance(profile.get("model"), dict) else {}
+    new_model = dict(block)
+    new_model["default"] = model_id
+    if not new_model.get("provider"):
+        raise SettingsValidationError(
+            "the local runtime profile has no model.provider configured"
+        )
+    cfg["model"] = new_model
+    _mirror_model_into_active_profile(cfg)
+    try:
+        _write_hermes_config(cfg)
+    except Exception as e:
+        logger.exception("[parley] local model persist failed")
+        raise SettingsValidationError(f"failed to write hermes config: {e}")
+    return _updated_def("model", {
+        "id": "model", "label": "Model", "category": "Agent",
+        "type": "enum", "value": model_id, "options": [],
+    })
+
+
 def apply_model_setting(value: Any) -> Dict[str, Any]:
     """Persist a new default model to hermes config.yaml, mirroring
     what ``/model <name> --global`` does in chat. Cached agents on
@@ -354,7 +647,18 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
     ``copilot:gpt-5.4``). The colon prefix is the cue to route the
     switch via switch_model's ``explicit_provider`` arg so we don't
     have to detect-by-name. Provider names with colons in them
-    would break this — none today."""
+    would break this — the local profile's ``custom:local-fallback``
+    is exactly such a name, which is why the ``local`` branch below
+    never goes near this decoder.
+
+    Two additions 2026-09-07 (LOCAL_MODE.md §1 rule 3):
+
+      * in the ``local`` profile the value is a bare id from the local
+        server's /v1/models and the provider comes from the profile;
+      * whichever profile is active, the resolved model is mirrored into
+        ``parley.runtime_profiles.<active>.model`` so a profile switch
+        never silently forgets a picker choice.
+    """
     # Log caller context for model-switch attribution.
     try:
         import traceback as _tb
@@ -381,6 +685,10 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
         raise SettingsValidationError(
             f"value not in options[]: {raw_value!r}"
         )
+
+    cfg_for_profile = read_hermes_config()
+    if rp.read_active_profile(cfg_for_profile) == rp.LOCAL_PROFILE:
+        return _apply_local_model_setting(raw_value, cfg_for_profile)
 
     # Decode ``<slug>:<model>`` if present. Bare values (no colon)
     # are treated as openrouter-routed. OpenRouter IDs CAN contain
@@ -467,12 +775,256 @@ def apply_model_setting(value: Any) -> Dict[str, Any]:
             cfg["model"]["provider"] = result.target_provider
         if result.base_url:
             cfg["model"]["base_url"] = result.base_url
+        _mirror_model_into_active_profile(cfg)
         save_config(cfg)
     except Exception as e:
         logger.warning("[parley] failed to persist model to config.yaml: %s", e)
 
     new_schema = build_settings_schema()
     return next((s for s in new_schema if s["id"] == "model"), schema[0])
+
+
+# ── Memory status (Settings › Memory, LOCAL_MODE.md §3) ─────────────────
+
+# The unit hindsight runs under, and the grep patterns that decide whether it
+# is healthy. Both are lifted verbatim from hermes-agent-private's
+# scripts/health-hermes.sh (`c_hindsight_server` / `c_hindsight_llm`) so the
+# Memory section and the daily digest cannot disagree about what "an LLM
+# error" is — two definitions of the same thing is how a check silently
+# stops covering the failure it was written for.
+_MEMORY_UNIT = "hindsight-server"
+_MEMORY_ERROR_RE = re.compile(
+    r"extraction failed|LLM error|refresh failed|Codex 401|AuthenticationError"
+    r"|RateLimitError|APIStatusError|Failed to load",
+    re.IGNORECASE,
+)
+_MEMORY_RETAIN_MARKER = "RETAIN_BATCH START"
+_MEMORY_JOURNAL_WINDOW = "24 hours ago"
+_MEMORY_PROBE_TIMEOUT = 5.0
+
+
+def _run(argv: List[str], timeout: float) -> Optional[subprocess.CompletedProcess]:
+    """Run a probe command. None when the binary is absent or it blew the
+    timeout — i.e. "we do not know", which is a different answer from "it is
+    broken" and must not be rendered as one. Tests and non-systemd hosts take
+    this path."""
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as e:
+        logger.debug("[parley] memory status probe %s unavailable: %s", argv[0], e)
+        return None
+
+
+def _service_active(unit: str) -> Optional[bool]:
+    proc = _run(["systemctl", "--user", "is-active", unit], _MEMORY_PROBE_TIMEOUT)
+    if proc is None:
+        return None
+    return (proc.stdout or "").strip() == "active"
+
+
+def _journal(unit: str, since: str) -> Optional[List[str]]:
+    # -o short-iso, not health.sh's -o cat: the Memory line has to say WHEN
+    # the last retain happened, and `cat` throws the timestamps away.
+    proc = _run(
+        ["journalctl", "--user", "-u", unit, "--since", since, "--no-pager", "-o", "short-iso"],
+        _MEMORY_PROBE_TIMEOUT,
+    )
+    if proc is None or proc.returncode != 0:
+        return None
+    return (proc.stdout or "").splitlines()
+
+
+def _iso_stamp(line: str) -> Optional[datetime]:
+    stamp = line.split(" ", 1)[0]
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+
+
+def _ago(then: datetime, now: Optional[datetime] = None) -> str:
+    now = now or datetime.now(then.tzinfo)
+    secs = max(0, int((now - then).total_seconds()))
+    if secs < 90:
+        return f"{secs} s ago"
+    if secs < 5400:
+        return f"{secs // 60} min ago"
+    if secs < 172800:
+        return f"{secs // 3600} h ago"
+    return f"{secs // 86400} d ago"
+
+
+def memory_status_text(now: Optional[datetime] = None) -> str:
+    """One line: ``hindsight-server active · last retain 3 min ago · 0 LLM
+    errors / 24h``. Every component degrades to "unknown" on its own, so a
+    host without systemd still renders a sensible row instead of a stack
+    trace or a false "not active"."""
+    active = _service_active(_MEMORY_UNIT)
+    if active is None:
+        head = f"{_MEMORY_UNIT} unknown"
+    elif active:
+        head = f"{_MEMORY_UNIT} active"
+    else:
+        head = f"{_MEMORY_UNIT} NOT active"
+
+    lines = _journal(_MEMORY_UNIT, _MEMORY_JOURNAL_WINDOW)
+    if lines is None:
+        return f"{head} · last retain unknown · LLM errors unknown"
+
+    retains = [ln for ln in lines if _MEMORY_RETAIN_MARKER in ln]
+    if not retains:
+        retain = "no retain in 24h"
+    else:
+        stamp = _iso_stamp(retains[-1])
+        retain = f"last retain {_ago(stamp, now)}" if stamp else f"{len(retains)} retains / 24h"
+
+    errors = sum(1 for ln in lines if _MEMORY_ERROR_RE.search(ln))
+    return f"{head} · {retain} · {errors} LLM errors / 24h"
+
+
+# ── runtime profile: the injected side effects ──────────────────────────
+
+# Ops lives with the ops scripts (LOCAL_MODE.md §1 rule 2.4): Parley does not
+# own process control. Overridable so tests can point at a stub — they must
+# never restart the owner's memory server.
+_DEFAULT_MEMORY_SCRIPT = "~/code/hermes-agent-private/scripts/apply-memory-profile.sh"
+
+
+def _memory_profile_script() -> Path:
+    return Path(
+        os.environ.get("PARLEY_MEMORY_PROFILE_SCRIPT") or _DEFAULT_MEMORY_SCRIPT
+    ).expanduser()
+
+
+def _memory_script_timeout() -> float:
+    try:
+        return max(10.0, float(os.environ.get("PARLEY_MEMORY_PROFILE_TIMEOUT", "180")))
+    except ValueError:
+        return 180.0
+
+
+def _write_hermes_config(cfg: Dict[str, Any]) -> None:
+    """Persist config.yaml through hermes' own writer.
+
+    save_config -> utils._atomic_write -> atomic_replace, which resolves a
+    symlink before os.replace. That is load-bearing here: ~/.hermes/config.yaml
+    is a symlink into the hermes-agent-private repo, and any writer that
+    renames over the LINK turns it into a plain file and silently orphans the
+    repo copy."""
+    from hermes_cli.config import save_config
+    save_config(cfg)
+
+
+def _write_hermes_env(updates: Any) -> None:
+    """Persist the HINDSIGHT_API_LLM_* keys. ``None`` removes the key.
+
+    Same symlink story as the config (~/.hermes/.env -> the repo's .env);
+    hermes' save_env_value/remove_env_value go through _write_env_lines ->
+    atomic_replace, so writing through the link is safe. Done here as well as
+    in the ops script so a missing/failed script still leaves .env coherent
+    with what the config now says."""
+    from hermes_cli.config import remove_env_value, save_env_value
+    for key, value in updates.items():
+        if value is None:
+            remove_env_value(key)
+        else:
+            save_env_value(key, value)
+
+
+def _restart_memory_server(spec: "rp.MemorySpec") -> None:
+    """Hand hindsight's restart to the repo script and wait for it."""
+    script = _memory_profile_script()
+    if not script.exists():
+        raise SettingsValidationError(
+            f"memory profile script not found at {script}; set "
+            f"PARLEY_MEMORY_PROFILE_SCRIPT or install it from hermes-agent-private"
+        )
+    argv = [str(script)] + spec.as_args()
+    started = time.time()
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, timeout=_memory_script_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        raise SettingsValidationError(
+            f"memory profile script did not finish within {_memory_script_timeout():.0f}s"
+        )
+    except OSError as e:
+        raise SettingsValidationError(f"could not run {script}: {e}")
+    logger.info(
+        "[parley] memory profile script rc=%s in %.1fs", proc.returncode, time.time() - started,
+    )
+    if proc.returncode != 0:
+        tail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
+        raise SettingsValidationError(
+            "memory profile switch failed: " + (tail[-1] if tail else f"exit {proc.returncode}")
+        )
+
+
+def _preflight_runtime_profile(target: str, profile: Dict[str, Any]) -> None:
+    """Preflight through the SAME probe the schema describes with.
+
+    rp.preflight_profile defaults to its own probe; routing it back through
+    ``_probe_local_server`` means the enum option that says "ready" and the
+    check that lets the switch through can never be answering from two
+    different code paths (and gives tests one seam instead of two)."""
+    rp.preflight_profile(
+        target, profile, probe=lambda *_a, **_k: _probe_local_server(profile),
+    )
+
+
+def apply_runtime_profile_setting(value: Any) -> Dict[str, Any]:
+    """POST /v1/settings/runtime_profile — switch every model call at once.
+
+    All the ordering and blast-radius rules live in parley_runtime_profiles;
+    this is the wiring that gives them real side effects and translates the
+    module's ProfileError into the extension's 400."""
+    if not isinstance(value, str) or not value.strip():
+        raise SettingsValidationError("runtime_profile value must be a non-empty string")
+    try:
+        plan = rp.apply_runtime_profile(
+            value.strip(),
+            preflight=_preflight_runtime_profile,
+            write_config=_write_hermes_config,
+            write_env=_write_hermes_env,
+            restart_memory=_restart_memory_server,
+            load=lambda: (read_hermes_config(), read_hermes_env()),
+        )
+    except rp.ProfileError as e:
+        raise SettingsValidationError(str(e))
+    except SettingsValidationError:
+        raise
+    except Exception as e:
+        logger.exception("[parley] runtime profile apply failed")
+        raise SettingsValidationError(f"failed to apply runtime profile: {e}")
+    logger.info("[parley] runtime profile now %s (was %s)", plan.target, plan.leaving)
+    return _updated_def("runtime_profile", {
+        "id": "runtime_profile", "label": "Runtime profile",
+        "category": "Agent", "type": "enum", "value": plan.target, "options": [],
+    })
+
+
+def apply_memory_toggle(sid: str, value: Any) -> Dict[str, Any]:
+    """The two writable Memory settings — plain hermes ``memory.*`` booleans.
+
+    Not a runtime-profile concern: turning memory off is orthogonal to where
+    its LLM calls go, and conflating them would make "off-grid" silently
+    disable recall."""
+    path = _MEMORY_TOGGLES.get(sid)
+    if path is None:
+        raise SettingsNotFoundError(f"unknown setting: {sid}")
+    if not isinstance(value, bool):
+        raise SettingsValidationError(f"{sid} value must be true or false")
+    cfg = read_hermes_config()
+    rp.set_path(cfg, path, value)
+    try:
+        _write_hermes_config(cfg)
+    except Exception as e:
+        logger.exception("[parley] memory toggle persist failed")
+        raise SettingsValidationError(f"failed to write hermes config: {e}")
+    return _updated_def(sid, {
+        "id": sid, "label": sid, "category": "Memory", "type": "toggle", "value": value,
+    })
 
 
 async def handle_schema(adapter, request: "web.Request") -> "web.Response":

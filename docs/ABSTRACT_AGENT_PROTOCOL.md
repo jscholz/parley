@@ -423,7 +423,10 @@ by other clients changing the same agent state).
 - `description` (string, optional) — hint text rendered next to /
   beneath the input.
 - `category` (string, optional) — group key for the UI. Defaults to
-  `"Agent"`. Same string across multiple settings groups them.
+  `"Agent"`. Same string across multiple settings groups them. The
+  value is free-form — an agent that owns a distinct subsystem can
+  name a section for it (e.g. `"Memory"`) and the PWA renders that
+  section from the schema alone.
 - `type` (string, required) — one of:
   - `enum` — dropdown. `options[]` required.
   - `slider` — numeric range. `min`, `max`, `step` required.
@@ -438,13 +441,18 @@ by other clients changing the same agent state).
 - `min`, `max`, `step` (slider only, required).
 - `placeholder` (text/string-list only, optional) — hint text in
   the input box.
-- `readonly` (boolean, optional, default `false`) — renders as a value
-  line (label + current value) instead of an input, whatever `type`
-  says. Parley never POSTs a readonly setting. For a value the agent
-  derives or forwards from elsewhere rather than accepts edits on
-  directly (e.g. hermes' Memory section shows which LLM backs memory
-  extraction, which follows the active runtime profile rather than
-  being independently editable there).
+- `group` (string, optional) — sub-heading WITHIN a category, for
+  agents that declare enough settings in one category to want them
+  clustered. The client renders it as a heading above the first
+  setting carrying that value; settings without one sit above the
+  first group.
+- `readonly` (boolean, optional, default `false`) — the setting is
+  reportable but not writable. The client renders it as a value line
+  (label + current value) instead of an input, whatever `type` says,
+  and never POSTs it; the agent SHOULD still reject a write to it
+  with a `400`. Use it for state the agent derives or forwards from
+  elsewhere rather than accepts edits on (a computed status line, a
+  value that follows some other setting).
 
 **Response (404):** Agent doesn't implement the extension. Parley
 hides the "Agent" settings group entirely.
