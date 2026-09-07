@@ -23,6 +23,30 @@ from threading import Lock
 from typing import Any, Dict, List, Optional
 
 
+def _epoch(value: Any) -> float:
+    """Coerce an envelope timestamp to epoch seconds for ordering.
+
+    ``tool_call`` envelopes carry ``started_at`` as ISO-8601 (see
+    ``__init__._iso_from_epoch``) while ``tool_result`` rows are stamped with
+    ``time.time()``; sorting the two shapes together raised
+    ``TypeError: '<' not supported between 'float' and 'str'`` on every
+    mid-turn transcript replay that had at least one call and one result
+    (GET /v1/conversations/{id}/items, field 2026-09-07). Unparseable or
+    missing values fall back to "now" so ordering degrades, never crashes.
+    """
+    if isinstance(value, bool):
+        return time.time()
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        import datetime as _dt
+        try:
+            return _dt.datetime.fromisoformat(value.strip().replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return time.time()
+
+
 class TurnEntry:
     __slots__ = (
         "chat_id", "user_message", "user_message_id",
@@ -97,7 +121,7 @@ class TurnBuffer:
                     "call_id": env.get("call_id", ""),
                     "tool_name": env.get("tool_name", ""),
                     "args": env.get("args"),
-                    "ts": env.get("started_at") or time.time(),
+                    "ts": _epoch(env.get("started_at")),
                 })
                 call_id = env.get("call_id")
                 if isinstance(call_id, str) and call_id:
@@ -173,7 +197,7 @@ class TurnBuffer:
             tool_events.append({"kind": "call", **c})
         for r in entry.tool_results:
             tool_events.append({"kind": "result", **r})
-        tool_events.sort(key=lambda e: e.get("ts") or 0)
+        tool_events.sort(key=lambda e: _epoch(e.get("ts")))
         for ev in tool_events:
             if ev["kind"] == "call":
                 out.append({
@@ -232,7 +256,7 @@ class TurnBuffer:
             tool_events.append({"kind": "call", **c})
         for r in entry.tool_results:
             tool_events.append({"kind": "result", **r})
-        tool_events.sort(key=lambda e: e.get("ts") or 0)
+        tool_events.sort(key=lambda e: _epoch(e.get("ts")))
         for ev in tool_events:
             content = ev.get("args") if ev["kind"] == "call" else ev.get("result")
             if not isinstance(content, str):
