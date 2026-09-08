@@ -2705,8 +2705,18 @@ async function boot() {
       ? parsed
       : Math.round(window.innerHeight * 0.4);
     const transcriptEl = document.getElementById('transcript');
+    // Literal bottom edge (chat.BOTTOM_EDGE_SLACK_PX, 8px) — NOT the
+    // generous 300px PINNED_THRESHOLD_PX. This used to be 80px, which
+    // yanked a reader sitting ~50px above the live edge down to the
+    // bottom on every keystroke while the composer grew (field
+    // 2026-09-0x: dozens of these scrollTo writes per second while
+    // typing). The intent — a growing composer must not push the live
+    // edge out of view — only actually requires re-pinning when the
+    // user was AT the edge to begin with; reuses the same constant
+    // ensureSettleCompensator's bottomFollowOwns() uses for the same
+    // "is this the literal edge" question, rather than a third threshold.
     const wasPinned = transcriptEl
-      ? (transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight) <= 80
+      ? (transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight) <= chat.BOTTOM_EDGE_SLACK_PX
       : false;
     composerInput.style.height = 'auto';
     composerInput.style.height = Math.min(composerInput.scrollHeight, cap) + 'px';

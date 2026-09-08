@@ -102,6 +102,18 @@ export function getRestoredViewedSessionId(): string | null {
  *  counts as pinned and autoScroll keeps following streaming replies. */
 const PINNED_THRESHOLD_PX = 300;
 
+/** The LITERAL bottom edge — distinct from PINNED_THRESHOLD_PX's generous
+ *  300px "pinned" zone. Used wherever a caller needs to know "is the
+ *  scrollbar actually at the live tail right now" rather than "is the
+ *  user in the generous near-the-edge zone" (ensureSettleCompensator's
+ *  bottomFollowOwns, main.ts's composer autoResize). A single shared
+ *  constant so a future tune doesn't drift the two call sites apart —
+ *  see bottomFollowOwns below for why 300px is wrong for this check
+ *  (a wheel-up's first ~300px keeps PINNED_THRESHOLD_PX true, and a
+ *  reader sitting just above the true edge would otherwise get yanked
+ *  back down by anything gated on the generous threshold instead). */
+export const BOTTOM_EDGE_SLACK_PX = 8;
+
 let pinnedToBottom = true;
 // Gesture-beats-geometry (field 2026-08-09, "network glitchiness" that
 // wasn't): the scroll listener re-derives pinnedToBottom from GEOMETRY,
@@ -348,7 +360,7 @@ function ensureSettleCompensator(): void {
    *  up off the live edge. Everywhere else (including pinned-but-300px-up)
    *  the reading position is the thing to defend. */
   const bottomFollowOwns = (): boolean =>
-    pinnedToBottom && el.scrollHeight - el.scrollTop - el.clientHeight <= 8;
+    pinnedToBottom && el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_EDGE_SLACK_PX;
 
   let anchorEl: HTMLElement | null = null;
   let anchorContentY = 0;

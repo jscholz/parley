@@ -102,6 +102,46 @@ export function initSessionResume(opts: {
   setHistoryLoadedRef = opts.setHistoryLoaded;
 }
 
+/** A rendered row's key and its OWN on-screen offset, captured just
+ *  before a re-render — see `preMutationRows` below. */
+interface PreMutationRow { key: string; offsetPx: number }
+
+/** Walk outward from `vanishedKey`'s position in `preMutationRows` (the
+ *  DOM-order snapshot captured just before a re-render) to find the
+ *  nearest neighbor — by original document position, not pixel distance
+ *  — that still exists in `el` after the re-render. Checks the row
+ *  immediately below first, then above, then two below, two above, etc.
+ *  Returns the neighbor's OWN pre-mutation offsetPx (NOT the vanished
+ *  key's) — restoring a surviving row to the SLOT the vanished row used
+ *  to occupy would introduce an artificial jump of however far apart
+ *  the two happened to be; restoring it to where IT already was doesn't
+ *  move anything that didn't already need to move. (When nothing
+ *  between them changed shape this converges on the same answer as a
+ *  plain scrollTop carry-over; when it did, this is still well-defined
+ *  because it's anchored to a row that genuinely exists, not a distance
+ *  computed against content that no longer does.) Returns null if the
+ *  vanished key isn't in the snapshot, or no candidate survives. */
+function findNearestSurvivingAnchor(
+  preMutationRows: PreMutationRow[],
+  vanishedKey: string,
+  el: HTMLElement,
+): { key: string; offsetPx: number } | null {
+  const startIdx = preMutationRows.findIndex((r) => r.key === vanishedKey);
+  if (startIdx < 0) return null;
+  const survivingKeys = new Set(
+    Array.from(el.querySelectorAll<HTMLElement>('.line[data-key]'))
+      .map((e) => e.getAttribute('data-key') || ''),
+  );
+  for (let d = 1; d < preMutationRows.length; d++) {
+    const below = preMutationRows[startIdx + d];
+    if (below && survivingKeys.has(below.key)) return below;
+    const above = preMutationRows[startIdx - d];
+    if (above && survivingKeys.has(above.key)) return above;
+    if (startIdx + d >= preMutationRows.length && startIdx - d < 0) break;
+  }
+  return null;
+}
+
 /** Render a full set of session messages, replacing the current
  *  transcript. Same-session resumes (visibility flip, SSE reconnect,
  *  post-turn drawer refresh) skip the clear so renderedMessages.upsert
@@ -160,6 +200,51 @@ export function replaySessionMessages(
   // (last write wins), so transient renders that fire scroll(0) just
   // get overwritten by the post-restore scroll(saved). No suppression.
   const saved = !targetMessageId ? getScrollPosition(id) : null;
+
+  // Live-viewport snapshot for the "anchor key vanished" fallback below
+  // (field 2026-09-0x: a switch's cache render settles the user on some
+  // bubble, then a DELAYED server reconcile replaces the transcript with
+  // a page whose id/key sequence doesn't match — sessionDrawer's
+  // sameTranscript() sees ANY id mismatch as "different transcript" and
+  // fires a full re-render even when only a few rows actually changed
+  // identity, dropping the ones that DID). Captured BEFORE any store
+  // mutation, ONLY when we're about to reach the mid-chat anchor-restore
+  // branch below (same-session, on-screen already, mid-chat not
+  // atBottom, an anchor actually saved) — every OTHER same-session
+  // resume (pinned-and-following, post-reply preserveScrollIfLive
+  // refresh, at-edge restore) skips this entirely. Those are the HIGH-
+  // FREQUENCY paths (a live reconcile runs after every reply); querying
+  // + measuring every rendered row's rect on each of them would be a
+  // real per-turn cost for a fallback that path never uses.
+  //
+  // `preMutationRows` is the DOM-order snapshot (key + own on-screen
+  // offset) of every rendered row — lets the fallback below find the
+  // NEAREST surviving neighbor of a vanished anchor (by original
+  // document position) and restore IT to where IT already was. Two
+  // simpler alternatives were tried and measured worse:
+  //   - A proportional scrollTop/scrollHeight ratio degrades badly when
+  //     the replaced rows are concentrated in one region rather than
+  //     spread evenly through the document (a tail/mid mismatch, not a
+  //     uniform re-layout).
+  //   - Seating the nearest neighbor at the VANISHED anchor's old offset
+  //     (instead of the neighbor's OWN old offset) introduces an
+  //     artificial jump of however far apart the two happened to sit —
+  //     measured WORSE than doing nothing whenever the surrounding
+  //     content's total height was actually unchanged (the common case:
+  //     an id/key hiccup with no real content shift), because it forces
+  //     a jump raw scrollTop would never have made.
+  const mayNeedVanishedAnchorFallback = sameSession && !targetMessageId
+    && !opts?.preserveScrollIfLive
+    && !!saved && !saved.atBottom && !!saved.anchorKey;
+  const preMutationEl = mayNeedVanishedAnchorFallback ? document.getElementById('transcript') : null;
+  const preMutationRows: PreMutationRow[] | null = preMutationEl
+    ? (() => {
+        const ct = preMutationEl.getBoundingClientRect().top;
+        return Array.from(preMutationEl.querySelectorAll<HTMLElement>('.line[data-key]'))
+          .map((el) => ({ key: el.getAttribute('data-key') || '', offsetPx: Math.round(el.getBoundingClientRect().top - ct) }))
+          .filter((r) => r.key);
+      })()
+    : null;
 
   // Promotion is atomic with the paint and must run BEFORE the store
   // mutates so the reconciler subscription sees the new active chat
@@ -407,10 +492,11 @@ export function replaySessionMessages(
       if (saved.anchorKey && !isDurableMessageKey(saved.anchorKey)) {
         diag(`[chat-resume] discarding synthetic saved anchor key=${saved.anchorKey}`);
       }
-      const tryAnchor = !saved.atBottom
-        && saved.anchorKey && typeof saved.anchorOffsetPx === 'number'
-        && isDurableMessageKey(saved.anchorKey)
-        ? chat.restoreDomAnchor({ key: saved.anchorKey, offsetPx: saved.anchorOffsetPx })
+      const anchorAttempted = !saved.atBottom
+        && !!saved.anchorKey && typeof saved.anchorOffsetPx === 'number'
+        && isDurableMessageKey(saved.anchorKey);
+      const tryAnchor = anchorAttempted
+        ? chat.restoreDomAnchor({ key: saved.anchorKey!, offsetPx: saved.anchorOffsetPx! })
         : false;
       if (tryAnchor) {
         log(`[chat-resume] restore via anchor key=${saved.anchorKey?.slice(0, 16)} offset=${saved.anchorOffsetPx}`);
@@ -442,7 +528,6 @@ export function replaySessionMessages(
         chat.forceScrollToBottom();
         scheduleAtBottomRepin();
       } else {
-        log(`[chat-resume] restore mid-chat saved=${saved.scrollTop}`);
         // Cancel any sibling chat's still-live at-bottom repin
         // observer — it would otherwise scroll us to the live edge
         // as A's content fills the transcript.
@@ -454,7 +539,38 @@ export function replaySessionMessages(
         // prepended content — dragging the user off `saved`.
         chat.suppressLazyLoadFor(1500);
         chat.setPinnedToBottom(false);
-        el.scrollTo({ top: saved.scrollTop, behavior: 'instant' as ScrollBehavior });
+        // anchorAttempted-but-failed means the bubble the user was on
+        // genuinely isn't in the new render (a same-session re-render
+        // replaced it — id/key mismatch between what was cached and
+        // what the server just returned; see sessionDrawer.ts's
+        // sameTranscript/cacheFuller comments). `saved.scrollTop` is a
+        // raw pixel number captured against the OLD layout — applying
+        // it verbatim against a transcript whose composition just
+        // changed is a coin flip (field repro: measured a 4-row /
+        // ~60px reading-position drift this way in one arrangement).
+        // Walk outward from the vanished key's position in the
+        // PRE-mutation row order to find the nearest neighbor that
+        // still exists in the new render, and restore IT to its OWN
+        // pre-mutation offset (see findNearestSurvivingAnchor's doc for
+        // why that, and not the vanished anchor's offset). Only
+        // available for a same-session re-render of a chat already on
+        // screen (preMutationRows is null on a fresh switch, which
+        // keeps using `saved.scrollTop` as before — unchanged, since
+        // there's no "current" view to preserve there).
+        const anchorKeyVanished = anchorAttempted && !tryAnchor;
+        const nearest = anchorKeyVanished && preMutationRows
+          ? findNearestSurvivingAnchor(preMutationRows, saved.anchorKey!, el)
+          : null;
+        if (nearest && chat.restoreDomAnchor({ key: nearest.key, offsetPx: nearest.offsetPx })) {
+          log(`[chat-resume] restore mid-chat — anchor key=${saved.anchorKey?.slice(0, 16)} vanished; ` +
+            `re-anchored to nearest surviving neighbor key=${nearest.key.slice(0, 16)} offset=${nearest.offsetPx}`);
+        } else {
+          if (anchorKeyVanished) {
+            diag(`[chat-resume] no surviving neighbor found for vanished anchor key=${saved.anchorKey}; falling back to raw scrollTop`);
+          }
+          log(`[chat-resume] restore mid-chat saved=${saved.scrollTop}`);
+          el.scrollTo({ top: saved.scrollTop, behavior: 'instant' as ScrollBehavior });
+        }
         // The scrollTo fires a scroll event synchronously; the listener
         // updates pinnedToBottom from isPinned() against the restored
         // position, so subsequent autoScroll calls during post-render
