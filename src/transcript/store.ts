@@ -477,13 +477,19 @@ export function appendInflight(chatId: string, env: ParleyEnvelope): void {
   notify(chatId);
 }
 
-/** Record (or clear, with null) the chat's live heartbeat text — the
+/** Record (or clear, with null) the chat's live turn-status text — the
  *  `status` envelope the hermes plugin derives from the gateway's
- *  "⏳ Working — …" pulse. The projection turns it into the turn-status
- *  line at the bottom of the transcript. */
+ *  "⏳ Working — …" pulse, OR the empty-string placeholder a `typing`
+ *  envelope sets before any heartbeat has arrived (see
+ *  transcript/turnIndicator.ts). The projection turns it into the
+ *  turn-status line at the bottom of the transcript, formatting `''`
+ *  as "Thinking" (formatTurnStatus). Only `null` clears — `''` is a
+ *  valid, distinct value from "no indicator" (field 2026-09-08: the
+ *  previous `text ? … : null` truthiness check silently collapsed the
+ *  typing-only placeholder into a clear). */
 export function setTurnStatus(chatId: string, text: string | null): void {
   const s = getState(chatId);
-  const next = text ? { text, at: Date.now() } : null;
+  const next = text !== null ? { text, at: Date.now() } : null;
   if (!next && !s.turnStatus) return;
   s.turnStatus = next;
   notify(chatId);

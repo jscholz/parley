@@ -47,6 +47,7 @@ import { apiOrigin } from './apiBase.ts';
 import * as conversations from './conversations.ts';
 import * as sessionCache from './sessionCache.ts';
 import * as transcriptStore from './transcript/store.ts';
+import { noteTyping, noteStatus, startTurnIndicatorSweep, stopTurnIndicatorSweep } from './transcript/turnIndicator.ts';
 import { markRecentlyDeleted, isRecentlyDeleted } from './sessionOps.ts';
 import * as switchCtl from './switchController.ts';
 import { isDevMode } from './util/devMode.ts';
@@ -732,6 +733,14 @@ function dispatchCrossDeviceSync(type: CrossDeviceSyncType, env: any, chatId: st
 function handleEnvelope(type: string, env: any, chatId: string): void {
   switch (type) {
     case 'typing':
+      // Immediate in-transcript feedback (field 2026-09-08): paint the
+      // plain "Thinking" placeholder on the FIRST typing pulse of a
+      // turn so the working indicator doesn't wait on the ~180s
+      // `status` heartbeat. noteTyping no-ops on replay — same gate as
+      // `status` below, since a stale typing pulse would show a dead
+      // turn as working (replayInflight / stream.ts stamp
+      // `_replay: true` on every envelope type, this one included).
+      noteTyping(chatId, { isReplay: env?._replay === true });
       subs?.onActivity?.({ working: true, detail: 'pending', conversation: chatId });
       return;
 
@@ -742,7 +751,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       if (env?._replay === true) return;
       const text = typeof env.text === 'string' ? env.text : '';
       const working = env.state !== 'done';
-      transcriptStore.setTurnStatus(chatId, working ? (text || 'Working') : null);
+      noteStatus(chatId, text, !working);
       subs?.onActivity?.({ working, detail: text || 'working', conversation: chatId });
       return;
     }
@@ -1070,6 +1079,7 @@ export const proxyClientAdapter = {
     // after a multi-second probe round-trip.
     startStreamChannel();
     startHealthPoll();
+    startTurnIndicatorSweep();
     // OS-lifecycle hardening: visibility/online/pageshow trigger a
     // forceReconnect because mobile-Safari silently kills the
     // EventSource on background / radio suspend / network handoff
@@ -1095,6 +1105,7 @@ export const proxyClientAdapter = {
   disconnect() {
     stopHealthPoll();
     stopStreamChannel();
+    stopTurnIndicatorSweep();
     connected = false;
   },
 
