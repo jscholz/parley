@@ -15,6 +15,7 @@ import {
 } from './swLifecycle.ts';
 import { handleNotification, handleUserMessage } from './backendEvents.ts';
 import { initAppTooltip } from './util/tooltip.ts';
+import { shouldDropAbandonedChat } from './util/abandonedChat.ts';
 import { initScrollDiag } from './scrollDiag.ts';
 import {
   initModelCapabilities,
@@ -882,6 +883,20 @@ async function boot() {
     const cached = sessionDrawer.getCachedSessions().find(s => s.id === leavingId);
     const serverKnowsRow = !!cached && cached.messageCount > 0;
     if (serverKnowsRow) return;
+    // An unstarted chat holding a DRAFT is not abandoned — it is work in
+    // progress (his report 2026-09-08: he started typing in a new chat, an
+    // approval banner pulled him elsewhere, and the draft was gone). The
+    // text itself lives in IDB keyed by chat id, so what this cleanup took
+    // was the conversation the draft belonged to, leaving it unreachable.
+    // Keep the chat; the drawer paints it a placeholder row (renderList's
+    // placeholderIds) so it is one click away, and the ordinary cleanups
+    // still apply: sending spends the draft, emptying the box removes it,
+    // and an explicit delete clears it.
+    const draft = composerDrafts.getDraft(leavingId);
+    if (!shouldDropAbandonedChat({ serverKnowsRow, draftText: draft })) {
+      diag(`navigate-away: keeping ${leavingId} — holds an unsent draft (${draft.trim().length} chars)`);
+      return;
+    }
     diag(`navigate-away: dropping local-only orphan ${leavingId}`);
     void conversations.remove(leavingId)
       .catch((e: any) => diag(`navigate-away cleanup failed: ${e?.message}`))
@@ -1078,7 +1093,16 @@ async function boot() {
     msgId: string | null,
   ): Promise<void> => {
     const cmd = approvalCommandForAction(action);
-    await drillToChatMessage(chatId, msgId);
+    // Deliberately does NOT navigate (his ask, 2026-09-08: "when I click an
+    // approve pop-up, don't switch sessions, just route the approve
+    // message"). Approving from a banner while composing elsewhere used to
+    // yank the view — and worse, if the chat you were in was an unstarted
+    // new conversation, the switch made it unreachable and the draft went
+    // with it. Routing is already chat-pinned: addPendingSend and
+    // sendMessage below both take `chatId` captured at tap time, so the
+    // command lands in the right conversation with the view untouched, and
+    // the pending bubble is waiting there when you next open it. Tapping
+    // the banner BODY still navigates — that path is inAppBanner's onOpen.
     const userMessageId = `umsg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     transcriptStore.addPendingSend(chatId, {
       messageId: userMessageId,

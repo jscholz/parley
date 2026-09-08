@@ -1356,7 +1356,7 @@ let lastActiveId: string | null = null;
  *  order. Anything not in here can change without us noticing — keep
  *  it broad enough that legitimate updates still trigger a rebuild.
  *  Deliberately EXCLUDES activeId (patched in place). */
-function renderListFingerprint(sessions: any[], showPlaceholder: boolean, pinnedOrder: string[]): string {
+function renderListFingerprint(sessions: any[], placeholderIds: string[], pinnedOrder: string[]): string {
   const rows = sessions.map(s =>
     `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`
     // Draft snippet state: appearance/disappearance/edit of a row's
@@ -1368,7 +1368,7 @@ function renderListFingerprint(sessions: any[], showPlaceholder: boolean, pinned
   // any row's fields or the incoming recency order, so without this the
   // diff-bypass would skip the rebuild and the pinned region wouldn't
   // move.
-  return `${showPlaceholder ? 'p' : ''}::pins=${pinnedOrder.join(',')}::${rows}`;
+  return `${placeholderIds.join('+')}::pins=${pinnedOrder.join(',')}::${rows}`;
 }
 
 /** Tier-2 reconcile: rows unchanged, active id moved — patch the
@@ -1393,7 +1393,21 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   // "New conversation" row at the top so the user has immediate visual
   // feedback that the new-chat click landed. Gets replaced by the real
   // row on the next refresh after a reply lands.
-  const showPlaceholder = isFresh;
+  // Unstarted conversations that deserve a row: the active brand-new chat
+  // (isFresh), plus ANY chat holding a draft that the server list doesn't
+  // know about yet. The second half is the fix for a stranded draft — a
+  // chat with no server rows has no row of its own, so switching away used
+  // to leave the text unreachable (his report 2026-09-08). Recently-deleted
+  // ids are excluded, and deleting a chat now clears its draft, so a
+  // phantom row can't outlive the conversation.
+  const known = new Set(sessions.map((s: any) => String(s?.id)));
+  const placeholderIds: string[] = [];
+  if (isFresh && activeId) placeholderIds.push(activeId);
+  for (const id of composerDrafts.draftChatIds()) {
+    if (!id || known.has(id) || isRecentlyDeleted(id) || placeholderIds.includes(id)) continue;
+    placeholderIds.push(id);
+  }
+  const showPlaceholder = placeholderIds.length > 0;
 
   // Wire pinned drag-reorder once, lazily, against the stable list
   // element (idempotent — guarded internally).
@@ -1416,7 +1430,7 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   // commit budget-free); rows changed → full rebuild below. refresh()
   // naturally renders twice (cache + server); most pairs reconcile to
   // the same list and the second rebuild is pure flicker.
-  const rowsPrint = renderListFingerprint(sessions, showPlaceholder, pinnedOrder);
+  const rowsPrint = renderListFingerprint(sessions, placeholderIds, pinnedOrder);
   if (rowsPrint === lastRowsPrint) {
     if (activeId !== lastActiveId) {
       patchActiveRow(listEl, activeId);
@@ -1439,7 +1453,7 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
     return;
   }
   listEl.innerHTML = '';
-  if (showPlaceholder) listEl.appendChild(renderPlaceholderRow(activeId));
+  for (const id of placeholderIds) listEl.appendChild(renderPlaceholderRow(id, activeId));
   // "Pinned" heads the pinned region, matching the time buckets below so
   // the whole drawer reads as one labelled list rather than an unlabelled
   // block followed by labelled ones. Omitted entirely when nothing is
@@ -1474,9 +1488,15 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   lastActiveId = activeId;
 }
 
-function renderPlaceholderRow(id: string): HTMLLIElement {
+function renderPlaceholderRow(id: string, activeId: string): HTMLLIElement {
   const li = document.createElement('li');
-  li.classList.add('active', 'sess-placeholder');
+  li.classList.add('sess-placeholder');
+  // Active only when it IS the viewed chat. An unstarted conversation that
+  // holds a draft keeps a row while you are elsewhere (his report
+  // 2026-09-08: typing in a new chat, an approval pulled him away, and the
+  // draft became unreachable because the row only ever existed for the
+  // ACTIVE fresh chat), so these rows now come in both states.
+  if (id === activeId) li.classList.add('active');
   const body = document.createElement('div');
   body.className = 'sess-body';
   const snippet = document.createElement('div');
@@ -1493,7 +1513,31 @@ function renderPlaceholderRow(id: string): HTMLLIElement {
   body.appendChild(snippet);
   body.appendChild(meta);
   li.appendChild(body);
-  // Intentionally no click (already active) or menu (nothing to rename/delete
+  // Draft preview, same treatment real rows get, so the row holding your
+  // unsent text is identifiable at a glance.
+  const draftText = composerDrafts.boundTo() !== id ? composerDrafts.getDraft(id) : '';
+  if (draftText.trim()) {
+    const dr = document.createElement('span');
+    // Same class real rows use, so it picks up the existing accent+italic
+    // "yours, unsent" treatment instead of introducing a second style.
+    dr.className = 'sess-draft-badge';
+    dr.title = draftText.slice(0, 300);
+    dr.textContent = `Draft: ${draftText.trim().slice(0, 60)}`;
+    meta.appendChild(dr);
+  }
+  // Clickable when it is NOT the active chat — that is the way back to a
+  // draft in an unstarted conversation. Mirrors the row-click essentials:
+  // claim the optimistic highlight synchronously, then the same cache-first
+  // resume() a real row uses (an unstarted chat simply renders empty).
+  if (id !== activeId) {
+    li.style.cursor = 'pointer';
+    li.onclick = () => {
+      switchCtl.setOptimistic(id);
+      noteViewIntent(id);
+      resume(id, 'tap').catch((e: any) => diag(`placeholder resume ${id} failed: ${e?.message ?? e}`));
+    };
+  }
+  // No menu (nothing to rename/delete
   // until the session is registered server-side).
   return li;
 }
@@ -1977,6 +2021,11 @@ async function deleteSessionAtomic(id: string): Promise<void> {
   // Mark + bump generation BEFORE anything async so any list response
   // or resume continuation that lands during the awaits is already gated.
   markRecentlyDeleted(id);
+  // A deleted chat must not keep a draft: drafts now keep an unstarted
+  // conversation's row alive (see renderList's placeholder loop), so a
+  // leftover draft for a deleted id would paint a row for a chat that no
+  // longer exists.
+  try { composerDrafts.clearDraft(id); } catch { /* drafts not initialised */ }
   switchCtl.invalidate();
   const wasViewed = switchCtl.viewedId() === id;
   if (switchCtl.optimisticId() === id) switchCtl.setOptimistic(null);

@@ -184,6 +184,20 @@ export function getDraft(chatId: string): string {
 
 /** The chat whose text currently occupies the composer (null before
  *  the first bind or after stashAndClear). Exposed for tests. */
+/** Chat ids holding a non-blank draft. The session drawer uses this to
+ *  keep an UNSTARTED conversation reachable: a chat with no server rows
+ *  has no drawer row of its own, so switching away used to strand its
+ *  draft with no way back (his report 2026-09-08 — started typing in a
+ *  new chat, an approval pulled him elsewhere, draft gone). The draft
+ *  itself was never lost (it is keyed by chat id in IDB); the ROW was. */
+export function draftChatIds(): string[] {
+  const out: string[] = [];
+  for (const [chatId, text] of cache) {
+    if (chatId && typeof text === 'string' && text.trim()) out.push(chatId);
+  }
+  return out;
+}
+
 export function boundTo(): string | null {
   return boundChatId;
 }
