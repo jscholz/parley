@@ -83,16 +83,21 @@ export default async function run({ page, log, mock }) {
   log('activity tray rendered approval item + actions ✓');
 
   await page.locator('#activity-drawer-panel .activity-item-actions button', { hasText: 'Deny' }).click();
-  // Wait for /deny in the transcript AND for the user_message echo's
-  // round-trip to fire resolveApprovalsForChat (the row carries .activity-
-  // resolved). The bare /deny appears instantly from the optimistic
-  // addPendingSend; the resolution only lands after the mock's
-  // user_message echo round-trips back through handleUserMessage.
-  await page.waitForFunction(
-    () => /\/deny/.test(document.getElementById('transcript')?.textContent || ''),
-    null,
-    { timeout: 5_000, polling: 100 },
+  // Acting on an approval must NOT switch sessions (his ask 2026-09-08:
+  // "when I click an approve pop-up, don't switch sessions, just route the
+  // approve message"). This scenario used to assert /deny in the VIEWED
+  // transcript, which only held because the action drilled into the
+  // approval chat first — the very yank he reported, which cost him a
+  // draft in the chat he was composing in. So: assert the command reached
+  // the APPROVAL chat server-side, and that the view stayed put.
+  // The drawer's active row is the honest "which session am I in" probe.
+  await page.waitForTimeout(1_200);   // let any (unwanted) switch settle
+  const activeRow = await page.evaluate(
+    () => document.querySelector('#sessions-list li.active')?.getAttribute('data-chat-id') || '(none)',
   );
+  assert(activeRow === VIEWED_CHAT,
+    `acting on an approval must not switch sessions — active row is ${activeRow}, expected ${VIEWED_CHAT}`);
+  log('acting on the approval did NOT switch sessions ✓');
   await page.waitForFunction(
     () => !!document.querySelector(
       '#activity-drawer-panel .activity-drawer-item.activity-approval.activity-resolved',
@@ -105,7 +110,15 @@ export default async function run({ page, log, mock }) {
     activity: document.getElementById('activity-drawer-panel')?.textContent || '',
     badgeHidden: document.getElementById('activity-drawer-count-rail')?.hidden ?? true,
   }));
-  assert(after.transcript.includes('/deny'), 'Deny action did not send /deny into the approval chat');
+  // Routed, not rendered here: the command lands in the APPROVAL chat
+  // (chatId captured at tap time), so it is the mock's record for that
+  // chat that must show it, not the transcript of the chat on screen.
+  const denied = mock.getChat(APPROVAL_CHAT)?.messages?.some(
+    (m) => /\/deny/.test(m.content || ''),
+  );
+  assert(denied, 'Deny action did not route /deny to the approval chat server-side');
+  assert(!after.transcript.includes('/deny'),
+    'the viewed chat must not have received the approval command');
   // 2026-05-28: reversed a3177a3's "delete on action" tightening. The
   // approval row now STAYS in the tray after Approve/Session/Deny with
   // a clear-at-a-glance outcome pill (✓ Approved / ✗ Denied / etc.) so
