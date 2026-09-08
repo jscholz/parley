@@ -2,6 +2,7 @@
 //
 //   GET  /api/parley/jobs                → upstream GET  /v1/jobs
 //   POST /api/parley/jobs/{id}           → upstream POST /v1/jobs/{id}   {enabled?, deliver?, model?}
+//   POST /api/parley/jobs/model          → upstream POST /v1/jobs/model {model}  ("model for all jobs")
 //   POST /api/parley/jobs/{id}/run       → upstream POST /v1/jobs/{id}/run
 //   GET  /api/parley/jobs/{id}/runs      → upstream GET  /v1/jobs/{id}/runs?limit=N
 //   DELETE /api/parley/jobs/{id}         → upstream DELETE /v1/jobs/{id}
@@ -73,6 +74,17 @@ export async function handleParleyJobUpdate(req: any, res: any, id: string) {
   const body = await readJson(req, res); if (body === undefined) return;
   try { json(res, 200, await upstream.updateJob(id, body)); }
   catch (e: any) { forwardError(res, e, `job update ${id}`); }
+}
+
+/** POST /api/parley/jobs/model {model} → the listJobs-shaped payload.
+ *  Must be routed BEFORE /api/parley/jobs/{id} — see server.ts's ordering
+ *  comment, same reason the run/runs suffixes are checked first. */
+export async function handleParleyJobsSetModel(req: any, res: any) {
+  const upstream = requireUpstream(res); if (!upstream) return;
+  const body = await readJson(req, res); if (body === undefined) return;
+  if (typeof body?.model !== 'string') { json(res, 400, { error: { message: "body must include a string 'model'" } }); return; }
+  try { json(res, 200, await upstream.setAllJobsModel(body.model)); }
+  catch (e: any) { forwardError(res, e, 'jobs bulk model update'); }
 }
 
 /** POST /api/parley/jobs/{id}/run */

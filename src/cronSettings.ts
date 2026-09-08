@@ -12,15 +12,28 @@
  * delivery target picker, model pin picker (blank = follow the agent's
  * default), "Run now", and a deep link to the Parley chat it reports to.
  *
+ * At the top of the section: "Model for all jobs" (POST /v1/jobs/model) —
+ * repoints every job at one model in a single action and clears every
+ * per-job pin, instead of clicking through each job's picker. Shows the
+ * shared pin when every job agrees, or "Mixed" (cronJobsModel.bulkModelHeader)
+ * when they don't; selecting a value re-renders the WHOLE section (control +
+ * summary + every card) from that one response.
+ *
  * Same refresh policy as agentSettings.ts: load() on panel open and close.
  */
 import * as backend from './backend.ts';
 import {
   type JobDef, type JobOption, type JobsPayload,
-  chatLinkFor, groupOptions, mergeJob, relativeTime, statusText, statusTone, withCurrentOption,
+  bulkModelHeader, chatLinkFor, groupOptions, mergeJob, relativeTime, statusText, statusTone, withCurrentOption,
 } from './cronJobsModel.ts';
 
 let payload: JobsPayload | null = null;
+
+// Not a real model id — a placeholder <option> shown only when jobs
+// disagree on their pin (cronJobsModel.bulkModelHeader's 'mixed' case).
+// Re-selecting it from the dropdown is a no-op (see the onChange guard in
+// renderBulkModelControl): it never reaches the endpoint as a value.
+const BULK_MIXED = '__mixed__';
 
 async function getAdapter(): Promise<any> {
   const mod: any = await import('./proxyClient.ts');
@@ -59,6 +72,11 @@ async function submit(job: JobDef, body: Record<string, unknown>, card: HTMLElem
     const updated: JobDef = await adapter.updateJob(job.id, body);
     if (payload) payload.data = mergeJob(payload.data, updated);
     renderCard(updated, card);
+    // A per-job pin can flip the header between a shared value and "Mixed".
+    if ('model' in body) {
+      const bulkHost = document.getElementById('cron-bulk-model-host');
+      if (bulkHost) renderBulkModelControl(bulkHost);
+    }
   } catch (e: any) {
     renderCard(job, card); // revert the controls to the last known state
     try { window.alert(`Couldn't update ${job.name}: ${e?.message ?? e}`); } catch {}
@@ -92,6 +110,8 @@ async function deleteJob(job: JobDef, card: HTMLElement) {
     await adapter.deleteJob(job.id);
     if (payload) payload.data = payload.data.filter((j) => j.id !== job.id);
     card.remove();
+    const bulkHost = document.getElementById('cron-bulk-model-host');
+    if (bulkHost) renderBulkModelControl(bulkHost); // header may change, or clear on zero jobs
     if (payload && payload.data.length === 0) {
       const group = document.getElementById('settings-group-cron');
       if (group) setPlaceholder(group, 'No scheduled jobs yet.');
@@ -191,29 +211,61 @@ function setPlaceholder(host: HTMLElement, text: string) {
   if (ph) { ph.textContent = text; ph.hidden = false; ph.style.display = ''; }
 }
 
-/** Fetch + render. Idempotent; errors leave the previous render in place. */
-export async function load() {
-  const host = document.getElementById('cron-jobs-host');
-  const group = document.getElementById('settings-group-cron');
-  if (!host || !group) return;
-  const adapter = await getAdapter();
-  if (!adapter?.listJobs) return;
-  let fresh: JobsPayload | null;
-  try { fresh = await adapter.listJobs(); } catch { return; }
-  if (fresh === null) {
-    setPlaceholder(group, 'This agent does not expose scheduled jobs.');
-    host.innerHTML = '';
-    return;
+/** POST the new bulk pin and re-render EVERYTHING (the control, the
+ *  summary, every card) from the single response — the contract's point:
+ *  one response reflects every job's post-clear state, so nothing here
+ *  re-derives what changed from the request we just sent. */
+async function submitBulkModel(value: string, wrap: HTMLElement) {
+  wrap.classList.add('cron-job-busy');
+  try {
+    const adapter = await getAdapter();
+    payload = await adapter.setAllJobsModel(value);
+  } catch (e: any) {
+    try { window.alert(`Couldn't change the model for all jobs: ${e?.message ?? e}`); } catch {}
+  } finally {
+    renderCronBody();
   }
-  payload = fresh;
-  const ph = group.querySelector<HTMLElement>('[data-cron-placeholder]');
-  // `.row` is display:flex, which beats the `hidden` attribute — hide explicitly.
-  if (ph) { ph.hidden = true; ph.style.display = 'none'; }
+}
+
+/** "Model for all jobs" — the blast-radius-obvious control at the top of
+ *  the Cron section. Shows the shared pin when every job agrees, or a
+ *  non-selectable "Mixed" placeholder when they don't
+ *  (cronJobsModel.bulkModelHeader decides which). Selecting a real value
+ *  calls POST /v1/jobs/model and re-renders from its response. */
+function renderBulkModelControl(host: HTMLElement) {
   host.innerHTML = '';
-  if (payload.data.length === 0) {
-    setPlaceholder(group, 'No scheduled jobs yet.');
-    return;
-  }
+  if (!payload || payload.data.length === 0) return;
+  const header = bulkModelHeader(payload.data);
+  const options: JobOption[] = header.kind === 'mixed'
+    ? [{ value: BULK_MIXED, label: 'Mixed — jobs use different models', group: 'Current' }, ...payload.options.model]
+    : payload.options.model;
+  const value = header.kind === 'mixed' ? BULK_MIXED : header.value;
+
+  const wrap = el('div', 'cron-bulk-model');
+  const ctl = el('label', 'cron-ctl');
+  ctl.appendChild(document.createTextNode('Model for all jobs '));
+  const sel = select('cron-bulk-model-select', options, value, (v) => {
+    if (v === BULK_MIXED) return; // re-picking the placeholder is not a real submission
+    void submitBulkModel(v, wrap);
+  });
+  sel.dataset.role = 'bulk-model';
+  ctl.appendChild(sel);
+  wrap.appendChild(ctl);
+  wrap.appendChild(el('div', 'hint cron-bulk-model-hint',
+    'Sets every job at once and clears any individual pin — use a per-job picker below to override just one.'));
+  host.appendChild(wrap);
+}
+
+/** Rebuild the bulk-model control, the summary line and every job card
+ *  from the current `payload`. Shared by the initial load() and every
+ *  bulk-model submit, so both paths render off one response shape. */
+function renderCronBody() {
+  const bulkHost = document.getElementById('cron-bulk-model-host');
+  const host = document.getElementById('cron-jobs-host');
+  if (!host) return;
+  if (bulkHost) renderBulkModelControl(bulkHost);
+  host.innerHTML = '';
+  if (!payload || payload.data.length === 0) return;
   const summary = el('div', 'hint cron-summary',
     `${payload.data.length} job${payload.data.length === 1 ? '' : 's'} · unpinned jobs follow the agent default (${payload.default_model || 'unset'})`);
   host.appendChild(summary);
@@ -223,4 +275,33 @@ export async function load() {
     host.appendChild(card);
   }
   try { window.dispatchEvent(new CustomEvent('cron-jobs-loaded', { detail: { count: payload.data.length } })); } catch {}
+}
+
+/** Fetch + render. Idempotent; errors leave the previous render in place. */
+export async function load() {
+  const host = document.getElementById('cron-jobs-host');
+  const group = document.getElementById('settings-group-cron');
+  const bulkHost = document.getElementById('cron-bulk-model-host');
+  if (!host || !group) return;
+  const adapter = await getAdapter();
+  if (!adapter?.listJobs) return;
+  let fresh: JobsPayload | null;
+  try { fresh = await adapter.listJobs(); } catch { return; }
+  payload = fresh;
+  if (fresh === null) {
+    setPlaceholder(group, 'This agent does not expose scheduled jobs.');
+    host.innerHTML = '';
+    if (bulkHost) bulkHost.innerHTML = '';
+    return;
+  }
+  const ph = group.querySelector<HTMLElement>('[data-cron-placeholder]');
+  // `.row` is display:flex, which beats the `hidden` attribute — hide explicitly.
+  if (ph) { ph.hidden = true; ph.style.display = 'none'; }
+  if (payload.data.length === 0) {
+    setPlaceholder(group, 'No scheduled jobs yet.');
+    host.innerHTML = '';
+    if (bulkHost) bulkHost.innerHTML = '';
+    return;
+  }
+  renderCronBody();
 }

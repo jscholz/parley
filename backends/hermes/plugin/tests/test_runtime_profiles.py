@@ -63,6 +63,9 @@ def test_cloud_profile_is_seeded_from_live_values_not_from_the_doc():
     # the local diet's widened roots, restored to "hermes defaults" in cloud
     assert cloud["tools"] == {"tool_search": {}}
     assert cloud["skills"] == {"platform_disabled": {"parley": []}}
+    # explicit empty cron pin: "follow this profile's model.default" — a
+    # switch INTO cloud always resets any bulk "model for all jobs" pin.
+    assert cloud["cron"] == {"model": "", "model_provider": ""}
 
 
 def test_cloud_seed_carries_no_compression_when_the_box_sets_none():
@@ -94,6 +97,9 @@ def test_local_profile_seed_matches_the_design():
     # the software-development category itself is NOT named as a hidden
     # group — that call is the owner's to make, not this diet's.
     assert "software-development" not in parley_hidden
+    # same reset guarantee as cloud's: a cloud-pinned bulk model must not
+    # survive a flip to local (no API key off-grid).
+    assert local["cron"] == {"model": "", "model_provider": ""}
 
 
 def test_scalar_model_config_is_normalised_into_a_dict():
@@ -128,6 +134,7 @@ def test_plan_to_local_writes_exactly_the_target_routing():
         "compression.threshold": 0.6,
         "tools.tool_search": rp.LOCAL_TOOL_SEARCH,
         "skills.platform_disabled.parley": rp.LOCAL_SKILLS_HIDDEN_PARLEY,
+        "cron.model": "", "cron.model_provider": "",
     }
     assert plan.env_updates == {
         "HINDSIGHT_API_LLM_PROVIDER": "lmstudio",
@@ -237,7 +244,7 @@ def test_plan_touches_nothing_outside_the_allowed_roots():
         plan = rp.plan_apply(LIVE_CFG, LIVE_ENV, target)
         roots = {p.split(".", 1)[0] for p in plan.touched_config_paths()}
         assert roots <= {"model", "auxiliary", "fallback_providers", "compression",
-                          "parley", "tools", "skills"}
+                          "parley", "tools", "skills", "cron"}
         assert set(plan.touched_env_keys()) <= set(rp.MEMORY_ENV_KEYS)
 
 
@@ -385,6 +392,73 @@ def test_platform_disabled_replaces_only_the_named_platform():
     assert after["skills"]["platform_disabled"]["parley"] == ["new-one"]
     assert after["skills"]["platform_disabled"]["whatsapp"] == ["keep-me"]   # sibling platform survives
     assert after["skills"]["disabled"] == ["global-skill"]                   # global list survives
+
+
+# ── A2: the widened `cron` root stays narrow (model/model_provider only) ─
+
+def test_profile_cron_writes_model_and_model_provider():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"cron": {"model": "gpt-5.6-sol", "model_provider": "openai-codex"}}},
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "cloud")
+    assert plan.config_updates == {"cron.model": "gpt-5.6-sol", "cron.model_provider": "openai-codex"}
+
+
+def test_profile_cron_may_only_set_model_and_model_provider():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"cron": {"model": "", "provider": "chronos"}}},
+    })
+    with pytest.raises(rp.ProfileError, match="model_provider"):
+        rp.plan_apply(cfg, LIVE_ENV, "cloud")
+
+
+def test_profile_cron_rejects_non_string_values():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"cron": {"model": 5}}},
+    })
+    with pytest.raises(rp.ProfileError, match="must be a string"):
+        rp.plan_apply(cfg, LIVE_ENV, "cloud")
+
+
+def test_profile_cron_must_itself_be_a_mapping():
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": {"cloud": {"cron": "nonsense"}},
+    })
+    with pytest.raises(rp.ProfileError, match="cron must be a mapping"):
+        rp.plan_apply(cfg, LIVE_ENV, "cloud")
+
+
+def test_cron_leaf_write_preserves_sibling_cron_keys():
+    """A profile switch must not blow away the SCHEDULER provider, the
+    drift guard, or any other owner/hermes cron.* setting — only the two
+    keys the bulk-model endpoint owns."""
+    cfg = dict(LIVE_CFG, cron={
+        "model_drift_guard": True, "preflight": True, "provider": "chronos",
+        "model": "old-pin", "model_provider": "old-provider",
+    })
+    cfg = rp.apply_config_updates(cfg, {
+        "parley.runtime_profiles": {"cloud": {"cron": {"model": "", "model_provider": ""}}},
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "cloud")
+    after = rp.apply_config_updates(cfg, plan.config_updates)
+    assert after["cron"]["model"] == "" and after["cron"]["model_provider"] == ""
+    assert after["cron"]["model_drift_guard"] is True
+    assert after["cron"]["preflight"] is True
+    assert after["cron"]["provider"] == "chronos"
+
+
+def test_profile_switch_resets_a_bulk_model_pin():
+    """The scenario the doc's semantic promises: the owner sets "model for
+    all jobs" (writing cron.model directly, exactly like
+    apply_bulk_model_update does), then switches profiles — the seeded
+    empty cron pin on EITHER profile must win, not the stale bulk value."""
+    cfg = rp.apply_config_updates(LIVE_CFG, {
+        "parley.runtime_profiles": rp.seed_default_profiles(LIVE_CFG, LIVE_ENV),
+        "cron": {"model": "gpt-5.6-sol", "model_provider": "openai-codex"},
+    })
+    plan = rp.plan_apply(cfg, LIVE_ENV, "local")
+    after = rp.apply_config_updates(cfg, plan.config_updates)
+    assert after["cron"]["model"] == "" and after["cron"]["model_provider"] == ""
 
 
 # ── C: hindsight recall knobs (memory.recall_max_tokens / recall_budget) ─

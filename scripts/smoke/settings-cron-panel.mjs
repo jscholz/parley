@@ -12,12 +12,15 @@
 //   4. Change the delivery target to a Parley chat → POST {deliver:…}
 //      and the deep link now points at the target chat.
 //   5. Pin the model → POST {model:…}; card meta shows the pin.
+//   5b. "Model for all jobs" shows "Mixed" (jobs disagree); picking a
+//      value → POST /v1/jobs/model, clears every per-job pin, and the
+//      header re-renders as the new default from that one response.
 //   6. Click "Run now" → POST …/run; a notice appears.
 //   7. Delete (confirm dialog accepted) → DELETE …/{id}; the card disappears.
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
 export const NAME = 'settings-cron-panel';
-export const DESCRIPTION = 'Settings › Cron lists scheduled jobs; toggle/deliver/model/run post back via /v1/jobs';
+export const DESCRIPTION = 'Settings › Cron lists scheduled jobs; toggle/deliver/model/run/bulk-model post back via /v1/jobs';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -81,6 +84,27 @@ export default async function run({ page, log, mock }) {
   post = mock.getLastJobPost();
   assert(post.body.model === 'gpt-5.6-sol', `model POST: ${JSON.stringify(post)}`);
   log('model pin posts and shows in the meta line');
+
+  // 5b. "Model for all jobs" — job-brief is unpinned, job-sync just got
+  // pinned above, so the header must show "Mixed"; picking a value clears
+  // BOTH jobs' per-job pin and re-renders every card from one response.
+  const bulkSel = '#cron-bulk-model-host [data-role="bulk-model"]';
+  await page.waitForSelector(bulkSel, { timeout: 3_000 });
+  let bulkLabel = await page.$eval(bulkSel, (s) => s.options[s.selectedIndex]?.textContent);
+  assert(bulkLabel === 'Mixed — jobs use different models', `bulk header before: ${bulkLabel}`);
+  await page.selectOption(bulkSel, 'gpt-5.6-sol');
+  await page.waitForFunction(() => {
+    const cards = document.querySelectorAll('#cron-jobs-host .cron-job');
+    return cards.length === 2 && Array.from(cards).every((c) => !/pinned to/.test(c.querySelector('.cron-job-meta')?.textContent || ''));
+  }, null, { timeout: 3_000 });
+  const bulkPost = mock.getLastBulkModelPost();
+  assert(bulkPost && bulkPost.model === 'gpt-5.6-sol', `bulk model POST: ${JSON.stringify(bulkPost)}`);
+  const syncModelValue = await page.$eval(
+    '#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="model"]', (s) => s.value);
+  assert(syncModelValue === '', `job-sync's own pin cleared: ${syncModelValue}`);
+  bulkLabel = await page.$eval(bulkSel, (s) => s.options[s.selectedIndex]?.textContent);
+  assert(bulkLabel === 'Follow default (gpt-5.6-sol)', `bulk header after: ${bulkLabel}`);
+  log('"Model for all jobs" shows Mixed, then clears every pin and shows the new default');
 
   // 6. run now
   await page.click('#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="run"]');

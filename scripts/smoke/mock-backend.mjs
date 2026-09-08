@@ -886,6 +886,24 @@ export async function installMockBackend(page) {
   // scheduler (404, section shows "not supported").
   let jobs = null;                       // null | JobDef[]
   let lastJobPost = null;                // { id, action: 'update'|'run', body }
+  let lastBulkModelPost = null;          // { model } — POST /api/parley/jobs/model
+  let defaultModel = 'gpt-6-astra';      // moves when a bulk model post names a real model
+  const modelOptions = [
+    { value: '', label: `Follow default (${defaultModel})`, group: 'Default' },
+    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', group: 'OpenAI Codex' },
+  ];
+  const jobsPayload = () => ({
+    object: 'list', data: jobs,
+    options: {
+      deliver: [
+        { value: 'origin', label: 'Origin chat', group: 'Routing' },
+        { value: 'local', label: 'Save only', group: 'Routing' },
+        { value: 'parley:chat-press', label: 'Press radar chat', group: 'Parley chats' },
+      ],
+      model: [{ ...modelOptions[0], label: `Follow default (${defaultModel})` }, ...modelOptions.slice(1)],
+    },
+    default_model: defaultModel,
+  });
   await page.route(/.*\/api\/parley\/jobs(?:\/.*)?$/, async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -893,21 +911,19 @@ export async function installMockBackend(page) {
       body: JSON.stringify({ error: { message: 'agent does not implement /v1/jobs' } }) });
     if (method === 'GET' && /\/jobs\/?$/.test(url.pathname)) {
       if (jobs === null) return notSupported();
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        object: 'list', data: jobs,
-        options: {
-          deliver: [
-            { value: 'origin', label: 'Origin chat', group: 'Routing' },
-            { value: 'local', label: 'Save only', group: 'Routing' },
-            { value: 'parley:chat-press', label: 'Press radar chat', group: 'Parley chats' },
-          ],
-          model: [
-            { value: '', label: 'Follow default (gpt-6-astra)', group: 'Default' },
-            { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', group: 'OpenAI Codex' },
-          ],
-        },
-        default_model: 'gpt-6-astra',
-      }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(jobsPayload()) });
+      return;
+    }
+    // Must match BEFORE the generic /jobs/{id} regex below — "model" is a
+    // syntactically valid job id too (mirrors server.ts's route ordering).
+    if (method === 'POST' && /\/jobs\/model\/?$/.test(url.pathname)) {
+      if (jobs === null) return notSupported();
+      let body = {};
+      try { body = JSON.parse(route.request().postData() || '{}'); } catch {}
+      lastBulkModelPost = { model: body.model };
+      defaultModel = body.model || 'gpt-6-astra';
+      for (const j of jobs) { j.model = ''; j.provider = ''; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(jobsPayload()) });
       return;
     }
     const m = url.pathname.match(/\/jobs\/([^/]+)(\/run|\/runs)?$/);
@@ -1713,8 +1729,10 @@ export async function installMockBackend(page) {
     setHealth(list) { health = list; lastHealthRun = null; },
     getLastHealthRun() { return lastHealthRun; },
     /** Scheduled jobs served at /api/parley/jobs (null = 404). */
-    setJobs(list) { jobs = list; lastJobPost = null; },
+    setJobs(list) { jobs = list; lastJobPost = null; lastBulkModelPost = null; defaultModel = 'gpt-6-astra'; },
     getLastJobPost() { return lastJobPost; },
+    /** Most recent POST /api/parley/jobs/model ("model for all jobs"). */
+    getLastBulkModelPost() { return lastBulkModelPost; },
     setSettingsSchema(schema) {
       settingsSchema = schema;
       lastSettingsPost = null;

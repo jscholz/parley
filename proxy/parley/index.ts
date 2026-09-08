@@ -71,6 +71,7 @@ export {
 export {
   handleParleyJobsList,
   handleParleyJobUpdate,
+  handleParleyJobsSetModel,
   handleParleyJobRun,
   handleParleyJobRuns,
   handleParleyJobDelete,

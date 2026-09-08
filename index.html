@@ -540,8 +540,14 @@
       by src/cronSettings.ts: one card per job with enable toggle,
       delivery target, model pin, Run now, and a link to the chat it
       reports to. The placeholder stays until a successful response.
+
+      cron-bulk-model-host: "Model for all jobs" (POST /v1/jobs/model) —
+      repoints every job at one model and clears per-job pins in one
+      action. Empty until load() has jobs to show; hidden again on 404
+      or an empty job list.
     -->
     <div class="row row-wide" data-cron-placeholder><span class="hint">Loading scheduled jobs…</span></div>
+    <div id="cron-bulk-model-host"></div>
     <div id="cron-jobs-host" class="cron-jobs"></div>
   </div>
   <div class="settings-group" id="settings-group-health" data-section="health" hidden>

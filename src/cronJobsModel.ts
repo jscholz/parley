@@ -110,3 +110,19 @@ export function withCurrentOption(options: JobOption[], value: string): JobOptio
 export function mergeJob(jobs: JobDef[], updated: JobDef): JobDef[] {
   return jobs.map((j) => (j.id === updated.id ? updated : j));
 }
+
+/** What the "Model for all jobs" header control should show: the shared
+ *  pin every job carries (possibly '' = follow the agent default), or
+ *  'mixed' when jobs disagree — which is not a value the picker can
+ *  select, so the caller renders a placeholder rather than a real option.
+ *  Pure classification only; cronSettings.ts builds the actual <select>. */
+export type BulkModelHeader = { kind: 'uniform'; value: string } | { kind: 'mixed' };
+
+export function bulkModelHeader(jobs: Pick<JobDef, 'model'>[]): BulkModelHeader {
+  if (jobs.length === 0) return { kind: 'uniform', value: '' };
+  const first = jobs[0].model || '';
+  for (const j of jobs) {
+    if ((j.model || '') !== first) return { kind: 'mixed' };
+  }
+  return { kind: 'uniform', value: first };
+}

@@ -6090,6 +6090,13 @@
    red text button for destructive actions. */
 .cron-jobs { display: flex; flex-direction: column; gap: 10px; }
 .cron-summary { margin: 4px 0 6px; }
+.cron-bulk-model {
+  background: var(--surface-subtle); border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cron-bulk-model .cron-ctl { color: var(--fg); font-weight: 600; }
+.cron-bulk-model-hint { margin: 0; }
 .cron-job {
   background: var(--surface-subtle); border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;

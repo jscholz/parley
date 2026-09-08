@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob, withCurrentOption } from './cronJobsModel.ts';
+import { statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob, withCurrentOption, bulkModelHeader } from './cronJobsModel.ts';
 
 const base = { state: 'scheduled', enabled: true, last_status: 'ok', last_error: null, deliver: 'origin', origin: null } as any;
 
@@ -55,4 +55,17 @@ test('withCurrentOption — appends a missing current value, leaves listed/empty
   const out = withCurrentOption(opts, 'sidekick:old');
   assert.equal(out.length, 2);
   assert.deepEqual(out[1], { value: 'sidekick:old', label: 'sidekick:old (current)', group: 'Current' });
+});
+
+test('bulkModelHeader — uniform (all unpinned, all pinned alike) vs mixed', () => {
+  assert.deepEqual(bulkModelHeader([]), { kind: 'uniform', value: '' });
+  assert.deepEqual(bulkModelHeader([{ model: '' }, { model: '' }]), { kind: 'uniform', value: '' });
+  assert.deepEqual(
+    bulkModelHeader([{ model: 'gpt-5.6-sol' }, { model: 'gpt-5.6-sol' }]),
+    { kind: 'uniform', value: 'gpt-5.6-sol' },
+  );
+  assert.deepEqual(bulkModelHeader([{ model: '' }, { model: 'gpt-5.6-sol' }]), { kind: 'mixed' });
+  assert.deepEqual(bulkModelHeader([{ model: 'gpt-5.6-sol' }, { model: 'gpt-6-astra' }]), { kind: 'mixed' });
+  // a single job is trivially uniform, never mixed
+  assert.deepEqual(bulkModelHeader([{ model: 'gpt-5.6-sol' }]), { kind: 'uniform', value: 'gpt-5.6-sol' });
 });

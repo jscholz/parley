@@ -18,6 +18,7 @@ Routes (aiohttp, same auth as the rest of the adapter):
                                        "options":{"deliver":[…],"model":[…]},
                                        "default_model": "<label>"}
   POST /v1/jobs/{id}               {"enabled"?:bool,"deliver"?:str,"model"?:str} -> JobDef
+  POST /v1/jobs/model              {"model":str}    -> the GET /v1/jobs payload (see below)
   POST /v1/jobs/{id}/run           -> JobDef  (queued for the next scheduler tick)
   DELETE /v1/jobs/{id}             -> {"deleted": true}  (permanent; the UI confirms first)
   GET  /v1/jobs/{id}/runs?limit=N  -> {"object":"list","data":[RunDef…]}
@@ -25,6 +26,25 @@ Routes (aiohttp, same auth as the rest of the adapter):
 JobDef.model is "" when the job follows the agent default (no pin);
 POSTing "" clears a pin. Option lists carry ``group`` like the settings
 model picker so the UI can render <optgroup>s.
+
+``POST /v1/jobs/model`` — "model for all jobs" (2026-09-08): the owner kept
+wanting to repoint every cron job in one action instead of clicking through
+each job's picker, which is also exactly the shape of the 2026-09-05 drift
+bug in this module's docstring above (a model switch that quietly missed
+four jobs). The value is resolved through the SAME catalog/pin-resolution
+path as a per-job pin (``_model_catalog_options`` / ``_resolve_pin``) so the
+two surfaces can never disagree about what a picker value means. "" means
+"follow the agent default" and clears ``cron.model``/``cron.model_provider``
+in hermes config, same as clearing any other picker to its default.
+
+Write order is deliberate (see ``apply_bulk_model_update``'s docstring):
+every job's per-job pin is cleared FIRST, and only once every clear has
+succeeded does ``cron.model``/``cron.model_provider`` get written. A
+failure partway through clearing aborts BEFORE the config write, so the
+worst case is "every job still follows whatever default was already live"
+(uniform, unchanged) — never a mix of jobs already on the new model and
+jobs silently still pinned to the old one, which is the class of bug this
+endpoint exists to prevent at a bulk scale.
 """
 from __future__ import annotations
 
@@ -155,7 +175,32 @@ def _resolve_pin(model_value: str) -> Tuple[str, str]:
     return result.new_model, (result.target_provider or "")
 
 
+def _write_cron_default(model: str, provider: str) -> None:
+    """Persist cron.model / cron.model_provider, ONE dotted key at a time
+    through hermes' own comment-preserving round-trip writer
+    (``utils.atomic_roundtrip_yaml_update`` → ``_atomic_write`` →
+    ``atomic_replace``, which is symlink-preserving — ``~/.hermes/config.yaml``
+    is commonly a symlink into an ops repo).
+
+    NOT a read-modify-write of the whole document via ``save_config``: that
+    round-trips the file through a plain loader and drops every comment in
+    it, so a knob the owner flips often would quietly strip the annotations
+    from a hand-maintained config. Narrow single-key updates leave the rest
+    of the file byte-identical.
+
+    A module-level seam (rather than inlined in apply_bulk_model_update) so
+    tests can monkeypatch it without touching disk, same pattern as
+    ``_resolve_pin``/``_default_model`` above.
+    """
+    from hermes_cli.config import get_config_path
+    from utils import atomic_roundtrip_yaml_update
+    cfg_path = get_config_path()
+    atomic_roundtrip_yaml_update(cfg_path, "cron.model", model)
+    atomic_roundtrip_yaml_update(cfg_path, "cron.model_provider", provider)
+
+
 # ── views ────────────────────────────────────────────────────────────────
+
 
 def _truncate(text: Any, n: int) -> str:
     s = str(text or "")
@@ -361,6 +406,140 @@ async def _in_executor(fn, *args):
     return await asyncio.get_running_loop().run_in_executor(None, ctx.run, fn, *args)
 
 
+def apply_bulk_model_update(value: Any) -> Dict[str, Any]:
+    """POST /v1/jobs/model — "model for all jobs": one action that repoints
+    EVERY cron job at the same model, instead of clicking through each
+    job's picker (the owner's ask; see this module's docstring for the
+    2026-09-05 drift bug that motivates it at bulk scale too).
+
+    Resolves *value* through the exact same catalog/pin-resolution path a
+    per-job pin uses (``_resolve_pin``, itself built on
+    ``_model_catalog_options`` — the Agent settings model picker's own
+    catalog), so an unknown value is rejected with a 400 (JobsValidationError)
+    BEFORE anything is written — never a partial write.
+
+    "" means "follow the agent default": every job's pin is cleared AND
+    ``cron.model``/``cron.model_provider`` are cleared, so unpinned jobs
+    fall through to ``model.default`` (parley_route_jobs._default_model's
+    existing fallthrough — unchanged by this function).
+
+    Write order is deliberate: every job's per-job pin is cleared FIRST;
+    ``cron.model``/``cron.model_provider`` is written LAST, and only if
+    every clear succeeded. Rationale (the failure modes this endpoint has
+    to be explainable under):
+
+      * A per-job clear can genuinely fail (``cron.jobs.update_job`` raises
+        ``ValueError`` for e.g. a job in a state that rejects updates) even
+        though *value* itself resolved fine. If that happens partway
+        through the job list, we abort BEFORE touching cron.model/provider
+        and raise, listing which job(s) failed. Every job's *effective*
+        model is therefore whatever cron.model already said before this
+        call — uniform, unchanged, exactly as if the call had not been
+        made. The alternative order (write config first, clear pins after)
+        would leave already-cleared jobs on the NEW model while a job that
+        failed to clear stays on its OLD pin — precisely the "some jobs
+        silently left behind" bug this endpoint exists to prevent, just
+        introduced by the fix itself.
+      * If every clear succeeds but the config write itself fails (e.g. a
+        filesystem error in save_config), every job is now unpinned but
+        cron.model/provider still says the OLD default — again uniform
+        (every job follows the same, unchanged default), not a mix, and
+        the caller can simply retry the call to finish the job.
+
+    Either way the response (a fresh ``build_jobs_payload()``) always
+    reflects what is ACTUALLY in the store, so the UI never has to trust a
+    claim the write didn't back up.
+    """
+    if value is not None and not isinstance(value, str):
+        raise JobsValidationError("model must be a string")
+    raw = (value or "").strip()
+    if raw:
+        model, provider = _resolve_pin(raw)
+    else:
+        model, provider = "", ""
+
+    from cron.jobs import list_jobs, update_job
+    jobs = list_jobs(include_disabled=True)
+    failed: List[Tuple[str, str]] = []
+    for job in jobs:
+        if not (job.get("model") or job.get("provider")):
+            continue  # already unpinned — nothing to clear
+        job_id = str(job.get("id"))
+        try:
+            update_job(job_id, {"model": None, "provider": None})
+        except Exception as e:
+            failed.append((job_id, str(e)))
+    if failed:
+        detail = "; ".join(f"{jid}: {err}" for jid, err in failed)
+        raise JobsValidationError(
+            f"could not clear the per-job pin for {len(failed)} job(s) ({detail}); "
+            f"no config change was made — fix and retry"
+        )
+
+    try:
+        _write_cron_default(model, provider)
+    except Exception as e:
+        logger.exception("[parley] cron default model persist failed")
+        raise JobsValidationError(f"failed to write hermes config: {e}")
+
+    return build_jobs_payload()
+
+
+def run_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Queue the job for the next scheduler tick (delivers through the gateway, unlike a CLI run)."""
+    from cron.jobs import trigger_job
+    try:
+        job = trigger_job(job_id)
+    except ValueError as e:
+        raise JobsValidationError(str(e))
+    return _job_view(job) if job else None
+
+
+def delete_job(job_id: str) -> bool:
+    """Remove the job permanently (hermes keeps its run history / output dir)."""
+    from cron.jobs import remove_job
+    return bool(remove_job(job_id))
+
+
+def job_runs(job_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+    from cron.executions import list_executions
+    rows = list_executions(job_id=job_id, limit=max(1, min(int(limit), 100)))
+    return [{
+        "id": r.get("id"), "status": r.get("status"), "source": r.get("source"),
+        "claimed_at": r.get("claimed_at"), "started_at": r.get("started_at"),
+        "finished_at": r.get("finished_at"), "error": _truncate(r.get("error"), _ERROR_PREVIEW_CHARS) or None,
+    } for r in rows]
+
+
+# ── aiohttp handlers ─────────────────────────────────────────────────────
+
+def _err(web, status: int, err_type: str, message: str):
+    return web.json_response({"error": {"type": err_type, "message": message}}, status=status)
+
+
+def _unauthorized(ctx, request) -> bool:
+    """The plugin's HTTP app authenticates at the middleware layer; ``register_routes``
+    receives a lightweight context, not the adapter. Honour an explicit checker when the
+    caller provides one (tests, direct adapter use), otherwise defer to the middleware."""
+    check = getattr(ctx, "check_http_auth", None) or getattr(ctx, "_check_http_auth", None)
+    return bool(check) and not check(request)
+
+
+def _job_id_from(request) -> str:
+    job_id = request.match_info.get("job_id", "")
+    if not _JOB_ID_RE.match(job_id):
+        raise JobsValidationError("invalid job id")
+    return job_id
+
+
+async def _in_executor(fn, *args):
+    # Copy the caller's context into the worker thread: the cron store can be
+    # scoped per-context (cron.jobs.use_cron_store) and a bare executor thread
+    # would silently fall back to the process-wide ~/.hermes/cron store.
+    ctx = contextvars.copy_context()
+    return await asyncio.get_running_loop().run_in_executor(None, ctx.run, fn, *args)
+
+
 async def handle_jobs_list(adapter, request):
     from aiohttp import web
     if _unauthorized(adapter, request):
@@ -369,6 +548,27 @@ async def handle_jobs_list(adapter, request):
         payload = await _in_executor(build_jobs_payload)
     except Exception as e:
         logger.exception("[parley] jobs list failed")
+        return _err(web, 500, "server_error", str(e))
+    return web.json_response(payload)
+
+
+async def handle_jobs_bulk_model(adapter, request):
+    """POST /v1/jobs/model {"model": str} -> the GET /v1/jobs payload.
+
+    Registered BEFORE ``/v1/jobs/{job_id}`` (see register_jobs_routes) so
+    the literal path ``model`` is never swallowed by the job-id matcher."""
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    try:
+        body = await request.json()
+        if not isinstance(body, dict) or "model" not in body:
+            raise JobsValidationError("body must include a 'model' field")
+        payload = await _in_executor(apply_bulk_model_update, body["model"])
+    except JobsValidationError as e:
+        return _err(web, 400, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] bulk model update failed")
         return _err(web, 500, "server_error", str(e))
     return web.json_response(payload)
 
@@ -445,6 +645,10 @@ async def handle_job_runs(adapter, request):
 
 def register_jobs_routes(app, adapter) -> None:
     app.router.add_get("/v1/jobs", lambda r: handle_jobs_list(adapter, r))
+    # Registered BEFORE the dynamic {job_id} route below: aiohttp's
+    # UrlDispatcher matches resources in registration order, and job_id's
+    # alphabet ([A-Za-z0-9_-]{1,64}) matches the literal string "model" too.
+    app.router.add_post("/v1/jobs/model", lambda r: handle_jobs_bulk_model(adapter, r))
     app.router.add_post("/v1/jobs/{job_id}", lambda r: handle_job_update(adapter, r))
     app.router.add_post("/v1/jobs/{job_id}/run", lambda r: handle_job_run(adapter, r))
     app.router.add_get("/v1/jobs/{job_id}/runs", lambda r: handle_job_runs(adapter, r))

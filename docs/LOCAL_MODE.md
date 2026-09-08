@@ -36,6 +36,7 @@ parley:
       memory:     { llm_provider: openai-codex, llm_model: gpt-5.4-mini, recall_max_tokens: 4096, recall_budget: mid }
       tools:      { tool_search: {} }               # {} = explicit "use hermes defaults" (still a real write)
       skills:     { platform_disabled: { parley: [] } }
+      cron:       { model: "", model_provider: "" }  # explicit empty pin: "follow cloud's model.default"
     local:
       model:      { default: qwen3.6-35b-a3b, provider: custom:local-fallback, base_url: http://127.0.0.1:8000/v1,
                   max_tokens: 8192 }
@@ -91,6 +92,8 @@ parley:
           # Names taken from the live skills index on 2026-09-07. The `software-development` CATEGORY is
           # deliberately NOT named here — the list above hides individual creative/media/ops-tooling/ML-training
           # skills, not the software-development group as a whole; that call is the owner's, not this diet's.
+      cron: { model: "", model_provider: "" }  # same reset guarantee: a cloud-pinned bulk model must not
+                                                # survive a flip to local (no API key off-grid).
 ```
 
 Rules:
@@ -188,6 +191,33 @@ Rules:
    Same rationale as the original five-root allow-list: a setting that
    reroutes every model call the owner's agent makes must not quietly grow
    the blast radius of what "switching profiles" can touch.
+7. **`cron` is a widened root too, restricted to `cron.model`/
+   `cron.model_provider`** — the two keys `POST /v1/jobs/model` ("model for
+   all jobs", `ABSTRACT_AGENT_PROTOCOL.md`'s scheduled-jobs extension)
+   writes. Landmine this closes: the owner uses "model for all jobs" to
+   repoint every cron job at once, and a runtime-profile switch reroutes
+   every OTHER model call the same way — if a switch left `cron.model`
+   alone, a cloud model pinned into cron strands every job when the owner
+   flips to `local` (no API key off-grid), and the reverse strands crons on
+   a small local model after flipping back. Both shipped profiles seed an
+   EXPLICIT `cron: {model: "", model_provider: ""}` (an empty pin means
+   "follow this profile's `model.default`"), so **every profile switch
+   resets "model for all jobs" back to that profile's own default** — it
+   does not carry a bulk pin over from the profile being left, and it does
+   not remember a bulk pin from the last time this profile was active
+   either. Anything else under `cron` (the SCHEDULER provider — a
+   different axis, `model_drift_guard`, `preflight`, chronos settings, …)
+   is owner/hermes territory and a profile may not touch it, same
+   enforcement as rule 6's `tools`/`skills` restriction.
+
+   Caveat for an ALREADY-seeded `parley.runtime_profiles` block (any box
+   that ran the local-mode feature before this rule existed): `read_profiles`
+   honours an existing block as-is and never re-seeds it, so an existing
+   profile with no `cron` key simply leaves `cron.model` untouched on
+   switch — the reset guarantee above only holds once each profile's YAML
+   carries the explicit empty pin. Add `cron: {model: "", model_provider:
+   ""}` to each profile by hand (docs above show the exact shape) to pick
+   up the guarantee on such a box.
 
 ## 2. Guard rails for the local model
 

@@ -589,6 +589,45 @@ Body: any subset of `{ "enabled": bool, "deliver": string, "model": string }`
 "invalid_request_error","message":…}}` when the agent rejects a value
 — parley reverts the control and shows the message.
 
+### `POST /v1/jobs/model`
+
+"Model for all jobs" — repoints EVERY scheduled job at one model in a
+single action, instead of the caller clicking through each job's `model`
+picker one at a time. Body: `{ "model": string }`, using the same picker
+values as a per-job `model` (one of `options.model[].value` from `GET
+/v1/jobs`, or `""` for "follow the agent default").
+
+The agent MUST resolve the value through the identical catalog/validation
+path a per-job pin uses — the two pickers show the same options, so they
+must accept the same values. A successful call:
+
+1. clears every job's per-job `model`/`provider` pin, so no job is left
+   behind on its old model;
+2. persists the new value as the agent's own default for jobs that don't
+   pin (an unpinned job's fire-time model), so every job — pinned or not —
+   now runs the chosen model; `""` means "go back to whatever the agent's
+   general default is" and clears that stored default too.
+
+**Response (200):** the SAME shape as `GET /v1/jobs` (`object`, `data`,
+`options`, `default_model`), reflecting every job's now-cleared pin and the
+new default — parley re-renders the whole Cron section from this one
+response rather than re-deriving what changed from the request it just
+sent.
+
+**Error responses:**
+
+- `400` — the value isn't recognised (not `""` and not one of
+  `options.model[].value`), or the field is missing/not a string. The
+  agent MUST reject this BEFORE writing anything — this is bulk-scale, so
+  a value that doesn't resolve must never leave the store half-changed.
+- `404` — agent has no scheduler (same as `GET /v1/jobs`).
+- `500` — a write partway through failed unexpectedly. Agents SHOULD make
+  this explainable per their own store's semantics (e.g. hermes' reference
+  implementation guarantees a failure never leaves a MIX of jobs already on
+  the new model and jobs silently still pinned to the old one — see
+  `parley_route_jobs.py`'s `apply_bulk_model_update` docstring for the
+  exact ordering that gets it).
+
 ### `POST /v1/jobs/{id}/run`
 
 Queue the job to run at the agent's next opportunity (results deliver

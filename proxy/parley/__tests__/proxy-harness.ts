@@ -114,6 +114,8 @@ export class FakeAgent {
   /** Scheduled-jobs extension — null = agent has no scheduler (404). */
   private jobs: any[] | null = [];
   public lastJobPost: { id: string; action: 'update' | 'run' | 'delete'; body: unknown } | null = null;
+  /** Most-recent POST /v1/jobs/model observed ("model for all jobs"). */
+  public lastBulkModelPost: { model: string } | null = null;
 
   setMode(mode: FakeMode): void { this.mode = mode; }
 
@@ -159,6 +161,7 @@ export class FakeAgent {
   setJobs(jobs: any[] | null): void {
     this.jobs = jobs;
     this.lastJobPost = null;
+    this.lastBulkModelPost = null;
   }
 
   /** Number of /v1/events SSE subscribers currently attached. Tests
@@ -282,12 +285,31 @@ export class FakeAgent {
       });
       return;
     }
+    if (url.pathname === '/v1/jobs/model' && method === 'POST') {
+      void this.handleJobsBulkModel(req, res);
+      return;
+    }
     const jobMatch = url.pathname.match(/^\/v1\/jobs\/([^/]+)(\/run|\/runs)?$/);
     if (jobMatch) {
       void this.handleJob(req, res, method, jobMatch[1], jobMatch[2] || '');
       return;
     }
     this.json(res, 404, { error: 'no route' });
+  }
+
+  private async handleJobsBulkModel(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    let body: any;
+    try { body = raw ? JSON.parse(raw) : {}; } catch { body = {}; }
+    if (this.jobs === null) { this.json(res, 404, { error: { message: 'no scheduler' } }); return; }
+    this.lastBulkModelPost = { model: String(body?.model ?? '') };
+    for (const j of this.jobs) { j.model = ''; j.provider = ''; }
+    this.json(res, 200, {
+      object: 'list', data: this.jobs,
+      options: { deliver: [{ value: 'origin', label: 'Origin', group: 'Routing' }], model: [{ value: '', label: 'Follow default (x)', group: 'Default' }] },
+      default_model: 'x',
+    });
   }
 
   private async handleJob(
@@ -469,6 +491,9 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     if (healthRun) return parley.handleParleyHealthRun(req, res, decodeURIComponent(healthRun[1]));
     if (method === 'GET' && path === '/api/parley/jobs') {
       return parley.handleParleyJobsList(req, res);
+    }
+    if (method === 'POST' && path === '/api/parley/jobs/model') {
+      return parley.handleParleyJobsSetModel(req, res);
     }
     const jobRun = method === 'POST' && path.match(/^\/api\/parley\/jobs\/([^/]+)\/run$/);
     if (jobRun) return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));

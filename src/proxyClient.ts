@@ -1746,6 +1746,18 @@ export const proxyClientAdapter = {
     return r.json();
   },
 
+  /** POST /api/parley/jobs/model {model} → the JobsPayload (same shape as
+   *  listJobs), reflecting every job with its pin cleared. "" = follow the
+   *  agent default. Throws with the agent's message on rejection (e.g. an
+   *  unrecognised model) so the panel can revert. */
+  async setAllJobsModel(model: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/jobs/model`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+
   /** GET /api/parley/health → {data: HealthCheck[]} or null when unsupported (404). */
   async listHealth(): Promise<any | null> {
     try {

@@ -77,6 +77,43 @@ test('jobs — 404 when the agent has no scheduler; bad ids rejected at the prox
   } finally { await rig.stop(); }
 });
 
+test('jobs — bulk model forwards {model} and returns every job with its pin cleared', async () => {
+  const rig = await startRig();
+  try {
+    rig.fakeAgent.setJobs([
+      structuredClone(JOB),
+      { ...structuredClone(JOB), id: 'other-job', model: 'gpt-5.6-sol', provider: 'openai-codex' },
+    ]);
+    const r = await fetch(`${rig.proxyUrl}/api/parley/jobs/model`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-5.6-sol' }),
+    });
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.object, 'list');
+    assert.ok(body.data.every((j: any) => j.model === '' && j.provider === ''));
+    assert.deepEqual(rig.fakeAgent.lastBulkModelPost, { model: 'gpt-5.6-sol' });
+    // the bulk route must not be swallowed by the {id} route ("model" is
+    // a syntactically valid job id too) — confirmed by the 200 above.
+  } finally { await rig.stop(); }
+});
+
+test('jobs — bulk model rejects a non-string body and propagates a 404 (no scheduler)', async () => {
+  const rig = await startRig();
+  try {
+    rig.fakeAgent.setJobs([structuredClone(JOB)]);
+    const bad = await fetch(`${rig.proxyUrl}/api/parley/jobs/model`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 5 }),
+    });
+    assert.equal(bad.status, 400);
+    rig.fakeAgent.setJobs(null);
+    const none = await fetch(`${rig.proxyUrl}/api/parley/jobs/model`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: '' }),
+    });
+    assert.equal(none.status, 404);
+  } finally { await rig.stop(); }
+});
+
 test('jobs — delete forwards and the job disappears from the list', async () => {
   const rig = await startRig();
   try {

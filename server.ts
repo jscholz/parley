@@ -1384,6 +1384,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (req.method === 'GET' && /^\/api\/parley\/jobs(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleyJobsList(req, res);
     }
+    // Must match BEFORE the bare {id} POST route below — "model" is a
+    // valid job-id string too, and the dynamic route would swallow it.
+    if (req.method === 'POST' && /^\/api\/parley\/jobs\/model(?:\?.*)?$/.test(req.url)) {
+      return parley.handleParleyJobsSetModel(req, res);
+    }
     const jobRun = req.method === 'POST' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/run(?:\?.*)?$/);
     if (jobRun) {
       return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));

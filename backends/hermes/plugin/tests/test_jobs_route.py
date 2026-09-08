@@ -24,14 +24,21 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs_route, "_parley_chat_titles", lambda limit=300: [("abc-123", "Pitch deck"), ("def-456", "")])
     monkeypatch.setattr(jobs_route, "_hermes_delivery_targets", lambda: [
         {"id": "telegram", "name": "Telegram", "home_target_set": True}])
-    monkeypatch.setattr(jobs_route, "_default_model", lambda: ("gpt-6-astra", "openai-codex"))
+    # Mutable so apply_bulk_model_update's writes are observable AND so
+    # _default_model reflects them, the same way cron.model/_default_model
+    # actually relate in production (hermes.config.yaml round-trip).
+    cron_default = {"model": "", "provider": ""}
+    monkeypatch.setattr(jobs_route, "_default_model", lambda: (
+        cron_default["model"] or "gpt-6-astra", cron_default["provider"] or "openai-codex"))
     monkeypatch.setattr(jobs_route, "_resolve_pin", lambda v: (v.split(":", 1)[-1], "openai-codex"))
+    monkeypatch.setattr(jobs_route, "_write_cron_default",
+                        lambda model, provider: cron_default.update(model=model, provider=provider))
     with cron_jobs.use_cron_store(tmp_path):
         a = cron_jobs.create_job(prompt="Daily brief", schedule="0 7 * * *", name="Brief", deliver="origin",
                                  origin={"platform": "parley", "chat_id": "abc-123", "chat_name": "parley:abc-123"})
         b = cron_jobs.create_job(prompt="Sync workbook", schedule="30 6 * * *", name="Workbook",
                                  deliver="sidekick:zzz-999")
-        yield {"a": a["id"], "b": b["id"], "jobs": cron_jobs}
+        yield {"a": a["id"], "b": b["id"], "jobs": cron_jobs, "cron_default": cron_default}
 
 
 def test_payload_lists_jobs_with_option_catalogs(store):
@@ -75,6 +82,64 @@ def test_pin_and_unpin_model(store):
     v = jobs_route.apply_job_update(store["a"], {"model": ""})
     assert v["model"] == "" and v["provider"] == ""
     assert not store["jobs"].get_job(store["a"]).get("model")
+
+
+def test_bulk_model_update_pins_all_and_writes_the_cron_default(store):
+    jobs_route.apply_job_update(store["a"], {"model": "gpt-5.6-sol"})
+    payload = jobs_route.apply_bulk_model_update("gpt-5.6-sol")
+    assert all(j["model"] == "" and j["provider"] == "" for j in payload["data"])
+    assert not store["jobs"].get_job(store["a"]).get("model")
+    assert store["cron_default"] == {"model": "gpt-5.6-sol", "provider": "openai-codex"}
+    assert payload["default_model"] == "gpt-5.6-sol via openai-codex"
+    assert payload["object"] == "list" and set(payload["options"]) == {"deliver", "model"}
+
+
+def test_bulk_model_update_empty_follows_agent_default(store):
+    jobs_route.apply_job_update(store["a"], {"model": "gpt-5.6-sol"})
+    jobs_route.apply_bulk_model_update("gpt-5.6-sol")
+    payload = jobs_route.apply_bulk_model_update("")
+    assert store["cron_default"] == {"model": "", "provider": ""}
+    assert payload["default_model"] == "gpt-6-astra via openai-codex"
+    assert all(j["model"] == "" for j in payload["data"])
+
+
+def test_bulk_model_update_unknown_value_rejected_before_any_write(store, monkeypatch):
+    jobs_route.apply_job_update(store["a"], {"model": "gpt-5.6-sol"})
+
+    def _boom(v):
+        raise jobs_route.JobsValidationError(f"value not in options[]: {v!r}")
+    monkeypatch.setattr(jobs_route, "_resolve_pin", _boom)
+    with pytest.raises(jobs_route.JobsValidationError, match="not in options"):
+        jobs_route.apply_bulk_model_update("bogus/model")
+    # never a partial write: neither the job's pin nor the cron default moved
+    assert store["jobs"].get_job(store["a"])["model"] == "gpt-5.6-sol"
+    assert store["cron_default"] == {"model": "", "provider": ""}
+
+
+def test_bulk_model_update_rejects_non_string(store):
+    with pytest.raises(jobs_route.JobsValidationError, match="must be a string"):
+        jobs_route.apply_bulk_model_update(5)
+    assert store["cron_default"] == {"model": "", "provider": ""}
+
+
+def test_bulk_model_update_aborts_config_write_when_a_pin_clear_fails(store, monkeypatch):
+    """Order under test: pins clear FIRST, cron.model/provider LAST. A
+    per-job clear failure must abort BEFORE the config write, so no job
+    ends up on the new model while another is silently still pinned."""
+    jobs_route.apply_job_update(store["a"], {"model": "gpt-5.6-sol"})
+    jobs_route.apply_job_update(store["b"], {"model": "gpt-5.6-sol"})
+    from cron import jobs as cron_jobs
+    real_update_job = cron_jobs.update_job
+
+    def _flaky(job_id, updates):
+        if job_id == store["b"]:
+            raise ValueError("job is terminal")
+        return real_update_job(job_id, updates)
+    monkeypatch.setattr(cron_jobs, "update_job", _flaky)
+    with pytest.raises(jobs_route.JobsValidationError, match=store["b"]):
+        jobs_route.apply_bulk_model_update("")
+    # the config write never ran
+    assert store["cron_default"] == {"model": "", "provider": ""}
 
 
 def test_run_now_queues_next_tick(store):
@@ -151,6 +216,18 @@ def test_handlers_status_codes(store):
     assert r.status == 200 and _body(r)["enabled"] is True
     r = _run(jobs_route.handle_job_runs(_Adapter(), _Request(store["b"], query={"limit": "3"})))
     assert r.status == 200 and _body(r)["object"] == "list"
+
+
+def test_handle_jobs_bulk_model_status_codes(store):
+    assert _run(jobs_route.handle_jobs_bulk_model(_Adapter(ok=False), _Request(body={"model": ""}))).status == 401
+    r = _run(jobs_route.handle_jobs_bulk_model(_Adapter(), _Request(body={"model": "gpt-5.6-sol"})))
+    assert r.status == 200
+    body = _body(r)
+    assert body["object"] == "list" and all(j["model"] == "" for j in body["data"])
+    r = _run(jobs_route.handle_jobs_bulk_model(_Adapter(), _Request(body={})))
+    assert r.status == 400 and _body(r)["error"]["type"] == "invalid_request_error"
+    r = _run(jobs_route.handle_jobs_bulk_model(_Adapter(), _Request(body={"model": 5})))
+    assert r.status == 400
 
 
 def test_delete_removes_job(store):

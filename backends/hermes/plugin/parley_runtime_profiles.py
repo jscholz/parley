@@ -2,8 +2,9 @@
 
 Design: ``~/code/parley/docs/LOCAL_MODE.md`` §1. A *runtime profile* names
 the model block, the auxiliary models, the fallback chain, the compression
-overrides and hindsight's LLM env for one operating mode. Two ship by
-default:
+overrides, hindsight's LLM env, and the cron model pin (``cron.model`` /
+``cron.model_provider`` — what parley_route_jobs.py's "model for all jobs"
+bulk endpoint writes) for one operating mode. Two ship by default:
 
   cloud  — seeded FROM THE LIVE CONFIG on first run (never hardcoded, so a
            box whose model differs from the doc's example keeps its own).
@@ -67,7 +68,7 @@ MEMORY_ENV_KEYS = (ENV_MEMORY_PROVIDER, ENV_MEMORY_MODEL, ENV_MEMORY_BASE_URL)
 # of a setting that reroutes every model call the owner's agent makes.
 ALLOWED_CONFIG_ROOTS = frozenset({
     "model", "auxiliary", "fallback_providers", "compression", PARLEY_KEY,
-    "tools", "skills",
+    "tools", "skills", "cron",
 })
 
 # `tools` and `skills` are widened roots (the local diet: fewer tool schemas,
@@ -79,6 +80,20 @@ ALLOWED_CONFIG_ROOTS = frozenset({
 # rejected outright rather than silently applied.
 ALLOWED_TOOLS_SUBKEY = "tool_search"
 ALLOWED_SKILLS_SUBKEY = "platform_disabled"
+
+# `cron` is the same shape of widened root: a profile switch must not leave
+# a stale "model for all jobs" pin from the profile being LEFT — a cloud
+# model pinned into cron.model strands every cron job when the owner flips
+# to `local` (no API key off-grid); the reverse strands crons on a small
+# local model after flipping back. Restricted to model/model_provider (the
+# two keys parley_route_jobs.py's bulk-model endpoint writes) so a profile
+# cannot also silently repoint `cron.provider` (the SCHEDULER provider,
+# unrelated) or flip `cron.model_drift_guard`/`cron.preflight` — those are
+# hermes/owner territory, same rationale as tools/skills above. Both shipped
+# profiles seed an EXPLICIT empty pin (docs/LOCAL_MODE.md §1 rule 7) so a
+# switch always resets cron back to "follow this profile's model.default",
+# never silently inherits whatever a bulk-model call last wrote.
+ALLOWED_CRON_SUBKEYS = frozenset({"model", "model_provider"})
 
 _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
@@ -247,6 +262,12 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
         # switch back to cloud undoes whatever the local diet configured.
         "tools": {"tool_search": {}},
         "skills": {"platform_disabled": {"parley": []}},
+        # Explicit empty pin (docs/LOCAL_MODE.md §1 rule 7): "follow this
+        # profile's model.default." Written on every switch INTO cloud so a
+        # "model for all jobs" bulk pin from a previous profile never
+        # survives the switch silently — the owner has to re-pin explicitly
+        # if they want cron different from the profile default again.
+        "cron": {"model": "", "model_provider": ""},
     }
     # Only carry a compression override when the box actually sets one, so
     # switching back to cloud restores the value the user had rather than
@@ -303,6 +324,9 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
         "compression": {"threshold": 0.6},
         "tools": {"tool_search": copy.deepcopy(LOCAL_TOOL_SEARCH)},
         "skills": {"platform_disabled": {"parley": list(LOCAL_SKILLS_HIDDEN_PARLEY)}},
+        # Same reset guarantee as cloud's: a cloud-pinned "model for all
+        # jobs" must not survive a flip to local (no API key off-grid).
+        "cron": {"model": "", "model_provider": ""},
     }
     return {DEFAULT_PROFILE: cloud, LOCAL_PROFILE: local}
 
@@ -640,6 +664,29 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
                 config_updates[f"skills.{ALLOWED_SKILLS_SUBKEY}.{platform}"] = copy.deepcopy(list(names))
     elif skills is not None:
         raise ProfileError(f"profile {name!r} skills must be a mapping, got {type(skills).__name__}")
+
+    # 2d. cron.model / cron.model_provider — leaf-level, restricted to the
+    #     two keys parley_route_jobs.py's bulk-model endpoint writes (LOCAL_
+    #     MODE.md §1 rule 7). Everything else under `cron` (model_provider's
+    #     scheduler-side sibling `provider`, `model_drift_guard`,
+    #     `preflight`, chronos settings, …) is owner/hermes territory and
+    #     survives untouched, same as auxiliary's leaf merge.
+    cron = profile.get("cron")
+    if isinstance(cron, Mapping):
+        extra = set(cron) - ALLOWED_CRON_SUBKEYS
+        if extra:
+            raise ProfileError(
+                f"profile {name!r} may only set cron.{{{', '.join(sorted(ALLOWED_CRON_SUBKEYS))}}}; "
+                f"found unexpected cron.* key(s): {', '.join(sorted(extra))}"
+            )
+        for key, value in cron.items():
+            if not isinstance(value, str):
+                raise ProfileError(
+                    f"profile {name!r} cron.{key} must be a string, got {type(value).__name__}"
+                )
+            config_updates[f"cron.{key}"] = value
+    elif cron is not None:
+        raise ProfileError(f"profile {name!r} cron must be a mapping, got {type(cron).__name__}")
 
     # 3. hindsight env. An absent/blank base_url is written as None =
     #    REMOVE THE KEY: hindsight reads `os.getenv(...) or None`, so an

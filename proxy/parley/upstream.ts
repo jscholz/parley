@@ -269,6 +269,10 @@ export interface UpstreamAgent {
    *  with the upstream's status + body on rejection. */
   listJobs(): Promise<any | null>;
   updateJob(id: string, body: unknown): Promise<any>;
+  /** "Model for all jobs" — resolves the value and clears every per-job
+   *  pin server-side; returns the listJobs-shaped payload. Throws
+   *  UpstreamHTTPError on rejection (e.g. an unrecognised model). */
+  setAllJobsModel(model: string): Promise<any>;
   runJob(id: string): Promise<any>;
   listJobRuns(id: string, limit?: number): Promise<any>;
   deleteJob(id: string): Promise<any>;
@@ -499,6 +503,10 @@ export class HTTPAgentUpstream implements UpstreamAgent {
 
   updateJob(id: string, body: unknown): Promise<any> {
     return this.postJob(`/v1/jobs/${encodeURIComponent(id)}`, body);
+  }
+
+  setAllJobsModel(model: string): Promise<any> {
+    return this.postJob('/v1/jobs/model', { model });
   }
 
   runJob(id: string): Promise<any> {
