@@ -215,7 +215,23 @@ function setPlaceholder(host: HTMLElement, text: string) {
  *  summary, every card) from the single response — the contract's point:
  *  one response reflects every job's post-clear state, so nothing here
  *  re-derives what changed from the request we just sent. */
-async function submitBulkModel(value: string, wrap: HTMLElement) {
+async function submitBulkModel(value: string, wrap: HTMLElement, label?: string) {
+  // Blast-radius guard, same pattern as deleteJob's confirm (field
+  // 2026-09-08: a single selection in this native <select> repointed all
+  // 12 of the owner's jobs at an out-of-credit provider, and the failure
+  // only surfaced the next morning when a job fired. A fleet-wide write
+  // must be a deliberate second act, not one mouse release.) Tests accept
+  // the dialog, as they do for delete.
+  const n = payload?.data.length ?? 0;
+  const target = label || (value ? value : 'the agent default');
+  let ok = true;
+  try {
+    ok = window.confirm(
+      `Point all ${n} scheduled job${n === 1 ? '' : 's'} at ${target}?\n\n`
+      + 'This also clears any per-job model pin.',
+    );
+  } catch { /* no dialog available (tests/headless): proceed */ }
+  if (!ok) { renderCronBody(); return; }   // re-render resets the <select> to the real state
   wrap.classList.add('cron-job-busy');
   try {
     const adapter = await getAdapter();
@@ -246,7 +262,10 @@ function renderBulkModelControl(host: HTMLElement) {
   ctl.appendChild(document.createTextNode('Model for all jobs '));
   const sel = select('cron-bulk-model-select', options, value, (v) => {
     if (v === BULK_MIXED) return; // re-picking the placeholder is not a real submission
-    void submitBulkModel(v, wrap);
+    // Pass the option's own label so the confirm names what the user saw
+    // ("Follow default (…)"), not the raw picker value.
+    const picked = options.find((o) => o.value === v);
+    void submitBulkModel(v, wrap, picked?.label);
   });
   sel.dataset.role = 'bulk-model';
   ctl.appendChild(sel);

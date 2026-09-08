@@ -92,6 +92,23 @@ export default async function run({ page, log, mock }) {
   await page.waitForSelector(bulkSel, { timeout: 3_000 });
   let bulkLabel = await page.$eval(bulkSel, (s) => s.options[s.selectedIndex]?.textContent);
   assert(bulkLabel === 'Mixed — jobs use different models', `bulk header before: ${bulkLabel}`);
+  // 5b-i. DISMISSING the blast-radius confirm must write nothing (field
+  // 2026-09-08: one selection in this native <select> silently repointed
+  // all 12 of the owner's real jobs at an out-of-credit provider).
+  const postsBefore = mock.getLastBulkModelPost();
+  page.once('dialog', (d) => d.dismiss());
+  await page.selectOption(bulkSel, 'openrouter/decoy-model');
+  await page.waitForTimeout(300);
+  const afterDismiss = mock.getLastBulkModelPost();
+  assert(JSON.stringify(afterDismiss) === JSON.stringify(postsBefore),
+    `dismissed confirm must not POST: ${JSON.stringify(afterDismiss)}`);
+  bulkLabel = await page.$eval(bulkSel, (s) => s.options[s.selectedIndex]?.textContent);
+  assert(bulkLabel === 'Mixed — jobs use different models',
+    `select reverts to the real state after dismiss: ${bulkLabel}`);
+  log('Dismissing the fleet-change confirm writes nothing and reverts the picker');
+
+  // 5b-ii. Accepting it applies to every job.
+  page.once('dialog', (d) => d.accept());
   await page.selectOption(bulkSel, 'gpt-5.6-sol');
   await page.waitForFunction(() => {
     const cards = document.querySelectorAll('#cron-jobs-host .cron-job');

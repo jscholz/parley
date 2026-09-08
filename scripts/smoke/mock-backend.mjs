@@ -891,6 +891,9 @@ export async function installMockBackend(page) {
   const modelOptions = [
     { value: '', label: `Follow default (${defaultModel})`, group: 'Default' },
     { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', group: 'OpenAI Codex' },
+    // A second real option so a smoke can pick one, dismiss the fleet-change
+    // confirm, and prove nothing was written (2026-09-08 incident).
+    { value: 'openrouter/decoy-model', label: 'openrouter/decoy-model', group: 'OpenRouter' },
   ];
   const jobsPayload = () => ({
     object: 'list', data: jobs,
