@@ -453,20 +453,42 @@ self.addEventListener('push', (e) => {
 // isn't available (some older WebKit builds).
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const target = e.notification.data?.url || '/';
+  const data = e.notification.data || {};
+  const target = data.url || '/';
+  // The chat this notification points at, if any. Same rule as
+  // notifications/nativeModel.ts tapChatId (keep the two in sync): an
+  // explicit chat_id, else the chat carried by our own ?chat= deep link.
+  let chatId = typeof data.chat_id === 'string' ? data.chat_id.trim() : '';
+  if (!chatId && typeof data.url === 'string') {
+    const m = /[?&]chat=([^&#]+)/.exec(data.url);
+    if (m) { try { chatId = decodeURIComponent(m[1]).trim(); } catch { chatId = m[1]; } }
+  }
+  const msgId = typeof data.message_id === 'string' ? data.message_id
+    : (typeof data.msg_id === 'string' ? data.msg_id : '');
   e.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    // Prefer an already-focused or same-origin tab — reuse it via
-    // navigate() so we don't accumulate orphan PWA windows.
+    // Prefer an already-focused or same-origin tab. Field 2026-09-08:
+    // this used to focus AND navigate(), which reloads a running app —
+    // the session list refetches from scratch and a tap through several
+    // notifications pays that cost each time. When we know the chat, hand
+    // it to the live page instead and let it switch in place (cache-first,
+    // instant for a cached chat); only fall back to navigate() when there
+    // is no chat to switch to.
     for (const c of all) {
       try {
         await c.focus();
+        if (chatId) {
+          c.postMessage({ type: 'parley:open-chat', chatId, msgId: msgId || null, source: 'sw-notificationclick' });
+          return;
+        }
         if ('navigate' in c) {
           try { await c.navigate(target); } catch { /* cross-origin or unsupported */ }
         }
         return;
       } catch { /* tab vanished mid-loop — try the next */ }
     }
+    // No live window: a cold start is the only option, and the ?chat=
+    // deep link is how boot learns where to land.
     if (self.clients.openWindow) {
       await self.clients.openWindow(target);
     }

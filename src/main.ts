@@ -1208,6 +1208,30 @@ async function boot() {
   window.addEventListener('parley:activity-changed', () => { void prewarmActivityWindows(); });
   window.addEventListener('parley:server-activity-changed', () => { void prewarmActivityWindows(); });
   void prewarmActivityWindows();
+  // Notification taps (native push via notifications/native.ts, and the
+  // service worker's notificationclick for the installed PWA) funnel here
+  // instead of navigating the document. Field 2026-09-08: a tap called
+  // location.assign / client.navigate, which reloaded an already-running
+  // app — the CAP shell came back with an unpopulated session list and
+  // every tap in a run of notifications paid a full boot. Same drill the
+  // in-app banner uses, so a cached chat opens instantly.
+  const openChatFromNotification = (chatId: string, msgId: string | null): void => {
+    if (!chatId) return;
+    diag(`[notify-open] in-place chat=${chatId} msg=${msgId ?? '∅'}`);
+    void drillToChatMessage(chatId, msgId);
+  };
+  window.addEventListener('parley:open-chat', (ev: Event) => {
+    const d = (ev as CustomEvent<{ chatId?: string; msgId?: string | null }>).detail || {};
+    openChatFromNotification(String(d.chatId || ''), d.msgId ?? null);
+  });
+  try {
+    navigator.serviceWorker?.addEventListener('message', (ev: MessageEvent) => {
+      const d: any = ev?.data;
+      if (!d || d.type !== 'parley:open-chat') return;
+      openChatFromNotification(String(d.chatId || ''), d.msgId ?? null);
+    });
+  } catch { /* no service worker in this context */ }
+
   inAppBanner.init({
     onOpen: (chatId, msgId) => { void drillToChatMessage(chatId, msgId); },
     onAction: (chatId, action, msgId) => { void sendApprovalAction(chatId, action, msgId); },

@@ -13,7 +13,7 @@
  */
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
-import { hasNativePush, normaliseDeviceToken, tapTarget } from './nativeModel.ts';
+import { hasNativePush, normaliseDeviceToken, tapTarget, tapChatId, tapMessageId } from './nativeModel.ts';
 
 const LS_KEY = 'parley.native-push.token';
 
@@ -74,7 +74,27 @@ export function initNativePushHandlers(): void {
   if (!pn) return;
   try {
     pn.addListener('pushNotificationActionPerformed', (ev: any) => {
-      const target = tapTarget(ev?.notification?.data);
+      const data = ev?.notification?.data;
+      // In-place FIRST (field 2026-09-08): this listener only runs when the
+      // WebView is already alive, so `location.assign` was reloading a
+      // running app — the CAP bundle re-booted, the session list had not
+      // been fetched yet ("sessions don't load"), and tapping through
+      // several notifications paid a full reload each time. Hand the chat
+      // to the same drill the in-app banner uses (cache-first resume,
+      // instant for a cached chat) via a DOM event, mirroring how the
+      // native shell already delivers `parley:remote-control`. main.ts owns
+      // the handler, so this module keeps no import on the drawer.
+      const chatId = tapChatId(data);
+      if (chatId) {
+        log(`[notifications] tap → in-place open chat=${chatId}`);
+        window.dispatchEvent(new CustomEvent('parley:open-chat', {
+          detail: { chatId, msgId: tapMessageId(data), source: 'native-push' },
+        }));
+        return;
+      }
+      // No chat to switch to (an explicit non-chat url, or a payload we
+      // don't understand): a document navigation is the only option.
+      const target = tapTarget(data);
       if (target) location.assign(target);
     });
     pn.addListener('pushNotificationReceived', (n: any) => {
