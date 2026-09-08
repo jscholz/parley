@@ -43,7 +43,7 @@ stream multiplexer (`stream.ts`), and drawer/history handlers work unchanged.
 | `questions.ts` | Pending-question registry: `canUseTool` ↔ `agent_question` ↔ `answerQuestion` |
 | `docShim.ts` | Per-turn in-process MCP server exposing `display_doc` → `doc_show` envelope |
 | `asyncQueue.ts` | Unbounded async queue — lets side channels (approvals, docs) interleave into the turn stream |
-| `adapter.test.ts` | node:test suite, SDK faked (22 tests) |
+| `adapter.test.ts` | node:test suite, SDK faked (24 tests) |
 
 ### Session mapping (conversation key ↔ SDK session)
 
@@ -152,7 +152,10 @@ new ClaudeCodeUpstream({
 tool_call/tool_result visibility; session create/resume/persist;
 list/items/delete/rename over SDK session storage; canUseTool approvals
 round-trip (allow / deny / free-text deny); display_doc → doc_show;
-barge-in via interrupt; cwd allowlist validation.
+barge-in via interrupt; cwd allowlist validation; mid-turn inflight
+replay buffer (`getMessages().inflight`, converges with hermes/openclaw
+so a reconnect during a live turn regroups its tools under one activity
+row instead of an orphan-per-call fragment — field 2026-09-08).
 
 **Deferred (v1.1+):**
 - **Real-SDK integration pass** — the SDK is faked in tests; first wiring
@@ -164,8 +167,6 @@ barge-in via interrupt; cwd allowlist validation.
 - **Long-lived query per chat** (in-process message queueing instead of
   per-turn resume) — per-turn resume is simpler and loses only mid-turn
   input queueing.
-- **Inflight replay buffer** (`getMessages().inflight`) — mid-turn
-  reconnect currently misses the streaming bubble until reply_final.
 - **message_count / turn_count** in drawer rows (needs a transcript read
   per row).
 - **Slash-command catalog** via `Query.supportedCommands()`.
@@ -217,5 +218,5 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning \
   --test backends/claude-code/*.test.ts
 ```
 
-22 tests; strip-only TS throughout (no enums, no parameter properties —
+24 tests; strip-only TS throughout (no enums, no parameter properties —
 the test file dies at load otherwise).

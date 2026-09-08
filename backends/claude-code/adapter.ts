@@ -119,6 +119,32 @@ export class ClaudeCodeUpstream {
   private lastEventId = 0;
   private static EVENT_RING_CAP = 128;
 
+  // Per-chat mid-turn replay buffer (was the README's "v1.1 deferred"
+  // gap: getMessages().inflight hardcoded to []). hermes/openclaw own
+  // their in-flight state via a TurnBuffer merged into getMessages(),
+  // so a mid-turn reconnect (hard refresh, second spectating device,
+  // SSE drop) still carries that turn's user_message + tool_call/
+  // tool_result — the PWA's projection groups them under ONE activity
+  // row (currentTurnKey anchored on the user_message). Without this,
+  // the SAME reconnect for claude-code saw an empty inflight array: any
+  // tool envelope that arrived afterward had no turn anchor and fell
+  // back to a synthetic `turn:orphan:<ts>` row, fragmenting one turn's
+  // tools across several small activity-row cards instead of one.
+  // Recorded for every envelope this backend emits for a turn (via
+  // `push` and the two direct user_message/typing/reply_final yields
+  // below); cleared once the turn settles, since the SDK's session
+  // storage carries the full turn from then on (sessionMessagesToItems
+  // rebuilds it durably, same shape either way).
+  private inflightByChat = new Map<string, ClaudeCodeEnvelope[]>();
+  private static INFLIGHT_CAP = 500;
+
+  private recordInflight(chatId: string, envelope: ClaudeCodeEnvelope): void {
+    let buf = this.inflightByChat.get(chatId);
+    if (!buf) { buf = []; this.inflightByChat.set(chatId, buf); }
+    buf.push(envelope);
+    if (buf.length > ClaudeCodeUpstream.INFLIGHT_CAP) buf.shift();
+  }
+
   constructor(deps: ClaudeCodeUpstreamDeps) {
     this.sdk = deps.sdk;
     this.config = deps.config;
@@ -160,7 +186,15 @@ export class ClaudeCodeUpstream {
     const entry = this.resolveEntry(chatId);
     const userMessageId = opts.userMessageId ?? `umsg_${randomUUID()}`;
     const queue = new AsyncQueue<ClaudeCodeEnvelope>();
-    const push = (env: ClaudeCodeEnvelope) => queue.push(env);
+    // Every envelope a turn emits — tool_call/tool_result, reply_delta,
+    // agent_question, doc_show, error — flows through this single push,
+    // so recording here (rather than at each call site) is the one spot
+    // that keeps the mid-turn replay buffer complete. See
+    // `recordInflight` / `inflightByChat` above for why this exists.
+    const push = (env: ClaudeCodeEnvelope) => {
+      this.recordInflight(chatId, env);
+      queue.push(env);
+    };
 
     const state: TurnState = {
       chatId,
@@ -223,16 +257,33 @@ export class ClaudeCodeUpstream {
     try {
       // Cross-device user bubble first (same contract as the hermes
       // plugin's _handle_responses emission), then a typing indicator.
-      yield { type: 'user_message', chat_id: chatId, message_id: userMessageId, text };
-      yield { type: 'typing', chat_id: chatId };
+      // Recorded into the mid-turn replay buffer too — it's the
+      // envelope a reconnecting client needs most, since it's what
+      // anchors the turn's tool_call/tool_result under one activity
+      // row (projection.ts currentTurnKey) instead of an orphan row.
+      const userMsgEnv: ClaudeCodeEnvelope = { type: 'user_message', chat_id: chatId, message_id: userMessageId, text };
+      this.recordInflight(chatId, userMsgEnv);
+      yield userMsgEnv;
+      const typingEnv: ClaudeCodeEnvelope = { type: 'typing', chat_id: chatId };
+      this.recordInflight(chatId, typingEnv);
+      yield typingEnv;
       for await (const env of queue) yield env;
       if (state.sawDelta && !state.sawFinal) {
         // Interrupted turn (barge-in): settle the streaming bubble.
-        yield { type: 'reply_final', chat_id: chatId, message_id: state.messageId };
+        const finalEnv: ClaudeCodeEnvelope = { type: 'reply_final', chat_id: chatId, message_id: state.messageId };
+        this.recordInflight(chatId, finalEnv);
+        yield finalEnv;
       }
     } finally {
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
       await pump.catch(() => {});
+      // Turn settled (success, error, or interrupt) — the SDK's session
+      // storage now carries the full turn, so getMessages() no longer
+      // needs the replay buffer for it. Clearing here (rather than on a
+      // timer) means a reconnect that lands MID-turn always sees the
+      // in-progress envelopes, and one that lands after never sees a
+      // stale/duplicate replay of a turn durable already covers.
+      this.inflightByChat.delete(chatId);
     }
   }
 
@@ -439,7 +490,13 @@ export class ClaudeCodeUpstream {
   }> {
     const entry = this.peekEntry(chatId);
     if (!entry || !entry.sessionId) {
-      return { items: [], first_id: null, has_more: false, inflight: [] };
+      // No SDK session yet — but a turn can still be mid-flight for a
+      // BRAND NEW chat (system/init hasn't landed to record the session
+      // id). Same reasoning as the populated branch below: without
+      // this, a reconnect during a chat's very first turn is the
+      // worst-case for the orphan-row gap (no durable history AND no
+      // inflight to anchor the turn).
+      return { items: [], first_id: null, has_more: false, inflight: this.inflightByChat.get(chatId) ?? [] };
     }
     const raw = await this.sdk.getSessionMessages(entry.sessionId, { dir: entry.cwd });
     const all = sessionMessagesToItems(raw);
@@ -449,11 +506,48 @@ export class ClaudeCodeUpstream {
     const items = windowed.slice(Math.max(0, windowed.length - limit));
     const firstId = items.length > 0 ? items[0].id : null;
     const lastId = items.length > 0 ? items[items.length - 1].id : null;
+    // The SDK can flush a turn's messages to the session file WHILE it's
+    // still running (each tool_use/tool_result lands as its own JSONL
+    // row as the CLI subprocess produces it), so a call already visible
+    // in `all` can ALSO still be sitting in the mid-turn buffer below.
+    // Because durable items have no id matching the live envelopes'
+    // (the SDK owns its own row ids; see durableToolCallIds), the
+    // projection can't recognize them as the same call — it would
+    // render the tool twice, under two different activity rows. Strip
+    // anything durable already covers before handing the buffer back.
+    const alreadyDurable = durableToolCallIds(all);
+    // Same reasoning for the turn's opening user_message: the SDK
+    // typically flushes it to the session file before the first tool
+    // call, and this backend has no id linking that durable row back to
+    // the live envelope's message_id (see the class-level note on
+    // inflightByChat), so a still-open turn's user_message can be BOTH
+    // durable AND buffered. Content-matching it against the most recent
+    // durable user row and dropping it here does double duty: it kills
+    // the duplicate user bubble, AND leaves `currentTurnKey` anchored on
+    // whatever key the durable walk already assigned that row — the
+    // buffered tool_call/tool_result then attach to the SAME row durable
+    // built instead of a mismatched orphan.
+    let lastDurableUserContent: string | null = null;
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (all[i].role === 'user') { lastDurableUserContent = all[i].content ?? ''; break; }
+    }
+    const inflight = (this.inflightByChat.get(chatId) ?? []).filter((env) => {
+      if (env.type === 'user_message' && lastDurableUserContent != null && env.text === lastDurableUserContent) {
+        return false;
+      }
+      const callId = (env as { call_id?: string }).call_id;
+      return !callId || !alreadyDurable.has(callId);
+    });
     return {
       items,
       first_id: firstId,
       has_more: firstId != null && firstId > 1,
-      inflight: [], // v1: no mid-turn replay buffer (see README deferred list)
+      // Mid-turn replay buffer (was hardcoded [] — see README's old
+      // "deferred" note and `inflightByChat` above). The proxy only
+      // attaches this to a response that reaches the live tail
+      // (history.ts), so paginating BACK through old history never
+      // carries it.
+      inflight,
       last_id: lastId,
       has_more_newer: lastId != null && all.length > 0 && lastId < all[all.length - 1].id,
     };
@@ -702,6 +796,37 @@ export function sessionMessagesToItems(raw: SdkSessionMessage[]): ConversationIt
     }
   }
   return items;
+}
+
+/** callIds already visible in durable history — role='tool' rows carry
+ *  `tool_call_id` directly, role='assistant' rows carry the serialized
+ *  `tool_calls` extension (see sessionMessagesToItems above). Used to
+ *  strip the mid-turn replay buffer down to tool activity durable
+ *  history DOESN'T cover yet: this backend's durable items have no
+ *  stable id matching the live envelopes' chat-local ids (the SDK owns
+ *  its own storage format), so a call that already flushed to the
+ *  session file and one still sitting in the buffer would otherwise
+ *  render as TWO tool-row entries under two different activity rows
+ *  instead of being recognized as the same call. */
+function durableToolCallIds(items: ConversationItem[]): Set<string> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    if (item.role === 'tool' && item.tool_call_id) {
+      ids.add(item.tool_call_id);
+      continue;
+    }
+    if (item.role === 'assistant' && item.tool_calls) {
+      try {
+        const parsed = JSON.parse(item.tool_calls);
+        if (Array.isArray(parsed)) {
+          for (const c of parsed) if (c && typeof c.id === 'string') ids.add(c.id);
+        }
+      } catch {
+        // malformed tool_calls JSON — nothing to dedup against
+      }
+    }
+  }
+  return ids;
 }
 
 function readTimestampSeconds(row: SdkSessionMessage): number {

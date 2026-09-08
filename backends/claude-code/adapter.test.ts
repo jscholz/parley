@@ -521,6 +521,105 @@ test('getMessages for an unknown chat returns the empty shape', async () => {
   assert.deepEqual(page, { items: [], first_id: null, has_more: false, inflight: [] });
 });
 
+// ── Mid-turn inflight replay buffer (field 2026-09-08) ───────────────
+//
+// getMessages().inflight used to be hardcoded to [] for this backend
+// (the README's own "deferred" note). A client that reconnects mid-turn
+// — hard refresh, a second device spectating the same chat — got NO
+// backfill of the turn's user_message, so the PWA's projection had no
+// turn key to anchor that turn's tool_call/tool_result envelopes to and
+// fell back to a synthetic per-call orphan row instead of one grouped
+// activity row (the "spamming me with tool calls" shape). These tests
+// pin the buffer's three jobs: populate mid-turn, clear once settled,
+// and never duplicate what durable history already covers.
+
+test('getMessages mid-turn: inflight carries this turn\'s user_message + tool_call, cleared once the turn settles', async () => {
+  let releaseGate: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const sdk = new FakeSdk(async function* () {
+    yield init('sess-mid');
+    yield assistantToolUse('toolu_mid', 'Bash', { command: 'ls' });
+    await gate; // held open — simulates the turn still running
+    yield userToolResult('toolu_mid', 'file.txt');
+    yield delta('Listed one file.');
+    yield resultMsg('Listed one file.');
+  });
+  const adapter = makeAdapter(sdk);
+
+  const iter = adapter.sendMessage('chatMid', 'list files')[Symbol.asyncIterator]();
+  let step: IteratorResult<ClaudeCodeEnvelope>;
+  do {
+    step = await iter.next();
+  } while (!step.done && step.value.type !== 'tool_call');
+  assert.equal(step.done, false, 'reached tool_call before the turn settled');
+
+  const mid = await adapter.getMessages('chatMid');
+  assert.equal(mid.inflight.some((e) => e.type === 'user_message'), true,
+    'mid-turn inflight carries the turn-anchoring user_message');
+  assert.equal(mid.inflight.some((e) => e.type === 'tool_call' && (e as any).call_id === 'toolu_mid'), true,
+    'mid-turn inflight carries the in-progress tool_call');
+  assert.equal(mid.inflight.some((e) => e.type === 'tool_result'), false,
+    'the paired tool_result has not arrived yet');
+
+  releaseGate();
+  while (!(await iter.next()).done) { /* drain the rest of the turn */ }
+
+  const after = await adapter.getMessages('chatMid');
+  assert.deepEqual(after.inflight, [], 'buffer clears once the turn settles');
+});
+
+test('getMessages mid-turn: a tool_call already visible in durable history is not duplicated in inflight', async () => {
+  let releaseGate: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const sdk = new FakeSdk(async function* () {
+    yield init('sess-dup');
+    yield assistantToolUse('toolu_a', 'Read', { file_path: '/a.ts' }, 'sess-dup');
+    yield userToolResult('toolu_a', 'contents of a.ts', 'sess-dup');
+    yield assistantToolUse('toolu_b', 'Bash', { command: 'npm test' }, 'sess-dup');
+    await gate; // toolu_b's result hasn't landed — turn still open
+    yield userToolResult('toolu_b', 'all green', 'sess-dup');
+    yield delta('Done.', 'sess-dup');
+    yield resultMsg('Done.', 'sess-dup');
+  });
+  const adapter = makeAdapter(sdk);
+
+  const iter = adapter.sendMessage('chatDup', 'run the suite')[Symbol.asyncIterator]();
+  let step: IteratorResult<ClaudeCodeEnvelope>;
+  do {
+    step = await iter.next();
+  } while (!step.done && !(step.value.type === 'tool_call' && (step.value as any).call_id === 'toolu_b'));
+  assert.equal(step.done, false);
+
+  // Simulate the SDK having ALREADY flushed toolu_a's call+result to the
+  // session file while the turn is still running (progressive JSONL
+  // writes) — durable now covers toolu_a but not yet toolu_b.
+  sdk.sessionMessages['sess-dup'] = [
+    { type: 'user', uuid: 'u1', session_id: 'sess-dup', message: { role: 'user', content: 'run the suite' } },
+    {
+      type: 'assistant', uuid: 'a1', session_id: 'sess-dup',
+      message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_a', name: 'Read', input: { file_path: '/a.ts' } }] },
+    },
+    {
+      type: 'user', uuid: 'u2', session_id: 'sess-dup',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_a', content: 'contents of a.ts' }] },
+    },
+  ];
+
+  const mid = await adapter.getMessages('chatDup');
+  const callIds = mid.inflight
+    .filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
+    .map((e) => (e as any).call_id);
+  assert.ok(!callIds.includes('toolu_a'), 'toolu_a already durable — must not also come back via inflight');
+  assert.ok(callIds.includes('toolu_b'), 'toolu_b is not durable yet — must still surface via inflight');
+  // The durable walk already anchors the turn on its own user row, so
+  // the redundant live echo must be dropped too (else it'd render twice).
+  assert.equal(mid.inflight.some((e) => e.type === 'user_message'), false,
+    'user_message content-matches the already-durable user row — dropped, not duplicated');
+
+  releaseGate();
+  while (!(await iter.next()).done) { /* drain */ }
+});
+
 // ── Barge-in / abort ─────────────────────────────────────────────────
 
 test('abort signal interrupts the SDK query and settles the streaming bubble', async () => {
