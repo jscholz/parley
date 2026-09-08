@@ -105,8 +105,19 @@ function ensureSubscribed(): void {
   tts.on('play-start', ({ replyId }: { replyId: string }) => {
     const b = findBubbleByReplyId(replyId);
     if (b) currentBubble = b;
+    // Playback STARTING arms the grace window too, not just its end.
+    // The end-only version made the gate depend on a terminal event that
+    // is not guaranteed to arrive: if 'ended'/'stopped' never fires for a
+    // playback (a path that tears the element down, an engine that omits
+    // it), lastTtsEndAt stays null and a legitimate skip moments later is
+    // refused with "sinceLastTts=n/a" — seen as an intermittent failure of
+    // the mediasession-skip smoke under full-suite load, 2026-09-08. A
+    // reply that started playing is itself proof the user is in a
+    // listening session, which is exactly what the window is for.
+    lastTtsEndAt = Date.now();
   });
-  // Natural end-of-reply always arms the grace window.
+  // Natural end-of-reply re-arms the grace window (it moves the clock
+  // forward from play-start to the actual end).
   tts.on('ended', () => { lastTtsEndAt = Date.now(); });
   // Explicit stop/cancel arms it too — EXCEPT 'reset', which is
   // reset() tearing playback down on purpose for a chat switch, not

@@ -346,3 +346,30 @@ describe('replyNavigator — currentBubble after grace lapses / reset', () => {
     assert.equal(afterReset.allowed, false, 'reset() must clear the grace timestamp, not just the pointer');
   });
 });
+
+// Regression, 2026-09-08: the grace window used to arm ONLY on a terminal
+// tts event ('ended'/'stopped'). When a playback finished by a path that
+// emitted neither, lastTtsEndAt stayed null and the very next skip was
+// refused with "sinceLastTts=n/a" — an intermittent mediasession-skip
+// failure under full-suite load. A reply that STARTED playing is itself
+// proof the user is in a listening session, so play-start arms it too.
+describe('play-start arms the grace window', () => {
+  beforeEach(() => { nav.reset(); });
+
+  test('a skip is allowed after a play-start with no terminal event', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    ttsEmit('play-start', { replyId: 'm-r1' });
+    ttsState = 'idle';              // playback gone, no 'ended'/'stopped' emitted
+    const gate = nav.skipAllowed();
+    assert.equal(gate.allowed, true, `skip must be honored: ${gate.reason}`);
+    assert.match(gate.reason, /recent-tts-grace/);
+  });
+
+  test('the window still lapses on its own after the grace period', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    ttsEmit('play-start', { replyId: 'm-r1' });
+    ttsState = 'idle';
+    t.mock.timers.tick(nav.RECENT_TTS_GRACE_MS + 1000);
+    assert.equal(nav.skipAllowed().allowed, false, 'a long-idle app must not honor skips');
+  });
+});
