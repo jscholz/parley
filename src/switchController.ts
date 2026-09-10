@@ -158,7 +158,7 @@ export function canPaint(tok: PaintToken): boolean {
  *    prewarm   — a speculative fetch/paint (none today) */
 export type NavOrigin =
   | 'tap' | 'keyboard' | 'cmdk' | 'push-tap' | 'deep-link' | 'drill' | 'delete-landing'
-  | 'new-chat' | 'capture-landing'
+  | 'new-chat' | 'capture-landing' | 'retry'
   | 'boot' | 'fallback' | 'reconcile' | 'prewarm';
 
 /** THE authority rule, as a pure function so it is testable and so the
@@ -174,6 +174,15 @@ export function originClass(o: NavOrigin): 'user' | 'programmatic' {
     case 'delete-landing':
     case 'new-chat':
     case 'capture-landing':
+    // 'retry' re-attempts the user's OWN navigation to the SAME chat after
+    // its transcript fetch failed (field 2026-09-10: a flaky link left a
+    // permanently blank transcript). Classed as user because it inherits
+    // the authority of the tap it is finishing — a programmatic class
+    // would be refused outright, since `userNavigated` is sticky for the
+    // session, and the blank would never heal. The caller re-checks that
+    // the chat is still focused at fire time, so it cannot pull the view
+    // away from a newer choice.
+    case 'retry':
       return 'user';
     default:
       return 'programmatic';

@@ -30,6 +30,7 @@ import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
 import { markRecentlyDeleted, unmarkRecentlyDeleted, isRecentlyDeleted, recentlyDeletedSize, markPendingRename, unmarkPendingRename, overlayPendingRenames } from './sessionOps.ts';
 import * as badge from './notifications/badge.ts';
 import * as composerDrafts from './composerDrafts.ts';
+import { shouldRetryResume } from './util/resumeRetry.ts';
 import { escapeHtml } from './util/dom.ts';
 import { toast } from './toast.ts';
 import { isMuted as isChatMuted, setMuted as setChatMuted } from './notifications/mutes.ts';
@@ -889,6 +890,24 @@ let staleTailSweepRunning = false;
 // once a resume re-renders the chat from fresh data (cache/server), which
 // brings the in-memory store current again.
 const memStaleChats = new Set<string>();
+// Retries already scheduled for a chat whose transcript fetch failed with
+// nothing on screen (field 2026-09-10: a flaky link left a permanently
+// blank transcript because nothing re-tried the load). Cleared on a
+// successful render, so a later failure gets a fresh budget.
+const resumeRetryAttempts = new Map<string, number>();
+const resumeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function cancelResumeRetry(id: string): void {
+  const t = resumeRetryTimers.get(id);
+  if (t) clearTimeout(t);
+  resumeRetryTimers.delete(id);
+}
+
+/** Forget a chat's retry budget once its transcript is on screen. */
+function noteResumeRendered(id: string): void {
+  cancelResumeRetry(id);
+  resumeRetryAttempts.delete(id);
+}
 
 function newestMessageSec(messages: any[]): number | null {
   let max: number | null = null;
@@ -2400,6 +2419,7 @@ async function resume(id: string, origin: NavOrigin, targetMessageId?: string) {
         // replaySessionMessages → setDurable; it's current again.
         memStaleChats.delete(id);
         t?.trace('cache-render-end');
+        noteResumeRendered(id);   // content on screen — retry budget spent/moot
         scheduleRefresh();
         cacheRendered = true;
       }
@@ -2486,6 +2506,7 @@ async function resume(id: string, origin: NavOrigin, targetMessageId?: string) {
       // In-memory buffer is now reconciled to the server tail.
       memStaleChats.delete(id);
       t?.trace('server-render-end');
+      noteResumeRendered(id);
       scheduleRefresh();
     } catch (e: any) {
       diag(`sessionDrawer: resume ${id} failed: ${e.message}`);
@@ -2496,6 +2517,35 @@ async function resume(id: string, origin: NavOrigin, targetMessageId?: string) {
         );
         if (!cacheRendered) {
           switchCtl.setOptimistic(null);
+        }
+        // Retry the TRANSCRIPT, not just the drawer (field 2026-09-10, CAP
+        // on flaky 5G): a switch blanks the transcript, the cache render is
+        // skipped when nothing is cached, and a failed /messages fetch then
+        // left an empty view for good — the status line said
+        // "reconnecting…" but only the SSE stream reconnects, and his
+        // stream had never dropped ("Connected" in the header the whole
+        // time), so nothing ever came back to paint it.
+        const attempts = resumeRetryAttempts.get(id) ?? 0;
+        const decision = shouldRetryResume(attempts, {
+          stillViewed: switchCtl.isCurrent(tok),
+          renderedSomething: cacheRendered,
+          offline: typeof navigator !== 'undefined' && navigator.onLine === false,
+        });
+        if (decision.retry) {
+          resumeRetryAttempts.set(id, decision.attempt);
+          cancelResumeRetry(id);
+          resumeRetryTimers.set(id, setTimeout(() => {
+            resumeRetryTimers.delete(id);
+            // Re-check ownership at fire time: a switch away between the
+            // schedule and now means this chat is no longer the user's
+            // concern, and resume() would fight the newer navigation.
+            if (switchCtl.focusedId() !== id) return;
+            diag(`sessionDrawer: retrying transcript for ${id} (attempt ${decision.attempt})`);
+            resume(id, 'retry').catch((err: any) =>
+              diag(`sessionDrawer: retry ${id} failed: ${err?.message ?? err}`));
+          }, decision.delayMs));
+        } else if (decision.retry === false) {
+          diag(`sessionDrawer: no transcript retry for ${id} — ${decision.reason}`);
         }
         scheduleRefresh();
       }

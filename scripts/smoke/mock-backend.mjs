@@ -115,6 +115,7 @@ export async function installMockBackend(page) {
    *  2026-09-06 mis-send (docs/UX_DETERMINISM_PLAN.md §1). */
   let streamConnectDelayMs = 0;
   const messageFailStatus = new Map();
+  const messageFailOnce = new Map();
   /** Active SSE responses (real http.ServerResponse objects). */
   const streamSubs = new Set();
   let envelopeId = 0;
@@ -266,7 +267,14 @@ export async function installMockBackend(page) {
     const m = url.pathname.match(/\/sessions\/([^/]+)\/messages/);
     const chatId = m ? decodeURIComponent(m[1]) : '';
     const chat = chats.get(chatId);
-    const failStatus = messageFailStatus.get(chatId) || 0;
+    let failStatus = messageFailStatus.get(chatId) || 0;
+    // One-shot variant: fail the NEXT fetch only, then serve normally.
+    // Models the transient failure that used to leave a permanently blank
+    // transcript (field 2026-09-10) so a smoke can prove the retry heals it.
+    if (messageFailOnce.has(chatId)) {
+      failStatus = messageFailOnce.get(chatId) || 503;
+      messageFailOnce.delete(chatId);
+    }
     if (failStatus > 0) {
       await route.fulfill({
         status: failStatus,
@@ -1722,6 +1730,10 @@ export async function installMockBackend(page) {
       if (!chatId) return;
       if (status > 0) messageFailStatus.set(chatId, status);
       else messageFailStatus.delete(chatId);
+    },
+    /** Fail the NEXT /messages fetch for this chat, then serve normally. */
+    failMessagesOnce(chatId, status = 503) {
+      messageFailOnce.set(chatId, status);
     },
     /** Configure the /v1/settings/schema response. Pass null to
      *  declare the agent doesn't implement the extension (route
