@@ -170,6 +170,42 @@ export function noteStatus(chatId: string, text: string, done: boolean, opts: No
   apply(chatId, { kind: 'status', text, done }, opts.now ?? Date.now());
 }
 
+/** A NEW turn is starting for this chat (the user's message landed).
+ *
+ *  Clears the `justEnded` latch. That latch stops a straggler `typing`
+ *  arriving moments after a turn ended from resurrecting the dead turn's
+ *  dots — but on its own it also suppressed the FIRST dots of the user's
+ *  NEXT turn for the whole staleness window, since typing was refused
+ *  while it was set. A user message is the unambiguous "new turn" signal,
+ *  so it releases the latch without weakening the straggler guard: a
+ *  stray typing with no user message before it is still ignored. */
+export function noteTurnStarted(chatId: string, opts: NoteOpts = {}): void {
+  if (opts.isReplay) return;
+  indicators.set(chatId, IDLE_TURN_INDICATOR);
+}
+
+/** A turn finished: clear the indicator now rather than waiting for the
+ *  staleness sweep.
+ *
+ *  Field 2026-09-11: "stale thinking dots at the end of turns, which go
+ *  away when I do /agents or /status." Nothing was wired to the definitive
+ *  end-of-turn signal, so the dots sat there for up to
+ *  TURN_INDICATOR_STALE_MS + the sweep's own interval — and the reason a
+ *  slash command "fixed" it is that the next turn's envelopes reset the
+ *  bookkeeping. hermes does not reliably send a terminal `status` for a
+ *  turn, so `reply_final` is the signal to use.
+ *
+ *  INTERIM finals do not end anything: a heartbeat/inactivity send carries
+ *  `interim` and the turn keeps running (the agent is still working), so
+ *  clearing there would flicker the dots off mid-turn — exactly the churn
+ *  the collapsed-by-default work was avoiding. Replays are ignored for the
+ *  same reason `noteStatus` ignores them: a replayed final belongs to a
+ *  turn that is already over and must not touch a live one. */
+export function noteTurnEnded(chatId: string, opts: NoteOpts & { interim?: boolean } = {}): void {
+  if (opts.isReplay || opts.interim) return;
+  apply(chatId, { kind: 'status', text: '', done: true }, opts.now ?? Date.now());
+}
+
 /** Sweep every chat with live bookkeeping and clear any that's gone
  *  stale (no typing/status signal in TURN_INDICATOR_STALE_MS) — the
  *  self-heal for a missed terminal envelope. `now` is injectable so

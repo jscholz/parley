@@ -47,7 +47,7 @@ import { apiOrigin } from './apiBase.ts';
 import * as conversations from './conversations.ts';
 import * as sessionCache from './sessionCache.ts';
 import * as transcriptStore from './transcript/store.ts';
-import { noteTyping, noteStatus, startTurnIndicatorSweep, stopTurnIndicatorSweep } from './transcript/turnIndicator.ts';
+import { noteTyping, noteStatus, noteTurnEnded, noteTurnStarted, startTurnIndicatorSweep, stopTurnIndicatorSweep } from './transcript/turnIndicator.ts';
 import { markRecentlyDeleted, isRecentlyDeleted } from './sessionOps.ts';
 import * as switchCtl from './switchController.ts';
 import { isDevMode } from './util/devMode.ts';
@@ -791,6 +791,13 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       // back on. The shell's two-state thinking indicator can flicker
       // briefly between bubbles — acceptable.
       subs?.onActivity?.({ working: false, conversation: chatId });
+      // End-of-turn clears the in-transcript working indicator. Without
+      // this it lingered until the staleness sweep noticed (field
+      // 2026-09-11: "stale thinking dots at the end of turns, which go
+      // away when I do /agents or /status" — the slash command's own turn
+      // was what reset the bookkeeping). Interim finals are heartbeat
+      // sends mid-turn and must NOT clear it.
+      noteTurnEnded(chatId, { isReplay, interim: env?.interim === true });
       subs?.onFinal?.({ replyId, text: finalText, conversation: chatId, messageId: msgId, isReplay, interim: env?.interim === true });
       // Bump last_message_at so the drawer sort surfaces this row even
       // before /api/parley/sessions enrichment refreshes.
@@ -966,6 +973,12 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       const text = typeof env.text === 'string' ? env.text : '';
       const messageId = typeof env?.message_id === 'string' ? env.message_id : '';
       if (!messageId) return;
+      // A user message starts a turn: release the end-of-turn latch so the
+      // first `typing` of THIS turn paints dots immediately. Without it the
+      // latch (which exists to stop a straggler typing resurrecting the
+      // turn that just ended) also muted the next turn's first dots for
+      // the whole staleness window.
+      noteTurnStarted(chatId, { isReplay: env?._replay === true });
       const isReplay = env?._replay === true;
       subs?.onUserMessage?.({ conversation: chatId, text, messageId, isReplay });
       // Drawer ordering — skip on replay (see reply_final's matching

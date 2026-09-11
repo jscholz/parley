@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
   reduceTurnIndicator, turnIndicatorLabel, isTurnIndicatorStale,
   IDLE_TURN_INDICATOR, TURN_INDICATOR_STALE_MS,
-  noteTyping, noteStatus, sweepStaleTurnIndicators, resetTurnIndicators,
+  noteTyping, noteStatus, noteTurnEnded, noteTurnStarted, sweepStaleTurnIndicators, resetTurnIndicators,
 } from './turnIndicator.ts';
 import { getState } from './store.ts';
 
@@ -135,5 +135,83 @@ describe('noteTyping / noteStatus — per-chat wiring into transcript/store', ()
     assert.notEqual(getState(chatId).turnStatus, null, 'not stale yet — must still be showing');
     sweepStaleTurnIndicators(T0 + TURN_INDICATOR_STALE_MS);
     assert.equal(getState(chatId).turnStatus, null, 'stale — sweep must clear it');
+  });
+});
+
+// ── end-of-turn (field 2026-09-11) ─────────────────────────────────────
+// "Stale thinking dots at the end of turns, which go away when I do
+// /agents or /status." Nothing was wired to reply_final, so the dots sat
+// out the staleness window; the slash command only "fixed" it because its
+// own turn reset the bookkeeping.
+describe('noteTurnEnded', () => {
+  it('clears the indicator immediately when a turn finishes', () => {
+    const chatId = `chat-end-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    assert.equal(getState(chatId).turnStatus?.text, '');
+    noteTurnEnded(chatId, { now: T0 + 10 });
+    assert.equal(getState(chatId).turnStatus, null);
+  });
+
+  it('does NOT clear on an interim (heartbeat) final — the turn is still running', () => {
+    const chatId = `chat-end-interim-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    noteStatus(chatId, '⏳ Working — 2 min — iteration 7/60, terminal', false, { now: T0 + 5 });
+    const mid = getState(chatId).turnStatus?.text;
+    noteTurnEnded(chatId, { now: T0 + 10, interim: true });
+    assert.equal(getState(chatId).turnStatus?.text, mid,
+      'an interim final must leave the indicator alone');
+  });
+
+  it('ignores a replayed final so it cannot kill a live turn', () => {
+    const chatId = `chat-end-replay-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    noteTurnEnded(chatId, { now: T0 + 10, isReplay: true });
+    assert.equal(getState(chatId).turnStatus?.text, '');
+  });
+
+  it('leaves other chats alone', () => {
+    const a = `chat-end-a-${Math.random()}`;
+    const b = `chat-end-b-${Math.random()}`;
+    noteTyping(a, { now: T0 });
+    noteTyping(b, { now: T0 });
+    noteTurnEnded(a, { now: T0 + 10 });
+    assert.equal(getState(a).turnStatus, null);
+    assert.equal(getState(b).turnStatus?.text, '');
+  });
+});
+
+// ── turn start releases the end-of-turn latch (field 2026-09-11) ───────
+// The latch that stops a straggler `typing` resurrecting a finished turn
+// also muted the FIRST dots of the next turn for the whole staleness
+// window. A user message is the unambiguous new-turn signal.
+describe('noteTurnStarted', () => {
+  it('lets the next turn paint immediately after a finished one', () => {
+    const chatId = `chat-restart-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    noteTurnEnded(chatId, { now: T0 + 10 });
+    assert.equal(getState(chatId).turnStatus, null);
+    // Without the release this typing is refused for TURN_INDICATOR_STALE_MS.
+    noteTurnStarted(chatId, {});
+    noteTyping(chatId, { now: T0 + 20 });
+    assert.equal(getState(chatId).turnStatus?.text, '',
+      "a new turn's first typing must paint at once");
+  });
+
+  it('still suppresses a straggler typing when no new turn began', () => {
+    const chatId = `chat-straggler-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    noteTurnEnded(chatId, { now: T0 + 10 });
+    noteTyping(chatId, { now: T0 + 20 });
+    assert.equal(getState(chatId).turnStatus, null,
+      'a stray typing with no user message before it must stay ignored');
+  });
+
+  it('ignores a replayed user message', () => {
+    const chatId = `chat-restart-replay-${Math.random()}`;
+    noteTyping(chatId, { now: T0 });
+    noteTurnEnded(chatId, { now: T0 + 10 });
+    noteTurnStarted(chatId, { isReplay: true });
+    noteTyping(chatId, { now: T0 + 20 });
+    assert.equal(getState(chatId).turnStatus, null);
   });
 });

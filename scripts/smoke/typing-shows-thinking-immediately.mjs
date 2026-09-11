@@ -127,4 +127,41 @@ export default async function run({ page, log, mock }) {
   snap = await turnStatusSnapshot(page);
   assert(snap.count === 0, `a straggler typing right after done must not resurrect the bubble, got ${snap.count} rows`);
   log('straggler typing after done did not resurrect the bubble ✓');
+
+  // A turn that ends with reply_final and NO terminal status must clear the
+  // indicator too (field 2026-09-11: "stale thinking dots at the end of
+  // turns, which go away when I do /agents or /status" — hermes does not
+  // reliably send a terminal status, so the dots sat out the staleness
+  // window until the slash command's own turn reset the bookkeeping).
+  // A user message starts the next turn and releases the end-of-turn latch
+  // (without it, the straggler guard also muted this turn's first dots for
+  // the whole staleness window).
+  mock.pushEnvelope({
+    type: 'user_message', chat_id: CHAT_ID, message_id: 'umsg-next-turn', text: 'next question',
+  });
+  mock.pushEnvelope({ type: 'typing', chat_id: CHAT_ID });
+  await page.waitForFunction(
+    () => !!document.querySelector('#transcript .line.turn-status'),
+    null, { timeout: 4_000, polling: 100 },
+  ).catch(() => { throw new Error("a new turn's first typing must paint dots at once"); });
+  log('a new turn paints dots immediately after the previous one ended ✓');
+  // Interim first: a heartbeat send must NOT take the indicator down.
+  mock.pushEnvelope({
+    type: 'reply_final', chat_id: CHAT_ID, message_id: 'msg-interim-1',
+    text: 'partial progress', interim: true,
+  });
+  await page.waitForTimeout(600);
+  if (!(await page.$('#transcript .line.turn-status'))) {
+    throw new Error('an interim reply_final must leave the working indicator up — the turn is still running');
+  }
+  log('interim reply_final left the indicator up ✓');
+
+  mock.pushEnvelope({
+    type: 'reply_final', chat_id: CHAT_ID, message_id: 'msg-final-1', text: 'all done',
+  });
+  await page.waitForFunction(
+    () => !document.querySelector('#transcript .line.turn-status'),
+    null, { timeout: 4_000, polling: 100 },
+  ).catch(() => { throw new Error('reply_final did not clear the working indicator'); });
+  log('reply_final cleared the indicator without waiting for the staleness sweep ✓');
 }
