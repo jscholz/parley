@@ -129,6 +129,34 @@ export async function putListCache(sessions: any[]): Promise<void> {
   } catch {}
 }
 
+/** What the drawer's background prefetch should do with the window it
+ *  just fetched, given what is already cached.
+ *
+ *  - `merge`         the window overlaps a fuller cache: upsert it in.
+ *  - `keep-existing` the window does NOT overlap a fuller cache. Merging
+ *                    would leave a permanent mid-transcript hole (the
+ *                    window is entirely newer than anything cached), and
+ *                    REPLACING throws away history the user can see —
+ *                    field 2026-09-11: a 279-turn chat cached 12 rows, so
+ *                    every switch painted a near-empty transcript until
+ *                    the full page arrived ~6s later. A busy chat reaches
+ *                    this state whenever it advances by more than the
+ *                    window between prefetches. Keep the history and mark
+ *                    the record partial so the next resume fetches a full
+ *                    page.
+ *  - `replace`       nothing cached, or the window is at least as big as
+ *                    the cache: the window IS the better record.
+ */
+export type PrefetchMergeMode = 'merge' | 'keep-existing' | 'replace';
+
+export function prefetchMergeMode(
+  existingCount: number, pageCount: number, overlaps: boolean,
+): PrefetchMergeMode {
+  const existingIsFuller = existingCount > pageCount;
+  if (!existingIsFuller) return 'replace';
+  return overlaps ? 'merge' : 'keep-existing';
+}
+
 /** `partial: true` marks a record written by the drawer's tiny boot
  *  prefetch (a ~12-row newest window, NOT a full newest page). Partial
  *  records are fine as instant-paint material but must never serve as

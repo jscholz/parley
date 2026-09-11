@@ -19,6 +19,7 @@ import {
   capTranscript,
   sameTranscript,
   MAX_CACHED_MESSAGES,
+  prefetchMergeMode,
 } from './sessionCache.ts';
 
 const row = (id: number, content = `m${id}`) => ({ id, content });
@@ -108,5 +109,31 @@ describe('sameTranscript', () => {
 
   it('false for reordered / different ids', () => {
     assert.equal(sameTranscript([row(1), row(2)], [row(2), row(1)]), false);
+  });
+});
+
+
+describe('prefetchMergeMode', () => {
+  // A 279-turn chat he had been in minutes earlier cached only 12 rows, so
+  // every switch into it painted a near-empty transcript until the full page
+  // landed ~6s later. Cause: the background prefetch REPLACED the cache with
+  // its ~12-row window whenever that window did not overlap what was cached
+  // — which is the normal state of a busy chat, since it advances by more
+  // than a window between prefetches.
+  it('prefetchMergeMode merges an overlapping window into a fuller cache', () => {
+    assert.equal(prefetchMergeMode(200, 12, true), 'merge');
+  });
+
+  it('prefetchMergeMode KEEPS a fuller cache when the window does not overlap', () => {
+    assert.equal(prefetchMergeMode(200, 12, false), 'keep-existing');
+  });
+
+  it('prefetchMergeMode replaces when there is nothing cached', () => {
+    assert.equal(prefetchMergeMode(0, 12, false), 'replace');
+  });
+
+  it('prefetchMergeMode replaces when the window is at least as full as the cache', () => {
+    assert.equal(prefetchMergeMode(12, 12, false), 'replace');
+    assert.equal(prefetchMergeMode(5, 12, false), 'replace');
   });
 });

@@ -826,15 +826,35 @@ async function fetchAndMergeNewestPage(
   // String(id) — one chat can mix numeric and ms-timestamp id spaces.
   const cachedIds = new Set((existing?.messages ?? []).map((m: any) => String(m?.id)));
   const overlaps = page.some((row: any) => row?.id != null && cachedIds.has(String(row.id)));
-  const cacheFuller = !!existing && existing.messages.length > page.length && overlaps;
-  const merged = cacheFuller ? sessionCache.mergeNewestPage(existing!.messages, page) : page;
+  // No overlap and the cache is FULLER than this window: refusing to merge
+  // is right (it would leave a permanent mid-transcript hole), but the old
+  // fallback — writing the window in its place — threw away good history.
+  // Field 2026-09-11: a 279-turn chat he had been in minutes earlier cached
+  // just 12 rows, so every switch painted a near-empty transcript for the
+  // ~6s the full page took to arrive. A busy chat reaches this state easily:
+  // when it has advanced by more than the ~12-row window since the cache was
+  // written, the newest rows are entirely newer than anything cached, so the
+  // overlap test finds nothing. Keep the history, flag it partial so the
+  // next resume fetches a full page (and delta-resume won't trust this tail).
+  const mode = sessionCache.prefetchMergeMode(
+    existing?.messages.length ?? 0, page.length, overlaps,
+  );
+  if (mode === 'keep-existing' && existing) {
+    diag(`prefetch: keeping ${existing.messages.length} cached rows for ${id} `
+      + `(window of ${page.length} does not overlap; marked partial)`);
+    await sessionCache.putMessagesCache(
+      id, existing.messages, { ...existing.pagination, partial: true },
+    );
+    return;
+  }
+  const merged = mode === 'merge' ? sessionCache.mergeNewestPage(existing!.messages, page) : page;
   // This is a tiny prefetch window, not a full newest page. Mark it
   // partial ONLY when older rows exist beyond the window (hasMore) —
   // otherwise the window reached the transcript start and IS the
   // complete history, safe for delta resume (#191) to use as a tail
   // cursor. Marking a complete small chat partial needlessly forces a
   // full-page refetch on switch-back.
-  const pagination = cacheFuller
+  const pagination = mode === 'merge'
     ? existing!.pagination
     : { firstId: r.firstId ?? null, hasMore: !!r.hasMore, partial: !!r.hasMore };
   const capped = sessionCache.capTranscript(merged, pagination);
