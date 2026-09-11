@@ -9,9 +9,20 @@
 // cursor, fetches nothing, and the hole never heals.
 //
 // Fix under test: the merge is only taken when the fetched window
-// OVERLAPS the cache (shares at least one id); otherwise the cache is
-// replaced by the window flagged `partial: true`, which delta resume
-// refuses as a cursor — the next open does a full fetch and heals.
+// OVERLAPS the cache (shares at least one id). Without overlap the cache
+// is NOT spliced — and, since 2026-09-11, not replaced either: the
+// cached history is KEPT and the record flagged `partial: true`, which
+// delta resume refuses as a cursor, so the next open does a full fetch
+// and heals.
+//
+// That last part changed after a field report: replacing a fuller cache
+// with the ~12-row window meant a busy chat cached 12 rows of a 279-turn
+// conversation, so every switch into it painted a near-empty transcript
+// for the ~6s the full page took ("I was just looking at this session a
+// few minutes ago so it should have been cached"). Keeping the history
+// trades a briefly stale TAIL for a transcript that is actually there;
+// the hole protection and the heal-on-next-open are unchanged, and this
+// scenario still guards both.
 //
 // Test plan (mocked):
 //   1. Seed chats A (to view) and B (20 msgs, last activity ~10 min ago).
@@ -117,12 +128,20 @@ export default async function run({ page, log, mock }) {
     const sd = await import('/build/sessionDrawer.mjs');
     await sd.refresh();
   });
-  await pollUntil(page, async ({ c, s }) => {
+  // The sweep must mark the record partial WITHOUT throwing away the
+  // cached history: msgs 1..20 stay, the window's tail is not adopted
+  // (adopting it is what used to leave 12 rows of a long chat), and the
+  // partial flag is what makes the next open fetch a full page.
+  await pollUntil(page, async ({ c }) => {
     const sc = await import('/build/sessionCache.mjs');
     const rec = await sc.getMessagesCache(c);
-    return !!rec?.messages?.some((m) => m?.parley_id === s);
-  }, { c: CHAT_B, s: WINDOW_TAIL_ID }, { timeout: 8_000, polling: 200, label: `sweep never merged ${WINDOW_TAIL_ID} into B's cache` });
-  log('sweep refreshed B cache with the no-overlap window ✓');
+    return !!rec?.pagination?.partial;
+  }, { c: CHAT_B }, { timeout: 8_000, polling: 200, label: "sweep never flagged B's cache partial" });
+  assert(await cacheHasMsg(page, CHAT_B, 'tfcb2-msg-20'),
+    'the sweep must KEEP the cached history, not replace it with the window');
+  assert(!(await cacheHasMsg(page, CHAT_B, WINDOW_TAIL_ID)),
+    'the no-overlap window must not be spliced in (that is the hole bug)');
+  log('sweep kept B history and flagged the record partial ✓');
 
   // 5. Switch to B — the messages the window skipped (21..23) must
   //    render once the resume settles. With the splice bug the cache
