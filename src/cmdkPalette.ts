@@ -1,25 +1,40 @@
 /**
- * @fileoverview cmd+K command palette — search across the cached session
- * list (instant) and against the active backend's message-search index
- * (debounced 300ms, via `backend.search('both', q, …)`). Backends without
- * a search implementation (openclaw, openai-compat, hermes-gateway today)
- * return an empty result and the palette degrades to the cached-sessions
- * filter only.
+ * @fileoverview cmd+K command palette — search across sessions and
+ * messages.
+ *
+ * Two sections, one flat keyboard list:
+ *
+ *   Sessions — rows whose VISIBLE name matches the query (or whose id
+ *     contains a pasted id fragment, badged "id match"). Painted
+ *     instantly from the cached drawer list, then RECONCILED with the
+ *     backend's answer: the server adds rows the cache didn't have; it
+ *     never removes a row the client matched (his 2026-09-12 report:
+ *     "fix cron" flashed then vanished because the server repaint used
+ *     to replace the section wholesale).
+ *   Messages — backend hits only. Each row is a plain-text excerpt with
+ *     the matched text marked, under a meta line naming the chat, role,
+ *     time, and how many further hits that chat has.
+ *
+ * The backend contract (`SearchResult`) carries the match reason and
+ * highlight ranges; this file paints them and never re-implements a
+ * backend's matching rules. Responses are sequence-guarded so a slow
+ * answer to an older query cannot repaint over a newer one.
  *
  * Layout: <dialog> modal mirroring the session-info-dialog pattern in
  * sessionDrawer.ts (centered, ::backdrop, click-outside-to-close, Esc
- * built into <dialog>). Two sections — Sessions (top, instant) and
- * Messages (bottom, network) — keyboard navigable as one flat list.
- *
- * Enter on either kind resumes the underlying session; we do NOT
- * scroll-to-specific-message for message hits — that's a deferred follow-up.
+ * built into <dialog>).
  */
 
 import * as backend from './backend.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
 import * as switchCtl from './switchController.ts';
-import { parseQuery, applyFilter } from './sessionFilter.ts';
-import type { SearchMessageHit as ServerMessageHit } from './proxyClientTypes.ts';
+import { parseQuery, matchSession, displayLabel } from './sessionFilter.ts';
+import type { SearchMessageHit as ServerMessageHit, SearchSessionRow } from './proxyClientTypes.ts';
+import {
+  QuerySequence, reconcileSessions, viewFromServer, highlightRanges, segments,
+  sessionsEmptyText, messagesStatusText, hitMetaParts,
+} from './search/searchModel.ts';
+import type { SessionView } from './search/searchModel.ts';
 import { diag } from './util/log.ts';
 import * as headerTitle from './headerTitle.ts';
 
@@ -32,7 +47,7 @@ type SessionHit = {
 type MessageHit = {
   kind: 'message';
   session_id: string;
-  message_id: number;
+  message_id: number | string;
   role: string;
   snippet: string;
   timestamp: number;
@@ -53,6 +68,9 @@ let visibleHits: Hit[] = [];
 let activeIdx = 0;
 let messagesDebounceTimer: number | null = null;
 let messagesAbortCtl: AbortController | null = null;
+/** Monotonic query counter — a response is painted only if it answers
+ *  the query the input currently holds. */
+const querySeq = new QuerySequence();
 
 /** Resume callback supplied by main.ts. Session-hit activations (no
  *  specific message target) funnel through this so we don't have to
@@ -130,7 +148,7 @@ export function open() {
   if (messagesStatusEl) messagesStatusEl.textContent = '';
   // Render an initial sessions snapshot (no filter = full list, top 10)
   // so the modal isn't empty before the user types.
-  rerenderSessions('');
+  paintSessions('', null, true);
   dialogEl.showModal();
   // showModal() autofocuses the first focusable element, which is the
   // input due to DOM order — but explicitly focus + select to be safe
@@ -187,31 +205,31 @@ function ensureDialog() {
 
   inputEl.addEventListener('input', () => {
     const q = inputEl!.value;
-    // Instant client-side paint of the sessions section over the
-    // cached list — keeps the modal feeling immediate while the
-    // server round-trip is in flight.
-    rerenderSessions(q);
+    const seq = querySeq.next();
     if (messagesDebounceTimer != null) clearTimeout(messagesDebounceTimer);
-    if (!q.trim()) {
-      // Clear messages section + cancel anything in flight. Sessions
-      // already rerendered above (full cached list, top 10).
-      if (messagesAbortCtl) { messagesAbortCtl.abort(); messagesAbortCtl = null; }
-      if (messagesListEl) messagesListEl.innerHTML = '';
+    if (messagesAbortCtl) { messagesAbortCtl.abort(); messagesAbortCtl = null; }
+    // Instant client-side paint of the sessions section over the cached
+    // list. Without a server index this IS the answer, so it may claim
+    // "No matching sessions" right away; with one, the empty state waits
+    // for the authoritative reply.
+    paintSessions(q, null, !backend.hasSearch());
+    if (messagesListEl) messagesListEl.innerHTML = '';
+    if (!q.trim() || !backend.hasSearch()) {
       if (messagesStatusEl) messagesStatusEl.textContent = '';
       rebuildVisibleHits();
       return;
     }
-    if (messagesStatusEl) messagesStatusEl.textContent = '…';
-    // Debounce backend search — don't pummel server with one query per
-    // keystroke. 300ms hits the sweet spot for a chunky type-and-pause.
-    // backend.search(q, 'both') returns sessions + messages in one round
-    // trip, so the server-authoritative sessions list reconciles into the
-    // panel as well (covers matches outside the cached top-50). Backends
-    // without a search implementation return {sessions:[], hits:[]} and
-    // the messages section just stays empty.
+    if (messagesStatusEl) {
+      messagesStatusEl.textContent = messagesStatusText({
+        query: q, hitCount: 0, serverAnswered: false, hasSearch: true,
+      });
+    }
+    rebuildVisibleHits();
+    // Debounce the backend round-trip — one request per type-and-pause,
+    // not one per keystroke.
     messagesDebounceTimer = setTimeout(() => {
       messagesDebounceTimer = null;
-      runUnifiedSearch(q);
+      runUnifiedSearch(q, seq);
     }, 300) as unknown as number;
   });
 
@@ -231,128 +249,131 @@ function ensureDialog() {
   });
 }
 
-/** Render the sessions section against the cached session list. Instant —
- *  no network. Top 10 results to keep the modal compact. */
-function rerenderSessions(q: string) {
+/** Client-side session views for `q` over the cached drawer list: the
+ *  rows whose visible label (or id, for a lone id-shaped token) matches,
+ *  with highlight ranges into the label. Empty query → the recent list. */
+function clientSessionViews(q: string): SessionView[] {
+  const parsed = parseQuery(q);
+  const terms = parsed.terms;
+  const out: SessionView[] = [];
+  for (const s of sessionDrawer.getCachedSessions()) {
+    if (!s?.id) continue;
+    const match = matchSession(s, parsed);
+    if (!match) continue;
+    const title = displayLabel(s);
+    out.push({
+      id: s.id,
+      title,
+      source: s.source ?? null,
+      messageCount: typeof s.messageCount === 'number' ? s.messageCount : null,
+      lastMessageAt: typeof s.lastMessageAt === 'number' ? s.lastMessageAt : null,
+      match,
+      highlights: match === 'title' && terms.length ? highlightRanges(title, terms) : [],
+    });
+  }
+  return out;
+}
+
+/** Paint the sessions section. `serverRows === null` is the instant
+ *  client paint; otherwise the server answer is reconciled INTO the
+ *  client rows (add/merge, never remove). */
+function paintSessions(q: string, serverRows: SearchSessionRow[] | null, serverAnswered: boolean) {
   if (!sessionsListEl) return;
-  const sessions = sessionDrawer.getCachedSessions();
-  const filtered = q.trim() ? applyFilter(sessions, parseQuery(q)) : sessions;
-  const top = filtered.slice(0, 10);
+  const terms = parseQuery(q).terms;
+  const client = clientSessionViews(q);
+  const rows = serverRows
+    ? reconcileSessions(client, serverRows.map((r) => viewFromServer(r, terms)), 10)
+    : client.slice(0, 10);
   sessionsListEl.innerHTML = '';
-  if (top.length === 0) {
-    if (q.trim()) {
-      const empty = document.createElement('li');
-      empty.className = 'cmdk-empty';
-      empty.textContent = 'No matching sessions.';
-      sessionsListEl.appendChild(empty);
-    }
-  } else {
-    for (const s of top) {
-      sessionsListEl.appendChild(renderSessionRow(s));
-    }
+  for (const v of rows) sessionsListEl.appendChild(renderSessionRow(v));
+  const empty = sessionsEmptyText({ query: q, rowCount: rows.length, serverAnswered });
+  if (empty) {
+    const li = document.createElement('li');
+    li.className = 'cmdk-empty';
+    li.textContent = empty;
+    sessionsListEl.appendChild(li);
   }
   rebuildVisibleHits();
 }
 
-function renderSessionRow(s: any): HTMLLIElement {
+/** Fill `el` with `text`, wrapping each highlight range in <mark>. */
+function paintHighlighted(el: HTMLElement, text: string, ranges: number[][] | undefined) {
+  el.textContent = '';
+  for (const seg of segments(text, ranges)) {
+    if (seg.hit) {
+      const m = document.createElement('mark');
+      m.textContent = seg.text;
+      el.appendChild(m);
+    } else {
+      el.appendChild(document.createTextNode(seg.text));
+    }
+  }
+}
+
+function renderSessionRow(v: SessionView): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'cmdk-row';
   li.dataset.kind = 'session';
-  li.dataset.id = s.id;
+  li.dataset.id = v.id;
+  li.dataset.match = v.match;
   const title = document.createElement('div');
   title.className = 'cmdk-row-title';
-  title.textContent = s.title || s.snippet || s.id;
+  paintHighlighted(title, v.title, v.highlights);
   const meta = document.createElement('div');
   meta.className = 'cmdk-row-meta';
   const parts: string[] = [];
-  if (s.source) parts.push(s.source);
-  if (typeof s.messageCount === 'number') parts.push(`${s.messageCount} msgs`);
+  if (v.source) parts.push(v.source);
+  if (typeof v.messageCount === 'number') parts.push(`${v.messageCount} msgs`);
   meta.textContent = parts.join(' · ');
+  if (v.match === 'id') {
+    // The reason badge lives on the meta line so `.cmdk-row-title` stays
+    // pure text (tests and screen readers read the name alone).
+    const badge = document.createElement('span');
+    badge.className = 'cmdk-badge';
+    badge.textContent = 'id match';
+    meta.prepend(badge);
+  }
   li.appendChild(title);
   li.appendChild(meta);
   li.addEventListener('mouseenter', () => setActiveByElement(li));
   li.addEventListener('click', () => {
-    activate({
-      kind: 'session',
-      id: s.id,
-      title: s.title || s.snippet || s.id,
-      meta: meta.textContent || '',
-    });
+    activate({ kind: 'session', id: v.id, title: v.title, meta: meta.textContent || '' });
   });
   return li;
 }
 
-/** Run a single round-trip via backend.search('both') — pulls sessions
- *  (server-authoritative, may include rows outside the cached top-50)
- *  and message FTS hits in one request. The sessions section is repainted
- *  with the server-truth result so deep-history matches surface.
- *  AbortController is shared with the legacy `messagesAbortCtl` slot
- *  so an in-flight earlier query gets cancelled correctly. Backends
- *  without an index return `{sessions:[], hits:[]}`; the cached-sessions
- *  paint from rerenderSessions() above is what the user actually sees. */
-async function runUnifiedSearch(q: string) {
+/** One backend round-trip via backend.search('both'). Paints only if
+ *  `seq` is still the current query — an older answer landing late is
+ *  dropped, which is what keeps a result from "disappearing" under the
+ *  user (a slow reply to "fix" must not overwrite the answer to
+ *  "fix cron"). */
+async function runUnifiedSearch(q: string, seq: number) {
   if (messagesAbortCtl) messagesAbortCtl.abort();
-  messagesAbortCtl = new AbortController();
+  const ctl = new AbortController();
+  messagesAbortCtl = ctl;
   try {
-    const result = await backend.search(q, 'both', { limit: 20, signal: messagesAbortCtl.signal });
+    const result = await backend.search(q, 'both', { limit: 20, signal: ctl.signal });
+    if (!querySeq.isCurrent(seq) || ctl.signal.aborted) return;
     if (!messagesListEl || !messagesStatusEl || !sessionsListEl) return;
-    // Sessions section: only repaint from the SERVER result if the
-    // active backend actually has a search index. Otherwise the
-    // cached client-side fuzzy filter (painted by rerenderSessions
-    // on every keystroke) is the answer — we do not want to clobber
-    // it with an empty server response. Pre-fix bug: a hermes-gateway
-    // user typing "lon" would briefly see fuzzy hits, then watch them
-    // disappear 300ms later when the empty server search overwrote
-    // the section with "No matching sessions."
-    if (backend.hasSearch()) {
-      const topSessions = result.sessions.slice(0, 10);
-      // The user's RENAMED session title lives in parley.db
-      // conversation_titles (client-cached), NOT in the hermes FTS index —
-      // so server search results carry the stale/auto title (often empty,
-      // → renderSessionRow falls back to the raw `parley:<uuid>` id).
-      // Merge the cached override title by id so the server repaint doesn't
-      // clobber the name the user gave it (field 2026-05-27: search match
-      // flashed the real name, then ~300ms later showed the raw id).
-      const titleById = new Map(
-        sessionDrawer.getCachedSessions().map((c: any) => [c.id, c.title]),
-      );
-      sessionsListEl.innerHTML = '';
-      if (topSessions.length === 0 && q.trim()) {
-        const empty = document.createElement('li');
-        empty.className = 'cmdk-empty';
-        empty.textContent = 'No matching sessions.';
-        sessionsListEl.appendChild(empty);
-      } else {
-        for (const s of topSessions) {
-          const title = titleById.get(s.id) || s.title || '';
-          sessionsListEl.appendChild(renderSessionRow(title ? { ...s, title } : s));
-        }
-      }
-    }
-    // Messages section: always repaint. Backends without a search
-    // index return result.hits = [] and the status flips to "no
-    // matches" — that's accurate for messages (we can't fuzzy-match
-    // message bodies client-side; cached IDB only stores transcripts
-    // for chats the user has resumed).
+    if (inputEl && inputEl.value !== q) return;
+    paintSessions(q, result.sessions, true);
     messagesListEl.innerHTML = '';
-    if (result.error) {
-      messagesStatusEl.textContent = result.error;
-      rebuildVisibleHits();
-      return;
+    if (!result.error) {
+      const terms = parseQuery(q).terms;
+      for (const h of result.hits) messagesListEl.appendChild(renderMessageRow(h, terms));
     }
-    if (!backend.hasSearch()) {
-      messagesStatusEl.textContent = '';
-    } else {
-      messagesStatusEl.textContent = result.hits.length ? '' : 'no matches';
-      for (const h of result.hits) {
-        messagesListEl.appendChild(renderMessageRow(h));
-      }
-    }
+    messagesStatusEl.textContent = messagesStatusText({
+      query: q, hitCount: result.hits.length, serverAnswered: true,
+      hasSearch: true, error: result.error || null,
+    });
     rebuildVisibleHits();
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
+    if (!querySeq.isCurrent(seq)) return;
     diag(`cmdk: unified search failed: ${e?.message || e}`);
     if (messagesStatusEl) messagesStatusEl.textContent = 'error';
+  } finally {
+    if (messagesAbortCtl === ctl) messagesAbortCtl = null;
   }
 }
 
@@ -372,7 +393,7 @@ function formatHitTime(ts: number): string {
   return `${date}, ${time}`;
 }
 
-function renderMessageRow(h: ServerMessageHit): HTMLLIElement {
+function renderMessageRow(h: ServerMessageHit, terms: string[]): HTMLLIElement {
   const li = document.createElement('li');
   li.className = 'cmdk-row';
   li.dataset.kind = 'message';
@@ -382,17 +403,27 @@ function renderMessageRow(h: ServerMessageHit): HTMLLIElement {
   li.dataset.sessionId = h.session_id;
   if (h.role) li.dataset.role = h.role;
   const title = document.createElement('div');
-  title.className = 'cmdk-row-title';
-  title.textContent = h.snippet || '(empty)';
+  title.className = 'cmdk-row-title cmdk-excerpt';
+  const text = h.snippet || '(empty)';
+  // Backends that don't send ranges get client-side marks on the terms.
+  const ranges = Array.isArray(h.highlights) && h.highlights.length
+    ? h.highlights
+    : highlightRanges(text, terms);
+  paintHighlighted(title, text, ranges);
   const meta = document.createElement('div');
   meta.className = 'cmdk-row-meta';
-  const parts: string[] = [];
-  if (h.session_title) parts.push(h.session_title);
-  if (h.session_source) parts.push(h.session_source);
-  if (h.role) parts.push(h.role);
-  const when = formatHitTime(h.timestamp);
-  if (when) parts.push(when);
-  meta.textContent = parts.join(' · ');
+  const parts = hitMetaParts(h, formatHitTime(h.timestamp));
+  const more = Number(h.more_in_session || 0);
+  if (more > 0) {
+    // Last part is the "+N more" note — give it the accent colour.
+    meta.textContent = parts.slice(0, -1).join(' · ') + (parts.length > 1 ? ' · ' : '');
+    const span = document.createElement('span');
+    span.className = 'cmdk-row-more';
+    span.textContent = parts[parts.length - 1];
+    meta.appendChild(span);
+  } else {
+    meta.textContent = parts.join(' · ');
+  }
   li.appendChild(title);
   li.appendChild(meta);
   li.addEventListener('mouseenter', () => setActiveByElement(li));
@@ -424,7 +455,7 @@ function rebuildVisibleHits() {
       visibleHits.push({
         kind: 'message',
         session_id: li.dataset.sessionId || '',
-        message_id: parseInt(li.dataset.id || '0', 10),
+        message_id: li.dataset.id || '',
         role: li.dataset.role || '',
         snippet: li.querySelector('.cmdk-row-title')?.textContent || '',
         timestamp: 0,

@@ -499,6 +499,11 @@ let filterServerTimer: number | null = null;
  *  cancels the previous request so we don't paint stale results over fresh
  *  ones if the older response lands second. */
 let filterServerAbort: AbortController | null = null;
+/** Server-found rows outside the cached window for the CURRENT filter
+ *  value, rendered after the client matches. Cleared when the filter
+ *  changes (`filterServerExtrasFor` no longer equals `currentFilter`). */
+let filterServerExtras: any[] = [];
+let filterServerExtrasFor = '';
 
 // Switch focus state (optimistic highlight, committed view, generation)
 // is owned by switchController — see that module's header. Reads come
@@ -1199,8 +1204,25 @@ async function runServerFilterReconcile(q: string) {
     // filter or typed something different. Drop stale results — the
     // current input handler will dispatch its own reconcile.
     if (q !== currentFilter) return;
-    cachedSessions = overlayPendingRenames(sessions);
-    await sessionCache.putListCache(sessions);
+    // ADD, never replace (2026-09-12): the server answer used to
+    // overwrite cachedSessions AND the IDB list cache with the search
+    // result, so the drawer lost its top-50 (and their message counts)
+    // until the next refresh, and rows the client matched on a visible
+    // name vanished when the server ranked differently. Now server-only
+    // rows ride along as an overlay for the life of this filter value.
+    const known = new Set(cachedSessions.map((s: any) => s.id));
+    filterServerExtras = sessions
+      .filter((s: any) => s?.id && !known.has(s.id))
+      .map((s: any) => ({
+        id: s.id,
+        source: s.source || 'parley',
+        title: s.title || '',
+        snippet: s.snippet || '',
+        lastMessageAt: typeof s.lastMessageAt === 'number' ? s.lastMessageAt : 0,
+        messageCount: typeof s.messageCount === 'number' ? s.messageCount : 0,
+        sessionIds: undefined,
+      }));
+    filterServerExtrasFor = q;
     const listEl = document.getElementById('sessions-list');
     if (!listEl) return;
     const active = activeRowId();
@@ -1332,8 +1354,15 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   // stays visible across session-switch even when cachedSessions gets
   // overwritten by the server fetch.
   const merged = mergePending(base);
+  // Server-only matches for this exact filter value append after the
+  // client matches. They already passed the server's name match, so
+  // they bypass the client text filter (an id-match row's title need
+  // not contain the query).
+  const extras = (currentFilter && filterServerExtrasFor === currentFilter)
+    ? filterServerExtras.filter(e => !merged.some(m => m.id === e.id))
+    : [];
   const textFiltered = currentFilter
-    ? applyFilter(merged, parseQuery(currentFilter))
+    ? [...applyFilter(merged, parseQuery(currentFilter)), ...extras]
     : merged;
   // Option filter (has-recording) stacks on top of the text filter.
   const filtered = applyRecordingFilter(textFiltered, recordingFilter, hasMeetings);

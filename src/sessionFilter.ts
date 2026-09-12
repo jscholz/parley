@@ -14,8 +14,14 @@
  *     are dropped entirely — they shouldn't filter the list to nothing.
  *   - Empty input → pass-through (no filtering).
  *
- * Match field union: title || snippet || source || id. ALL terms+globs
- * must hit somewhere in that union for a session to pass.
+ * Match fields (2026-09-12 redesign — his report: "why is there a hit
+ * without a string match?"): a row matches on what the drawer SHOWS —
+ * its display label (title, else first-message snippet, else raw id)
+ * plus the source chip. ALL terms+globs must hit in that text. Hidden
+ * fields (the snippet behind a title, rolled-up hermes session ids)
+ * never produce a text match. Pasted ids are served by a separate,
+ * explicit id pass (`matchSession` → 'id') so the UI can label the
+ * reason.
  */
 
 export type FilterQuery = {
@@ -76,14 +82,51 @@ function globToRegex(glob: string): RegExp {
   return new RegExp(pattern, 'i');
 }
 
-/** Build the searchable text for a session row — concat of the same fields
- *  the Info panel exposes. Single string, lower-cased once, so each term
- *  check is a simple `.includes()`. */
-function haystack(s: SessionRow): string {
-  return [s.title, s.snippet, s.source, s.id, s.sessionIds]
+/** The label the drawer renders for a row: user/hermes title, else the
+ *  first-message snippet, else the raw id. Search matches THIS string so
+ *  a hit is always visible in the row that claims it. */
+export function displayLabel(s: SessionRow): string {
+  return String(s.title || s.snippet || s.id || '');
+}
+
+/** Why a row matched: `'title'` = every term/glob hit the visible label
+ *  (or source chip); `'id'` = the single query token is a fragment of the
+ *  row's chat id or one of its rolled-up hermes session ids. */
+export type SessionMatch = 'title' | 'id';
+
+/** A lone `[A-Za-z0-9_]{4,}` token is the only shape we treat as a
+ *  possible id fragment — same rule as the backend's id pass. */
+const ID_TOKEN_RE = /^[A-Za-z0-9_]{4,}$/;
+
+type Compiled = { termsLc: string[]; globRes: RegExp[]; idToken: string | null };
+
+function compile(q: FilterQuery): Compiled {
+  const termsLc = q.terms.map((t) => t.toLowerCase());
+  const idToken = (q.terms.length === 1 && !q.globs.length && ID_TOKEN_RE.test(q.terms[0]))
+    ? termsLc[0] : null;
+  return { termsLc, globRes: q.globs.map(globToRegex), idToken };
+}
+
+function matchCompiled(s: SessionRow, c: Compiled): SessionMatch | null {
+  const hay = [displayLabel(s), s.source]
     .filter((v) => v != null && v !== '')
     .join('\u0001')
     .toLowerCase();
+  let ok = true;
+  for (const t of c.termsLc) if (!hay.includes(t)) { ok = false; break; }
+  if (ok) for (const re of c.globRes) if (!re.test(hay)) { ok = false; break; }
+  if (ok) return 'title';
+  if (c.idToken) {
+    const ids = [s.id, s.sessionIds].filter(Boolean).join(' ').toLowerCase();
+    if (ids.includes(c.idToken)) return 'id';
+  }
+  return null;
+}
+
+/** Classify one row against a parsed query. Empty query → 'title' (pass). */
+export function matchSession(s: SessionRow, q: FilterQuery): SessionMatch | null {
+  if (!q.terms.length && !q.globs.length) return 'title';
+  return matchCompiled(s, compile(q));
 }
 
 /** Drawer option-filter state (meeting-polish #25). `engaged` is the
@@ -119,16 +162,10 @@ export function applyRecordingFilter<T extends SessionRow>(
 }
 
 /** Filter a session list against a parsed query. AND across all
- *  terms+globs. Empty query is pass-through. */
+ *  terms+globs on the visible label, or an explicit id-fragment match.
+ *  Empty query is pass-through. */
 export function applyFilter<T extends SessionRow>(sessions: T[], q: FilterQuery): T[] {
   if (!q.terms.length && !q.globs.length) return sessions;
-  // Pre-lowercase term list once.
-  const termsLc = q.terms.map((t) => t.toLowerCase());
-  const globRes = q.globs.map(globToRegex);
-  return sessions.filter((s) => {
-    const hay = haystack(s);
-    for (const t of termsLc) if (!hay.includes(t)) return false;
-    for (const re of globRes) if (!re.test(hay)) return false;
-    return true;
-  });
+  const c = compile(q);
+  return sessions.filter((s) => matchCompiled(s, c) !== null);
 }

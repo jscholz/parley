@@ -934,6 +934,25 @@
   .cmdk-empty {
     padding: 8px 14px; color: var(--muted); font-style: italic; font-size: 13px;
   }
+  /* Search-match markup: the backend says WHERE it matched, we paint it. */
+  .cmdk-row mark {
+    background: color-mix(in srgb, var(--primary) 30%, transparent);
+    color: inherit; border-radius: 2px; padding: 0 1px;
+  }
+  .cmdk-badge {
+    display: inline-block; margin-right: 6px; padding: 0 5px;
+    font-size: 10px; line-height: 15px; border-radius: 8px;
+    background: var(--surface-2, var(--surface)); border: 1px solid var(--border);
+    color: var(--muted); vertical-align: middle;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  /* Message hits show a two-line excerpt instead of a one-line title. */
+  .cmdk-row-title.cmdk-excerpt {
+    white-space: normal; font-size: 13px; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .cmdk-row-more { color: var(--primary); }
   .cmdk-close-row { margin: 0; padding: 8px 14px; text-align: right; border-top: 1px solid var(--border); }
   .cmdk-close-row button {
     background: var(--surface-2); color: var(--fg);

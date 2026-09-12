@@ -1409,12 +1409,12 @@ class ParleyAdapter(BasePlatformAdapter):
     async def _handle_search_conversations(self, request: "web.Request") -> "web.Response":
         """GET /v1/conversations/search?q=&limit=20 — FTS5 cross-conversation search.
 
-        Reads against hermes' `messages_fts` index (maintained by
-        hermes_state.SessionDB) — we just SELECT, hermes owns the writes.
-        Filters to user/assistant roles by default (tool blobs would
-        dominate noise from JSON-heavy outputs). Returns the
-        `{sessions, hits}` shape `src/proxyClientTypes.ts:SearchResult`
-        defines, so the PWA cmd+K palette renders without translation.
+        Sessions match on the drawer's VISIBLE name; hits match on
+        conversational text only (tool-call JSON and compaction
+        envelopes never surface) and resolve to root chats. Rules live
+        in ``parley_search``. Returns the `{sessions, hits}` shape
+        `src/proxyClientTypes.ts:SearchResult` defines, so the PWA
+        cmd+K palette renders without translation.
         """
         if not self._check_http_auth(request):
             return web.Response(status=401, text="invalid token")
@@ -1444,195 +1444,29 @@ class ParleyAdapter(BasePlatformAdapter):
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Synchronous worker for `/v1/conversations/search`.
 
-        FTS5 query syntax: auto-prefix-wildcards on bare tokens (matches
-        hermes_cli/web_server.py:740's pattern — `nimb` → `nimb*` so
-        partial-word queries match). Quoted phrases and existing wildcards
-        pass through. Tokens with FTS5 operator chars are passed verbatim
-        for power users.
+        All matching rules live in ``parley_search`` (name matches on
+        the drawer's visible title, content-only message hits resolved
+        to root chats, session-id fragments). This method only binds
+        the adapter and the drawer's source allow-list.
         """
-        prefix_query = self._fts5_query_for(q)
-        sql = f"""
-            SELECT
-                m.id           AS message_id,
-                m.session_id   AS session_id,
-                m.role         AS role,
-                snippet(messages_fts, 0, '', '', '…', 32) AS snippet,
-                m.timestamp    AS timestamp,
-                s.user_id      AS chat_id,
-                s.source       AS source,
-                COALESCE(s.title, '') AS session_title
-            FROM messages_fts
-            JOIN messages m ON m.id = messages_fts.rowid
-            JOIN sessions s ON s.id = m.session_id
-            WHERE messages_fts MATCH ?
-              AND m.role IN ('user', 'assistant')
-              AND s.source IN ({",".join("?" for _ in GATEWAY_DRAWER_SOURCES)})
-            ORDER BY rank
-            LIMIT ?
-        """
-        params: List[Any] = [prefix_query, *GATEWAY_DRAWER_SOURCES, limit]
-        uri = f"file:{self._state_db_path}?mode=ro"
-        with contextlib.closing(
-            sqlite3.connect(uri, uri=True, timeout=2.0)
-        ) as conn:
-            try:
-                rows = conn.execute(sql, params).fetchall()
-            except sqlite3.OperationalError:
-                # FTS5 syntax error despite sanitization (e.g. user passed
-                # raw `OR` token without context). Empty rather than 500 —
-                # the cmd+K palette keeps showing the cached session-filter
-                # results above.
-                rows = []
-            id_rows = self._session_id_matches(conn, q)
-
-        # Group by (chat_id, source) for the sessions list. Best rank
-        # wins for ordering; preserve hit order in the flat list.
-        # Session-ID matches go FIRST: when the query looks like a
-        # hermes session id (FTS can't see those — they never appear
-        # in message text), the resolved conversation is almost
-        # certainly what the user wants.
-        hits: List[Dict[str, Any]] = []
-        sessions_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        for (chat_id, source, session_title) in id_rows:
-            key = (chat_id, source)
-            if key in sessions_by_key:
-                continue
-            sessions_by_key[key] = {
-                "id": _format_gateway_id(source, chat_id),
-                "source": source,
-                "title": session_title or None,
-                "snippet": None,
-                "messageCount": None,
-                "lastMessageAt": None,
-            }
-        for (message_id, session_id, role, snippet, timestamp,
-             chat_id, source, session_title) in rows:
-            prefixed_id = _format_gateway_id(source, chat_id)
-            hits.append({
-                "session_id": prefixed_id,
-                "message_id": int(message_id),
-                "role": role or "",
-                "snippet": snippet or "",
-                "timestamp": float(timestamp or 0),
-                "session_title": session_title or "",
-                "session_source": source or "",
-            })
-            key = (chat_id, source)
-            if key not in sessions_by_key:
-                sessions_by_key[key] = {
-                    "id": prefixed_id,
-                    "source": source,
-                    "title": session_title or None,
-                    "snippet": None,
-                    "messageCount": None,
-                    "lastMessageAt": None,
-                }
-
-        return list(sessions_by_key.values()), hits
+        from . import parley_search
+        return parley_search.search_conversations(
+            self, q, limit, GATEWAY_DRAWER_SOURCES,
+        )
 
     @staticmethod
     def _session_id_matches(
         conn: "sqlite3.Connection", q: str,
     ) -> List[Tuple[str, str, str]]:
-        """Match `q` as a hermes session-id substring → owning chats.
-
-        FTS can't find session ids (they never appear in message
-        text), so searching `20260611_223425_98bd2b` returned nothing
-        even though the session exists. This pass LIKE-matches
-        sessions.id and resolves each hit to its root conversation.
-
-        Rotated/compacted child sessions have user_id=NULL — walk
-        parent_session_id up (bounded, same pattern as
-        _session_belongs_to_chat) until a user_id-bearing root is
-        found, and filter on the ROOT's source so child rows with
-        NULL source still resolve.
-
-        Only runs for queries that plausibly are id fragments: a
-        single [A-Za-z0-9_] token of >= 4 chars. `_` is a LIKE
-        single-char wildcard, so the pattern is escaped.
-
-        Returns [(chat_id, source, title)] — at most a handful.
-        """
-        token = q.strip()
-        if (len(token) < 4 or not token.replace("_", "").isalnum()
-                or any(c.isspace() for c in token)
-                or not all(ord(c) < 128 for c in token)):
-            return []
-        escaped = (token.replace("\\", "\\\\")
-                        .replace("%", "\\%")
-                        .replace("_", "\\_"))
-        sql = f"""
-            WITH RECURSIVE walk(start_id, cur_user_id, cur_source,
-                                cur_title, parent_id, depth) AS (
-                SELECT s.id, s.user_id, s.source, COALESCE(s.title, ''),
-                       s.parent_session_id, 0
-                  FROM sessions s
-                 WHERE s.id LIKE ? ESCAPE '\\'
-                UNION ALL
-                SELECT w.start_id, p.user_id, p.source,
-                       COALESCE(p.title, ''), p.parent_session_id,
-                       w.depth + 1
-                  FROM walk w
-                  JOIN sessions p ON p.id = w.parent_id
-                 WHERE w.cur_user_id IS NULL AND w.depth < 20
-            )
-            SELECT DISTINCT w.cur_user_id, w.cur_source, w.cur_title
-              FROM walk w
-             WHERE w.cur_user_id IS NOT NULL
-               AND w.cur_source IN ({",".join("?" for _ in GATEWAY_DRAWER_SOURCES)})
-             LIMIT 10
-        """
-        try:
-            return conn.execute(
-                sql, ["%" + escaped + "%", *GATEWAY_DRAWER_SOURCES],
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return []
+        """Compatibility shim — see ``parley_search.session_id_matches``."""
+        from . import parley_search
+        return parley_search.session_id_matches(conn, q, GATEWAY_DRAWER_SOURCES)
 
     @staticmethod
     def _fts5_query_for(q: str) -> str:
-        """Auto-add prefix wildcards on bare tokens so partial words match.
-
-        Mirrors hermes_cli/web_server.py:740. `"quoted phrases"` and
-        existing `wildcards*` pass through. Tokens containing FTS5
-        operator chars (parens, colons) pass through verbatim — power
-        users get raw FTS5 syntax; everyone else gets prefix matching.
-
-        Special-char tokens (e.g. `@s.whatsapp.net`, `foo-bar-baz`,
-        `user@example.com`) are wrapped in double quotes so FTS5
-        doesn't parse `-` as NOT, `.`/`@` as separators with prefix-*
-        producing junk, etc. Quoted phrases match the unicode61-
-        tokenized subwords as a NEAR-style consecutive run, which
-        recovers indexability of these tokens. No prefix-* on quoted
-        phrases (FTS5 doesn't allow it inside quotes; users typing
-        these strings want exact substring anyway).
-
-        Field-driven additions 2026-05-11: `@s.whatsapp.net` returned
-        zero hits because `s.net` got tokenized weirdly with the prefix
-        wildcard. Quoting fixes it. Same for dashed tokens — `-` is
-        the FTS5 NOT operator and a bare token like `smoke-search-marker`
-        was parsing as `smoke AND NOT search AND NOT marker`.
-        """
-        import re
-        tokens = []
-        for token in re.findall(r'"[^"]*"|\S+', q.strip()):
-            # Power-user passthroughs: existing quotes, existing
-            # wildcard, or any of (, ), : which the original logic
-            # treated as raw-FTS5-syntax markers.
-            if (token.startswith('"')
-                    or token.endswith("*")
-                    or any(c in token for c in '():')):
-                tokens.append(token)
-                continue
-            # Wrap any token with non-word characters in quotes so
-            # FTS5 operator chars (-, +, etc.) and unicode61 splitters
-            # (@, ., /) don't corrupt the query. Escape embedded
-            # quotes by doubling per FTS5 convention.
-            if any(not (c.isalnum() or c == '_') for c in token):
-                tokens.append('"' + token.replace('"', '""') + '"')
-                continue
-            tokens.append(token + "*")
-        return " ".join(tokens) or q.strip()
+        """Compatibility shim — see ``parley_search.fts5_query_for``."""
+        from . import parley_search
+        return parley_search.fts5_query_for(q)
 
     async def _handle_list_commands(self, request: "web.Request") -> "web.Response":
         """GET /v1/commands — slash-command catalog for the parley PWA.

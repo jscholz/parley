@@ -128,10 +128,14 @@ export interface SearchMessageHit {
   session_id: string;
   message_id: number;
   role: string;
+  /** Plain-text excerpt; `highlights` are [start, end) ranges into it. */
   snippet: string;
+  highlights?: number[][];
   timestamp: number;
   session_title?: string;
   session_source?: string;
+  /** Further matches in the same chat the upstream collapsed. */
+  more_in_session?: number;
 }
 
 /** Session-grouped collapse over hits. Mirrors ConversationSummary so
@@ -145,6 +149,10 @@ export interface SearchSessionRow {
   snippet?: string | null;
   messageCount?: number | null;
   lastMessageAt?: number | null;
+  /** Why the upstream listed it: visible-name match or id fragment. */
+  match?: 'title' | 'id';
+  /** [start, end) ranges into `title`. */
+  highlights?: number[][];
 }
 
 export interface SearchResult {

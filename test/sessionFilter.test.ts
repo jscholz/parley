@@ -5,7 +5,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter } from '../src/sessionFilter.ts';
+import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter, matchSession, displayLabel } from '../src/sessionFilter.ts';
 
 const sessions = [
   { id: 'parley-main', title: 'Project Hermes', snippet: 'migration plan', source: 'api_server' },
@@ -55,24 +55,51 @@ describe('sessionFilter.applyFilter', () => {
     assert.equal(out.length, sessions.length);
   });
 
-  it('single term substring matches title/snippet/source/id union', () => {
+  it('single term substring matches the visible label', () => {
     const out = applyFilter(sessions, parseQuery('paris'));
     assert.equal(out.length, 1);
     assert.equal(out[0].id, 'parley-1234');
   });
 
-  it('multi-term query AND-matches across the union', () => {
+  it('multi-term query AND-matches across label + source chip', () => {
     // 'whatsapp' hits source, 'jane' hits title — both must match.
     const out = applyFilter(sessions, parseQuery('whatsapp jane'));
     assert.equal(out.length, 1);
     assert.equal(out[0].id, 'wa-2026-04-20-jane');
   });
 
-  it('glob with * matches across union', () => {
-    // 'parley-*' should hit both parley-* sessions via id.
-    const out = applyFilter(sessions, parseQuery('parley-*'));
-    assert.equal(out.length, 2);
-    assert.ok(out.every((s) => s.id.startsWith('parley-')));
+  it('glob with * matches the visible label', () => {
+    const out = applyFilter(sessions, parseQuery('trip*paris'));
+    assert.equal(out.length, 1);
+    assert.equal(out[0].id, 'parley-1234');
+  });
+
+  it('hidden fields never produce a text match (2026-09-12 redesign)', () => {
+    // Every row here has a title, so the snippet is not rendered — a
+    // term that only appears in the snippet must NOT match. His report:
+    // "why is there a hit without a string match?"
+    assert.deepEqual(applyFilter(sessions, parseQuery('flights')), []);
+    assert.deepEqual(applyFilter(sessions, parseQuery('migration')), []);
+    // Nor does a glob over the (hidden) chat id when a title is shown.
+    assert.deepEqual(applyFilter(sessions, parseQuery('parley-*')), []);
+  });
+
+  it('displayLabel mirrors the drawer: title, else snippet, else id', () => {
+    assert.equal(displayLabel(sessions[0]), 'Project Hermes');
+    assert.equal(displayLabel(sessions[2]), 'standup notes');
+    assert.equal(displayLabel({ id: 'raw-only', title: null, snippet: null }), 'raw-only');
+  });
+
+  it('matchSession reports why a row matched', () => {
+    assert.equal(matchSession(sessions[4], parseQuery('paris')), 'title');
+    assert.equal(matchSession(sessions[4], parseQuery('flights')), null);
+    // A lone id-shaped token matches the chat id even though a title is
+    // shown — but it is labelled as an id match, not a text match.
+    assert.equal(matchSession(sessions[4], parseQuery('1234')), 'id');
+    // Two tokens are never an id fragment.
+    assert.equal(matchSession(sessions[4], parseQuery('parley 1234')), null);
+    // Empty query passes everything.
+    assert.equal(matchSession(sessions[0], parseQuery('')), 'title');
   });
 
   it('case-insensitive', () => {
@@ -94,10 +121,11 @@ describe('sessionFilter.applyFilter', () => {
   });
 
   it('combined term + glob both required', () => {
-    // 'parley-*' filters to the two parley rows; 'paris' narrows to one.
-    const out = applyFilter(sessions, parseQuery('parley-* paris'));
+    // 'tr*p' matches Trip; 'paris' narrows to the same row; 'london' kills it.
+    const out = applyFilter(sessions, parseQuery('tr*p paris'));
     assert.equal(out.length, 1);
     assert.equal(out[0].id, 'parley-1234');
+    assert.deepEqual(applyFilter(sessions, parseQuery('tr*p london')), []);
   });
 
   it('matches raw hermes session ids via sessionIds', () => {
@@ -114,6 +142,7 @@ describe('sessionFilter.applyFilter', () => {
     const out = applyFilter(rows, parseQuery('20260611_223425_98bd2b'));
     assert.equal(out.length, 1);
     assert.equal(out[0].id, 'parley:c31cd523');
+    assert.equal(matchSession(rows[0], parseQuery('20260611_223425_98bd2b')), 'id');
     // Fragment matches too (substring semantics).
     const frag = applyFilter(rows, parseQuery('98bd2b'));
     assert.equal(frag.length, 1);

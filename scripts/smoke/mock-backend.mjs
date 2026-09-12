@@ -105,6 +105,12 @@ export async function installMockBackend(page) {
   let streamOutage = false;
   let sessionsFailStatus = 0;
   let sessionsDelayMs = 0;      // artificial /sessions list latency
+  // /search controls: per-query artificial latency (substring key →
+  // ms; longest matching key wins), a forced HTTP failure, and a log
+  // of every query the PWA sent (out-of-order tests assert on it).
+  const searchDelays = new Map();
+  let searchFailStatus = 0;
+  const searchQueries = [];
   /** Artificial latency before the SSE stream response is forwarded.
    *  The PWA gates its whole boot LANDING (last-viewed restore +
    *  most-recent fallback, main.ts onStatus) on the EventSource
@@ -252,6 +258,93 @@ export async function installMockBackend(page) {
       contentType: 'application/json',
       body: JSON.stringify({ sessions }),
     });
+  });
+
+  // GET /api/parley/search?q=&limit= — the backend-agnostic search
+  // contract (proxy/parley/search.ts → SearchResult). Mirrors the
+  // hermes plugin's rules over the in-memory chats: sessions match on
+  // the VISIBLE name (title, else first user message) with highlight
+  // ranges; hits are user/assistant messages whose text contains every
+  // term, excerpted, capped per chat with `more_in_session`.
+  await page.route('**/api/parley/search*', async (route) => {
+    const url = new URL(route.request().url());
+    const q = (url.searchParams.get('q') || '').trim();
+    searchQueries.push(q);
+    let delay = 0;
+    let bestKey = -1;
+    for (const [key, ms] of searchDelays) {
+      if (q.toLowerCase().includes(key.toLowerCase()) && key.length > bestKey) { bestKey = key.length; delay = ms; }
+    }
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+    if (searchFailStatus > 0) {
+      await route.fulfill({ status: searchFailStatus, contentType: 'application/json', body: JSON.stringify({ error: 'mock search failure' }) });
+      return;
+    }
+    const limit = Math.max(1, Math.min(50, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
+    const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const ranges = (text) => {
+      const folded = text.toLowerCase();
+      const out = [];
+      for (const t of terms) {
+        const i = folded.indexOf(t);
+        if (i < 0) return null;
+        out.push([i, i + t.length]);
+      }
+      return out.sort((a, b) => a[0] - b[0]);
+    };
+    const sessions = [];
+    const hits = [];
+    if (terms.length) {
+      const rows = Array.from(chats.values())
+        .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0));
+      for (const c of rows) {
+        const firstUser = c.messages.find((m) => m.role === 'user');
+        const name = (c.title || '').trim() || String(firstUser?.content || '').slice(0, 80);
+        if (!name) continue;
+        const r = ranges(name);
+        if (!r) continue;
+        sessions.push({
+          id: c.chatId, source: c.source || 'parley', title: name,
+          snippet: firstUser ? String(firstUser.content || '').slice(0, 80) : null,
+          messageCount: c.messages.length,
+          lastMessageAt: Math.floor((c.lastActiveAt || 0) / 1000),
+          match: 'title', highlights: r,
+        });
+        if (sessions.length >= 20) break;
+      }
+      const shown = new Map();
+      const firstIdx = new Map();
+      for (const c of rows) {
+        c.messages.forEach((m, idx) => {
+          if (m.role !== 'user' && m.role !== 'assistant') return;
+          if (typeof m.content !== 'string' || !m.content) return;
+          const text = m.content.replace(/\s+/g, ' ').trim();
+          const r = ranges(text);
+          if (!r) return;
+          const n = shown.get(c.chatId) || 0;
+          if (n >= 3 || hits.length >= limit) {
+            const fi = firstIdx.get(c.chatId);
+            if (fi != null) hits[fi].more_in_session = (hits[fi].more_in_session || 0) + 1;
+            return;
+          }
+          const start = Math.max(0, r[0][0] - 50);
+          const end = Math.min(text.length, start + 160);
+          const prefix = start > 0 ? '…' : '';
+          const snippet = prefix + text.slice(start, end) + (end < text.length ? '…' : '');
+          const shifted = r.filter(([a]) => a >= start && a < end).map(([a, b]) => [a - start + prefix.length, Math.min(b, end) - start + prefix.length]);
+          shown.set(c.chatId, n + 1);
+          if (!firstIdx.has(c.chatId)) firstIdx.set(c.chatId, hits.length);
+          hits.push({
+            session_id: c.chatId, message_id: m.parley_id || `mock-hit-${c.chatId}-${idx}`,
+            role: m.role, snippet, highlights: shifted,
+            timestamp: m.timestamp || Math.floor((c.lastActiveAt || 0) / 1000),
+            session_title: (c.title || '').trim() || String(firstUser?.content || '').slice(0, 80),
+            session_source: c.source || 'parley', more_in_session: 0,
+          });
+        });
+      }
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions, hits }) });
   });
 
   // GET /api/parley/sessions/<chat_id>/messages — canned transcript.
@@ -1717,6 +1810,16 @@ export async function installMockBackend(page) {
     /** Hold the /sessions LIST response open for `ms` — simulates the
      *  slow-list window where a single-flight refresh is in flight and
      *  drawer paints must NOT wait for it. */
+    /** Artificial latency for /search responses whose query contains
+     *  `substr` (case-insensitive). Pass ms=0 to clear. Lets a test
+     *  make an EARLIER query's answer land AFTER a later one. */
+    setSearchDelay(substr, ms) {
+      if (ms > 0) searchDelays.set(substr, ms); else searchDelays.delete(substr);
+    },
+    /** Force /search to fail with `status` (0 = healthy). */
+    setSearchFailStatus(status) { searchFailStatus = status | 0; },
+    /** Every q the PWA sent to /search, in arrival order. */
+    getSearchQueries() { return searchQueries.slice(); },
     setSessionsDelay(ms) {
       sessionsDelayMs = typeof ms === 'number' && ms > 0 ? ms : 0;
     },

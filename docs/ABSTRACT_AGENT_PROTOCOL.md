@@ -271,6 +271,77 @@ agent to forget. A delete that leaves memory traces is a privacy bug.
 
 ---
 
+## Optional search extension — `GET /v1/conversations/search`
+
+Cross-conversation search behind the PWA's cmd+K palette and the
+drawer's filter box. Backends that don't implement it return `404`;
+parley then falls back to filtering the cached session list
+client-side and leaves the Messages section empty.
+
+**Request:** `GET /v1/conversations/search?q=<text>&limit=<1..50>`
+
+**Response (200):**
+
+```json
+{
+  "sessions": [
+    {
+      "id": "parley:709f…",
+      "source": "parley",
+      "title": "Fix R2 investor calendar cron",
+      "snippet": "please look at the calendar sync",
+      "messageCount": 12,
+      "lastMessageAt": 1757650000.0,
+      "match": "title",
+      "highlights": [[0, 3], [25, 29]]
+    }
+  ],
+  "hits": [
+    {
+      "session_id": "parley:2ae9…",
+      "message_id": 48211,
+      "role": "user",
+      "snippet": "…the cron job that failed again…",
+      "highlights": [[4, 8]],
+      "timestamp": 1757640000.0,
+      "session_title": "Daily recap",
+      "session_source": "parley",
+      "more_in_session": 2
+    }
+  ]
+}
+```
+
+**Semantics the client relies on:**
+
+- `sessions[]` are conversations whose **visible name** matched
+  (`match: "title"` — the same string `GET /v1/conversations` would
+  show as the row label, user rename applied) or whose id contains the
+  query (`match: "id"`). A conversation is NOT a session hit merely
+  because one of its messages matched; that is what `hits[]` is for.
+  Order most-recent-first.
+- `hits[]` are individual messages whose **conversational text**
+  contains every query term. `snippet` is plain text (no markup);
+  `highlights` are `[start, end)` code-unit ranges into it. Tool-call
+  payloads, tool results and backend-synthesised system envelopes
+  must not surface as hits. `session_id` MUST be a conversation id
+  the client can open (`GET /v1/conversations/{id}/items`), never an
+  internal sub-session. Backends MAY cap hits per conversation and
+  report the remainder on that conversation's first hit as
+  `more_in_session`.
+- `match`, `highlights` and `more_in_session` are optional for older
+  backends; the client then treats every session as a title match and
+  marks query terms itself.
+- How a backend finds matches (full-text index, trigram, LIKE) is not
+  part of the contract. The client only paints what it is told.
+
+**Error responses:** `404` — not implemented. `500` with
+`{ "sessions": [], "hits": [], "error": "…" }` — index unavailable;
+the client shows the error beside the Messages heading and keeps its
+client-side session matches.
+
+---
+
 ## Optional gateway extension — `/v1/gateway/*`
 
 A second contract layered on top of the channel contract above.

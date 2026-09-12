@@ -4,9 +4,21 @@
 //
 //   GET /api/parley/search?q=&limit=20  → { sessions, hits }
 //
-// Forwards to the upstream's /v1/conversations/search contract. Returns
-// the SearchResult shape `src/proxyClientTypes.ts` defines so the PWA
-// cmd+K palette renders without translation.
+// Forwards to the upstream's /v1/conversations/search contract and
+// returns its body verbatim — the SearchResult shape
+// `src/proxyClientTypes.ts` defines. The contract is backend-agnostic:
+//
+//   sessions[] — chats whose VISIBLE name matched (`match: "title"`) or
+//                whose id contains the query (`match: "id"`), with
+//                `highlights` = [start, end) ranges into `title`.
+//   hits[]     — messages whose conversational text matched: plain-text
+//                `snippet`, `highlights` into it, `session_title`,
+//                `role`, `timestamp`, and `more_in_session` for hits
+//                the backend collapsed per chat.
+//
+// How a backend decides a match (FTS tables, envelope stripping, parent
+// walking…) is its own business and never leaks past this boundary; the
+// PWA only paints `match` and `highlights`.
 //
 // 404 from the upstream propagates as 404 — agents that don't implement
 // search simply leave the cmd+K Messages section showing nothing. Other

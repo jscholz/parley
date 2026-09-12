@@ -205,6 +205,12 @@ export interface SearchSessionRow {
   snippet?: string | null;
   messageCount?: number | null;
   lastMessageAt?: number | null;
+  /** Why the backend listed this session: its visible name matched
+   *  (`title`) or the query was a fragment of one of its ids (`id`).
+   *  Absent on older backends → treated as `title`. */
+  match?: 'title' | 'id';
+  /** [start, end) ranges into `title` marking the matched text. */
+  highlights?: number[][];
   [k: string]: any;
 }
 
@@ -213,10 +219,15 @@ export interface SearchMessageHit {
   session_id: string;
   message_id: number;
   role: string;
+  /** Plain-text excerpt around the match (no markup). */
   snippet: string;
+  /** [start, end) ranges into `snippet` marking the matched text. */
+  highlights?: number[][];
   timestamp: number;
   session_title?: string;
   session_source?: string;
+  /** Further matches in the same chat the backend collapsed. */
+  more_in_session?: number;
 }
 
 export interface SearchResult {
