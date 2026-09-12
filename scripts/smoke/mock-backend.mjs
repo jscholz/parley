@@ -103,6 +103,9 @@ export async function installMockBackend(page) {
    *  its own; the OS-lifecycle handler calls forceReconnect (mirrors
    *  real mobile foreground/online behavior). */
   let streamOutage = false;
+  // Stream-ONLY outage: /stream 503s while every other endpoint keeps
+  // answering — the one-bar-of-5G shape (HTTP works, SSE cannot open).
+  let streamOnlyOutage = false;
   let sessionsFailStatus = 0;
   let sessionsDelayMs = 0;      // artificial /sessions list latency
   // /search controls: per-query artificial latency (substring key →
@@ -908,7 +911,7 @@ export async function installMockBackend(page) {
   // EventSource-reconnect hop required.
   await page.route('**/api/parley/stream', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
-    if (streamOutage) {
+    if (streamOutage || streamOnlyOutage) {
       // Non-200 makes the EventSource fail HARD (readyState CLOSED, no
       // native retry) — that's what flips proxyClient's connected=false.
       // A network abort would leave it in the CONNECTING retry loop with
@@ -1641,6 +1644,17 @@ export async function installMockBackend(page) {
      *  outage (and back) — exercises the client uploader's durable
      *  retry path. `getCaptures()` exposes the mock's manifests for
      *  assertions (segment acks, marks, stop state). */
+    /** Stream-only outage: the SSE endpoint 503s (connected=false) while
+     *  /messages, /transcribe, /sessions… keep answering. Models a link
+     *  that carries short requests but cannot hold a long-lived stream. */
+    setStreamOnlyOutage(on) {
+      streamOnlyOutage = !!on;
+      if (streamOnlyOutage) {
+        for (const sub of streamSubs) { try { sub.end(); } catch {} }
+        streamSubs.clear();
+        for (const sock of openSockets) { try { sock.destroy(); } catch {} }
+      }
+    },
     setCaptureOutage(on) { captureOutage = !!on; },
     getCaptures() { return Array.from(captures.values()); },
     /** Force a capture into a terminal state SERVER-SIDE without the

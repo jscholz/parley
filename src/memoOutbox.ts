@@ -40,6 +40,7 @@ import { postTranscribe, PermanentTranscribeError } from './audio/shared/postTra
 import { transcribeBudget } from './audio/shared/transcribeBudget.ts';
 import { StallTimeoutError } from './util/stallTimeoutPost.ts';
 import { apiUrl } from './apiBase.ts';
+import * as reachability from './net/reachability.ts';
 
 // Tracks the in-flight /transcribe upload size (bytes) so the periodic
 // status refresher can surface "Uploading audio (NKB)…" while the
@@ -198,6 +199,10 @@ export async function flushOutbox() {
         // first to prove the link is alive, and composer.submit
         // silently no-ops when the gateway is down) — throw so the
         // queue retains the item and the retry poller re-delivers.
+        // Listen turns keep the STREAM gate (not mere HTTP reachability):
+        // composer.submit is fire-and-forget, so this path cannot observe
+        // the POST outcome and re-queue durably. Memos/dictation upload
+        // opportunistically instead — their outcome is observed below.
         if (!backend.isConnected()) throw new Error('offline');
         routeListenTurnText(text, item);
         return;
@@ -219,6 +224,10 @@ export async function flushOutbox() {
     },
     async (blob, mimeType, id, autoSend, toComposer, durationMs, item) => {
       const listenTurn = !!(item && item.listenTurn);
+      // Same stream gate for the audio lane of a listen turn: its
+      // transcript auto-SENDS, and that send must stay in the durable
+      // outbox until the stream is up (see the text lane above).
+      if (listenTurn && !backend.isConnected()) throw new Error('offline');
       // Re-delivered item (a prior flush inserted its transcript but the
       // IDB row survived — see deliveredIds). The user's buffer already
       // received this text once; if they deleted it, that's their edit
@@ -322,7 +331,13 @@ export async function flushOutbox() {
               if (!uploadStatusLabel) status.setStatus(uploadLabel(), 'live');
             });
           }
+          reachability.noteAnswered();
         } catch (e) {
+          // Classify for the reachability model: a timeout/stall or a
+          // rejected fetch means the server never spoke; anything else
+          // (permanent error, server-reported failure) is an answer.
+          if (e instanceof TimeoutError || e instanceof TypeError) reachability.noteNetworkFailure();
+          else reachability.noteAnswered();
           // Non-timeout transient failures were previously SILENT here
           // (re-thrown into queue.flush's bare catch), which made a
           // fast-failing device upload look like a frozen "Stalled" pill
@@ -545,22 +560,28 @@ export function startBackgroundPollers(): void {
     }
   });
 
-  // Periodic background retry. Covers the scenario where /transcribe
-  // fails mid-memo (blob queued) but the gateway WS stays connected —
-  // no reconnect event fires, no user send happens. Without this, a
-  // queued blob sits until the next reload or user action. Poll is
-  // cheap (IDB read + early-out if empty); only flushes when there's
-  // pending work AND the gateway is reachable.
-  setInterval(async () => {
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+  // Opportunistic background retry. Self-scheduling so the cadence can
+  // follow the link: a steady 30s sweep while the stream is up; while it
+  // is DOWN, exponential backoff on consecutive network failures (10s →
+  // 120s) — but it never stops trying. Field report 2026-09-12: on one
+  // bar of 5G the stream could not open, this poller was gated on
+  // isConnected(), and four memos sat queued although a short POST would
+  // have gone through. The only hard stop is the OS offline flag.
+  let sweepTimer: ReturnType<typeof setTimeout> | null = null;
+  const sweep = async () => {
+    sweepTimer = null;
     try {
-      const pending = await queue.pending();
-      if (pending > 0 && backend.isConnected()) {
-        diag(`outbox: periodic retry (${pending} pending)`);
-        flushOutbox().catch(() => {});
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        const pending = await queue.pending();
+        if (pending > 0 && reachability.shouldAttempt({ onLine: navigator.onLine })) {
+          diag(`outbox: opportunistic retry (${pending} pending, stream ${backend.isConnected() ? 'up' : 'down'})`);
+          await flushOutbox().catch(() => {});
+        }
       }
     } catch {}
-  }, 30_000);
+    sweepTimer = setTimeout(sweep, reachability.attemptDelayMs({ streamConnected: backend.isConnected() }));
+  };
+  sweepTimer = setTimeout(sweep, reachability.attemptDelayMs({ streamConnected: true }));
 
   // Periodic network-status refresh. Surfaces queued count + weak-signal
   // detection in the header. Only writes when there's no active WebRTC
@@ -600,6 +621,10 @@ export function startBackgroundPollers(): void {
         } else {
           status.setStatus(uploadLabel(), 'live');
         }
+      } else if (!gwConnected && reachability.recentlyReachable()) {
+        // HTTP is being answered but the live stream is down: sends and
+        // uploads work, so say that instead of "reconnecting".
+        status.setState('degraded', { queuedCount: summary.count, queuedAudioMs: summary.totalAudioMs });
       } else if (!gwConnected) {
         status.setState('reconnecting', { queuedCount: summary.count, queuedAudioMs: summary.totalAudioMs });
       } else if (msIdle > WEAK_SIGNAL_MS && summary.count > 0) {
@@ -751,7 +776,9 @@ export async function transcribeToComposer(
 
   composer.setInterim('Transcribing…');
 
-  const offline = navigator.onLine === false || !backend.isConnected();
+  // Attempt unless the OS says there is no network at all — a down
+  // stream is not a reason to hold a short POST (2026-09-12).
+  const offline = !reachability.shouldAttempt({ onLine: navigator.onLine });
   if (offline) {
     // Leave it queued; the periodic poller drains it on reconnect. Keep
     // the ghost line so the user knows the dictation wasn't lost.
@@ -797,7 +824,10 @@ export async function transcribeListenTurn(
   });
   log('listen: queued turn blob (' + Math.round(audioBlob.size / 1024) + 'KB) reason=' + (reason || 'silence'));
 
-  const offline = navigator.onLine === false || !backend.isConnected();
+  // Listen turns auto-send: keep them on the stream gate so the durable
+  // outbox holds them until the stream is up (their send is
+  // fire-and-forget and cannot be re-queued on failure).
+  const offline = !reachability.shouldAttempt({ onLine: navigator.onLine }) || !backend.isConnected();
   if (offline) {
     status.setStatus('Voice turn queued — will send when connected');
     return;
@@ -818,7 +848,10 @@ export async function sendListenText(text: string, chatId: string | null): Promi
   await queue.enqueue({
     type: 'text', text: body, source: 'listen', listenTurn: true, chatId,
   });
-  const offline = navigator.onLine === false || !backend.isConnected();
+  // Listen turns auto-send: keep them on the stream gate so the durable
+  // outbox holds them until the stream is up (their send is
+  // fire-and-forget and cannot be re-queued on failure).
+  const offline = !reachability.shouldAttempt({ onLine: navigator.onLine }) || !backend.isConnected();
   if (offline) {
     status.setStatus('Voice turn queued — will send when connected');
     return;
@@ -839,7 +872,9 @@ export async function handleMemoResult(audioBlob: Blob, durationMs?: number, aut
   // online or offline.
   const { card } = await renderMemoCard(audioBlob, durationMs, autoSend);
 
-  const offline = navigator.onLine === false || !backend.isConnected();
+  // Attempt unless the OS says there is no network at all — a down
+  // stream is not a reason to hold a short POST (2026-09-12).
+  const offline = !reachability.shouldAttempt({ onLine: navigator.onLine });
   if (offline) {
     if (card) memoCard.update(card, { status: 'queued' });
     status.setStatus('Audio queued — will transcribe when connected');

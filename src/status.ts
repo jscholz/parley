@@ -29,6 +29,9 @@ export type NetworkState =
   | 'connected'
   | 'syncing'
   | 'reconnecting'
+  /** HTTP requests are being answered but the live stream is down —
+   *  sends and uploads work; replies arrive on the next sync. */
+  | 'degraded'
   | 'weakSignal'
   | 'stalled'
   | 'offline';
@@ -104,6 +107,15 @@ export function setState(state: NetworkState, ctx: StateContext = {}) {
     case 'reconnecting': {
       const txt = ctx.retryIn != null ? `Reconnecting in ${ctx.retryIn}s` : 'Reconnecting…';
       setStatus(txt, 'live');
+      return;
+    }
+    case 'degraded': {
+      const parts: string[] = ['Connected — live updates paused'];
+      if (ctx.queuedCount && ctx.queuedCount > 0) {
+        const dur = ctx.queuedAudioMs ? ` (${fmtMmSs(ctx.queuedAudioMs)} audio)` : '';
+        parts.push(`· ${ctx.queuedCount} queued${dur}`);
+      }
+      setStatus(parts.join(' '), 'live');
       return;
     }
     case 'weakSignal': setStatus('Weak signal', 'err'); return;

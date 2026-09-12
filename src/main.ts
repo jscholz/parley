@@ -55,6 +55,7 @@ import * as conversations from './conversations.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
 import * as switchCtl from './switchController.ts';
 import * as cmdkPalette from './cmdkPalette.ts';
+import * as reachability from './net/reachability.ts';
 import * as hotkeysHelp from './hotkeysHelp.ts';
 import { initPinDrawer, openAllDocs } from './pins/drawer.ts';
 import { initCapturePill, hotkeyToggleMeetingCapture } from './capture/pill.ts';
@@ -398,22 +399,29 @@ let queuedSendFlushInFlight = false;
 // dropped; a POST can network-fail while the stream stays up (server
 // blip, half-open link — the retry-keeps-attachments shape), and with
 // no reconnect transition ever firing, the queued send would sit
-// `.pending` forever. The timer retries with backoff (1s→2s→4s) while
-// the channel is CONNECTED — three misses exhaust the flush budget
-// (~7s) and surface the `.failed` Retry affordance. While DISCONNECTED
-// it just re-arms without attempting: the budget must not burn on a
-// dead link (the walking case queues indefinitely until reconnect,
-// which is the point).
+// `.pending` forever. The timer retries with backoff (1s→2s→4s→8s)
+// while the channel is CONNECTED — three misses exhaust the flush budget
+// and surface the `.failed` Retry affordance.
+//
+// While DISCONNECTED it still ATTEMPTS (2026-09-12: one bar of 5G could
+// carry a POST but never open the stream, and queued sends waited on a
+// reconnect that never came), on the reachability model's backoff
+// (10s→120s). Those misses do NOT burn the budget — see
+// reachability.countsAgainstBudget — so a dead link cannot strand a
+// message as "failed" the moment signal returns.
 let queuedSendRetryTimer: ReturnType<typeof setTimeout> | null = null;
 let queuedSendRetryDelayMs = 1000;
 const QUEUED_SEND_RETRY_MAX_DELAY_MS = 8000;
 
 function scheduleQueuedSendRetry(): void {
   if (queuedSendRetryTimer != null || queuedSends.length === 0) return;
+  const delay = backend.isConnected()
+    ? queuedSendRetryDelayMs
+    : Math.max(queuedSendRetryDelayMs, reachability.attemptDelayMs({ streamConnected: false }));
   queuedSendRetryTimer = setTimeout(() => {
     queuedSendRetryTimer = null;
-    if (!backend.isConnected()) {
-      scheduleQueuedSendRetry();   // safety-net re-arm; reconnect flush is primary
+    if (!reachability.shouldAttempt({ onLine: navigator.onLine })) {
+      scheduleQueuedSendRetry();   // OS says no network — re-arm only
       return;
     }
     queuedSendRetryDelayMs = Math.min(queuedSendRetryDelayMs * 2, QUEUED_SEND_RETRY_MAX_DELAY_MS);
@@ -421,7 +429,7 @@ function scheduleQueuedSendRetry(): void {
       if (queuedSends.length === 0) queuedSendRetryDelayMs = 1000;
       else scheduleQueuedSendRetry();
     });
-  }, queuedSendRetryDelayMs);
+  }, delay);
 }
 
 /** Shared send-failure surface: status line + flip the optimistic bubble
@@ -510,9 +518,11 @@ async function flushQueuedSends(): Promise<void> {
         await backend.sendMessage(q.text, q.sendOpts);
       } catch (e: unknown) {
         const msg = (e as Error)?.message || String(e);
-        q.flushes += 1;
+        // A miss against a server we believed reachable spends budget;
+        // a miss on a dead link does not (it would strand the message).
+        if (reachability.countsAgainstBudget({ streamConnected: backend.isConnected() })) q.flushes += 1;
         if (isConnectivitySendError(e) && q.flushes < QUEUED_SEND_MAX_FLUSHES) {
-          queuedSends.push(q);   // still unreachable — hold for the next reconnect
+          queuedSends.push(q);   // still unreachable — hold for the next attempt
         } else {
           failSendBubble(q.chatId, q.messageId, msg);
         }

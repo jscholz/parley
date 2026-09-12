@@ -50,6 +50,8 @@ import * as transcriptStore from './transcript/store.ts';
 import { noteTyping, noteStatus, noteTurnEnded, noteTurnStarted, startTurnIndicatorSweep, stopTurnIndicatorSweep } from './transcript/turnIndicator.ts';
 import { markRecentlyDeleted, isRecentlyDeleted } from './sessionOps.ts';
 import * as switchCtl from './switchController.ts';
+import { fetchWithTimeout } from './util/fetchWithTimeout.ts';
+import * as reachability from './net/reachability.ts';
 import { isDevMode } from './util/devMode.ts';
 
 let subs: any = null;
@@ -311,13 +313,19 @@ interface SessionsResponse {
  *  that as "connected, but degraded" so the UI can show a hint
  *  rather than a generic disconnected state. The /messages endpoint
  *  will 503 on send in that case; we don't pretend otherwise. */
+const PROBE_TIMEOUT_MS = 10_000;
+
 async function probeSessions(): Promise<{ ok: boolean; unconfigured?: boolean }> {
   try {
-    const r = await fetch(`${apiBase()}/sessions?limit=1`);
+    // Bounded: on a one-bar link an unbounded fetch can hang for minutes
+    // and leave the status pill frozen on whatever it last said.
+    const r = await fetchWithTimeout(`${apiBase()}/sessions?limit=1`, { timeoutMs: PROBE_TIMEOUT_MS });
+    reachability.noteAnswered();
     if (!r.ok) return { ok: false };
     const d = (await r.json()) as SessionsResponse;
     return { ok: true, unconfigured: !!d.unconfigured };
   } catch {
+    reachability.noteNetworkFailure();
     return { ok: false };
   }
 }
@@ -1264,11 +1272,21 @@ export const proxyClientAdapter = {
     // channel via onDelta / onFinal callbacks. We don't await an
     // SSE here.
     try {
-      const res = await fetch(`${apiBase()}/messages`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      let res: Response;
+      try {
+        res = await fetch(`${apiBase()}/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (netErr) {
+        reachability.noteNetworkFailure();
+        throw netErr;
+      }
+      // Answered — even a refusal proves the server is reachable, which
+      // is what the opportunistic-send paths key off while the stream
+      // is down.
+      reachability.noteAnswered();
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
         let detail = errText.slice(0, 200);
