@@ -15,7 +15,7 @@
 //   5b. "Model for all jobs" shows "Mixed" (jobs disagree); picking a
 //      value → POST /v1/jobs/model, clears every per-job pin, and the
 //      header re-renders as the new default from that one response.
-//   6. Click "Run now" → POST …/run; a notice appears.
+//   6. Click "Run now" → POST …/run; a live run row appears (Running…).
 //   7. Delete (confirm dialog accepted) → DELETE …/{id}; the card disappears.
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
@@ -123,12 +123,15 @@ export default async function run({ page, log, mock }) {
   assert(bulkLabel === 'Follow default (gpt-5.6-sol)', `bulk header after: ${bulkLabel}`);
   log('"Model for all jobs" shows Mixed, then clears every pin and shows the new default');
 
-  // 6. run now
+  // 6. run now → the agent fires immediately and answers with the run;
+  //    the card shows a live run row (not a vanishing notice).
   await page.click('#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="run"]');
-  await page.waitForSelector('#cron-jobs-host .cron-job[data-cron-job="job-sync"] .cron-job-notice', { timeout: 3_000 });
-  post = mock.getLastJobPost();
-  assert(post.id === 'job-sync' && post.action === 'run', `run POST: ${JSON.stringify(post)}`);
-  log('Run now posts to /run and shows the queued notice');
+  await page.waitForSelector('#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="latest-run"][data-run-status="running"]', { timeout: 3_000 });
+  const runLabel = await page.textContent('#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="latest-run"] [data-role="run-label"]');
+  assert(/^Running/.test(runLabel), `run row reads Running…, got "${runLabel}"`);
+  assert((await page.$eval('#cron-jobs-host .cron-job[data-cron-job="job-sync"] [data-role="status"]', (e) => e.textContent)) === 'running',
+    'status pill flips to running while the run is active');
+  log('Run now posts to /run and shows a live run row');
 
   // 7. delete (confirm dialog auto-accepted)
   page.once('dialog', (d) => d.accept());

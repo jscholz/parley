@@ -75,6 +75,8 @@ export {
   handleParleyJobRun,
   handleParleyJobRuns,
   handleParleyJobDelete,
+  handleParleyJobRunGet,
+  handleParleyJobRunConsole,
 } from './jobs.ts';
 export { handleParleyHealthList, handleParleyHealthRun } from './health.ts';
 export { handleParleyCommands } from './commands.ts';

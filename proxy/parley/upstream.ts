@@ -281,7 +281,13 @@ export interface UpstreamAgent {
    *  pin server-side; returns the listJobs-shaped payload. Throws
    *  UpstreamHTTPError on rejection (e.g. an unrecognised model). */
   setAllJobsModel(model: string): Promise<any>;
-  runJob(id: string): Promise<any>;
+  /** Fire the job now; `body` may carry `{note}` (single-run extra prompt).
+   *  Resolves to the job view with `last_run`. 409 → UpstreamHTTPError. */
+  runJob(id: string, body?: unknown): Promise<any>;
+  /** One run view, or throws UpstreamHTTPError(404). */
+  getJobRun(id: string, runId: string): Promise<any>;
+  /** Console lines for a run after message id `after`. */
+  getJobRunConsole(id: string, runId: string, after: number): Promise<any>;
   listJobRuns(id: string, limit?: number): Promise<any>;
   deleteJob(id: string): Promise<any>;
   /** Optional health extension (/v1/health/*). listHealth → null when unsupported (404). */
@@ -517,8 +523,25 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     return this.postJob('/v1/jobs/model', { model });
   }
 
-  runJob(id: string): Promise<any> {
-    return this.postJob(`/v1/jobs/${encodeURIComponent(id)}/run`);
+  runJob(id: string, body?: unknown): Promise<any> {
+    return this.postJob(`/v1/jobs/${encodeURIComponent(id)}/run`, body ?? {});
+  }
+
+  private async getJobPath(path: string): Promise<any> {
+    const r = await fetch(`${this.url}${path}`, { headers: this.headers() });
+    let parsed: any;
+    try { parsed = await r.json(); } catch { parsed = null; }
+    if (!r.ok) throw new UpstreamHTTPError(r.status, parsed);
+    return parsed;
+  }
+
+  getJobRun(id: string, runId: string): Promise<any> {
+    return this.getJobPath(`/v1/jobs/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`);
+  }
+
+  getJobRunConsole(id: string, runId: string, after: number): Promise<any> {
+    const q = new URLSearchParams({ after: String(Math.max(0, Math.floor(after || 0))) });
+    return this.getJobPath(`/v1/jobs/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/console?${q}`);
   }
 
   async deleteJob(id: string): Promise<any> {

@@ -33,6 +33,25 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs_route, "_resolve_pin", lambda v: (v.split(":", 1)[-1], "openai-codex"))
     monkeypatch.setattr(jobs_route, "_write_cron_default",
                         lambda model, provider: cron_default.update(model=model, provider=provider))
+    # The handlers start the run watcher lazily (needs a live adapter +
+    # loop); stub it so handler tests stay synchronous and ledger-free.
+    class _Watcher:
+        def poke(self): pass
+    monkeypatch.setattr(jobs_route, "ensure_run_watcher", lambda adapter: _Watcher())
+    # Run now fires through the scheduler provider — never the real one here.
+    from .. import parley_job_runs
+
+    def _fake_fire_now(job_id, note, *, loop=None, on_done=None):
+        job = cron_jobs.get_job(job_id)
+        if not job:
+            raise LookupError(job_id)
+        parley_job_runs.remember_manual("exec-test", note)
+        return job, "exec-test"
+    monkeypatch.setattr(parley_job_runs, "fire_now", _fake_fire_now)
+    import cron.executions as _ex
+    monkeypatch.setattr(_ex, "get_execution", lambda eid: {
+        "id": eid, "job_id": "", "status": "claimed", "claimed_at": "2026-01-01T00:00:00+00:00",
+        "started_at": None, "finished_at": None, "error": None})
     with cron_jobs.use_cron_store(tmp_path):
         a = cron_jobs.create_job(prompt="Daily brief", schedule="0 7 * * *", name="Brief", deliver="origin",
                                  origin={"platform": "parley", "chat_id": "abc-123", "chat_name": "parley:abc-123"})
@@ -142,11 +161,17 @@ def test_bulk_model_update_aborts_config_write_when_a_pin_clear_fails(store, mon
     assert store["cron_default"] == {"model": "", "provider": ""}
 
 
-def test_run_now_queues_next_tick(store):
+def test_run_now_fires_immediately_and_reports_the_run(store):
+    """Run now no longer marks the job due for the next tick (his 2026-09-12
+    report: the button appeared to do nothing for up to a minute). It
+    fires through the scheduler's claim-and-fire path and the response
+    carries the run just started so the card can show progress."""
     before = store["jobs"].get_job(store["a"])["next_run_at"]
-    v = jobs_route.run_job(store["a"])
-    assert v["state"] == "scheduled" and v["enabled"] is True
-    assert v["next_run_at"] != before
+    v = jobs_route.run_job(store["a"], "focus on Slack")
+    assert v["id"] == store["a"] and v["next_run_at"] == before   # schedule untouched
+    assert v["last_run"]["id"] == "exec-test" and v["last_run"]["status"] == "queued"
+    assert v["last_run"]["source"] == "manual" and v["last_run"]["note"] == "focus on Slack"
+    assert jobs_route.run_job("nope") is None
 
 
 @pytest.mark.parametrize("body,msg", [

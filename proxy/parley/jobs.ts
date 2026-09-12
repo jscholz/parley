@@ -87,12 +87,37 @@ export async function handleParleyJobsSetModel(req: any, res: any) {
   catch (e: any) { forwardError(res, e, 'jobs bulk model update'); }
 }
 
-/** POST /api/parley/jobs/{id}/run */
-export async function handleParleyJobRun(_req: any, res: any, id: string) {
+/** POST /api/parley/jobs/{id}/run  {note?} → job view with `last_run`.
+ *  Fires immediately upstream; 409 (already running) forwards as-is. */
+export async function handleParleyJobRun(req: any, res: any, id: string) {
   const upstream = requireUpstream(res); if (!upstream) return;
   if (!validId(res, id)) return;
-  try { json(res, 200, await upstream.runJob(id)); }
+  const body = await readJson(req, res); if (body === undefined) return;
+  const note = typeof body?.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 2000) : undefined;
+  try { json(res, 200, await upstream.runJob(id, note ? { note } : {})); }
   catch (e: any) { forwardError(res, e, `job run ${id}`); }
+}
+
+const RUN_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** GET /api/parley/jobs/{id}/runs/{runId} */
+export async function handleParleyJobRunGet(_req: any, res: any, id: string, runId: string) {
+  const upstream = requireUpstream(res); if (!upstream) return;
+  if (!validId(res, id)) return;
+  if (!RUN_ID_RE.test(runId)) { json(res, 400, { error: { message: 'invalid run id' } }); return; }
+  try { json(res, 200, await upstream.getJobRun(id, runId)); }
+  catch (e: any) { forwardError(res, e, `job run ${id}/${runId}`); }
+}
+
+/** GET /api/parley/jobs/{id}/runs/{runId}/console?after=N — ephemeral
+ *  console lines straight from the upstream; the proxy stores nothing. */
+export async function handleParleyJobRunConsole(req: any, res: any, id: string, runId: string) {
+  const upstream = requireUpstream(res); if (!upstream) return;
+  if (!validId(res, id)) return;
+  if (!RUN_ID_RE.test(runId)) { json(res, 400, { error: { message: 'invalid run id' } }); return; }
+  const after = Number(new URL(req.url, 'http://x').searchParams.get('after') || '0');
+  try { json(res, 200, await upstream.getJobRunConsole(id, runId, Number.isFinite(after) ? after : 0)); }
+  catch (e: any) { forwardError(res, e, `job run console ${id}/${runId}`); }
 }
 
 /** GET /api/parley/jobs/{id}/runs?limit=N */

@@ -1393,6 +1393,15 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (jobRun) {
       return parley.handleParleyJobRun(req, res, decodeURIComponent(jobRun[1]));
     }
+    // Run detail + console must match before the bare `/runs` list.
+    const jobRunConsole = req.method === 'GET' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/runs\/([^/?]+)\/console(?:\?.*)?$/);
+    if (jobRunConsole) {
+      return parley.handleParleyJobRunConsole(req, res, decodeURIComponent(jobRunConsole[1]), decodeURIComponent(jobRunConsole[2]));
+    }
+    const jobRunGet = req.method === 'GET' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/runs\/([^/?]+)(?:\?.*)?$/);
+    if (jobRunGet) {
+      return parley.handleParleyJobRunGet(req, res, decodeURIComponent(jobRunGet[1]), decodeURIComponent(jobRunGet[2]));
+    }
     const jobRuns = req.method === 'GET' && req.url.match(/^\/api\/parley\/jobs\/([^/?]+)\/runs(?:\?.*)?$/);
     if (jobRuns) {
       return parley.handleParleyJobRuns(req, res, decodeURIComponent(jobRuns[1]));

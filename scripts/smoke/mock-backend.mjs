@@ -991,6 +991,13 @@ export async function installMockBackend(page) {
   let jobs = null;                       // null | JobDef[]
   let lastJobPost = null;                // { id, action: 'update'|'run', body }
   let lastBulkModelPost = null;          // { model } — POST /api/parley/jobs/model
+  // Run feedback (2026-09-12): per-job run views + console lines. A POST
+  // …/run mints a running run on the job (job.last_run) and records the
+  // note; tests advance it with mock.finishJobRun() which also pushes the
+  // `job_run` stream envelope the PWA's live row listens for.
+  const jobRuns = new Map();             // jobId → RunView[] (newest first)
+  const jobConsoles = new Map();         // jobId → ConsoleLine[]
+  let runSeq = 0;
   let defaultModel = 'gpt-6-astra';      // moves when a bulk model post names a real model
   const modelOptions = [
     { value: '', label: `Follow default (${defaultModel})`, group: 'Default' },
@@ -1033,6 +1040,24 @@ export async function installMockBackend(page) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(jobsPayload()) });
       return;
     }
+    // Run detail + console: /jobs/{id}/runs/{runId}[/console]
+    const rm = url.pathname.match(/\/jobs\/([^/]+)\/runs\/([^/]+)(\/console)?$/);
+    if (rm && method === 'GET') {
+      const jid = decodeURIComponent(rm[1]); const rid = decodeURIComponent(rm[2]);
+      if (jobs === null) return notSupported();
+      const run = (jobRuns.get(jid) || []).find((r) => r.id === rid);
+      if (!run) { await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { message: 'no such run' } }) }); return; }
+      if (rm[3]) {
+        const after = parseInt(url.searchParams.get('after') || '0', 10) || 0;
+        const lines = (jobConsoles.get(jid) || []).filter((l) => l.id > after);
+        const done = run.status !== 'queued' && run.status !== 'running';
+        await route.fulfill({ status: 200, contentType: 'application/json',
+          body: JSON.stringify({ lines, next_after: lines.length ? lines[lines.length - 1].id : after, done, session_id: `mock-console-${rid}` }) });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(run) });
+      return;
+    }
     const m = url.pathname.match(/\/jobs\/([^/]+)(\/run|\/runs)?$/);
     if (!m) return route.fallback();
     const id = decodeURIComponent(m[1]);
@@ -1040,7 +1065,7 @@ export async function installMockBackend(page) {
     const job = jobs.find((j) => j.id === id);
     if (m[2] === '/runs') {
       await route.fulfill({ status: 200, contentType: 'application/json',
-        body: JSON.stringify({ object: 'list', data: [] }) });
+        body: JSON.stringify({ object: 'list', data: (jobRuns.get(id) || []).slice(0, 10) }) });
       return;
     }
     if (method === 'DELETE' && !m[2]) {
@@ -1058,8 +1083,24 @@ export async function installMockBackend(page) {
         body: JSON.stringify({ error: { type: 'not_found', message: 'no such job' } }) });
       return;
     }
-    if (m[2] === '/run') { job.enabled = true; job.state = 'scheduled'; }
-    else {
+    if (m[2] === '/run') {
+      // Already running → 409, like the agent.
+      if (job.last_run && (job.last_run.status === 'queued' || job.last_run.status === 'running')) {
+        await route.fulfill({ status: 409, contentType: 'application/json',
+          body: JSON.stringify({ error: { type: 'conflict', message: 'already running' } }) });
+        return;
+      }
+      runSeq += 1;
+      const run = {
+        id: `run-${runSeq}`, job_id: id, status: 'running', source: 'manual',
+        note: typeof body.note === 'string' && body.note ? body.note : null,
+        model: job.model || defaultModel, started_at: new Date().toISOString(), finished_at: null,
+        duration_ms: 0, error: null, delivery: { status: 'pending', error: null }, console: true,
+      };
+      jobRuns.set(id, [run, ...(jobRuns.get(id) || [])]);
+      job.last_run = run;
+      job.enabled = true; job.state = 'scheduled';
+    } else {
       Object.assign(job, body);
       if (typeof body.enabled === 'boolean') job.state = body.enabled ? 'scheduled' : 'paused';
     }
@@ -1824,6 +1865,22 @@ export async function installMockBackend(page) {
     /** Hold the /sessions LIST response open for `ms` — simulates the
      *  slow-list window where a single-flight refresh is in flight and
      *  drawer paints must NOT wait for it. */
+    /** Advance a job's latest run: patch = {status, error, delivery, duration_ms}.
+     *  Pushes the `job_run` envelope so the PWA's live row updates without
+     *  a reload. */
+    finishJobRun(jobId, patch = {}) {
+      const job = (jobs || []).find((j) => j.id === jobId);
+      const run = job?.last_run;
+      if (!job || !run) throw new Error(`finishJobRun: no active run for ${jobId}`);
+      Object.assign(run, { status: 'succeeded', finished_at: new Date().toISOString(),
+        delivery: { status: 'delivered', error: null }, duration_ms: 69_000 }, patch);
+      this.pushEnvelope({ type: 'job_run', chat_id: job.origin?.chat_id || 'cron', job_id: jobId,
+        job_name: job.name, run: { ...run } });
+    },
+    /** Seed console lines for a job's runs: [{id, ts, kind, text}]. */
+    setJobConsole(jobId, lines) { jobConsoles.set(jobId, lines.slice()); },
+    /** Seed run history (newest first) for a job. */
+    setJobRuns(jobId, runsList) { jobRuns.set(jobId, runsList.slice()); },
     /** Artificial latency for /search responses whose query contains
      *  `substr` (case-insensitive). Pass ms=0 to clear. Lets a test
      *  make an EARLIER query's answer land AFTER a later one. */

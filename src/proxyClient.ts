@@ -422,6 +422,9 @@ function startStreamChannel(): void {
                    // Ephemeral working indicator (plugin-converted
                    // gateway heartbeat) — see handleEnvelope 'status'.
                    'status',
+                   // Scheduled-job run state changes (Settings › Cron live
+                   // row + "run finished" banner) — see handleEnvelope.
+                   'job_run',
                    'notification', 'session_changed', 'error',
                    'tool_call', 'tool_result', 'user_message',
                    // Cross-device SSOT sync envelopes. The proxy
@@ -925,6 +928,14 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
     case 'conversation_deleted':
       dispatchCrossDeviceSync(env.type, env, chatId);
       return;
+
+    case 'job_run': {
+      // A scheduled job's run changed state (queued → running → done).
+      // Not chat-scoped for routing purposes — the envelope's chat_id is
+      // only where the job reports. Fan out to the cron panel + shell.
+      try { window.dispatchEvent(new CustomEvent('parley:job-run', { detail: env })); } catch {}
+      return;
+    }
 
     case 'session_changed': {
       // Compression rotated the gateway session, or hermes finished
@@ -1824,9 +1835,29 @@ export const proxyClientAdapter = {
     return r.json();
   },
 
-  /** POST /api/parley/jobs/{id}/run → JobDef (queued for the next tick). */
-  async runJob(id: string): Promise<any> {
-    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  /** POST /api/parley/jobs/{id}/run {note?} → JobDef with `last_run` (fires now). */
+  async runJob(id: string, body?: { note?: string }) {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/run`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** GET /api/parley/jobs/{id}/runs?limit=N → { object: 'list', data: RunView[] }. */
+  async listJobRuns(id: string, limit = 10) {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/runs?limit=${Math.max(1, Math.floor(limit))}`);
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** GET /api/parley/jobs/{id}/runs/{runId} → RunView. */
+  async getJobRun(id: string, runId: string) {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`);
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** GET …/runs/{runId}/console?after=N → { lines, next_after, done }. */
+  async getJobRunConsole(id: string, runId: string, after = 0) {
+    const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/console?after=${Math.max(0, Math.floor(after))}`);
     if (!r.ok) throw new Error(await errorMessage(r));
     return r.json();
   },

@@ -701,8 +701,52 @@ sent.
 
 ### `POST /v1/jobs/{id}/run`
 
-Queue the job to run at the agent's next opportunity (results deliver
-through the agent's normal path). Returns the updated job (200).
+Run the job **now**. Body may carry `{"note": "…"}` — a one-off addition
+to the job's prompt for this run only (parley's "Run with note…"). Results
+deliver through the agent's normal path. Returns the updated job (200)
+with `last_run` set to the run just started, so the client can show
+progress immediately. `409` when the job is already running; `503` when
+the scheduler cannot fire it right now.
+
+Every job in `GET /v1/jobs` may carry `last_run` (a **run view**, or
+null). Run view:
+
+```json
+{
+  "id": "faf73758…", "job_id": "fddb9e189342",
+  "status": "running",              // queued | running | succeeded | failed | unknown
+  "source": "manual",               // manual | scheduled
+  "note": "focus on Slack",         // the run's note, or null
+  "model": "gpt-5.4-mini",
+  "started_at": "2026-09-12T21:18:40+01:00", "finished_at": null,
+  "duration_ms": 14000,             // live for active runs
+  "error": null,
+  "delivery": { "status": "pending", "error": null },   // none | pending | delivering | delivered | failed
+  "console": true                   // whether …/console has anything to show
+}
+```
+
+### `GET /v1/jobs/{id}/runs/{run_id}`
+
+One run view (200) or `404`.
+
+### `GET /v1/jobs/{id}/runs/{run_id}/console?after=N`
+
+The run's console: what the run did, as the agent recorded it — prompt,
+tool calls, tool results, errors, final text. `{"lines": [{"id", "ts",
+"kind", "text"}], "next_after": N, "done": bool}`; `kind` is one of
+`prompt | user | assistant | tool_call | tool_result | error`. Pass the
+previous `next_after` to receive only new lines; poll while `done` is
+false. Ephemeral by design: the client renders and discards, the agent
+serves from records it already keeps.
+
+### Stream envelope `job_run`
+
+When it tracks runs, the agent pushes `{"type": "job_run", "chat_id",
+"job_id", "job_name", "run": <run view>}` on the events stream whenever a
+run's status or delivery status changes. `chat_id` is where the job
+reports (or a placeholder when it reports nowhere parley can show) and is
+not used for routing.
 
 ### `DELETE /v1/jobs/{id}`
 
@@ -711,8 +755,7 @@ or `404`. Parley asks the user to confirm before calling this.
 
 ### `GET /v1/jobs/{id}/runs?limit=N`
 
-Recent executions, newest first: `{"object":"list","data":[{"id",
-"status","source","claimed_at","started_at","finished_at","error"}]}`.
+Recent runs, newest first: `{"object":"list","data":[<run view>, …]}`.
 Optional; parley tolerates 404.
 
 Reference implementation: `backends/hermes/plugin/parley_route_jobs.py`

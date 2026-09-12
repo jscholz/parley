@@ -49,6 +49,7 @@ endpoint exists to prevent at a bulk scale.
 from __future__ import annotations
 
 import asyncio
+import functools
 import contextvars
 import logging
 import os
@@ -207,7 +208,7 @@ def _truncate(text: Any, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _job_view(job: Dict[str, Any]) -> Dict[str, Any]:
+def _job_view(job: Dict[str, Any], last_run: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from cron.jobs import effective_job_state
     origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
     origin_view = None
@@ -236,6 +237,10 @@ def _job_view(job: Dict[str, Any]) -> Dict[str, Any]:
         "provider": str(job.get("provider") or ""),
         "skills": [str(s) for s in (job.get("skills") or []) if s],
         "origin": origin_view,
+        # Most recent execution as a run view (parley_job_runs), or None.
+        # Lets the card show "Running · 0:14" / "Done in 1m09s" without a
+        # second request per job.
+        "last_run": last_run,
     }
 
 
@@ -289,8 +294,11 @@ def _model_options(current_models: Iterable[str], default_label: str) -> List[Di
 def build_jobs_payload() -> Dict[str, Any]:
     from cron.jobs import list_jobs
     jobs = list_jobs(include_disabled=True)
-    views = [_job_view(j) for j in jobs]
     default_model, default_provider = _default_model()
+    from . import parley_job_runs
+    by_id = {str(j.get("id")): j for j in jobs}
+    latest = parley_job_runs.latest_runs(by_id.keys(), jobs_by_id=by_id, default_model=default_model)
+    views = [_job_view(j, latest.get(str(j.get("id")))) for j in jobs]
     default_label = f"{default_model} via {default_provider}" if default_provider else default_model
     return {
         "object": "list",
@@ -351,14 +359,59 @@ def apply_job_update(job_id: str, body: Dict[str, Any]) -> Optional[Dict[str, An
     return _job_view(get_job(job_id) or job)
 
 
-def run_job(job_id: str) -> Optional[Dict[str, Any]]:
-    """Queue the job for the next scheduler tick (delivers through the gateway, unlike a CLI run)."""
-    from cron.jobs import trigger_job
+def run_job(job_id: str, note: Optional[str] = None, *, loop: Any = None,
+            on_done: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+    """Fire the job NOW through the gateway's claim-and-fire path and return
+    the job view with ``last_run`` = the execution just started.
+
+    Replaces the old "mark due for the next 60 s tick" (his report
+    2026-09-12: the button appeared to do nothing). A duplicate press while
+    the run holds the fire claim raises ``JobRunConflict`` (409). ``note``
+    rides along as hermes' single-fire ``manual_run_prompt``.
+    """
+    from cron.executions import get_execution
+    from . import parley_job_runs
     try:
-        job = trigger_job(job_id)
+        job, execution_id = parley_job_runs.fire_now(job_id, note, loop=loop, on_done=on_done)
+    except LookupError:
+        return None
     except ValueError as e:
         raise JobsValidationError(str(e))
-    return _job_view(job) if job else None
+    default_model, _ = _default_model()
+    last_run = None
+    if execution_id:
+        ex = get_execution(execution_id)
+        if ex:
+            last_run = parley_job_runs.run_view(ex, job=job, default_model=default_model)
+    return _job_view(job, last_run)
+
+
+def job_run_view(job_id: str, run_id: str, state_db_path: Any = None) -> Optional[Dict[str, Any]]:
+    from cron.jobs import get_job
+    from . import parley_job_runs
+    default_model, _ = _default_model()
+    return parley_job_runs.get_run(job_id, run_id, job=get_job(job_id), default_model=default_model,
+                                   state_db_path=state_db_path)
+
+
+def job_run_console(job_id: str, run_id: str, after: int, state_db_path: Any) -> Optional[Dict[str, Any]]:
+    """Console lines for one run, or None when the run is unknown. A run
+    whose session hasn't appeared yet returns an empty page (not 404) so
+    the client keeps polling."""
+    from cron.executions import get_execution
+    from . import parley_job_runs
+    ex = get_execution(run_id)
+    if not ex or str(ex.get("job_id")) != str(job_id):
+        return None
+    session_id = parley_job_runs.find_console_session(state_db_path, job_id, ex)
+    status = parley_job_runs.run_view(ex)["status"]
+    if not session_id:
+        return {"lines": [], "next_after": int(after or 0), "session_id": None,
+                "done": status in parley_job_runs.TERMINAL_RUN_STATUSES}
+    page = parley_job_runs.console_lines(state_db_path, session_id, after_id=int(after or 0))
+    page["session_id"] = session_id
+    page["done"] = status in parley_job_runs.TERMINAL_RUN_STATUSES
+    return page
 
 
 def delete_job(job_id: str) -> bool:
@@ -367,14 +420,12 @@ def delete_job(job_id: str) -> bool:
     return bool(remove_job(job_id))
 
 
-def job_runs(job_id: str, limit: int = 20) -> List[Dict[str, Any]]:
-    from cron.executions import list_executions
-    rows = list_executions(job_id=job_id, limit=max(1, min(int(limit), 100)))
-    return [{
-        "id": r.get("id"), "status": r.get("status"), "source": r.get("source"),
-        "claimed_at": r.get("claimed_at"), "started_at": r.get("started_at"),
-        "finished_at": r.get("finished_at"), "error": _truncate(r.get("error"), _ERROR_PREVIEW_CHARS) or None,
-    } for r in rows]
+def job_runs(job_id: str, limit: int = 20, state_db_path: Any = None) -> List[Dict[str, Any]]:
+    from cron.jobs import get_job
+    from . import parley_job_runs
+    default_model, _ = _default_model()
+    return parley_job_runs.list_runs(job_id, limit, job=get_job(job_id), default_model=default_model,
+                                     state_db_path=state_db_path)
 
 
 # ── aiohttp handlers ─────────────────────────────────────────────────────
@@ -485,66 +536,12 @@ def apply_bulk_model_update(value: Any) -> Dict[str, Any]:
     return build_jobs_payload()
 
 
-def run_job(job_id: str) -> Optional[Dict[str, Any]]:
-    """Queue the job for the next scheduler tick (delivers through the gateway, unlike a CLI run)."""
-    from cron.jobs import trigger_job
-    try:
-        job = trigger_job(job_id)
-    except ValueError as e:
-        raise JobsValidationError(str(e))
-    return _job_view(job) if job else None
-
-
-def delete_job(job_id: str) -> bool:
-    """Remove the job permanently (hermes keeps its run history / output dir)."""
-    from cron.jobs import remove_job
-    return bool(remove_job(job_id))
-
-
-def job_runs(job_id: str, limit: int = 20) -> List[Dict[str, Any]]:
-    from cron.executions import list_executions
-    rows = list_executions(job_id=job_id, limit=max(1, min(int(limit), 100)))
-    return [{
-        "id": r.get("id"), "status": r.get("status"), "source": r.get("source"),
-        "claimed_at": r.get("claimed_at"), "started_at": r.get("started_at"),
-        "finished_at": r.get("finished_at"), "error": _truncate(r.get("error"), _ERROR_PREVIEW_CHARS) or None,
-    } for r in rows]
-
-
-# ── aiohttp handlers ─────────────────────────────────────────────────────
-
-def _err(web, status: int, err_type: str, message: str):
-    return web.json_response({"error": {"type": err_type, "message": message}}, status=status)
-
-
-def _unauthorized(ctx, request) -> bool:
-    """The plugin's HTTP app authenticates at the middleware layer; ``register_routes``
-    receives a lightweight context, not the adapter. Honour an explicit checker when the
-    caller provides one (tests, direct adapter use), otherwise defer to the middleware."""
-    check = getattr(ctx, "check_http_auth", None) or getattr(ctx, "_check_http_auth", None)
-    return bool(check) and not check(request)
-
-
-def _job_id_from(request) -> str:
-    job_id = request.match_info.get("job_id", "")
-    if not _JOB_ID_RE.match(job_id):
-        raise JobsValidationError("invalid job id")
-    return job_id
-
-
-async def _in_executor(fn, *args):
-    # Copy the caller's context into the worker thread: the cron store can be
-    # scoped per-context (cron.jobs.use_cron_store) and a bare executor thread
-    # would silently fall back to the process-wide ~/.hermes/cron store.
-    ctx = contextvars.copy_context()
-    return await asyncio.get_running_loop().run_in_executor(None, ctx.run, fn, *args)
-
-
 async def handle_jobs_list(adapter, request):
     from aiohttp import web
     if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
+        ensure_run_watcher(adapter)
         payload = await _in_executor(build_jobs_payload)
     except Exception as e:
         logger.exception("[parley] jobs list failed")
@@ -593,13 +590,101 @@ async def handle_job_update(adapter, request):
     return web.json_response(view)
 
 
+def _state_db_path(adapter) -> Any:
+    return getattr(adapter, "_state_db_path", None)
+
+
+def _job_chat_id(job: Dict[str, Any]) -> Optional[str]:
+    """The Parley chat a job reports to (bare chat id, same form the
+    session_changed envelope uses), or None when it delivers elsewhere."""
+    target = str(job.get("deliver") or "").split(",")[0].strip()
+    if target.startswith("parley:"):
+        return target.split(":", 2)[1] or None
+    origin = job.get("origin") if isinstance(job.get("origin"), dict) else {}
+    if target in ("origin", "") and origin.get("platform") == "parley" and origin.get("chat_id"):
+        return str(origin["chat_id"])
+    return None
+
+
+_watcher = None
+
+
+def ensure_run_watcher(adapter):
+    """Start (once) the ledger watcher that pushes ``job_run`` envelopes and
+    the manual-run completion notice. Lazy: created on the first jobs
+    request, so it needs no hook in the adapter's start()."""
+    global _watcher
+    from . import parley_job_runs
+    if _watcher is not None:
+        _watcher.ensure_started()
+        return _watcher
+
+    def _jobs() -> Dict[str, Dict[str, Any]]:
+        try:
+            from cron.jobs import list_jobs
+            return {str(j.get("id")): j for j in list_jobs(include_disabled=True)}
+        except Exception:
+            return {}
+
+    async def _emit(env: Dict[str, Any]) -> None:
+        job = _jobs().get(str(env.get("job_id")))
+        # Every stream envelope must carry a chat_id (the proxy drops the
+        # rest). Route to the job's Parley chat when it has one, else to a
+        # sentinel the PWA's job_run handler ignores for routing purposes.
+        env["chat_id"] = (_job_chat_id(job) if job else None) or "cron"
+        await adapter._safe_send_envelope(env)
+
+    async def _manual_terminal(run: Dict[str, Any], job: Dict[str, Any]) -> None:
+        # A run that delivered its output to a Parley chat already produced
+        # the ⏰ notification the user will see; only speak up when there is
+        # nothing else to see — a failure, a failed delivery, or a job that
+        # reports somewhere Parley cannot show.
+        chat_id = _job_chat_id(job)
+        delivered_here = chat_id and run.get("status") == "succeeded" \
+            and run.get("delivery", {}).get("status") in ("delivered", "delivering", "pending")
+        if delivered_here:
+            return
+        target = chat_id or _job_chat_id({"deliver": "origin", "origin": job.get("origin")})
+        if not target:
+            return
+        body = parley_job_runs.run_finished_notice(job, run)
+        await adapter._safe_send_envelope({
+            "type": "notification", "chat_id": target, "kind": "cron", "content": body, "text": body,
+        })
+
+    _watcher = parley_job_runs.RunWatcher(
+        emit=_emit, job_lookup=_jobs, default_model=lambda: _default_model()[0],
+        state_db_path=lambda: _state_db_path(adapter), on_manual_terminal=_manual_terminal,
+    )
+    _watcher.ensure_started()
+    return _watcher
+
+
 async def handle_job_run(adapter, request):
+    """POST /v1/jobs/{id}/run {"note"?: str} → job view with ``last_run``.
+    409 when the job is already running, 503 when the scheduler can't fire."""
     from aiohttp import web
+    from . import parley_job_runs
     if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
+    note = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and body.get("note") is not None:
+            note = str(body.get("note")).strip()[:2000] or None
+    except Exception:
+        body = {}
     try:
         job_id = _job_id_from(request)
-        view = await _in_executor(run_job, job_id)
+        watcher = ensure_run_watcher(adapter)
+        loop = asyncio.get_running_loop()
+        view = await _in_executor(functools.partial(run_job, job_id, note, loop=loop,
+                                                    on_done=lambda: loop.call_soon_threadsafe(watcher.poke)))
+        watcher.poke()
+    except parley_job_runs.JobRunConflict:
+        return _err(web, 409, "conflict", "already running")
+    except parley_job_runs.JobRunUnavailable as e:
+        return _err(web, 503, "unavailable", str(e))
     except JobsValidationError as e:
         return _err(web, 400, "invalid_request_error", str(e))
     except Exception as e:
@@ -608,6 +693,44 @@ async def handle_job_run(adapter, request):
     if view is None:
         return _err(web, 404, "not_found", "no such job")
     return web.json_response(view)
+
+
+async def handle_job_run_get(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    try:
+        job_id = _job_id_from(request)
+        run_id = str(request.match_info.get("run_id") or "")
+        view = await _in_executor(job_run_view, job_id, run_id, _state_db_path(adapter))
+    except Exception as e:
+        logger.exception("[parley] job run get failed")
+        return _err(web, 500, "server_error", str(e))
+    if view is None:
+        return _err(web, 404, "not_found", "no such run")
+    return web.json_response(view)
+
+
+async def handle_job_run_console(adapter, request):
+    """GET /v1/jobs/{id}/runs/{run_id}/console?after=N → console lines
+    after message id N. Reads hermes' own session for the run — nothing
+    is stored on the Parley side."""
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    try:
+        job_id = _job_id_from(request)
+        run_id = str(request.match_info.get("run_id") or "")
+        after = int(request.query.get("after", "0") or 0)
+        page = await _in_executor(job_run_console, job_id, run_id, after, _state_db_path(adapter))
+    except ValueError as e:
+        return _err(web, 400, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] job run console failed")
+        return _err(web, 500, "server_error", str(e))
+    if page is None:
+        return _err(web, 404, "not_found", "no such run")
+    return web.json_response(page)
 
 
 async def handle_job_delete(adapter, request):
@@ -634,7 +757,7 @@ async def handle_job_runs(adapter, request):
     try:
         job_id = _job_id_from(request)
         limit = int(request.query.get("limit", "20"))
-        rows = await _in_executor(job_runs, job_id, limit)
+        rows = await _in_executor(job_runs, job_id, limit, _state_db_path(adapter))
     except (JobsValidationError, ValueError) as e:
         return _err(web, 400, "invalid_request_error", str(e))
     except Exception as e:
@@ -652,4 +775,6 @@ def register_jobs_routes(app, adapter) -> None:
     app.router.add_post("/v1/jobs/{job_id}", lambda r: handle_job_update(adapter, r))
     app.router.add_post("/v1/jobs/{job_id}/run", lambda r: handle_job_run(adapter, r))
     app.router.add_get("/v1/jobs/{job_id}/runs", lambda r: handle_job_runs(adapter, r))
+    app.router.add_get("/v1/jobs/{job_id}/runs/{run_id}", lambda r: handle_job_run_get(adapter, r))
+    app.router.add_get("/v1/jobs/{job_id}/runs/{run_id}/console", lambda r: handle_job_run_console(adapter, r))
     app.router.add_delete("/v1/jobs/{job_id}", lambda r: handle_job_delete(adapter, r))

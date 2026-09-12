@@ -1,6 +1,8 @@
-import { test } from 'node:test';
+import { test, describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob, withCurrentOption, bulkModelHeader } from './cronJobsModel.ts';
+import {
+  statusTone, statusText, relativeTime, chatLinkFor, groupOptions, mergeJob, withCurrentOption, bulkModelHeader, formatDuration, liveDurationMs, runLabel, runTone, runMeta, jobsSummary, consolePrefix, formatConsoleTime,
+} from './cronJobsModel.ts';
 
 const base = { state: 'scheduled', enabled: true, last_status: 'ok', last_error: null, deliver: 'origin', origin: null } as any;
 
@@ -68,4 +70,61 @@ test('bulkModelHeader — uniform (all unpinned, all pinned alike) vs mixed', ()
   assert.deepEqual(bulkModelHeader([{ model: 'gpt-5.6-sol' }, { model: 'gpt-6-astra' }]), { kind: 'mixed' });
   // a single job is trivially uniform, never mixed
   assert.deepEqual(bulkModelHeader([{ model: 'gpt-5.6-sol' }]), { kind: 'uniform', value: 'gpt-5.6-sol' });
+});
+
+describe('cronJobsModel runs (2026-09-12 run feedback)', () => {
+  const base = {
+    id: 'r1', job_id: 'j1', source: 'manual', note: null, model: 'gpt-5.4-mini',
+    started_at: '2026-09-12T20:00:00.000Z', finished_at: null, duration_ms: null, error: null,
+    delivery: { status: 'pending', error: null }, console: true,
+  };
+  const NOW = Date.parse('2026-09-12T20:00:14.000Z');
+
+  it('formatDuration is compact', () => {
+    assert.equal(formatDuration(14_000), '0:14');
+    assert.equal(formatDuration(69_000), '1:09');
+    assert.equal(formatDuration(3_720_000), '1h02m');
+    assert.equal(formatDuration(null), '');
+  });
+
+  it('active runs tick from started_at; finished runs use the agent figure', () => {
+    assert.equal(liveDurationMs({ ...base, status: 'running' }, NOW), 14_000);
+    assert.equal(liveDurationMs({ ...base, status: 'succeeded', duration_ms: 69_000 }, NOW), 69_000);
+    assert.equal(runLabel({ ...base, status: 'running' }, NOW), 'Running · 0:14');
+    assert.equal(runLabel({ ...base, status: 'queued' }, NOW), 'Queued…');
+    assert.equal(runLabel({ ...base, status: 'succeeded', duration_ms: 69_000 }, NOW), 'Done in 1:09');
+    assert.equal(runLabel({ ...base, status: 'failed', duration_ms: 31_000 }, NOW), 'Failed after 0:31');
+  });
+
+  it('tone and meta reflect delivery', () => {
+    assert.equal(runTone({ ...base, status: 'running' }), 'warn');
+    assert.equal(runTone({ ...base, status: 'succeeded', delivery: { status: 'delivered', error: null } }), 'ok');
+    assert.equal(runTone({ ...base, status: 'succeeded', delivery: { status: 'failed', error: 'x' } }), 'bad');
+    assert.equal(runTone({ ...base, status: 'failed' }), 'bad');
+    const meta = runMeta({ ...base, status: 'succeeded', delivery: { status: 'delivered', error: null }, note: 'only Slack' }, NOW);
+    assert.deepEqual(meta, ['manual', 'just now', 'gpt-5.4-mini', 'delivered', 'note: only Slack']);
+  });
+
+  it('an active latest run makes the job pill read running', () => {
+    const job: any = { state: 'scheduled', enabled: true, last_status: 'ok', last_error: null, last_run: { ...base, status: 'running' } };
+    assert.equal(statusText(job), 'running');
+    assert.equal(statusTone(job), 'warn');
+  });
+
+  it('jobsSummary counts running, failed today, and the next fire', () => {
+    const jobs: any[] = [
+      { id: 'a', enabled: true, next_run_at: new Date(NOW + 40 * 60_000).toISOString(), last_run: { ...base, status: 'running' } },
+      { id: 'b', enabled: true, next_run_at: new Date(NOW + 3 * 3600_000).toISOString(),
+        last_run: { ...base, status: 'failed', finished_at: new Date(NOW - 3600_000).toISOString() } },
+      { id: 'c', enabled: false, next_run_at: null, last_run: null },
+    ];
+    assert.equal(jobsSummary(jobs, NOW), '3 jobs · 1 running · 1 failed today · next in 40m');
+  });
+
+  it('console glyphs and clock', () => {
+    assert.equal(consolePrefix('tool_call'), '▶');
+    assert.equal(consolePrefix('error'), '✖');
+    assert.equal(formatConsoleTime(0), '--:--:--');
+    assert.match(formatConsoleTime(1_757_700_000), /^\d\d:\d\d:\d\d$/);
+  });
 });
