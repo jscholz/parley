@@ -714,6 +714,17 @@ export function applyVisuals() {
  * Hydrate all settings controls from current values + wire change handlers.
  * @param {Object} handlers — { onThemeChange, onVoiceChange, onWakeLockChange, onSave, onModelChange }
  */
+// Hoisted from hydrate() so other modules (the /cron slash command) can
+// open the panel to a section without reaching into the DOM themselves.
+let openPanelFn: (() => void) | null = null;
+let showSectionFn: ((target: string) => void) | null = null;
+
+/** Open Settings to a nav target ("cron", "agent", …). No-op before hydrate. */
+export function openSettingsTo(target: string): void {
+  openPanelFn?.();
+  showSectionFn?.(target);
+}
+
 export function hydrate(handlers: {
   onThemeChange?: () => void;
   onVoiceChange?: () => void;
@@ -1485,6 +1496,7 @@ export function hydrate(handlers: {
   };
   if (btnSet) btnSet.onclick = openPanel;
 
+  openPanelFn = openPanel;
   // Wire the section-nav buttons (desktop two-column shell). Click swaps
   // which `.settings-group[data-section]` is visible; mobile breakpoint
   // CSS overrides this and shows them all stacked. See index.html
@@ -1509,6 +1521,7 @@ export function hydrate(handlers: {
       if (t) showSection(t);
     };
   }
+  showSectionFn = showSection;
 
   const closeBtn = $any('settings-close');
   if (closeBtn) {

@@ -272,6 +272,11 @@ export interface AssistantBubbleSpec {
   /** `true` while the turn is in flight (no reply_final). Drives the
    *  .streaming class + thinking dots. */
   streaming?: boolean;
+  /** Label beside the dots while `text` is still blank: "Thinking", or
+   *  the parsed progress heartbeat ("Working · 3 min · iteration 4/60").
+   *  Set on the pending-turn placeholder so the in-bubble indicator
+   *  carries the same information the bottom-pinned status line would. */
+  statusText?: string;
 }
 
 export interface NotificationBubbleSpec {

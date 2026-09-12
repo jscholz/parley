@@ -600,6 +600,11 @@ export function project(state: ChatState): BubbleSpec[] {
   // bubble is the send feedback; dots start from turn 2.
   const now = Date.now();
   const PLACEHOLDER_MAX_AGE_MS = 120_000;
+  // Latest progress heartbeat, shared by the placeholder (step 5) and the
+  // bottom-pinned status line (step 6): whichever one renders shows it.
+  const STATUS_MAX_AGE_MS = 10 * 60_000;
+  const beat = state.turnStatus && now - state.turnStatus.at < STATUS_MAX_AGE_MS
+    ? state.turnStatus : null;
   const liveSendKeys = new Set<string>();
   for (const p of state.pendingSends) {
     if (!p.failed && now - p.sentAt < PLACEHOLDER_MAX_AGE_MS) {
@@ -626,6 +631,11 @@ export function project(state: ChatState): BubbleSpec[] {
             key: `pending:turn:${s.key}`,
             text: '',
             streaming: true,
+            // Field 2026-09-12: the placeholder used to render as a bare
+            // cursor (its dots had no styling) AND suppressed the status
+            // line, so a 3-minute turn showed nothing. It now carries the
+            // label itself.
+            statusText: beat ? formatTurnStatus(beat.text) : 'Thinking',
             // +1ms: directly under its user bubble, ahead of anything
             // landing in the same millisecond.
             timestamp: s.timestamp + 1,
@@ -646,9 +656,6 @@ export function project(state: ChatState): BubbleSpec[] {
   // fresh heartbeat (`status` envelope; the store clears it on a
   // turn-ending final, the age cap covers a plugin that died mid-turn).
   {
-    const STATUS_MAX_AGE_MS = 10 * 60_000;
-    const beat = state.turnStatus && now - state.turnStatus.at < STATUS_MAX_AGE_MS
-      ? state.turnStatus : null;
     const openRow = specs.some(s => s.kind === 'activityRow' && !s.complete);
     const liveTurn = specs.some(s =>
       s.kind === 'user' && liveSendKeys.has(s.key) && !finalizedTurnUserKeys.has(s.key));

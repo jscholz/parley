@@ -1030,6 +1030,7 @@ async function doRefresh() {
   const cached = await sessionCache.getListCache();
   if (cached?.sessions?.length) {
     cachedSessions = overlayPendingRenames(cached.sessions);
+    announceSessionsCached();
     // A renamed/re-titled session's new name may be sitting in this list
     // fetch even when the viewed id itself hasn't changed — re-sync so
     // the header doesn't keep showing a stale title (Phase 0 #1).
@@ -1055,6 +1056,7 @@ async function doRefresh() {
     // repaints over the optimistic rename (title visibly reverts until
     // the post-rename refresh; field 2026-07-22).
     cachedSessions = overlayPendingRenames(sessions);
+    announceSessionsCached();
     // Same as the cache-render rung above: the server list is the
     // authoritative title source (session_changed / rename), so re-sync
     // the header here too (Phase 0 #1).
@@ -1165,6 +1167,15 @@ export function getSourceForChat(id: string | null | undefined): string {
  *  brand-new chat that arrived via SSE before the drawer refresh
  *  caught up). Used by the in-app notification banner to render a
  *  scannable chat label instead of a UUID prefix. */
+/** Tell title consumers that render outside the drawer (pin captions, the
+ *  notification banner) that the cached list changed. Field 2026-09-12:
+ *  pins rendered before the list loaded kept their raw-id caption until
+ *  a manual refresh — getTitleForChat is a synchronous cache read and
+ *  nothing re-ran it once the cache filled. */
+function announceSessionsCached(): void {
+  try { window.dispatchEvent(new CustomEvent('parley:sessions-cached')); } catch { /* noop */ }
+}
+
 export function getTitleForChat(id: string | null | undefined): string | null {
   if (!id) return null;
   const row = cachedSessions.find(s => s.id === id);

@@ -1181,6 +1181,23 @@ describe('local thinking placeholder (latency B1a, 2026-07-13)', () => {
     assert.equal(ph.key, 'pending:turn:umsg_p1');
     assert.equal((ph as any).streaming, true);
     assert.equal(ph.timestamp, now - 500 + 1);
+    // The placeholder carries its own label (field 2026-09-12: it used
+    // to render as a bare caret while suppressing the status line).
+    assert.equal((ph as any).statusText, 'Thinking');
+    assert.ok(!out.some(x => x.kind === 'turnStatus'), 'placeholder replaces the bottom status line');
+  });
+
+  it('placeholder label upgrades to the progress heartbeat', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: priorTurn(),
+      pendingSends: [pending('umsg_p1', now - 500)],
+      turnStatus: { text: '⏳ Working — 3 min — iteration 4/60, terminal', at: now - 1000 },
+    }));
+    const ph = out.find(x => x.key === 'pending:turn:umsg_p1') as any;
+    assert.ok(ph, 'placeholder present');
+    assert.match(ph.statusText, /Working/);
+    assert.match(ph.statusText, /3 min/);
   });
 
   it('first-turn gate: no placeholder before the agent has any row in the chat', () => {

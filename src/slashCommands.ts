@@ -61,6 +61,17 @@ let onDispatchCb: ((text: string) => void) | null = null;
  *  Parley-frontend-only (no gateway restart). */
 const PARLEY_SYNTHETIC_COMMANDS: CommandDef[] = [
   {
+    // hermes' own /cron is cli_only (never dispatched by the gateway), so
+    // Parley handles this one locally: open Settings › Cron, or fire a
+    // job now — see cronCommand.ts and handleCronLocally().
+    name: 'cron',
+    description: 'Scheduled jobs — open the Cron panel, or run one now',
+    category: 'Tools & Skills',
+    aliases: [],
+    args_hint: '[run <job> [-- note]]',
+    subcommands: ['list', 'run'],
+  },
+  {
     name: 'reset',
     description: "Reset the agent's context — keeps this thread",
     category: 'Session',
@@ -341,8 +352,40 @@ export function isCommand(text: string): boolean {
 export function dispatch(text: string): void {
   close();
   if (!text) return;
+  if (/^\/cron\b/i.test(text.trim())) {
+    void handleCronLocally(text);
+    return;
+  }
   try { onDispatchCb?.(text); }
   catch (e: any) { diag(`slashCommands: onDispatch threw: ${e?.message || e}`); }
+}
+
+/** `/cron` never leaves the client: it routes to Settings › Cron (the
+ *  Parley cron surface over /v1/jobs). `/cron run <job> [-- note]` fires
+ *  the job through the same endpoint the panel's Run now uses, then opens
+ *  the panel so the live run row is on screen. */
+async function handleCronLocally(text: string): Promise<void> {
+  const { parseCronCommand, matchJob } = await import('./cronCommand.ts');
+  const status = await import('./status.ts');
+  const settings = await import('./settings.ts');
+  const cmd = parseCronCommand(text);
+  if (cmd.action === 'error') { status.setStatus(cmd.message, 'err'); return; }
+  if (cmd.action === 'open') { settings.openSettingsTo('cron'); return; }
+  try {
+    const backend = await import('./backend.ts');
+    const mod: any = await import('./proxyClient.ts');
+    const adapter: any = (backend as any).adapter ?? mod.proxyClientAdapter;
+    const payload = await adapter.listJobs();
+    if (!payload) { status.setStatus('This agent has no scheduled jobs.', 'err'); return; }
+    const found = matchJob(payload.data as { id: string; name: string }[], cmd.query);
+    if ('error' in found) { status.setStatus(found.error, 'err'); return; }
+    await adapter.runJob(found.job.id, cmd.note ? { note: cmd.note } : {});
+    status.setStatus(`Run started: ${found.job.name}`, 'ok');
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    status.setStatus(/409|already running/i.test(msg) ? 'That job is already running.' : `Couldn't run: ${msg}`, 'err');
+  }
+  settings.openSettingsTo('cron');
 }
 
 // ── Event handlers ────────────────────────────────────────────────────

@@ -271,7 +271,8 @@ function createAssistant(spec: AssistantBubbleSpec, batch: boolean): HTMLElement
     batch,
   });
   if (!el) return null;
-  if (spec.streaming) ensureThinkingDots(el);
+  if (spec.streaming) ensureThinkingDots(el, spec.statusText);
+  el.classList.toggle('blank', !(spec.text || '').trim());
   // Under virtualization the bubble's DOM is destroyed when it scrolls
   // outside the window. Reapply any persisted tts playback state (loaded
   // bar, played bar, .tts-* classes) AND replay attached cards so a
@@ -656,13 +657,16 @@ function updateAssistant(el: HTMLElement, spec: AssistantBubbleSpec): void {
   }
   el.dataset.text = spec.text || '';
 
-  // Streaming class.
+  // Streaming class. `blank` = no visible text yet, so the caret cursor
+  // (which follows text) stays hidden and only the dots + label show.
+  el.classList.toggle('blank', !(spec.text || '').trim());
   if (spec.streaming) {
     el.classList.add('streaming');
-    ensureThinkingDots(el);
+    ensureThinkingDots(el, spec.statusText);
   } else {
     el.classList.remove('streaming');
     el.querySelector('.thinking-dots')?.remove();
+    el.querySelector('.thinking-label')?.remove();
   }
   updateTimestamp(el, spec.timestamp);
 }
@@ -1117,14 +1121,30 @@ function fmtDurationMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-function ensureThinkingDots(el: HTMLElement): void {
-  if (el.querySelector('.thinking-dots')) return;
-  const dots = document.createElement('span');
-  dots.className = 'thinking-dots';
-  dots.innerHTML = `<span></span><span></span><span></span>`;
-  const text = el.querySelector('.text');
-  if (text) text.appendChild(dots);
-  else el.appendChild(dots);
+/** Dots (+ optional label) inside a streaming bubble whose reply hasn't
+ *  started. Idempotent: creates once, then only updates the label text so
+ *  a heartbeat upgrade never re-mounts (and re-animates) the dots. */
+function ensureThinkingDots(el: HTMLElement, label?: string): void {
+  let dots = el.querySelector<HTMLElement>('.thinking-dots');
+  if (!dots) {
+    dots = document.createElement('span');
+    dots.className = 'thinking-dots';
+    dots.innerHTML = `<span></span><span></span><span></span>`;
+    const text = el.querySelector('.text');
+    if (text) text.appendChild(dots);
+    else el.appendChild(dots);
+  }
+  let lbl = el.querySelector<HTMLElement>('.thinking-label');
+  if (label) {
+    if (!lbl) {
+      lbl = document.createElement('span');
+      lbl.className = 'thinking-label';
+      dots.insertAdjacentElement('afterend', lbl);
+    }
+    if (lbl.textContent !== label) lbl.textContent = label;
+  } else {
+    lbl?.remove();
+  }
 }
 
 function getAgentSpeaker(): string {

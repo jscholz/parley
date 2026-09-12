@@ -14,7 +14,9 @@ export function createPinsModule(opts: {
   onSelect?: () => void;
 }): RightDrawerModule {
   const expandedKeys = new Set<string>();
+  let lastCtx: RightDrawerModuleContext | null = null;
   const render = (ctx: RightDrawerModuleContext) => {
+    lastCtx = ctx;
     const pins = listAllPins();
     opts.list.innerHTML = '';
     if (ctx.clearButton) {
@@ -32,6 +34,10 @@ export function createPinsModule(opts: {
     opts.list.hidden = false;
     for (const item of pins) opts.list.appendChild(renderPinItem(item, opts, ctx, expandedKeys));
   };
+  // Captions name the source chat from the drawer's cached list; when that
+  // list (re)loads after the pins painted, re-render so a raw-id caption
+  // is replaced by the title (field 2026-09-12).
+  window.addEventListener('parley:sessions-cached', () => { if (lastCtx) render(lastCtx); });
   return {
     id: 'pins',
     title: 'Pinned',

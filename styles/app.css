@@ -3606,6 +3606,23 @@
     font-size: calc(var(--content-size) - 1px);
   }
   .line.streaming .thinking-dots.hidden { display: none; }
+  /* The dots themselves — previously styled only under .turn-status, so an
+     in-bubble placeholder rendered as a bare blinking caret (field
+     2026-09-12: "thinking bubble doesn't work", 3-minute turn). */
+  .line.streaming .thinking-dots { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; }
+  .line.streaming .thinking-dots span {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--muted); opacity: 0.4;
+    animation: turn-status-pulse 1.2s ease-in-out infinite;
+  }
+  .line.streaming .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .line.streaming .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+  .line.streaming .thinking-label {
+    margin-left: 8px; color: var(--muted); font-style: italic;
+    font-size: calc(var(--content-size) - 1px);
+  }
+  /* No text yet → no caret; the dots are the indicator. */
+  .line.streaming.blank .text::after { display: none; }
   /* Pending state: visible but dim — "we pressed send" without yet any
      confirmation from the backend. Once onActivity fires, .pending is
      removed (handleActivity in main.ts) and the dots reach full brightness. */
