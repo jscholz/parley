@@ -147,7 +147,15 @@ export async function installMockBackend(page) {
   const recent = [];
 
   const broadcast = (env) => {
-    if (env && env.type === 'reply_final' && env.chat_id && !env.interim) openTurns.delete(env.chat_id);
+    // Keep the mock's notion of "a turn is running" consistent with what
+    // it streams, the way the real plugin's _turn_queues is: live-turn
+    // envelopes imply an open turn; a turn-ending final / done closes it.
+    if (env && env.chat_id) {
+      const t = env.type;
+      if (t === 'typing' || t === 'reply_delta' || t === 'tool_call' || t === 'tool_result' || t === 'user_message'
+          || (t === 'status' && env.state !== 'done')) openTurns.add(env.chat_id);
+      else if ((t === 'reply_final' && !env.interim) || (t === 'status' && env.state === 'done') || t === 'error') openTurns.delete(env.chat_id);
+    }
     envelopeId++;
     const id = envelopeId;
     recent.push({ id, env });
