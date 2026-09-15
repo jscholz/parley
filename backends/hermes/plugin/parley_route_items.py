@@ -17,6 +17,8 @@ referenced via ``self``.
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 import contextlib
 import os
 from .parley_env import env_get
@@ -386,6 +388,51 @@ def _items_by_user_id(
     return (items, first_id, has_more)
 
 
+logger = logging.getLogger(__name__)
+
+
+def turn_is_active(adapter, chat_id: str) -> bool:
+    """Is a /v1/responses turn running for ``chat_id`` right now?
+
+    ``_turn_queues`` holds exactly the chats with a live turn handler
+    (registered before the turn buffer opens, released in the handler's
+    ``finally``), so it is the one source of truth for "the agent is
+    working on this chat". Anything else — a buffered in-flight turn, a
+    user row with no reply, an unfinished tool row in history — is
+    circumstantial and must not be presented as live.
+    """
+    queues = getattr(adapter, "_turn_queues", None) or {}
+    return chat_id in queues
+
+
+def resolve_inflight(adapter, chat_id: str) -> Tuple[bool, list]:
+    """``(turn_active, inflight_envelopes)`` for the items response.
+
+    The turn buffer is only ever emptied by the ``reply_final`` that
+    closes a turn. A turn that ends any other way — handler exception,
+    client disconnect mid-turn, timeout, hermes returning without a
+    final — left a phantom entry that this endpoint replayed as
+    ``inflight`` forever, so every reopen of that chat painted a user
+    message with no reply and the PWA showed "Thinking" for a turn that
+    had been dead for hours (field 2026-09-13/15). Now the buffer is
+    consulted ONLY while the turn is live; a phantom is evicted on sight.
+    """
+    active = turn_is_active(adapter, chat_id)
+    buf = getattr(adapter, "_turn_buffer", None)
+    if buf is None:
+        return active, []
+    entry = buf.active_for_chat(chat_id)
+    if entry is None:
+        return active, []
+    if not active:
+        buf.close_turn(chat_id)
+        age = time.time() - float(getattr(entry, "started_at", 0) or 0)
+        logger.warning("[parley] evicted phantom in-flight turn chat=%s age=%.0fs (no live handler)",
+                       chat_id, age if age < 1e9 else -1)
+        return False, []
+    return True, buf.render_envelopes(entry)
+
+
 async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     """GET /v1/conversations/{id}/items — transcript replay.
 
@@ -603,12 +650,7 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     has_more = result.get("has_more", False)
     _trace("query-end", f"rows={len(items)} target_found={target_found}")
 
-    inflight_entry = None
-    inflight_envelopes: list = []
-    if adapter._turn_buffer is not None:
-        inflight_entry = adapter._turn_buffer.active_for_chat(chat_id)
-        if inflight_entry is not None:
-            inflight_envelopes = adapter._turn_buffer.render_envelopes(inflight_entry)
+    turn_active, inflight_envelopes = resolve_inflight(adapter, chat_id)
 
     # 404 only when truly unknown chat: no parley.db rows + no
     # state.db session + no in-flight turn. Preserves the original
@@ -621,6 +663,10 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         "data": items,
         "first_id": first_id,
         "has_more": has_more,
+        # Authoritative "is the agent working on this chat right now".
+        # The PWA gates every in-flight indicator on it (his 2026-09-15
+        # report: reopening old sessions showed a permanent "Thinking").
+        "turn_active": turn_active,
     }
     # Echo whether the around-target was located so the PWA can fall back
     # to its serial load-earlier drill on a stale pin (target_found=False).

@@ -26,6 +26,10 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Parley uses the camera for image attachments.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Parley can attach photos from your library.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Parley does not save photos to your library; iOS requires this notice for the camera picker.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Parley uses your microphone for voice messages and dictation.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

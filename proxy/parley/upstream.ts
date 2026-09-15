@@ -242,7 +242,7 @@ export interface UpstreamAgent {
   getMessages(
     chatId: string,
     opts?: { limit?: number; before?: number; around?: string; after?: number },
-  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean }>;
+  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean }>;
 
   /** Drawer delete. Cascades upstream (transcript + memory store). */
   deleteConversation(chatId: string): Promise<void>;
@@ -406,7 +406,7 @@ export class HTTPAgentUpstream implements UpstreamAgent {
   async getMessages(
     chatId: string,
     opts: { limit?: number; before?: number; around?: string; after?: number } = {},
-  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean }> {
+  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set('limit', String(opts.limit));
     if (opts.before != null) params.set('before', String(opts.before));
@@ -436,6 +436,7 @@ export class HTTPAgentUpstream implements UpstreamAgent {
       ...(typeof j?.target_found === 'boolean' ? { target_found: j.target_found } : {}),
       ...(j?.last_id != null ? { last_id: j.last_id } : {}),
       ...(typeof j?.has_more_newer === 'boolean' ? { has_more_newer: j.has_more_newer } : {}),
+      ...(typeof j?.turn_active === 'boolean' ? { turn_active: j.turn_active } : {}),
     };
   }
 

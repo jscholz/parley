@@ -127,6 +127,10 @@ async def _handle_blocking(
         )
     finally:
         adapter._turn_queues.pop(chat_id, None)
+        # The turn is over however it ended: never leave a phantom
+        # in-flight entry for the items endpoint to replay (2026-09-15).
+        if adapter._turn_buffer is not None:
+            adapter._turn_buffer.close_turn(chat_id)
         # Linking is now done by parley.db's content-fingerprint
         # match (Phase 3, see parley_state.reconcile_from_state_db).
         # The legacy `_write_msg_links_after_turn` heuristic is dead
@@ -276,6 +280,10 @@ async def _handle_streaming(
             })
     finally:
         adapter._turn_queues.pop(chat_id, None)
+        # The turn is over however it ended: never leave a phantom
+        # in-flight entry for the items endpoint to replay (2026-09-15).
+        if adapter._turn_buffer is not None:
+            adapter._turn_buffer.close_turn(chat_id)
         with contextlib.suppress(Exception):
             await resp.write_eof()
         # Linking handled by reconcile_from_state_db on next items

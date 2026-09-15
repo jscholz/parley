@@ -224,6 +224,14 @@ on resume to repaint the chat surface from server state.
 }
 ```
 
+`turn_active` (bool, optional) — whether the agent is working on this
+conversation **right now**. Authoritative: parley shows an in-flight
+indicator ("Thinking", streaming dots, a progress line) only while this
+is true, and clears it the moment a fetch says false — history alone
+(an unanswered user row, an unfinished tool row) never implies activity.
+Backends that track turns SHOULD send it on every items page; `inflight`
+envelopes SHOULD be empty whenever it is false.
+
 `first_id` is the id of the oldest item in `data` (used for the next
 `?before=` cursor). `has_more` is true when older items exist.
 

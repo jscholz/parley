@@ -2060,6 +2060,10 @@ async function boot() {
       const pagination = {
         firstId: e.firstId ?? null,
         hasMore: !!e.hasMore,
+        // Authoritative live-turn flag from the reconcile fetch — this is
+        // the path that runs after a reconnect, exactly when a dead
+        // turn's dots need clearing (2026-09-15).
+        ...(typeof e.turnActive === 'boolean' ? { turnActive: e.turnActive } : {}),
       };
       // View token, not a switch: this repaints the chat already on
       // screen and must lose to any user navigation that lands between
@@ -3149,8 +3153,21 @@ async function boot() {
   const btnCamera = document.getElementById('btn-camera') as HTMLButtonElement | null;
   const btnAttach = document.getElementById('btn-attach') as HTMLButtonElement | null;
   if (btnCamera && cameraInput) {
-    btnCamera.onclick = () => {
+    btnCamera.onclick = async () => {
       if (btnCamera.disabled) return;
+      // CAP shell: the web view's built-in picker shows a BLACK preview
+      // when the app's camera permission is off (iOS gives no error), so
+      // go through the native camera plugin, which asks explicitly and
+      // lets us say what is wrong (field 2026-09-13). Falls back to the
+      // file input when the plugin is unavailable.
+      if (document.documentElement.classList.contains('capacitor-app')) {
+        const cam = await import('./native/cameraCapture.ts');
+        const outcome = await cam.captureWithNativeCamera();
+        if (outcome.kind === 'file') { await attachments.add(outcome.file); return; }
+        if (outcome.kind === 'denied') { status.setStatus(outcome.message, 'err'); return; }
+        if (outcome.kind === 'cancelled') return;
+        diag(`camera: native plugin unavailable (${outcome.message}) — falling back to the file input`);
+      }
       cameraInput.value = '';  // allow re-picking the same file
       cameraInput.click();
     };

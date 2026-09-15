@@ -215,3 +215,22 @@ describe('noteTurnStarted', () => {
     assert.equal(getState(chatId).turnStatus, null);
   });
 });
+
+import * as ti from './turnIndicator.ts';
+
+describe('turnIndicator.noteTurnState', () => {
+  it('false clears an existing indicator (store turnStatus → null); true is a no-op', () => {
+    ti.resetTurnIndicators();
+    const id = 'chat-nts';
+    const now = 1_700_000_000_000;
+    ti.noteTyping(id, { now });
+    assert.equal(getState(id).turnStatus?.text, '', 'typing painted the placeholder');
+    ti.noteTurnState(id, true);
+    assert.equal(getState(id).turnStatus?.text, '', 'true leaves it');
+    ti.noteTurnState(id, false);
+    assert.equal(getState(id).turnStatus, null, 'false clears it');
+    // …and a straggler typing after the server said "over" does not resurrect it
+    // (the reducer's own latch is not involved here; a fresh typing would
+    // legitimately start a new placeholder, which is correct behaviour).
+  });
+});

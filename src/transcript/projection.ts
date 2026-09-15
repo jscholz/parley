@@ -611,8 +611,12 @@ export function project(state: ChatState): BubbleSpec[] {
       liveSendKeys.add(p.messageId);
     }
   }
+  // The server's word on whether a turn is running. When it says no,
+  // nothing below may claim otherwise — not an unanswered user row in
+  // history, not an unfinished tool row, not a stale heartbeat.
+  const serverSaysIdle = state.turnActive === false;
   let placeholderSpliced = false;
-  {
+  if (!serverSaysIdle) {
     const agentHasSpoken = specs.some(s =>
       s.kind === 'assistant' || s.kind === 'activityRow' || s.kind === 'notification');
     if (agentHasSpoken) {
@@ -659,7 +663,7 @@ export function project(state: ChatState): BubbleSpec[] {
     const openRow = specs.some(s => s.kind === 'activityRow' && !s.complete);
     const liveTurn = specs.some(s =>
       s.kind === 'user' && liveSendKeys.has(s.key) && !finalizedTurnUserKeys.has(s.key));
-    if (!placeholderSpliced && (openRow || liveTurn || beat)) {
+    if (!placeholderSpliced && !serverSaysIdle && (openRow || liveTurn || beat)) {
       const last = specs[specs.length - 1];
       specs.push({
         kind: 'turnStatus',

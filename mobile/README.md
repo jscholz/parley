@@ -171,3 +171,14 @@ Workflow:
 
 - [`docs/MAC_BOOTSTRAP.md`](../docs/MAC_BOOTSTRAP.md) — first-time Xcode setup, signing, install
 - Top-level [`README.md`](../README.md) — overall architecture
+
+## Camera (2026-09-15)
+
+The camera button uses the native Capacitor Camera plugin inside the
+shell (`@capacitor/camera`, declared in the root `package.json`). The web
+view's built-in picker shows a black preview when the app's camera
+permission is off and gives no error; the plugin asks explicitly and the
+UI reports "Camera access is off for Parley" instead. After pulling this
+change run `npm install` before `npx cap sync ios` so the package lands in
+the Xcode project, then rebuild. `Info.plist` carries the camera and
+photo-library usage strings the plugin requires.

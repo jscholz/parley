@@ -53,6 +53,13 @@ export interface ChatState {
    *  time). Cleared by a turn-ending reply_final. Optional so partial
    *  states in tests/fixtures stay valid. */
   turnStatus?: { text: string; at: number } | null;
+  /** Server-authoritative "the agent is working on this chat right now",
+   *  from the items endpoint's `turn_active` and refreshed by live
+   *  envelopes. `false` suppresses every in-flight indicator regardless
+   *  of what history looks like (an unanswered user row, an unfinished
+   *  tool row) — those are circumstantial, this is the fact. `null` =
+   *  unknown (older backend / not fetched yet): fall back to inference. */
+  turnActive?: boolean | null;
   /** Most-recent pagination cursors from the items endpoint. Used by the
    *  load-earlier / load-later paths; not consumed by the projection
    *  itself. `firstId`/`hasMore` page OLDER (toward the head); `lastId`/

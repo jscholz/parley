@@ -17,6 +17,7 @@
  */
 
 import * as backend from './backend.ts';
+import * as turnIndicator from './transcript/turnIndicator.ts';
 import { saveCurrentScrollPosition, cancelAtBottomRepin } from "./chat.ts";
 import { flushScrollPosition } from "./chatScrollPositions.ts";
 import * as conversations from './conversations.ts';
@@ -2492,7 +2493,10 @@ async function resume(id: string, origin: NavOrigin, targetMessageId?: string) {
       const result: any = await backend.resumeSession(id);
       t?.trace('server-fetch-end', `n=${(result.messages || []).length} error=${result.error || ''}`);
       const messages = result.messages || [];
-      const pagination = { firstId: result.firstId ?? null, hasMore: !!result.hasMore };
+      const pagination = {
+        firstId: result.firstId ?? null, hasMore: !!result.hasMore,
+        ...(typeof result.turnActive === 'boolean' ? { turnActive: result.turnActive } : {}),
+      };
       if (result.error) {
         if (!switchCtl.isCurrent(tok)) return;
         const msg = cacheRendered
@@ -2556,13 +2560,20 @@ async function resume(id: string, origin: NavOrigin, targetMessageId?: string) {
           log(`sessionDrawer: cache-match — replaying ${inflight.length} inflight envelope(s) for ${id}`);
           backend.replayInflight?.(id, inflight);
         }
+        // The cached render never saw the server's live-turn flag — apply
+        // it here so a dead turn's cached dots clear on this visit.
+        turnIndicator.applyServerTurnState(id, result.turnActive);
         t?.trace('server-render-skip-cache-match');
         return;
       }
       t?.trace('server-render-start');
       const inflight = Array.isArray(result.inflight) ? result.inflight : [];
       log(`sessionDrawer: resumed ${id} (${capped.messages.length} messages, ${inflight.length} inflight, hasMore=${capped.pagination.hasMore})`);
-      onResumeCb?.(tok, capped.messages, capped.pagination, inflight, targetMessageId);
+      // capTranscript rebuilds pagination; re-attach the live-turn flag so
+      // replaySessionMessages can apply it (2026-09-15).
+      const pageWithTurn = typeof result.turnActive === 'boolean'
+        ? { ...capped.pagination, turnActive: result.turnActive } : capped.pagination;
+      onResumeCb?.(tok, capped.messages, pageWithTurn, inflight, targetMessageId);
       // In-memory buffer is now reconciled to the server tail.
       memStaleChats.delete(id);
       t?.trace('server-render-end');

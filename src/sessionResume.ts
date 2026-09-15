@@ -37,6 +37,7 @@ import * as sessionDrawer from './sessionDrawer.ts';
 import * as switchCtl from './switchController.ts';
 import * as backend from './backend.ts';
 import * as transcriptStore from './transcript/store.ts';
+import * as turnIndicator from './transcript/turnIndicator.ts';
 import * as sessionCache from './sessionCache.ts';
 import * as windowCache from './drillWindowCache.ts';
 import { listAllPins } from './pins/store.ts';
@@ -330,6 +331,10 @@ export function replaySessionMessages(
       hasMore: !!pagination?.hasMore,
     });
   }
+  // Authoritative live-turn flag rides on the server page (not on the
+  // cache path, which passes no such field). `false` clears the
+  // indicator bookkeeping outright — the server knows the turn is over.
+  turnIndicator.applyServerTurnState(id, (pagination as any)?.turnActive);
   // Only clobber inflight when the caller explicitly passed an array.
   // The cache-render path in sessionDrawer.resume passes undefined so
   // the live inflight envelopes (user_message echo + reply_delta

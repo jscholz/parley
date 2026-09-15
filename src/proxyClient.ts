@@ -189,6 +189,7 @@ async function fetchSessionMessages(id: string, logPrefix = 'proxy-client.fetchS
       firstId: d.firstId ?? null,
       hasMore: !!d.hasMore,
       inflight: inflightEnvelopes,
+      ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
     };
     log(`${logPrefix}: chat_id=${id}, ${result.messages.length} messages, ${inflightEnvelopes.length} inflight, hasMore=${result.hasMore}`);
     return result;
@@ -263,6 +264,7 @@ async function fetchSessionMessagesDelta(id: string, logPrefix: string) {
           firstId: cached.pagination.firstId ?? null,
           hasMore: !!cached.pagination.hasMore,
           inflight,
+          ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
         };
       }
       if (d.lastId == null) break;
@@ -602,6 +604,7 @@ async function reconcileActiveChat(gapMs: number, isRetry = false): Promise<void
       conversation: reconcilingChatId,
       firstId: d.firstId ?? null,
       hasMore: !!d.hasMore,
+      ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
     });
     clearReconcileDebt();
   } catch (e: any) {
@@ -741,7 +744,20 @@ function dispatchCrossDeviceSync(type: CrossDeviceSyncType, env: any, chatId: st
   } catch { /* swallow — sync is best-effort */ }
 }
 
+/** Envelope types that can only come from a turn that is running now. */
+const LIVE_TURN_TYPES = new Set(['typing', 'reply_delta', 'tool_call', 'tool_result', 'user_message']);
+
 function handleEnvelope(type: string, env: any, chatId: string): void {
+  // Keep the store's authoritative live-turn flag in step with what the
+  // stream says, so a resume's `turn_active` and the live envelopes agree.
+  if (env?._replay !== true) {
+    if (LIVE_TURN_TYPES.has(type) || (type === 'status' && env?.state !== 'done')) {
+      transcriptStore.setTurnActive(chatId, true);
+    } else if ((type === 'reply_final' && env?.interim !== true) || type === 'error'
+               || (type === 'status' && env?.state === 'done')) {
+      transcriptStore.setTurnActive(chatId, false);
+    }
+  }
   switch (type) {
     case 'typing':
       // Immediate in-transcript feedback (field 2026-09-08): paint the

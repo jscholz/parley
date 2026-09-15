@@ -134,6 +134,9 @@ async function handleSessionMessagesViaUpstream(
       ...(typeof r.target_found === 'boolean' ? { targetFound: r.target_found } : {}),
       ...(r.last_id != null ? { lastId: r.last_id } : {}),
       ...(typeof r.has_more_newer === 'boolean' ? { hasMoreNewer: r.has_more_newer } : {}),
+      // Authoritative live-turn flag from the agent; the PWA gates every
+      // in-flight indicator on it (see transcript/projection.ts).
+      ...(typeof r.turn_active === 'boolean' ? { turnActive: r.turn_active } : {}),
       ...(inflightEnvelopes.length > 0 ? { inflight: inflightEnvelopes } : {}),
     });
     trace('serialize-end', `bytes=${body.length}${inflightEnvelopes.length ? ` inflight=${inflightEnvelopes.length}` : ''}`);

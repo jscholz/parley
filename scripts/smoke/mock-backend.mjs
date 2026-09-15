@@ -46,6 +46,20 @@ export async function installMockBackend(page) {
    *  not yet persisted in state.db (e.g. an in-flight turn). The
    *  history-fetch handler appends these as the `inflight` field. */
   const inflightByChat = new Map();
+  /** Server-authoritative live-turn flag per chat (items `turnActive`).
+   *  Unset → inferred: true while the mock owes an auto-reply or has
+   *  inflight for the chat, else false. Tests force it with
+   *  mock.setTurnActive(chatId, bool|null). */
+  const turnActiveByChat = new Map();
+  /** Chats with a turn the mock considers running: opened by POST
+   *  /messages, closed when the mock broadcasts that chat's reply_final
+   *  (auto-reply, streamReply, pushReply, or a test's pushEnvelope).
+   *  Mirrors the plugin's `_turn_queues` lifecycle. */
+  const openTurns = new Set();
+  const turnActiveFor = (chatId) => {
+    if (turnActiveByChat.has(chatId)) return turnActiveByChat.get(chatId);
+    return openTurns.has(chatId) || (inflightByChat.get(chatId) || []).length > 0;
+  };
   /** When true (default), POST /api/parley/messages auto-emits a
    *  reply via SSE 50ms later. Tests that want to drive envelopes
    *  manually (e.g. assert the thinking-dots label transitions
@@ -133,6 +147,7 @@ export async function installMockBackend(page) {
   const recent = [];
 
   const broadcast = (env) => {
+    if (env && env.type === 'reply_final' && env.chat_id && !env.interim) openTurns.delete(env.chat_id);
     envelopeId++;
     const id = envelopeId;
     recent.push({ id, env });
@@ -514,6 +529,7 @@ export async function installMockBackend(page) {
           messages: page,
           lastId: typeof lastId === 'number' ? lastId : null,
           hasMoreNewer,
+          turnActive: turnActiveFor(chatId),
           ...(afterInflight.length > 0 ? { inflight: afterInflight } : {}),
         }),
       });
@@ -540,6 +556,7 @@ export async function installMockBackend(page) {
       messages,
       firstId: typeof firstId === 'number' ? firstId : null,
       hasMore,
+      turnActive: turnActiveFor(chatId),
       ...(inflightEnvelopes.length > 0 ? { inflight: inflightEnvelopes } : {}),
     };
     await route.fulfill({
@@ -815,6 +832,7 @@ export async function installMockBackend(page) {
     catch { body = {}; }
     const chatId = body.chat_id;
     const text = body.text || '';
+    if (chatId) openTurns.add(chatId);   // a turn is running until this chat's reply_final
     // user_message_id may ride on the body OR on metadata.
     // Mirrors what real plugin reads — see backends/hermes/plugin/__init__.py.
     const incomingUserMsgId =
@@ -1802,6 +1820,12 @@ export async function installMockBackend(page) {
     },
     activityItems() {
       return Array.from(activityById.values());
+    },
+    /** Force the items endpoint's `turnActive` for a chat (null = back
+     *  to inferred). Models the plugin's authoritative live-turn flag. */
+    setTurnActive(chatId, active) {
+      if (active === null || active === undefined) turnActiveByChat.delete(chatId);
+      else turnActiveByChat.set(chatId, !!active);
     },
     /** Set the inflight envelope list for a chat. The next
      *  /api/parley/sessions/<chatId>/messages GET will include

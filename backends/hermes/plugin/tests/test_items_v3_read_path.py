@@ -470,10 +470,16 @@ def test_healed_status_bubble_serves_once_envelope_only(db, state_db):
 
 
 class _Adapter:
-    def __init__(self, db, state_db, turn_buffer=None):
+    def __init__(self, db, state_db, turn_buffer=None, turn_active=None):
         self._parley_db = db
         self._state_db_path = state_db
         self._turn_buffer = turn_buffer
+        # `_turn_queues` is the plugin's source of truth for "a turn is
+        # running" (2026-09-15): the items route only overlays the turn
+        # buffer while the chat has a live handler. A test that hands us
+        # a buffer means a live turn unless it says otherwise.
+        live = turn_buffer is not None if turn_active is None else turn_active
+        self._turn_queues = {CHAT_ID: object()} if live else {}
 
     def _check_http_auth(self, request):
         return True

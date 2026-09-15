@@ -1320,3 +1320,39 @@ describe('local thinking placeholder (latency B1a, 2026-07-13)', () => {
     assert.equal(out[out.length - 1], phs[0]);
   });
 });
+
+describe('projection: server-authoritative turnActive (2026-09-15)', () => {
+  const pending = (id: string, sentAt: number): PendingSend =>
+    ({ messageId: id, text: 'q', source: 'text', sentAt, failed: false });
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const priorTurn = () => [u('umsg_q1', 'q1', nowSec() - 60), a('msg_e1', 'echo1', nowSec() - 55)];
+  it('turnActive=false suppresses the placeholder even with an unanswered inflight user message', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: priorTurn(),
+      inflight: [{ type: 'user_message', chat_id: 'c', message_id: 'umsg_ghost', text: 'phantom', timestamp: now / 1000 } as any],
+      turnActive: false,
+    }));
+    assert.ok(!out.some(x => x.key.startsWith('pending:turn:')), 'no placeholder for a dead turn');
+    assert.ok(!out.some(x => x.kind === 'turnStatus'), 'no status line for a dead turn');
+    // The user bubble itself still renders — history is not hidden, only the claim of activity.
+    assert.ok(out.some(x => x.kind === 'user' && x.key === 'umsg_ghost'));
+  });
+
+  it('turnActive=false suppresses the status line for a stale heartbeat and a live-looking send', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: priorTurn(),
+      pendingSends: [pending('umsg_p1', now - 500)],
+      turnStatus: { text: '⏳ Working — 3 min', at: now - 1000 },
+      turnActive: false,
+    }));
+    assert.ok(!out.some(x => x.kind === 'turnStatus' || x.key.startsWith('pending:turn:')));
+  });
+
+  it('turnActive=null (unknown backend) keeps the inferred behaviour', () => {
+    const now = Date.now();
+    const out = project(state({ durable: priorTurn(), pendingSends: [pending('umsg_p1', now - 500)], turnActive: null }));
+    assert.ok(out.some(x => x.key === 'pending:turn:umsg_p1'));
+  });
+});

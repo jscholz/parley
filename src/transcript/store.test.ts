@@ -344,3 +344,22 @@ describe('store: prepend/append dedup hygiene (#1 silent-hole guard)', () => {
     assert.deepEqual(s.durable.map(r => r.id), [5, 6, 7], 'dup row 6 not re-appended');
   });
 });
+
+import * as storeNs from './store.ts';
+
+describe('storeNs.setTurnActive (server-authoritative live-turn flag)', () => {
+  it('false clears the heartbeat text; true leaves it', () => {
+    const id = 'chat-turn-active';
+    storeNs.clearAll(id);
+    storeNs.setTurnStatus(id, '⏳ Working — 3 min');
+    storeNs.setTurnActive(id, true);
+    assert.equal(storeNs.getState(id).turnActive, true);
+    assert.ok(storeNs.getState(id).turnStatus, 'true keeps the heartbeat');
+    storeNs.setTurnActive(id, false);
+    assert.equal(storeNs.getState(id).turnActive, false);
+    assert.equal(storeNs.getState(id).turnStatus, null, 'false clears the heartbeat');
+  });
+  it('defaults to null (unknown) on a fresh chat', () => {
+    assert.equal(storeNs.getState('chat-fresh-ta').turnActive, null);
+  });
+});

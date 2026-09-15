@@ -35,6 +35,7 @@ function emptyChatState(): ChatState {
     pagination: { firstId: null, hasMore: false, lastId: null, hasMoreNewer: false },
     decorations: [],
     turnStatus: null,
+    turnActive: null,
   };
 }
 
@@ -495,6 +496,19 @@ export function setTurnStatus(chatId: string, text: string | null): void {
   notify(chatId);
 }
 
+/** Record the authoritative live-turn flag for a chat. `false` also
+ *  clears any heartbeat text: a turn the server says is over has no
+ *  "Working…" to show (his 2026-09-15 report — "these signals need to be
+ *  correlated with real agent state"). */
+export function setTurnActive(chatId: string, active: boolean | null): void {
+  const s = getState(chatId);
+  const changed = s.turnActive !== active;
+  if (active === false && s.turnStatus) { s.turnStatus = null; }
+  else if (!changed) return;
+  s.turnActive = active;
+  notify(chatId);
+}
+
 /** Drain inflight envelopes — typically called after reply_final once
  *  the next /messages fetch lands and absorbs the turn into durable. */
 export function clearInflight(chatId: string): void {
@@ -522,6 +536,11 @@ export function clearInflightThroughReplyFinal(chatId: string, messageId: string
 
 /** Add an optimistic user send. Dedup'd by messageId. */
 export function addPendingSend(chatId: string, send: PendingSend): void {
+  // Committing a send IS the start of a turn: flip the authoritative flag
+  // optimistically so a chat the server last reported idle shows its dots
+  // at once (the items page will confirm; a live reply_final clears it).
+  const st = getState(chatId);
+  if (st.turnActive !== true) { st.turnActive = true; }
   const s = getState(chatId);
   if (s.pendingSends.find(p => p.messageId === send.messageId)) return;
   s.pendingSends.push(send);

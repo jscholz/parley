@@ -30,7 +30,7 @@
  */
 
 import { formatTurnStatus } from '../util/progressHeartbeat.ts';
-import { setTurnStatus } from './store.ts';
+import { setTurnStatus, setTurnActive } from './store.ts';
 
 /** Silence window after which a turn indicator self-clears. Real
  *  `typing` pulses arrive ~every 2s while a turn is in flight (measured
@@ -204,6 +204,26 @@ export function noteTurnStarted(chatId: string, opts: NoteOpts = {}): void {
 export function noteTurnEnded(chatId: string, opts: NoteOpts & { interim?: boolean } = {}): void {
   if (opts.isReplay || opts.interim) return;
   apply(chatId, { kind: 'status', text: '', done: true }, opts.now ?? Date.now());
+}
+
+/** The server said whether a turn is running for this chat (items
+ *  endpoint `turn_active`, applied on every resume/reconcile). `false`
+ *  ends any indicator immediately — the authoritative signal outranks
+ *  every inferred one. `true` is informational: the live envelopes that
+ *  follow paint the label. */
+export function noteTurnState(chatId: string, active: boolean): void {
+  if (active) return;
+  indicators.set(chatId, IDLE_TURN_INDICATOR);
+  setTurnStatus(chatId, null);
+}
+
+/** One call for every place a server page lands (resume, cache-match
+ *  inflight replay, stream reconcile): record the authoritative flag on
+ *  the store AND settle the indicator bookkeeping. */
+export function applyServerTurnState(chatId: string, active: boolean | undefined | null): void {
+  if (typeof active !== 'boolean') return;
+  setTurnActive(chatId, active);
+  noteTurnState(chatId, active);
 }
 
 /** Sweep every chat with live bookkeeping and clear any that's gone
