@@ -590,8 +590,33 @@ async def handle_job_update(adapter, request):
     return web.json_response(view)
 
 
-def _state_db_path(adapter) -> Any:
-    return getattr(adapter, "_state_db_path", None)
+def _state_db_path(ctx) -> Any:
+    """Path to hermes' state.db. Routes are bound to the plugin's lightweight
+    routes context (``state_db_path``), tests to an adapter (``_state_db_path``)."""
+    return getattr(ctx, "state_db_path", None) or getattr(ctx, "_state_db_path", None)
+
+
+def _envelope_emitter(ctx):
+    """Async ``emit(env)`` over whichever fan-out the context offers: the
+    adapter's full ``_safe_send_envelope`` (adapter or ctx.send_envelope),
+    else the out-of-turn ``emit_envelope``. Field 2026-09-15: the routes ctx
+    is NOT the adapter, so a hard ``adapter._safe_send_envelope`` raised on
+    every watcher tick and no ``job_run`` envelope ever reached the PWA."""
+    send = getattr(ctx, "send_envelope", None) or getattr(ctx, "_safe_send_envelope", None)
+    if send is not None:
+        async def _emit(env: Dict[str, Any]) -> None:
+            res = send(env)
+            if asyncio.iscoroutine(res):
+                await res
+        return _emit
+    emit = getattr(ctx, "emit_envelope", None)
+    if emit is not None:
+        async def _emit_sync(env: Dict[str, Any]) -> None:
+            emit(env)
+        return _emit_sync
+    async def _noop(env: Dict[str, Any]) -> None:
+        logger.debug("[parley] no envelope emitter on routes ctx; dropping %s", env.get("type"))
+    return _noop
 
 
 def _job_chat_id(job: Dict[str, Any]) -> Optional[str]:
@@ -626,13 +651,15 @@ def ensure_run_watcher(adapter):
         except Exception:
             return {}
 
+    emit_env = _envelope_emitter(adapter)
+
     async def _emit(env: Dict[str, Any]) -> None:
         job = _jobs().get(str(env.get("job_id")))
         # Every stream envelope must carry a chat_id (the proxy drops the
         # rest). Route to the job's Parley chat when it has one, else to a
         # sentinel the PWA's job_run handler ignores for routing purposes.
         env["chat_id"] = (_job_chat_id(job) if job else None) or "cron"
-        await adapter._safe_send_envelope(env)
+        await emit_env(env)
 
     async def _manual_terminal(run: Dict[str, Any], job: Dict[str, Any]) -> None:
         # A run that delivered its output to a Parley chat already produced
@@ -648,7 +675,7 @@ def ensure_run_watcher(adapter):
         if not target:
             return
         body = parley_job_runs.run_finished_notice(job, run)
-        await adapter._safe_send_envelope({
+        await emit_env({
             "type": "notification", "chat_id": target, "kind": "cron", "content": body, "text": body,
         })
 

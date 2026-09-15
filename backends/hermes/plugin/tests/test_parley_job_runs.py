@@ -263,3 +263,43 @@ def test_run_console_route_handles_missing_session(cron_store, monkeypatch, tmp_
     page = jobs_route.job_run_console(cron_store["id"], "e-x", 0, db)
     assert page == {"lines": [], "next_after": 0, "session_id": None, "done": False}
     assert jobs_route.job_run_console("other-job", "e-x", 0, db) is None
+
+
+# ── routes ctx binding (field 2026-09-15: ctx is NOT the adapter) ────
+
+class _Ctx:
+    def __init__(self):
+        self.state_db_path = "/tmp/state.db"
+        self.sent = []
+
+    async def send_envelope(self, env):
+        self.sent.append(env)
+
+
+class _EmitOnlyCtx:
+    def __init__(self):
+        self.state_db_path = "/tmp/state.db"
+        self.emitted = []
+
+    def emit_envelope(self, env):
+        self.emitted.append(env)
+
+
+def test_state_db_path_resolves_from_routes_ctx_and_adapter():
+    assert jobs_route._state_db_path(_Ctx()) == "/tmp/state.db"
+
+    class _A:
+        _state_db_path = "/x/state.db"
+    assert jobs_route._state_db_path(_A()) == "/x/state.db"
+    assert jobs_route._state_db_path(object()) is None
+
+
+def test_envelope_emitter_prefers_async_send_then_sync_emit():
+    ctx = _Ctx()
+    asyncio.run(jobs_route._envelope_emitter(ctx)({"type": "job_run"}))
+    assert ctx.sent == [{"type": "job_run"}]
+    e = _EmitOnlyCtx()
+    asyncio.run(jobs_route._envelope_emitter(e)({"type": "job_run"}))
+    assert e.emitted == [{"type": "job_run"}]
+    # Nothing to emit with → a quiet no-op, never an exception in the watcher loop.
+    asyncio.run(jobs_route._envelope_emitter(object())({"type": "job_run"}))
