@@ -87,6 +87,7 @@ async function reconcileOne(doc: DocState): Promise<void> {
       chatId: doc.chatId,
       source: 'capture',
       captureId: doc.captureId,
+      durationMs: typeof data.duration_ms === 'number' ? data.duration_ms : doc.durationMs,
     }, { autoOpen: false });
   } catch { /* network failure — keep the doc; the next open retries */ }
 }

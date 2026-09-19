@@ -899,6 +899,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
           // title emoji; captureId powers the reader's player strip.
           source: typeof env.source === 'string' ? env.source : undefined,
           captureId: typeof env.capture_id === 'string' ? env.capture_id : undefined,
+          durationMs: typeof env.duration_ms === 'number' ? env.duration_ms : undefined,
         },
         conversation: chatId,
         isReplay: env?._replay === true,

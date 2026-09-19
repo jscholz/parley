@@ -40,6 +40,9 @@ export interface DocPayload {
   /** For capture docs: the capture id — the reader's player strip
    *  streams /api/parley/captures/{captureId}/audio. */
   captureId?: string;
+  /** For capture docs: meeting length in ms from the capture manifest
+   *  — shown before any audio loads (field 2026-09-19). */
+  durationMs?: number;
 }
 
 export interface DocState extends DocPayload {
@@ -215,6 +218,7 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
     chatId: payload.chatId,
     source: payload.source ?? existing?.source,
     captureId: payload.captureId ?? existing?.captureId,
+    durationMs: payload.durationMs ?? existing?.durationMs,
     receivedAt: existing?.receivedAt ?? displayedAt ?? now,
     updatedAt,
   };

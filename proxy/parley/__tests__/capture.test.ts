@@ -390,7 +390,11 @@ test('transcript endpoint: content for finished captures, 404s, discarded tombst
   const ok = mkRes();
   await handleCaptureTranscript(req, ok, cap.id);
   assert.equal(ok.status, 200);
-  assert.deepEqual(ok.body, {
+  // duration_ms rides along (meeting length without loading audio,
+  // 2026-09-19) — wall-clock derived, so assert its type, not its value.
+  const { duration_ms: okDurationMs, ...okBody } = ok.body;
+  assert.equal(typeof okDurationMs, 'number');
+  assert.deepEqual(okBody, {
     capture_id: cap.id,
     status: 'complete',
     title: 'Meeting 2026-08-24',

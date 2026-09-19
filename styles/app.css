@@ -5896,31 +5896,54 @@
    on surface is nearly invisible in dark, which is why the border was
    carrying the strip there). */
 .doc-player-strip {
-  display: flex; align-items: center; gap: 8px;
-  /* wrap: the failure/status note below takes a full row of its own */
-  flex-wrap: wrap;
-  margin: 6px 12px 2px; padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 6px 12px 2px; padding: 6px 8px 4px;
   background: color-mix(in srgb, var(--fg) 6%, transparent); border: none;
   border-radius: 10px;
 }
+.doc-player-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* tools row: loaded indicator left, actions pushed right */
+.doc-player-tools .doc-player-loaded { flex: 1 1 auto; }
 /* Honest transport (2026-09-19): a tap that fails says why, in the
    strip, instead of a silently inert play button. */
 .doc-player-note {
-  flex: 1 0 100%; min-width: 0;
+  min-width: 0;
   font-size: 11px; line-height: 1.35;
   color: var(--danger, #c0504a);
   padding: 0 2px 2px;
   overflow-wrap: anywhere;
 }
 .doc-player-note[hidden] { display: none; }
-.doc-player-strip[data-state="loading"] .doc-player-time {
+/* Loaded indicator (2026-09-19): says in words how much of the audio
+   is on THIS device — separate from the meeting length, which the
+   clock shows from the manifest before any audio loads. */
+.doc-player-loaded {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  font-size: 11px; color: var(--muted, #9a9a9a); padding: 0 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-player-loaded-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--border-strong, #3a3a3a);
+}
+.doc-player-loaded[data-level="partial"] .doc-player-loaded-dot {
+  background: color-mix(in srgb, var(--primary, #7fa86f) 55%, var(--border-strong, #3a3a3a));
+}
+.doc-player-loaded[data-level="full"] .doc-player-loaded-dot { background: var(--primary, #7fa86f); }
+.doc-player-strip[data-state="loading"] .doc-player-loaded-dot,
+.doc-player-strip[data-state="buffering"] .doc-player-loaded-dot,
+.doc-player-strip[data-state="loading"] .doc-player-time,
+.doc-player-strip[data-state="buffering"] .doc-player-time {
   animation: doc-player-pulse 1.2s ease-in-out infinite;
 }
 @keyframes doc-player-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
-.doc-player-audio { flex: 1; min-width: 0; height: 32px; }
+/* Hidden engine: our controls are the UI. Kept in the DOM so
+   wireTapToSeek can find it. */
+.doc-player-audio { display: none; }
 .doc-player-rate {
   background: color-mix(in srgb, var(--fg) 8%, transparent); border: none;
-  color: var(--muted, #aaa); border-radius: 6px; padding: 4px 7px;
+  color: var(--muted, #aaa); border-radius: 6px; padding: 7px 9px;
+  min-width: 36px;
   font: 12px/1 inherit; cursor: pointer; flex: none;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -5932,11 +5955,11 @@
  * when the download menu landed (option B), and UA button chrome gave
  * it a filled box the old <a> never had. */
 .doc-player-download {
-  display: flex; color: var(--muted, #aaa); flex: none; padding: 4px;
-  background: transparent; border: none; cursor: pointer;
+  display: flex; color: var(--muted, #aaa); flex: none; padding: 7px;
+  background: transparent; border: none; cursor: pointer; border-radius: 6px;
 }
-.doc-player-download:hover { color: var(--fg, #eee); }
-.doc-player-download svg { width: 15px; height: 15px; }
+.doc-player-download:hover { color: var(--fg, #eee); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.doc-player-download svg { width: 16px; height: 16px; }
 /* Seekable transcript: timestamp tokens read as links. */
 .doc-capture-seekable strong { cursor: pointer; }
 .doc-capture-seekable strong:hover { text-decoration: underline; }
@@ -5973,11 +5996,11 @@
 #sidebar.collapsed .sess-filter-btn,
 #sidebar.collapsed .sess-filter-options { display: none; }
 .doc-player-purge {
-  display: flex; color: var(--muted, #aaa); flex: none; padding: 4px;
-  background: transparent; border: none; cursor: pointer;
+  display: flex; color: var(--muted, #aaa); flex: none; padding: 7px;
+  background: transparent; border: none; cursor: pointer; border-radius: 6px;
 }
-.doc-player-purge:hover { color: #e5484d; }
-.doc-player-purge svg { width: 15px; height: 15px; }
+.doc-player-purge:hover { color: #e5484d; background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.doc-player-purge svg { width: 16px; height: 16px; }
 /* One-number rule (2026-07-10): the bell's badge is a NUMBER only for
    pending approvals; unread tray items render as this dot instead —
    a hint, not a count competing with the app's one number. */
@@ -5990,29 +6013,62 @@
    scrubber-less blob on iOS at strip size). Mirrors the reply-TTS
    player idiom: round play button, thin track + primary played fill,
    generous scrub hit area. */
+/* Hit areas sized for a mouse as well as a thumb (2026-09-19: "the
+   receptive field for the click is still too small on desktop"). */
 .doc-player-play {
-  width: 30px; height: 30px; border-radius: 50%; flex: none;
+  width: 36px; height: 36px; border-radius: 50%; flex: none;
   border: none; cursor: pointer;
   background: var(--primary, #7fa86f); color: var(--primary-fg, #10140e);
   display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 0.08s ease, filter 0.12s ease;
 }
-.doc-player-play svg { width: 14px; height: 14px; display: block; }
+.doc-player-play:hover { filter: brightness(1.08); }
+.doc-player-play:active { transform: scale(0.94); }
+.doc-player-play svg { width: 16px; height: 16px; display: block; }
 .doc-player-play svg[hidden] { display: none; }
+/* Scrub bar: 32px tall hit area, a track that thickens on hover, a
+   BUFFERED lane under the played fill (YouTube's grey), a thumb that
+   appears on hover/drag, and a time tip above the pointer. */
 .doc-player-bar {
-  position: relative; flex: 1; min-width: 0; height: 24px;
-  cursor: pointer; touch-action: none;
+  position: relative; flex: 1; min-width: 0; height: 32px;
+  cursor: pointer; touch-action: none; outline: none;
   -webkit-tap-highlight-color: rgba(0,0,0,0);
 }
-.doc-player-bar-track, .doc-player-bar-played {
+.doc-player-bar-track, .doc-player-bar-buffered, .doc-player-bar-played {
   position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  height: 3px; border-radius: 2px; pointer-events: none;
+  height: 4px; border-radius: 2px; pointer-events: none;
+  transition: height 0.1s ease;
 }
+.doc-player-bar:hover .doc-player-bar-track,
+.doc-player-bar:hover .doc-player-bar-buffered,
+.doc-player-bar:hover .doc-player-bar-played,
+.doc-player-bar.dragging .doc-player-bar-track,
+.doc-player-bar.dragging .doc-player-bar-buffered,
+.doc-player-bar.dragging .doc-player-bar-played { height: 6px; }
 .doc-player-bar-track { right: 0; background: var(--border-strong, #3a3a3a); }
-.doc-player-bar-played { width: 0; background: var(--primary, #7fa86f); transition: width 0.12s linear; }
+.doc-player-bar-buffered { right: 0; background: transparent; }
+.doc-player-bar-buffered i {
+  position: absolute; top: 0; bottom: 0; border-radius: 2px;
+  background: color-mix(in srgb, var(--fg) 28%, transparent);
+}
+.doc-player-bar-played { width: 0; background: var(--primary, #7fa86f); }
+.doc-player-bar:not(.dragging) .doc-player-bar-played { transition: width 0.12s linear, height 0.1s ease; }
+.doc-player-bar-thumb {
+  position: absolute; top: 50%; left: 0; width: 14px; height: 14px;
+  margin: -7px 0 0 -7px; border-radius: 50%; pointer-events: none;
+  background: var(--primary, #7fa86f);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bg, #111) 80%, transparent);
+  opacity: 0; transform: scale(0.6); transition: opacity 0.1s ease, transform 0.1s ease;
+}
+.doc-player-bar:hover .doc-player-bar-thumb,
+.doc-player-bar:focus-visible .doc-player-bar-thumb,
+.doc-player-bar.dragging .doc-player-bar-thumb { opacity: 1; transform: scale(1); }
+.doc-player-strip[data-state="error"] .doc-player-bar-track { background: color-mix(in srgb, var(--danger, #c0504a) 45%, var(--border-strong, #3a3a3a)); }
 .doc-player-time {
-  font-variant-numeric: tabular-nums; font-size: 11px;
+  font-variant-numeric: tabular-nums; font-size: 12px;
   color: var(--muted, #9a9a9a); flex: none;
 }
+.doc-player-time.previewing { color: var(--primary, #7fa86f); }
 
 /* Duplicate-spinner guard (2026-07-10 walking-test report): while the
    full-area switch spinner (.transcript-loading) is armed, the edge

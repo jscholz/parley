@@ -350,8 +350,17 @@ export interface CaptureSummary {
   duration_ms: number;
 }
 
-function summarize(m: CaptureManifest): CaptureSummary {
+/** Meeting length from the MANIFEST — wall clock when the capture has
+ *  ended, else the last sealed segment's offset. Independent of the
+ *  audio: the client shows this before (or without) loading a byte of
+ *  playback (field 2026-09-19: "meeting length should be available even
+ *  if the audio isn't loaded"). */
+export function captureDurationMs(m: Pick<CaptureManifest, 'started_at' | 'ended_at' | 'segments'>): number {
   const last = m.segments[m.segments.length - 1];
+  return m.ended_at ? Math.max(0, m.ended_at - m.started_at) : (last ? last.t0_ms : 0);
+}
+
+function summarize(m: CaptureManifest): CaptureSummary {
   return {
     id: m.id,
     title: m.title,
@@ -364,9 +373,7 @@ function summarize(m: CaptureManifest): CaptureSummary {
     ended_at: m.ended_at,
     segment_count: m.segments.length,
     total_bytes: m.segments.reduce((s, x) => s + x.bytes, 0),
-    duration_ms: m.ended_at
-      ? m.ended_at - m.started_at
-      : (last ? last.t0_ms : 0),
+    duration_ms: captureDurationMs(m),
   };
 }
 
@@ -1413,6 +1420,7 @@ export async function handleCaptureTranscript(
       title: m.title,
       format: 'markdown',
       content,
+      duration_ms: captureDurationMs(m),
     });
   } catch (err) { sendError(res, err); }
 }

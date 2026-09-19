@@ -125,13 +125,26 @@ export async function handleCaptureAudio(
   const headOnly = req.method === 'HEAD';
   try {
     const file = await ensurePlaybackFile(id);
-    const { size } = await fs.stat(file);
+    const { size, mtimeMs } = await fs.stat(file);
+    // Validator so a browser may KEEP the bytes it already pulled: the
+    // media element re-created on every reader render used to refetch
+    // from zero (field 2026-09-19: "switch meetings and back, the cache
+    // seems to get discarded"). `no-cache` = store, but revalidate —
+    // one 304 per element instead of the whole file again. The tag
+    // moves whenever the file does (re-stitch, retro segment).
+    const etag = `"${size}-${Math.floor(mtimeMs)}"`;
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ETag: etag, 'Cache-Control': 'private, no-cache' });
+      res.end();
+      return;
+    }
     const range = typeof req.headers.range === 'string'
       ? req.headers.range.match(/^bytes=(\d*)-(\d*)$/) : null;
     const headers: Record<string, string | number> = {
       'Content-Type': 'audio/mp4',
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'private, no-cache',
+      ETag: etag,
     };
     if (range && (range[1] || range[2])) {
       const start = range[1] ? parseInt(range[1], 10) : Math.max(0, size - parseInt(range[2], 10));

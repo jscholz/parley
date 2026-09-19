@@ -27,7 +27,7 @@ import * as path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
-  getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath,
+  getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath, captureDurationMs,
   transcriptFilePath, sendJson, sendError,
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
@@ -282,6 +282,8 @@ async function pushDoc(id: string, opts?: { immediate?: boolean }): Promise<void
       source: 'capture',
       // The player strip resolves its audio URL from this (§3.6).
       capture_id: m.id,
+      // Meeting length without loading audio (field 2026-09-19).
+      duration_ms: captureDurationMs(m),
     } as any);
   } catch (e) {
     console.warn(`[capture-transcribe] doc push failed for ${id}: ${String(e)}`);

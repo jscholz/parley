@@ -35,8 +35,7 @@
 // `doc-html-images-render` smoke, which asserts both halves.
 
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
-import { apiUrl } from '../../apiBase.ts';
-import { log } from '../../util/log.ts';
+import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
   currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
@@ -348,7 +347,10 @@ export function createDocModule(opts: {
     // capture is terminal — the endpoint 409s until then, which the
     // native <audio> controls render as a scary "Error".
     if (hasStrip) {
-      opts.body.appendChild(buildPlayerStrip(doc));
+      // The strip's <audio> engine outlives this render (capturePlayer
+      // engine cache) — switching docs and back keeps buffered audio,
+      // position and duration.
+      opts.body.appendChild(buildPlayerStrip(doc, { downloadTranscript: () => downloadDoc(doc) }));
     }
 
     if (doc.format === 'html') {
@@ -446,281 +448,11 @@ export function splitLeadingMetaLine(
 
 // ── Capture player strip (§3.6 — trust-but-verify playback) ───────────
 
-const PLAYBACK_RATES = [1, 1.5, 2];
-
 /** Live = the pipeline's "(live)" title suffix — the same signal the
  *  glyph's red state uses. The finished push re-titles without it,
  *  which re-renders the reader and the strip appears. */
 export function isLiveCaptureDoc(doc: Pick<DocState, 'title'>): boolean {
   return /\(live\)\s*$/.test(doc.title);
-}
-
-function audioUrlFor(doc: DocState): string {
-  // apiUrl, not a bare path — the CAP shell serves the app from its
-  // local bundle and reaches the proxy through the configured base.
-  return apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}/audio`);
-}
-
-/** What the strip tells the user when play() fails. Pure — unit tested.
- *  `probe` is the result of re-requesting the audio url (Range 0-1)
- *  after the failure: the server's JSON error is the real reason (409
- *  still transcribing, 410 purged, 500 ffmpeg) and a media element
- *  never surfaces it — it just fires `error` with a four-value code.
- *  Field 2026-09-19 ("play button does nothing"): the old handler
- *  swallowed every rejection, so a dead strip and a working one were
- *  indistinguishable until someone read the network tab. */
-export function playbackFailureMessage(
-  err: { name?: string; message?: string } | null,
-  probe: { status: number; error?: string } | null,
-): string {
-  // The browser wanted a fresh user gesture (autoplay policy) — the
-  // audio itself is fine.
-  if (err?.name === 'NotAllowedError') return 'Tap play again to start playback.';
-  if (probe && probe.status >= 400) {
-    const reason = (probe.error || '').trim();
-    return `Audio unavailable (${probe.status})${reason ? `: ${reason}` : ''}`;
-  }
-  if (!probe) return 'Couldn\u2019t reach the server to load the audio.';
-  return `This browser couldn\u2019t play the audio${err?.name ? ` (${err.name})` : ''}.`;
-}
-
-const MEDIA_ERROR_NAMES = ['MediaError', 'MEDIA_ERR_ABORTED', 'MEDIA_ERR_NETWORK', 'MEDIA_ERR_DECODE', 'MEDIA_ERR_SRC_NOT_SUPPORTED'];
-
-function fmtClock(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return '–:––';
-  const s = Math.floor(sec);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = String(s % 60).padStart(2, '0');
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
-}
-
-function buildPlayerStrip(doc: DocState): HTMLElement {
-  const strip = document.createElement('div');
-  strip.className = 'doc-player-strip';
-
-  // Hidden engine — the visible controls are ours. Native <audio
-  // controls> on iOS renders a scrubber-less blob at this size (field
-  // 2026-07-10); the custom strip mirrors the reply-TTS player's
-  // visual language (play button + progress bar + tap/drag scrub —
-  // replyPlayer.ts), which is the player this app already taught
-  // users to expect. preload=none keeps the server's lazy stitch
-  // untriggered until first intent.
-  const audio = document.createElement('audio');
-  audio.className = 'doc-player-audio';
-  audio.preload = 'none';
-  audio.src = audioUrlFor(doc);
-  strip.appendChild(audio);
-
-  const playBtn = document.createElement('button');
-  playBtn.className = 'doc-player-play';
-  playBtn.setAttribute('aria-label', 'Play recording');
-  playBtn.innerHTML =
-    '<svg data-icon="play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="7 4 20 12 7 20 7 4"/></svg>'
-    + '<svg data-icon="pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
-  // Honest transport (field 2026-09-19): every outcome of a tap is
-  // visible. `loading` covers the gap between play() and first audio —
-  // the first play after a meeting can wait on a server-side ffmpeg
-  // stitch (seconds to a minute for a long meeting) and a paused-looking
-  // strip during that wait reads as broken. A failure writes the
-  // reason into the strip instead of vanishing into a swallowed
-  // rejection.
-  let loading = false;
-  let failed = false;
-  const note = document.createElement('div');
-  note.className = 'doc-player-note';
-  note.setAttribute('role', 'status');
-  note.hidden = true;
-  const setNote = (text: string | null) => {
-    note.hidden = !text;
-    note.textContent = text || '';
-  };
-  const probeAudio = async (): Promise<{ status: number; error?: string } | null> => {
-    try {
-      const res = await fetch(audio.src, { headers: { Range: 'bytes=0-1' } });
-      let error: string | undefined;
-      if (!res.ok) {
-        try { error = String((await res.json())?.error || ''); } catch { /* not json */ }
-      }
-      return { status: res.status, error };
-    } catch {
-      return null;
-    }
-  };
-  const reportFailure = async (err: { name?: string; message?: string } | null) => {
-    if (failed) return;          // one report per attempt; play() rejection + `error` event both land here
-    failed = true;
-    loading = false;
-    const probe = await probeAudio();
-    setNote(playbackFailureMessage(err, probe));
-    strip.dataset.state = 'error';
-    sync();
-    log(`[doc-player] playback failed (${doc.captureId}): ${err?.name || 'error'} ${err?.message || ''}`
-      + ` → probe ${probe ? probe.status : 'unreachable'}${probe?.error ? ` ${probe.error}` : ''}`);
-  };
-  const startPlayback = () => {
-    failed = false;
-    loading = true;
-    setNote(null);
-    delete strip.dataset.state;
-    sync();
-    void audio.play().catch((err) => { void reportFailure(err); });
-  };
-  playBtn.onclick = () => {
-    if (audio.paused) startPlayback();
-    else audio.pause();
-  };
-  strip.appendChild(playBtn);
-
-  // Scrub bar: generous hit area, thin track, played fill — the
-  // reply-player bar idiom. Seeks on tap and on drag (pointer capture).
-  const bar = document.createElement('div');
-  bar.className = 'doc-player-bar';
-  bar.innerHTML = '<div class="doc-player-bar-track"></div><div class="doc-player-bar-played"></div>';
-  const played = bar.querySelector('.doc-player-bar-played') as HTMLElement;
-  const seekTo = (clientX: number) => {
-    const r = bar.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-    if (Number.isFinite(audio.duration) && audio.duration > 0) {
-      audio.currentTime = ratio * audio.duration;
-    } else {
-      // Duration unknown (nothing loaded yet): start playback, then
-      // seek once metadata lands.
-      startPlayback();
-      audio.addEventListener('loadedmetadata', () => {
-        audio.currentTime = ratio * audio.duration;
-      }, { once: true });
-    }
-  };
-  bar.addEventListener('pointerdown', (ev) => {
-    bar.setPointerCapture(ev.pointerId);
-    seekTo(ev.clientX);
-    const move = (mv: PointerEvent) => seekTo(mv.clientX);
-    const up = () => {
-      bar.removeEventListener('pointermove', move);
-      bar.removeEventListener('pointerup', up);
-    };
-    bar.addEventListener('pointermove', move);
-    bar.addEventListener('pointerup', up);
-  });
-  strip.appendChild(bar);
-
-  const time = document.createElement('span');
-  time.className = 'doc-player-time';
-  time.textContent = '–:––';
-  strip.appendChild(time);
-
-  const sync = () => {
-    const dur = audio.duration;
-    if (Number.isFinite(dur) && dur > 0) {
-      played.style.width = `${(audio.currentTime / dur) * 100}%`;
-      time.textContent = `${fmtClock(audio.currentTime)} / ${fmtClock(dur)}`;
-    } else {
-      time.textContent = loading ? 'Loading\u2026' : '\u2013:\u2013\u2013';
-    }
-    const paused = audio.paused;
-    playBtn.querySelector('[data-icon="play"]')?.toggleAttribute('hidden', !paused);
-    playBtn.querySelector('[data-icon="pause"]')?.toggleAttribute('hidden', paused);
-    playBtn.setAttribute('aria-label', paused ? 'Play recording' : 'Pause recording');
-    if (strip.dataset.state !== 'error') {
-      strip.dataset.state = loading ? 'loading' : paused ? 'idle' : 'playing';
-    }
-  };
-  for (const ev of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended']) {
-    audio.addEventListener(ev, sync);
-  }
-  // First audio (or the user giving up mid-load) ends the loading state.
-  for (const ev of ['playing', 'canplay', 'loadedmetadata', 'pause']) {
-    audio.addEventListener(ev, () => { loading = false; sync(); });
-  }
-  audio.addEventListener('error', () => {
-    const code = audio.error?.code ?? 0;
-    void reportFailure({ name: MEDIA_ERROR_NAMES[code] || 'MediaError', message: audio.error?.message });
-  });
-  strip.appendChild(note);
-
-  // Speed toggle — one button cycling 1×/1.5×/2× (review speed).
-  const rate = document.createElement('button');
-  rate.className = 'doc-player-rate';
-  rate.textContent = '1×';
-  rate.title = 'Playback speed';
-  rate.onclick = () => {
-    const next = PLAYBACK_RATES[(PLAYBACK_RATES.indexOf(audio.playbackRate) + 1) % PLAYBACK_RATES.length] ?? 1;
-    audio.playbackRate = next;
-    rate.textContent = `${next}×`;
-  };
-  strip.appendChild(rate);
-
-  // Delete audio (storage hygiene, field 2026-07-09 #7): audio is the
-  // only real disk cost; the transcript keeps its value. Irreversible
-  // (playback + retro-diarize gone) → confirm.
-  const purge = document.createElement('button');
-  purge.className = 'doc-player-purge';
-  purge.title = 'Delete audio — keep the transcript';
-  purge.setAttribute('aria-label', 'Delete audio, keep transcript');
-  purge.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 4.5h11M6.5 4.5V3h3v1.5M4 4.5l.7 9h6.6l.7-9"/></svg>';
-  purge.onclick = async () => {
-    if (!window.confirm('Delete the audio for this recording? The transcript stays; playback and re-diarization will no longer be possible.')) return;
-    try {
-      const res = await fetch(apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}/purge-audio`), { method: 'POST' });
-      if (res.ok) strip.remove();
-    } catch { /* strip stays; user can retry */ }
-  };
-  strip.appendChild(purge);
-
-  // Download — ONE affordance for both artifacts. The reader used to
-  // show two identical download glyphs a few px apart (doc in the nav
-  // row, audio here) with nothing but hover text telling them apart —
-  // the "two action strips with possible redundancy" confusion (his
-  // words, 2026-08-25). One button, one two-item menu; each item names
-  // its artifact and extension so the choice is legible before the tap.
-  const dlWrap = document.createElement('span');
-  dlWrap.className = 'doc-player-dlwrap';
-  const dl = document.createElement('button');
-  dl.className = 'doc-player-download';
-  dl.title = 'Download…';
-  dl.setAttribute('aria-label', 'Download transcript or audio');
-  dl.setAttribute('aria-haspopup', 'menu');
-  dl.setAttribute('aria-expanded', 'false');
-  dl.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 2v8.5"/><path d="M4.5 7.5 8 11l3.5-3.5"/><path d="M2.5 13.5h11"/></svg>';
-  const menu = document.createElement('div');
-  menu.className = 'doc-player-dlmenu';
-  menu.setAttribute('role', 'menu');
-  menu.hidden = true;
-  const slug = doc.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'meeting';
-  const closeMenu = () => {
-    menu.hidden = true;
-    dl.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('pointerdown', onOutside, true);
-  };
-  const onOutside = (e: Event) => {
-    if (!dlWrap.contains(e.target as Node)) closeMenu();
-  };
-  const item = (label: string, act: () => void) => {
-    const b = document.createElement('button');
-    b.setAttribute('role', 'menuitem');
-    b.textContent = label;
-    b.onclick = () => { closeMenu(); act(); };
-    menu.appendChild(b);
-  };
-  item('Transcript (.md)', () => downloadDoc(doc));
-  item('Audio (.m4a)', () => {
-    const a = document.createElement('a');
-    a.href = audioUrlFor(doc);
-    a.download = `${slug}.m4a`;
-    a.click();
-  });
-  dl.onclick = () => {
-    const opening = menu.hidden;
-    menu.hidden = !opening;
-    dl.setAttribute('aria-expanded', String(opening));
-    if (opening) document.addEventListener('pointerdown', onOutside, true);
-  };
-  dlWrap.appendChild(dl);
-  dlWrap.appendChild(menu);
-  strip.appendChild(dlWrap);
-
-  return strip;
 }
 
 /** Parse a transcript timestamp token — `[+M:SS]`, `[+H:MM:SS]`,

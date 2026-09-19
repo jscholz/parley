@@ -1294,13 +1294,19 @@ function openMsgMenu(line: HTMLElement): void {
   // "Mark unread" would otherwise persist an activity row keyed
   // `pending:turn:…` — the exact shape the field bug this comment
   // describes elsewhere in this file already hit once.
-  if (isAgent && msgId && isDurableMessageKey(msgId)) {
+  // Notification bubbles (cron / reminder rows — class `notification`,
+  // not `agent`) carry a durable plugin id too; field 2026-09-19: "can
+  // you enable marking cron messages unread? seems not to be an option".
+  const isNotification = line.classList.contains('notification');
+  if ((isAgent || isNotification) && msgId && isDurableMessageKey(msgId)) {
     addItem('Mark unread', ICON.unread, () => {
       const chatId = viewedSessionIdRef || backend.getCurrentSessionId?.() || null;
       const liveText = line.dataset.text
         || (line.querySelector('.text') as HTMLElement | null)?.textContent || '';
       const ts = Number(line.dataset.ts) || Date.now();
-      markUnreadForMessage({ chatId, messageId: msgId, text: liveText.slice(0, 500), createdAt: ts });
+      const kind = line.classList.contains('notification-cron') ? 'cron'
+        : isNotification ? 'notification' : 'agent_reply';
+      markUnreadForMessage({ chatId, messageId: msgId, text: liveText.slice(0, 500), createdAt: ts, kind });
       if (chatId) void markChatUnread(chatId);
       toast('Marked unread');
     });

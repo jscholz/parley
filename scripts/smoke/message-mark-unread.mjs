@@ -20,7 +20,23 @@ export const DESCRIPTION = 'caret-menu "Mark unread" writes a New activity row +
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
-export function MOCK_SETUP(_mock) { /* defaults — auto-reply enabled */ }
+const CRON_CHAT = 'parley:mock-cron-unread';
+const CRON_MSG_ID = 'msg_cron_unread_1';
+
+export function MOCK_SETUP(mock) {
+  // E: a cron notification bubble (role=assistant + kind='cron' — renders
+  // as `.line.notification`, NOT `.line.agent`) must offer Mark unread
+  // too (field 2026-09-19: "seems not to be an option").
+  const t0 = Date.now() / 1000 - 600;
+  mock.addChat(CRON_CHAT, {
+    title: 'Cron digest',
+    messages: [
+      { role: 'assistant', kind: 'cron', parley_id: CRON_MSG_ID, timestamp: t0,
+        content: 'Cronjob Response: Personal US tax email monitor\n(job_id: abc123)\n----\n**New update**\n\nSaavun followed up.' },
+    ],
+    lastActiveAt: Date.now() - 500_000,
+  });
+}
 
 const MSG = 'mark-unread please remember this reply';
 
@@ -116,5 +132,35 @@ export default async function run({ page, log, mock }) {
   );
   log('D ✓ activity row re-hydrates from server after reload');
 
-  log('PASS: per-message Mark unread surfaces a toast, writes a server activity row + chat-unread, and survives reload');
+  // ── E. Cron notification bubbles get the item too ─────────────────
+  const { clickRow } = await import('./lib.mjs');
+  await clickRow(page, CRON_CHAT);
+  const cronSel = `#transcript .line.notification[data-message-id="${CRON_MSG_ID}"]`;
+  await page.waitForSelector(cronSel, { timeout: 5_000 });
+  await page.evaluate((s) => {
+    document.querySelector(`${s} .msg-caret`)
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }, cronSel);
+  await page.waitForSelector(`${cronSel} .msg-menu`, { timeout: 2_000 });
+  const hasItem = await page.evaluate((s) => {
+    const menu = document.querySelector(`${s} .msg-menu`);
+    const btn = Array.from(menu.querySelectorAll('button')).find((b) => b.textContent === 'Mark unread');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }, cronSel);
+  assert(hasItem, 'cron notification bubble menu must offer "Mark unread"');
+  const start3 = Date.now();
+  let cronItem = null;
+  while (Date.now() - start3 < 3_000) {
+    cronItem = mock.activityItems().find((it) => it.id === CRON_MSG_ID || it.messageId === CRON_MSG_ID);
+    if (cronItem) break;
+    await page.waitForTimeout(50);
+  }
+  assert(cronItem, 'cron bubble Mark unread writes an activity row');
+  assert(cronItem.kind === 'cron', `cron bubble's row is a cron row, got ${cronItem.kind}`);
+  assert(cronItem.read === false, 'cron row is unread');
+  log('E ✓ cron notification bubble: Mark unread offered, writes a cron activity row');
+
+  log('PASS: per-message Mark unread surfaces a toast, writes a server activity row + chat-unread, and survives reload; cron bubbles included');
 }

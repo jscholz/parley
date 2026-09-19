@@ -276,6 +276,9 @@ export function markUnreadForMessage(args: {
   text?: string;
   createdAt?: number;
   chatLabel?: string | null;
+  /** Row kind for a NEW activity item; a cron/notification bubble marked
+   *  unread should read as one in the tray, not as an "agent reply". */
+  kind?: ActivityKind;
 }): void {
   store.hydrate();
   const id = args.messageId;
@@ -298,8 +301,8 @@ export function markUnreadForMessage(args: {
     : {
         id,
         chatId: args.chatId,
-        kind: 'agent_reply',
-        title: titleFor('agent_reply', args.chatLabel || undefined),
+        kind: args.kind || 'agent_reply',
+        title: titleFor(args.kind || 'agent_reply', args.chatLabel || undefined),
         body: args.text || '',
         createdAt: args.createdAt || Date.now(),
         urgent: false,
