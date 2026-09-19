@@ -33,6 +33,7 @@ import {
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
 import { ffmpegStitch } from './captureStitch.ts';
+import { playbackFileFor } from './captureAudio.ts';
 import { dispatchInternalMessage } from './messages.ts';
 import { topicalTitleFromTranscript } from './meetingTitles.ts';
 import { isUserTitled } from './userTitles.ts';
@@ -415,7 +416,7 @@ async function runDiarizePass(id: string): Promise<boolean> {
     // the first play after a meeting is pre-warmed.
     const out = await stitch(
       m.segments.map((s) => segmentPath(m.id, s)),
-      path.join(captureDirPath(m.id), `audio.play.${m.segments.length}.m4a`),
+      playbackFileFor(m.id, m.segments.length),
       'm4a',
     );
     const audio = await fs.readFile(out);

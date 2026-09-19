@@ -119,3 +119,79 @@ test('out-of-bounds range → 416; unknown capture → 404; no segments → 404'
   await noseg.finished;
   assert.equal(noseg.status, 404);
 });
+
+// ── MP4 layout (2026-09-19: his Play button did nothing on the phone;
+//    every stitched file carried the moov index at the END, ffmpeg's
+//    default — Chrome range-reads the tail and copes, WebKit does not).
+//    The stitch now passes +faststart; legacy cached files are
+//    re-stitched once, on sight; unparseable fixtures are left alone. ──
+import { mp4Layout, playbackFileFor } from '../captureAudio.ts';
+
+function box(type: string, payload: Buffer): Buffer {
+  const hdr = Buffer.alloc(8);
+  hdr.writeUInt32BE(8 + payload.length, 0);
+  hdr.write(type, 4, 'latin1');
+  return Buffer.concat([hdr, payload]);
+}
+const FTYP = box('ftyp', Buffer.from('M4A \0\0\0\0'));
+const MOOV_LATE = Buffer.concat([FTYP, box('mdat', Buffer.alloc(40, 1)), box('moov', Buffer.alloc(24, 2))]);
+const FASTSTART = Buffer.concat([FTYP, box('moov', Buffer.alloc(24, 2)), box('mdat', Buffer.alloc(40, 1))]);
+
+test('mp4Layout: index-first, index-last, and not-an-mp4', async () => {
+  const f = (name: string, b: Buffer) => fs.writeFile(path.join(dir, name), b).then(() => path.join(dir, name));
+  assert.equal(await mp4Layout(await f('fast.m4a', FASTSTART)), 'faststart');
+  assert.equal(await mp4Layout(await f('late.m4a', MOOV_LATE)), 'moov-late');
+  assert.equal(await mp4Layout(await f('junk.m4a', Buffer.from('0123456789abcdef'))), 'unknown');
+  // 64-bit largesize header on the leading box still walks.
+  const big = Buffer.alloc(16);
+  big.writeUInt32BE(1, 0); big.write('free', 4, 'latin1'); big.writeBigUInt64BE(BigInt(16), 8);
+  assert.equal(await mp4Layout(await f('large.m4a', Buffer.concat([big, FASTSTART]))), 'faststart');
+});
+
+test('legacy index-at-end cache is re-stitched once; a faststart cache is served as-is', async () => {
+  setStitchForTests(async (_files, out) => {
+    stitchCalls += 1;
+    await fs.writeFile(out, FASTSTART);
+    return out;
+  });
+  const id = await mkCapture();
+  await fs.writeFile(playbackFileFor(id, 1), MOOV_LATE);   // what every pre-09-19 stitch left behind
+
+  const r1 = fakeRes();
+  await handleCaptureAudio({ headers: {} } as any, r1, id);
+  await r1.finished;
+  assert.equal(r1.status, 200);
+  assert.equal(stitchCalls, 1, 'index-at-end file must be replaced');
+  assert.ok(r1.body.equals(FASTSTART), 'serves the re-stitched file');
+
+  const r2 = fakeRes();
+  await handleCaptureAudio({ headers: { range: 'bytes=0-1' } } as any, r2, id);
+  await r2.finished;
+  assert.equal(r2.status, 206);
+  assert.equal(stitchCalls, 1, 'vetted once per process, not per request');
+
+  const good = await mkCapture();
+  await fs.writeFile(playbackFileFor(good, 1), FASTSTART);
+  const r3 = fakeRes();
+  await handleCaptureAudio({ headers: {} } as any, r3, good);
+  await r3.finished;
+  assert.equal(stitchCalls, 1, 'a faststart cache is never re-stitched');
+});
+
+test('HEAD: same status + headers as GET, no body', async () => {
+  const id = await mkCapture();
+  const full = fakeRes();
+  await handleCaptureAudio({ method: 'HEAD', headers: {} } as any, full, id);
+  await full.finished;
+  assert.equal(full.status, 200);
+  assert.equal(full.hdrs['Content-Length'], 16);
+  assert.equal(full.hdrs['Accept-Ranges'], 'bytes');
+  assert.equal(full.body.length, 0);
+
+  const ranged = fakeRes();
+  await handleCaptureAudio({ method: 'HEAD', headers: { range: 'bytes=0-1' } } as any, ranged, id);
+  await ranged.finished;
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.hdrs['Content-Range'], 'bytes 0-1/16');
+  assert.equal(ranged.body.length, 0);
+});

@@ -25,6 +25,69 @@ export function setStitchForTests(fn: typeof stitchOverride): void {
   stitchOverride = fn;
 }
 
+/** The cached playback file for a capture — keyed by segment COUNT so a
+ *  retro-arriving segment (or retro re-anything) invalidates by pointing
+ *  at a new name. Shared with the diarize pass, which pre-warms this
+ *  exact file. */
+export function playbackFileFor(id: string, segmentCount: number): string {
+  return path.join(captureDirPath(id), `audio.play.${segmentCount}.m4a`);
+}
+
+/** Top-level MP4 box walk: where does `moov` sit relative to `mdat`?
+ *  'faststart' = index first (streams and seeks on WebKit without the
+ *  whole file); 'moov-late' = data first (ffmpeg's default before we
+ *  passed -movflags +faststart); 'unknown' = not parseable as boxes
+ *  (test fixtures, torn files) — left alone, never re-stitched. */
+export async function mp4Layout(file: string): Promise<'faststart' | 'moov-late' | 'unknown'> {
+  const fh = await fs.open(file, 'r');
+  try {
+    const { size: fileSize } = await fh.stat();
+    let off = 0;
+    for (let i = 0; i < 64 && off + 8 <= fileSize; i++) {
+      const hdr = Buffer.alloc(16);
+      const { bytesRead } = await fh.read(hdr, 0, 16, off);
+      if (bytesRead < 8) return 'unknown';
+      let size = hdr.readUInt32BE(0);
+      const type = hdr.toString('latin1', 4, 8);
+      if (!/^[\x20-\x7e]{4}$/.test(type)) return 'unknown';
+      if (size === 1) {
+        if (bytesRead < 16) return 'unknown';
+        size = Number(hdr.readBigUInt64BE(8));
+      } else if (size === 0) {
+        size = fileSize - off;
+      }
+      if (type === 'moov') return 'faststart';
+      if (type === 'mdat') return 'moov-late';
+      if (size < 8) return 'unknown';
+      off += size;
+    }
+    return 'unknown';
+  } finally {
+    await fh.close();
+  }
+}
+
+// Files whose layout this process has already vetted — one box walk per
+// path per process, not per Range request.
+const layoutChecked = new Set<string>();
+
+/** Is the cached file present AND streamable? A legacy index-at-end
+ *  file is removed here so the caller re-stitches it (once). */
+async function isServable(out: string): Promise<boolean> {
+  try {
+    await fs.access(out);
+  } catch {
+    return false;
+  }
+  if (layoutChecked.has(out)) return true;
+  if ((await mp4Layout(out)) === 'moov-late') {
+    await fs.unlink(out).catch(() => { /* raced with a re-stitch */ });
+    return false;
+  }
+  layoutChecked.add(out);
+  return true;
+}
+
 // One stitch at a time per capture — concurrent first-plays must not
 // race two ffmpeg runs onto the same output file.
 const inflight = new Map<string, Promise<string>>();
@@ -40,28 +103,26 @@ async function ensurePlaybackFile(id: string): Promise<string> {
   if (m.status !== 'complete' && m.status !== 'failed') {
     throw new CaptureError(409, `capture is ${m.status}; playback is available once it completes`);
   }
-  // Cache key includes the segment COUNT, so a retro-arriving segment
-  // (or retro re-anything) naturally invalidates by pointing at a new
-  // name. The diarize pass pre-warms this exact file.
-  const out = path.join(captureDirPath(id), `audio.play.${m.segments.length}.m4a`);
-  try {
-    await fs.access(out);
-    return out;                       // cached from a previous request
-  } catch { /* stitch below */ }
+  const out = playbackFileFor(id, m.segments.length);
+  if (await isServable(out)) return out;   // cached from a previous request
   let p = inflight.get(id);
   if (!p) {
     const stitch = stitchOverride ?? ffmpegStitch;
     p = stitch(m.segments.map((s) => segmentPath(id, s)), out, 'm4a')
+      .then((file) => { layoutChecked.add(file); return file; })
       .finally(() => inflight.delete(id));
     inflight.set(id, p);
   }
   return p;
 }
 
-/** GET /api/parley/captures/{id}/audio — full body or 206 partial. */
+/** GET/HEAD /api/parley/captures/{id}/audio — full body or 206 partial.
+ *  HEAD answers the same headers with no body (media loaders and
+ *  download managers probe with it; a 405 there reads as "no audio"). */
 export async function handleCaptureAudio(
   req: IncomingMessage, res: ServerResponse, id: string,
 ): Promise<void> {
+  const headOnly = req.method === 'HEAD';
   try {
     const file = await ensurePlaybackFile(id);
     const { size } = await fs.stat(file);
@@ -83,11 +144,13 @@ export async function handleCaptureAudio(
       headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
       headers['Content-Length'] = end - start + 1;
       res.writeHead(206, headers);
+      if (headOnly) { res.end(); return; }
       createReadStream(file, { start, end }).pipe(res);
       return;
     }
     headers['Content-Length'] = size;
     res.writeHead(200, headers);
+    if (headOnly) { res.end(); return; }
     createReadStream(file).pipe(res);
   } catch (err) {
     const status = err instanceof CaptureError ? err.status : 500;

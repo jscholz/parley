@@ -5897,10 +5897,26 @@
    carrying the strip there). */
 .doc-player-strip {
   display: flex; align-items: center; gap: 8px;
+  /* wrap: the failure/status note below takes a full row of its own */
+  flex-wrap: wrap;
   margin: 6px 12px 2px; padding: 6px 8px;
   background: color-mix(in srgb, var(--fg) 6%, transparent); border: none;
   border-radius: 10px;
 }
+/* Honest transport (2026-09-19): a tap that fails says why, in the
+   strip, instead of a silently inert play button. */
+.doc-player-note {
+  flex: 1 0 100%; min-width: 0;
+  font-size: 11px; line-height: 1.35;
+  color: var(--danger, #c0504a);
+  padding: 0 2px 2px;
+  overflow-wrap: anywhere;
+}
+.doc-player-note[hidden] { display: none; }
+.doc-player-strip[data-state="loading"] .doc-player-time {
+  animation: doc-player-pulse 1.2s ease-in-out infinite;
+}
+@keyframes doc-player-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .doc-player-audio { flex: 1; min-width: 0; height: 32px; }
 .doc-player-rate {
   background: color-mix(in srgb, var(--fg) 8%, transparent); border: none;

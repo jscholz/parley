@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { parseTsToken, wireTapToSeek } from './doc.ts';
+import { parseTsToken, wireTapToSeek, playbackFailureMessage } from './doc.ts';
 
 // ── parseTsToken (player strip tap-to-seek; capture plan §3.6) ────────
 test('parseTsToken: rolling, mark, diarized, and hour-long forms', () => {
@@ -140,4 +140,26 @@ test('isSpeakerLead: speakers yes, timestamp/mark tokens no', () => {
   assert.equal(isSpeakerLead('[MARK 1:05]'), false);
   assert.equal(isSpeakerLead(''), false);
   assert.equal(isSpeakerLead('  [0:12]'), false);
+});
+
+// ── playbackFailureMessage (player strip honesty, field 2026-09-19:
+//    "play button does nothing" — every failure was swallowed). ──
+test('playbackFailureMessage: the server\'s reason wins when the probe has one', () => {
+  assert.equal(
+    playbackFailureMessage({ name: 'NotSupportedError' }, { status: 409, error: 'capture is transcribing; playback is available once it completes' }),
+    'Audio unavailable (409): capture is transcribing; playback is available once it completes',
+  );
+  assert.equal(playbackFailureMessage({ name: 'MEDIA_ERR_SRC_NOT_SUPPORTED' }, { status: 500 }), 'Audio unavailable (500)');
+  assert.equal(playbackFailureMessage(null, { status: 410, error: ' audio was purged ' }), 'Audio unavailable (410): audio was purged');
+});
+
+test('playbackFailureMessage: gesture rejection asks for another tap regardless of probe', () => {
+  assert.equal(playbackFailureMessage({ name: 'NotAllowedError' }, { status: 200 }), 'Tap play again to start playback.');
+  assert.equal(playbackFailureMessage({ name: 'NotAllowedError' }, null), 'Tap play again to start playback.');
+});
+
+test('playbackFailureMessage: server fine → blame the browser; unreachable → say so', () => {
+  assert.equal(playbackFailureMessage({ name: 'MEDIA_ERR_DECODE' }, { status: 206 }), 'This browser couldn\u2019t play the audio (MEDIA_ERR_DECODE).');
+  assert.equal(playbackFailureMessage(null, { status: 200 }), 'This browser couldn\u2019t play the audio.');
+  assert.equal(playbackFailureMessage({ name: 'AbortError' }, null), 'Couldn\u2019t reach the server to load the audio.');
 });

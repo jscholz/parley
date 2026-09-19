@@ -26,7 +26,12 @@ export async function ffmpegStitch(
   );
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile];
   if (format === 'wav16k') args.push('-ac', '1', '-ar', '16000');
-  else args.push('-ac', '1', '-c:a', 'aac', '-b:a', '48k');
+  // +faststart moves the moov index to the FRONT of the file. ffmpeg's
+  // default writes it last; Chrome copes by range-reading the tail
+  // first, WebKit/AVFoundation (iOS, Safari, the CAP shell) is far less
+  // forgiving of index-at-end MP4 over HTTP. Playback files stitched
+  // before 2026-09-19 lack this — captureAudio.ts re-stitches them.
+  else args.push('-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart');
   args.push(outFile);
   try {
     await new Promise<void>((resolve, reject) => {

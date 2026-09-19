@@ -750,6 +750,33 @@ export async function installMockBackend(page) {
     if (cap && cap.status === 'recording') { cap.status = 'complete'; cap.ended_at = Date.now(); }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: cap || null }) });
   });
+  // GET/HEAD /captures/{id}/audio — the player strip's engine. Real
+  // server: 404 unknown, 409 while live, 410 purged, else the stitched
+  // m4a. The mock has no ffmpeg; a capture may carry a scripted `audio`
+  // reply (setCaptureAudio) so smokes can drive the strip's failure
+  // surfacing (field 2026-09-19: a swallowed rejection looked like a
+  // dead button).
+  await page.route(/.*\/api\/parley\/captures\/[^/]+\/audio(?:\?.*)?$/, async (route) => {
+    const method = route.request().method();
+    if (method !== 'GET' && method !== 'HEAD') return route.fallback();
+    const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/audio$/);
+    const cap = captures.get(m ? m[1] : '');
+    const reply = (status, payload) => route.fulfill({
+      status, contentType: 'application/json', body: JSON.stringify(payload),
+    });
+    if (!cap) return reply(404, { error: 'unknown capture' });
+    if (cap.audio) {
+      return route.fulfill({
+        status: cap.audio.status,
+        contentType: cap.audio.contentType || 'application/json',
+        body: cap.audio.body ?? JSON.stringify({ error: cap.audio.error || 'audio unavailable' }),
+      });
+    }
+    if (cap.status !== 'complete' && cap.status !== 'failed') {
+      return reply(409, { error: `capture is ${cap.status}; playback is available once it completes` });
+    }
+    return reply(404, { error: 'mock has no stitched audio for this capture' });
+  });
   // GET /captures/{id}/transcript — the reconcile heal path (stale
   // "(live)" shelf docs, field report 2026-08-26). Mirrors the real
   // server: 404 for unknown captures or no transcript content;
@@ -1738,6 +1765,14 @@ export async function installMockBackend(page) {
      *  smokes assert e.g. "DELETE was never called" (postmortem
      *  regression: startup failure must abort-start, not delete). */
     getCaptureLifecycle() { return captureLifecycle.slice(); },
+    /** Script the mocked GET /captures/{id}/audio reply for a seeded
+     *  capture: `{ status, error }` → JSON error body (what the real
+     *  endpoint returns for 409/410/500), or `{ status, contentType,
+     *  body }` for a raw reply. */
+    setCaptureAudio(id, audio) {
+      const cap = captures.get(id);
+      if (cap) cap.audio = audio;
+    },
     /** Pre-seed a (finished) capture linked to a chat — feeds the
      *  drawer's has-recording filter + row badges via the GET list
      *  above. Call from MOCK_SETUP so the boot-time meetingsIndex

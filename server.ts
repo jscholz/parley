@@ -1287,7 +1287,7 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (capMark) {
       return parley.handleCaptureMark(req, res, capMark[1]);
     }
-    const capAudio = req.method === 'GET'
+    const capAudio = (req.method === 'GET' || req.method === 'HEAD')
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/audio(?:\?.*)?$/);
     if (capAudio) {
       return parley.handleCaptureAudio(req, res, capAudio[1]);

@@ -36,6 +36,7 @@
 
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
+import { log } from '../../util/log.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
   currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
@@ -460,6 +461,31 @@ function audioUrlFor(doc: DocState): string {
   return apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}/audio`);
 }
 
+/** What the strip tells the user when play() fails. Pure — unit tested.
+ *  `probe` is the result of re-requesting the audio url (Range 0-1)
+ *  after the failure: the server's JSON error is the real reason (409
+ *  still transcribing, 410 purged, 500 ffmpeg) and a media element
+ *  never surfaces it — it just fires `error` with a four-value code.
+ *  Field 2026-09-19 ("play button does nothing"): the old handler
+ *  swallowed every rejection, so a dead strip and a working one were
+ *  indistinguishable until someone read the network tab. */
+export function playbackFailureMessage(
+  err: { name?: string; message?: string } | null,
+  probe: { status: number; error?: string } | null,
+): string {
+  // The browser wanted a fresh user gesture (autoplay policy) — the
+  // audio itself is fine.
+  if (err?.name === 'NotAllowedError') return 'Tap play again to start playback.';
+  if (probe && probe.status >= 400) {
+    const reason = (probe.error || '').trim();
+    return `Audio unavailable (${probe.status})${reason ? `: ${reason}` : ''}`;
+  }
+  if (!probe) return 'Couldn\u2019t reach the server to load the audio.';
+  return `This browser couldn\u2019t play the audio${err?.name ? ` (${err.name})` : ''}.`;
+}
+
+const MEDIA_ERROR_NAMES = ['MediaError', 'MEDIA_ERR_ABORTED', 'MEDIA_ERR_NETWORK', 'MEDIA_ERR_DECODE', 'MEDIA_ERR_SRC_NOT_SUPPORTED'];
+
 function fmtClock(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return '–:––';
   const s = Math.floor(sec);
@@ -492,8 +518,56 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
   playBtn.innerHTML =
     '<svg data-icon="play" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="7 4 20 12 7 20 7 4"/></svg>'
     + '<svg data-icon="pause" viewBox="0 0 24 24" fill="currentColor" stroke="none" hidden><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+  // Honest transport (field 2026-09-19): every outcome of a tap is
+  // visible. `loading` covers the gap between play() and first audio —
+  // the first play after a meeting can wait on a server-side ffmpeg
+  // stitch (seconds to a minute for a long meeting) and a paused-looking
+  // strip during that wait reads as broken. A failure writes the
+  // reason into the strip instead of vanishing into a swallowed
+  // rejection.
+  let loading = false;
+  let failed = false;
+  const note = document.createElement('div');
+  note.className = 'doc-player-note';
+  note.setAttribute('role', 'status');
+  note.hidden = true;
+  const setNote = (text: string | null) => {
+    note.hidden = !text;
+    note.textContent = text || '';
+  };
+  const probeAudio = async (): Promise<{ status: number; error?: string } | null> => {
+    try {
+      const res = await fetch(audio.src, { headers: { Range: 'bytes=0-1' } });
+      let error: string | undefined;
+      if (!res.ok) {
+        try { error = String((await res.json())?.error || ''); } catch { /* not json */ }
+      }
+      return { status: res.status, error };
+    } catch {
+      return null;
+    }
+  };
+  const reportFailure = async (err: { name?: string; message?: string } | null) => {
+    if (failed) return;          // one report per attempt; play() rejection + `error` event both land here
+    failed = true;
+    loading = false;
+    const probe = await probeAudio();
+    setNote(playbackFailureMessage(err, probe));
+    strip.dataset.state = 'error';
+    sync();
+    log(`[doc-player] playback failed (${doc.captureId}): ${err?.name || 'error'} ${err?.message || ''}`
+      + ` → probe ${probe ? probe.status : 'unreachable'}${probe?.error ? ` ${probe.error}` : ''}`);
+  };
+  const startPlayback = () => {
+    failed = false;
+    loading = true;
+    setNote(null);
+    delete strip.dataset.state;
+    sync();
+    void audio.play().catch((err) => { void reportFailure(err); });
+  };
   playBtn.onclick = () => {
-    if (audio.paused) void audio.play().catch(() => { /* endpoint 4xx — strip stays inert */ });
+    if (audio.paused) startPlayback();
     else audio.pause();
   };
   strip.appendChild(playBtn);
@@ -512,7 +586,7 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
     } else {
       // Duration unknown (nothing loaded yet): start playback, then
       // seek once metadata lands.
-      void audio.play().catch(() => { /* inert */ });
+      startPlayback();
       audio.addEventListener('loadedmetadata', () => {
         audio.currentTime = ratio * audio.duration;
       }, { once: true });
@@ -541,15 +615,29 @@ function buildPlayerStrip(doc: DocState): HTMLElement {
     if (Number.isFinite(dur) && dur > 0) {
       played.style.width = `${(audio.currentTime / dur) * 100}%`;
       time.textContent = `${fmtClock(audio.currentTime)} / ${fmtClock(dur)}`;
+    } else {
+      time.textContent = loading ? 'Loading\u2026' : '\u2013:\u2013\u2013';
     }
     const paused = audio.paused;
     playBtn.querySelector('[data-icon="play"]')?.toggleAttribute('hidden', !paused);
     playBtn.querySelector('[data-icon="pause"]')?.toggleAttribute('hidden', paused);
     playBtn.setAttribute('aria-label', paused ? 'Play recording' : 'Pause recording');
+    if (strip.dataset.state !== 'error') {
+      strip.dataset.state = loading ? 'loading' : paused ? 'idle' : 'playing';
+    }
   };
   for (const ev of ['timeupdate', 'loadedmetadata', 'durationchange', 'play', 'pause', 'ended']) {
     audio.addEventListener(ev, sync);
   }
+  // First audio (or the user giving up mid-load) ends the loading state.
+  for (const ev of ['playing', 'canplay', 'loadedmetadata', 'pause']) {
+    audio.addEventListener(ev, () => { loading = false; sync(); });
+  }
+  audio.addEventListener('error', () => {
+    const code = audio.error?.code ?? 0;
+    void reportFailure({ name: MEDIA_ERROR_NAMES[code] || 'MediaError', message: audio.error?.message });
+  });
+  strip.appendChild(note);
 
   // Speed toggle — one button cycling 1×/1.5×/2× (review speed).
   const rate = document.createElement('button');
