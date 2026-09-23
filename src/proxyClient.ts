@@ -171,7 +171,24 @@ function apiBase(): string {
   return `${apiOrigin()}/api/parley`;
 }
 
+/** A history page's turn fields. Records the lifecycle capability and
+ *  the per-message 👀/✓/✗ marks, and returns the `turnActive` to forward
+ *  — or nothing when a live turn_start/turn_end landed while the page was
+ *  in flight (`seqAtIssue` from transcriptStore.liveTurnSeq), since the
+ *  stream is then newer than the page. */
+function pageTurnFields(chatId: string, d: any, seqAtIssue: number): { turnActive?: boolean } {
+  const fresh = transcriptStore.liveTurnSeq(chatId) === seqAtIssue;
+  const active = fresh && typeof d?.turnActive === 'boolean' ? d.turnActive as boolean : undefined;
+  transcriptStore.applyServerTurnMeta(chatId, {
+    turnLifecycle: d?.turnLifecycle === true,
+    turnAcks: d?.turnAcks && typeof d.turnAcks === 'object' ? d.turnAcks : undefined,
+    turnActive: active,
+  });
+  return typeof active === 'boolean' ? { turnActive: active } : {};
+}
+
 async function fetchSessionMessages(id: string, logPrefix = 'proxy-client.fetchSessionMessages', limit?: number) {
+  const turnSeq = transcriptStore.liveTurnSeq(id);
   try {
     const q = limit != null ? `?limit=${encodeURIComponent(String(limit))}` : '';
     const r = await fetch(
@@ -189,7 +206,7 @@ async function fetchSessionMessages(id: string, logPrefix = 'proxy-client.fetchS
       firstId: d.firstId ?? null,
       hasMore: !!d.hasMore,
       inflight: inflightEnvelopes,
-      ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
+      ...pageTurnFields(id, d, turnSeq),
     };
     log(`${logPrefix}: chat_id=${id}, ${result.messages.length} messages, ${inflightEnvelopes.length} inflight, hasMore=${result.hasMore}`);
     return result;
@@ -242,6 +259,7 @@ async function fetchSessionMessagesDelta(id: string, logPrefix: string) {
   try { cached = await sessionCache.getMessagesCache(id); } catch { /* IDB unavailable */ }
   const tailId = newestNumericId(cached?.messages);
   if (!cached || cached.pagination.partial || tailId == null) return fetchSessionMessages(id, logPrefix);
+  const turnSeq = transcriptStore.liveTurnSeq(id);
   try {
     let merged = cached.messages;
     let cursor = tailId;
@@ -264,7 +282,7 @@ async function fetchSessionMessagesDelta(id: string, logPrefix: string) {
           firstId: cached.pagination.firstId ?? null,
           hasMore: !!cached.pagination.hasMore,
           inflight,
-          ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
+          ...pageTurnFields(id, d, turnSeq),
         };
       }
       if (d.lastId == null) break;
@@ -421,6 +439,8 @@ function startStreamChannel(): void {
     handleEnvelope(type, env, chatId);
   };
   for (const t of ['reply_delta', 'reply_final', 'image', 'typing',
+                   // hermes' processing bracket — see handleEnvelope.
+                   'turn_start', 'turn_end',
                    // Ephemeral working indicator (plugin-converted
                    // gateway heartbeat) — see handleEnvelope 'status'.
                    'status',
@@ -585,6 +605,7 @@ async function reconcileActiveChat(gapMs: number, isRetry = false): Promise<void
   const owedRun = gapMs < RECONCILE_GAP_MS;
   reconcileOwed = true;
   log(`proxy-client: reconciling viewed chat ${reconcilingChatId} after ${gapMs}ms gap${owedRun ? ' (owed)' : ''}`);
+  const turnSeq = transcriptStore.liveTurnSeq(reconcilingChatId);
   try {
     const r = await fetch(
       `${apiBase()}/sessions/${encodeURIComponent(reconcilingChatId)}/messages`,
@@ -604,7 +625,7 @@ async function reconcileActiveChat(gapMs: number, isRetry = false): Promise<void
       conversation: reconcilingChatId,
       firstId: d.firstId ?? null,
       hasMore: !!d.hasMore,
-      ...(typeof d.turnActive === 'boolean' ? { turnActive: d.turnActive } : {}),
+      ...pageTurnFields(reconcilingChatId, d, turnSeq),
     });
     clearReconcileDebt();
   } catch (e: any) {
@@ -750,7 +771,10 @@ const LIVE_TURN_TYPES = new Set(['typing', 'reply_delta', 'tool_call', 'tool_res
 function handleEnvelope(type: string, env: any, chatId: string): void {
   // Keep the store's authoritative live-turn flag in step with what the
   // stream says, so a resume's `turn_active` and the live envelopes agree.
-  if (env?._replay !== true) {
+  // A lifecycle backend says when turns start and end (turn_start /
+  // turn_end below); inferring it from these envelopes is what left stale
+  // "Thinking" behind, so the inference only runs for backends without it.
+  if (env?._replay !== true && !transcriptStore.hasTurnLifecycle()) {
     if (LIVE_TURN_TYPES.has(type) || (type === 'status' && env?.state !== 'done')) {
       transcriptStore.setTurnActive(chatId, true);
     } else if ((type === 'reply_final' && env?.interim !== true) || type === 'error'
@@ -759,6 +783,22 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
     }
   }
   switch (type) {
+    case 'turn_start': {
+      const turnId = typeof env?.turn_id === 'string' ? env.turn_id : '';
+      if (!turnId) return;
+      transcriptStore.noteTurnStart(chatId, turnId, env?.user_message_id || undefined);
+      return;
+    }
+
+    case 'turn_end': {
+      const turnId = typeof env?.turn_id === 'string' ? env.turn_id : '';
+      if (!turnId) return;
+      const remaining = typeof env?.active_turns === 'number' ? env.active_turns : undefined;
+      transcriptStore.noteTurnEnd(chatId, turnId, env?.user_message_id || undefined, env?.outcome, remaining);
+      if (!remaining) subs?.onActivity?.({ working: false, conversation: chatId });
+      return;
+    }
+
     case 'typing':
       // Immediate in-transcript feedback (field 2026-09-08): paint the
       // plain "Thinking" placeholder on the FIRST typing pulse of a

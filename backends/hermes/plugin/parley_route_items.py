@@ -392,17 +392,29 @@ logger = logging.getLogger(__name__)
 
 
 def turn_is_active(adapter, chat_id: str) -> bool:
-    """Is a /v1/responses turn running for ``chat_id`` right now?
+    """Is the agent working on ``chat_id`` right now?
 
-    ``_turn_queues`` holds exactly the chats with a live turn handler
-    (registered before the turn buffer opens, released in the handler's
-    ``finally``), so it is the one source of truth for "the agent is
-    working on this chat". Anything else — a buffered in-flight turn, a
-    user row with no reply, an unfinished tool row in history — is
-    circumstantial and must not be presented as live.
+    hermes' own processing bracket (``_turn_lifecycle``, fed by
+    on_processing_start/complete) is the fact: it covers the whole run,
+    including follow-ups and the tail after the first reply. A live
+    /v1/responses handler (``_turn_queues``) covers the short gap between
+    POST receipt and hermes starting the run; on_processing_complete
+    releases it, so it can't outlive the turn. Anything else — a buffered
+    in-flight turn, a user row with no reply, an unfinished tool row in
+    history — is circumstantial and must not be presented as live.
     """
+    lifecycle = getattr(adapter, "_turn_lifecycle", None)
+    if lifecycle is not None and lifecycle.is_active(chat_id):
+        return True
     queues = getattr(adapter, "_turn_queues", None) or {}
     return chat_id in queues
+
+
+def turn_acks(adapter, chat_id: str) -> Dict[str, str]:
+    """``user_message_id → processing|success|failure|cancelled`` — the
+    per-message 👀/✓/✗ marks for a reload to repaint."""
+    lifecycle = getattr(adapter, "_turn_lifecycle", None)
+    return lifecycle.acks(chat_id) if lifecycle is not None else {}
 
 
 def resolve_inflight(adapter, chat_id: str) -> Tuple[bool, list]:
@@ -667,6 +679,10 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
         # The PWA gates every in-flight indicator on it (his 2026-09-15
         # report: reopening old sessions showed a permanent "Thinking").
         "turn_active": turn_active,
+        # Capability + per-message marks: this backend brackets turns with
+        # turn_start/turn_end envelopes, so the PWA may stop inferring.
+        "turn_lifecycle": True,
+        "turn_acks": turn_acks(adapter, chat_id),
     }
     # Echo whether the around-target was located so the PWA can fall back
     # to its serial load-earlier drill on a stale pin (target_found=False).

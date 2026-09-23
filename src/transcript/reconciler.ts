@@ -257,7 +257,52 @@ function createUser(spec: UserBubbleSpec, batch: boolean): HTMLElement | null {
     pending: spec.pending,
     batch,
   });
+  if (el) applyTurnAck(el, spec);
   return el || null;
+}
+
+// hermes' per-message processing mark — the Parley twin of Slack's 👀
+// reaction — and the "no reply" notice for a turn that failed or was
+// stopped. Self-contained on purpose: one call site per create/update,
+// so the mark can be flagged off or dropped without touching the rest.
+const TURN_ACK_GLYPH: Record<string, { glyph: string; title: string }> = {
+  processing: { glyph: '👀', title: 'Working on it' },
+  success: { glyph: '✓', title: 'Done' },
+  failure: { glyph: '✗', title: 'Failed' },
+  cancelled: { glyph: '✗', title: 'Stopped' },
+};
+
+function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
+  const want = spec.ack ? TURN_ACK_GLYPH[spec.ack] : undefined;
+  let mark = el.querySelector(':scope > .turn-ack') as HTMLElement | null;
+  if (!want) {
+    mark?.remove();
+  } else {
+    if (!mark) {
+      mark = document.createElement('span');
+      mark.className = 'turn-ack';
+      el.appendChild(mark);
+    }
+    if (mark.dataset.ack !== spec.ack) {
+      mark.dataset.ack = spec.ack!;
+      mark.textContent = want.glyph;
+      mark.title = want.title;
+      mark.setAttribute('aria-label', want.title);
+    }
+  }
+  let notice = el.querySelector(':scope > .turn-notice') as HTMLElement | null;
+  if (!spec.turnNotice) {
+    notice?.remove();
+    return;
+  }
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.className = 'turn-notice';
+    el.appendChild(notice);
+  }
+  const text = spec.turnNotice === 'cancelled' ? 'Stopped — no reply.' : 'Turn failed — no reply.';
+  if (notice.textContent !== text) notice.textContent = text;
+  notice.dataset.kind = spec.turnNotice;
 }
 
 function createAssistant(spec: AssistantBubbleSpec, batch: boolean): HTMLElement | null {
@@ -605,6 +650,7 @@ function updateUser(el: HTMLElement, spec: UserBubbleSpec): void {
     if (span.innerHTML !== want) span.innerHTML = want;
   }
   updateTimestamp(el, spec.timestamp);
+  applyTurnAck(el, spec);
 }
 
 function ensureRetryRow(el: HTMLElement, spec: UserBubbleSpec): void {

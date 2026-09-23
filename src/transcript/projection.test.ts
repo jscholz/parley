@@ -1356,3 +1356,55 @@ describe('projection: server-authoritative turnActive (2026-09-15)', () => {
     assert.ok(out.some(x => x.key === 'pending:turn:umsg_p1'));
   });
 });
+
+describe('projection: lifecycle backend (hermes turn_start/turn_end, 2026-09-23)', () => {
+  const nowSec = () => Math.floor(Date.now() / 1000);
+  const answered = () => [u('umsg_q1', 'q1', nowSec() - 60), a('msg_e1', 'echo1', nowSec() - 55)];
+  const indicator = (out: ReturnType<typeof project>) =>
+    out.some(x => x.kind === 'turnStatus' || x.key.startsWith('pending:turn:'));
+
+  it('idle: an open tool row and a fresh heartbeat claim nothing, and the row settles', () => {
+    const now = Date.now();
+    const out = project(state({
+      durable: answered(),
+      inflight: [{ type: 'tool_call', chat_id: 'c', call_id: 'k1', tool_name: 'terminal', args: {} } as any],
+      turnStatus: { text: '', at: now },
+      turnActive: false,
+      turnLifecycle: true,
+    }));
+    assert.ok(!indicator(out), 'no indicator once hermes says the turn ended');
+    assert.ok(out.filter(x => x.kind === 'activityRow').every(x => (x as any).complete));
+  });
+
+  it('active: the indicator stays up after the first reply of a multi-reply turn', () => {
+    const out = project(state({ durable: answered(), turnActive: true, turnLifecycle: true }));
+    assert.ok(out.some(x => x.kind === 'turnStatus'));
+  });
+
+  it('a young send hermes has not started yet carries the indicator; once acked it does not', () => {
+    const now = Date.now();
+    const send: PendingSend = { messageId: 'umsg_p1', text: 'q', source: 'text', sentAt: now - 200, failed: false };
+    const before = project(state({ durable: answered(), pendingSends: [send], turnLifecycle: true, turnActive: false }));
+    assert.ok(indicator(before), 'pre-turn_start gap shows the indicator');
+    const after = project(state({
+      durable: answered(), pendingSends: [send], turnLifecycle: true, turnActive: false,
+      turnAcks: { umsg_p1: 'success' },
+    }));
+    assert.ok(!indicator(after), 'a finished (acked) send no longer implies a turn');
+  });
+
+  it('stamps acks on user bubbles; a failed turn with no reply gets a notice, an answered one does not', () => {
+    const t = nowSec();
+    const out = project(state({
+      durable: [u('umsg_1', 'a', t - 30), a('msg_1', 'reply', t - 29), u('umsg_2', 'b', t - 20), u('umsg_3', 'c', t - 10)],
+      turnLifecycle: true, turnActive: false,
+      turnAcks: { umsg_1: 'failure', umsg_2: 'cancelled', umsg_3: 'success' },
+    }));
+    const user = (k: string) => out.find(x => x.kind === 'user' && x.key === k) as any;
+    assert.equal(user('umsg_1').ack, 'failure');
+    assert.equal(user('umsg_1').turnNotice, undefined, 'it did reply before failing');
+    assert.equal(user('umsg_2').turnNotice, 'cancelled');
+    assert.equal(user('umsg_3').ack, 'success');
+    assert.equal(user('umsg_3').turnNotice, undefined);
+  });
+});

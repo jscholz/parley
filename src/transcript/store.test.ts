@@ -363,3 +363,44 @@ describe('storeNs.setTurnActive (server-authoritative live-turn flag)', () => {
     assert.equal(storeNs.getState('chat-fresh-ta').turnActive, null);
   });
 });
+
+describe('store: turn lifecycle (hermes turn_start/turn_end, 2026-09-23)', () => {
+  it('start → active + 👀; nested end keeps it active; last end idles and marks', async () => {
+    const { noteTurnStart, noteTurnEnd, hasTurnLifecycle, resetTurnLifecycleBackend } = await import('./store.ts');
+    resetTurnLifecycleBackend();
+    const c = 'lc-chat-1';
+    noteTurnStart(c, 'A', 'umsg_a');
+    noteTurnStart(c, 'B', 'umsg_b');
+    assert.equal(hasTurnLifecycle(), true);
+    assert.equal(getState(c).turnActive, true);
+    assert.deepEqual(getState(c).turnAcks, { umsg_a: 'processing', umsg_b: 'processing' });
+    noteTurnEnd(c, 'B', 'umsg_b', 'success', 1);
+    assert.equal(getState(c).turnActive, true, 'parent still running');
+    noteTurnEnd(c, 'A', 'umsg_a', 'failure', 0);
+    assert.equal(getState(c).turnActive, false);
+    assert.deepEqual(getState(c).turnAcks, { umsg_a: 'failure', umsg_b: 'success' });
+    resetTurnLifecycleBackend();
+  });
+
+  it('a stale page cannot walk ✓ back to 👀; an idle page retires orphaned 👀', async () => {
+    const { noteTurnStart, noteTurnEnd, applyServerTurnMeta, resetTurnLifecycleBackend } = await import('./store.ts');
+    const c = 'lc-chat-2';
+    noteTurnStart(c, 'A', 'umsg_a');
+    noteTurnEnd(c, 'A', 'umsg_a', 'success', 0);
+    applyServerTurnMeta(c, { turnLifecycle: true, turnAcks: { umsg_a: 'processing' } });
+    assert.equal(getState(c).turnAcks!.umsg_a, 'success');
+    noteTurnStart(c, 'B', 'umsg_lost');
+    applyServerTurnMeta(c, { turnLifecycle: true, turnActive: false, turnAcks: {} });
+    assert.equal(getState(c).turnAcks!.umsg_lost, undefined, 'end was lost (restart) — no eternal 👀');
+    resetTurnLifecycleBackend();
+  });
+
+  it('a lifecycle backend does not flip turnActive on a committed send', async () => {
+    const { addPendingSend, markTurnLifecycleBackend, resetTurnLifecycleBackend } = await import('./store.ts');
+    markTurnLifecycleBackend();
+    const c = 'lc-chat-3';
+    addPendingSend(c, { messageId: 'umsg_x', text: 'x', sentAt: Date.now() });
+    assert.notEqual(getState(c).turnActive, true);
+    resetTurnLifecycleBackend();
+  });
+});

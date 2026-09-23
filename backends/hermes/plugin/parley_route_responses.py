@@ -105,6 +105,7 @@ async def _handle_blocking(
         # arrive on `queue` via _safe_send_envelope's fan-out.
         asyncio.create_task(adapter._dispatch_message(
             chat_id=chat_id, text=text, attachments=attachments,
+            user_message_id=user_message_id,
         ))
         assembled = ""
         while True:
@@ -117,6 +118,11 @@ async def _handle_blocking(
             elif t == "reply_final":
                 reply_final_seen = True
                 break
+            elif t == "turn_end" and env.get("user_message_id") == user_message_id:
+                # hermes finished this message without a reply_final
+                # (silent turn, failure, /stop). Another message's end is
+                # not ours — keep waiting.
+                break
         return web.json_response(_build_response_envelope(
             response_id, message_id, created_at, assembled,
         ))
@@ -126,11 +132,15 @@ async def _handle_blocking(
             status=500,
         )
     finally:
-        adapter._turn_queues.pop(chat_id, None)
-        # The turn is over however it ended: never leave a phantom
-        # in-flight entry for the items endpoint to replay (2026-09-15).
-        if adapter._turn_buffer is not None:
-            adapter._turn_buffer.close_turn(chat_id)
+        # Only our own queue: a follow-up POST for the same chat replaces
+        # the entry, and popping by key would orphan ITS handler.
+        # Same for the in-flight buffer, which the newer turn reopened.
+        if adapter._turn_queues.get(chat_id) is queue:
+            adapter._turn_queues.pop(chat_id, None)
+            # The turn is over however it ended: never leave a phantom
+            # in-flight entry for the items endpoint to replay (2026-09-15).
+            if adapter._turn_buffer is not None:
+                adapter._turn_buffer.close_turn(chat_id)
         # Linking is now done by parley.db's content-fingerprint
         # match (Phase 3, see parley_state.reconcile_from_state_db).
         # The legacy `_write_msg_links_after_turn` heuristic is dead
@@ -174,6 +184,7 @@ async def _handle_streaming(
     # _safe_send_envelope.
     asyncio.create_task(adapter._dispatch_message(
         chat_id=chat_id, text=text, attachments=attachments,
+        user_message_id=user_message_id,
     ))
 
     try:
@@ -211,6 +222,20 @@ async def _handle_streaming(
                     "response": _build_response_envelope(
                         response_id, message_id, created_at, assembled,
                     ),
+                })
+                completed_emitted = True
+                break
+            elif t == "turn_end" and env.get("user_message_id") == user_message_id:
+                # hermes finished this message without a reply_final (an
+                # earlier message's end is not ours). Terminal, but not
+                # a completion: the proxy must neither synthesize an empty
+                # reply nor report a truncated stream. The turn_end itself
+                # reaches the PWA on the event channel.
+                await write_sse("response.incomplete", {
+                    "type": "response.incomplete",
+                    "response": {"id": response_id, "status": "incomplete",
+                                 "incomplete_details": {"reason": "turn_ended",
+                                                        "outcome": env.get("outcome")}},
                 })
                 completed_emitted = True
                 break
@@ -279,11 +304,15 @@ async def _handle_streaming(
                 "error": {"type": "server_error", "message": str(exc)},
             })
     finally:
-        adapter._turn_queues.pop(chat_id, None)
-        # The turn is over however it ended: never leave a phantom
-        # in-flight entry for the items endpoint to replay (2026-09-15).
-        if adapter._turn_buffer is not None:
-            adapter._turn_buffer.close_turn(chat_id)
+        # Only our own queue: a follow-up POST for the same chat replaces
+        # the entry, and popping by key would orphan ITS handler.
+        # Same for the in-flight buffer, which the newer turn reopened.
+        if adapter._turn_queues.get(chat_id) is queue:
+            adapter._turn_queues.pop(chat_id, None)
+            # The turn is over however it ended: never leave a phantom
+            # in-flight entry for the items endpoint to replay (2026-09-15).
+            if adapter._turn_buffer is not None:
+                adapter._turn_buffer.close_turn(chat_id)
         with contextlib.suppress(Exception):
             await resp.write_eof()
         # Linking handled by reconcile_from_state_db on next items

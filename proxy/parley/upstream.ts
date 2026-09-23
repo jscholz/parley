@@ -22,6 +22,11 @@ export type ParleyEnvelope =
   | { type: 'tool_call'; chat_id: string; call_id: string; tool_name: string; args: unknown; started_at?: string }
   | { type: 'tool_result'; chat_id: string; call_id: string; tool_name: string; result: unknown; duration_ms?: number }
   | { type: 'typing'; chat_id: string }
+  // hermes' processing bracket (plugin on_processing_start/complete).
+  // turn_id pairs them; user_message_id names the bubble to mark.
+  | { type: 'turn_start'; chat_id: string; turn_id: string; user_message_id?: string }
+  | { type: 'turn_end'; chat_id: string; turn_id: string; user_message_id?: string;
+      outcome: 'success' | 'failure' | 'cancelled'; replied?: boolean; active_turns?: number }
   | { type: 'image'; chat_id: string; url: string; caption?: string }
   | { type: 'notification'; chat_id: string; kind: string; content: string }
   | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
@@ -242,7 +247,7 @@ export interface UpstreamAgent {
   getMessages(
     chatId: string,
     opts?: { limit?: number; before?: number; around?: string; after?: number },
-  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean }>;
+  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean; turn_lifecycle?: boolean; turn_acks?: Record<string, string> }>;
 
   /** Drawer delete. Cascades upstream (transcript + memory store). */
   deleteConversation(chatId: string): Promise<void>;
@@ -406,7 +411,7 @@ export class HTTPAgentUpstream implements UpstreamAgent {
   async getMessages(
     chatId: string,
     opts: { limit?: number; before?: number; around?: string; after?: number } = {},
-  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean }> {
+  ): Promise<{ items: ConversationItem[]; first_id: number | null; has_more: boolean; inflight: ParleyEnvelope[]; target_found?: boolean; last_id?: number | null; has_more_newer?: boolean; turn_active?: boolean; turn_lifecycle?: boolean; turn_acks?: Record<string, string> }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set('limit', String(opts.limit));
     if (opts.before != null) params.set('before', String(opts.before));
@@ -437,6 +442,8 @@ export class HTTPAgentUpstream implements UpstreamAgent {
       ...(j?.last_id != null ? { last_id: j.last_id } : {}),
       ...(typeof j?.has_more_newer === 'boolean' ? { has_more_newer: j.has_more_newer } : {}),
       ...(typeof j?.turn_active === 'boolean' ? { turn_active: j.turn_active } : {}),
+      ...(j?.turn_lifecycle === true ? { turn_lifecycle: true } : {}),
+      ...(j?.turn_acks && typeof j.turn_acks === 'object' ? { turn_acks: j.turn_acks } : {}),
     };
   }
 
@@ -718,7 +725,11 @@ export class HTTPAgentUpstream implements UpstreamAgent {
               : translated;
           }
 
-          if (event === 'response.completed' || event === 'response.error') {
+          // response.incomplete: the agent's turn ended with no reply
+          // (silent turn, failure, /stop). Terminal but quiet — the
+          // plugin's turn_end on the event stream tells the PWA how.
+          if (event === 'response.completed' || event === 'response.error'
+              || event === 'response.incomplete') {
             terminalSeen = true;
             closed = true;
             break;

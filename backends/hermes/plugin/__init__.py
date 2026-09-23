@@ -248,6 +248,7 @@ SESSION_ROWS_CACHE_TTL_S = float(
 # so route-handler submodules can import them without a circular dep
 # on this package's __init__. Re-exported here for backward compat
 # with any caller that still references them from the package root.
+from .parley_turn_lifecycle import TurnLifecycle
 from .parley_ids import (  # noqa: F401
     GATEWAY_DRAWER_SOURCES,
     PARLEY_SOURCE,
@@ -492,6 +493,10 @@ class ParleyAdapter(BasePlatformAdapter):
         # TurnBuffer (src/turn-buffer.js).
         from .parley_turn_buffer import TurnBuffer  # noqa: WPS433
         self._turn_buffer = TurnBuffer()
+        # hermes' processing hooks → turn_start / turn_end, the
+        # authoritative "is the agent working on this chat" signal (see
+        # parley_turn_lifecycle.py and on_processing_start below).
+        self._turn_lifecycle = TurnLifecycle()
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -852,8 +857,14 @@ class ParleyAdapter(BasePlatformAdapter):
         chat_id: str,
         text: str,
         attachments: Optional[list] = None,
+        user_message_id: str = "",
     ) -> None:
         """Build a MessageEvent and hand it to the gateway core.
+
+        ``user_message_id`` is the PWA's id for the user bubble. It rides
+        ``event.metadata`` (NOT ``message_id``, which hermes persists and
+        uses as a reply anchor) so the processing hooks can mark that
+        bubble 👀 → ✓/✗.
 
         ``attachments`` is the array the PWA collects from the camera /
         image picker — each entry ``{type, mimeType, fileName,
@@ -907,8 +918,63 @@ class ParleyAdapter(BasePlatformAdapter):
             message_id=str(uuid.uuid4()),
             media_urls=media_urls,
             media_types=media_types,
+            metadata={"parley_user_message_id": user_message_id} if user_message_id else {},
         )
+        self._lifecycle.remember_event(event.message_id, user_message_id)
         await self.handle_message(event)
+
+    # ------------------------------------------------------------------
+    # Processing lifecycle — hermes' authoritative turn bracket
+    # ------------------------------------------------------------------
+    #
+    # The same hooks Slack's 👀 reaction uses. Every inbound event hermes
+    # processes gets exactly one start and one complete, on every exit
+    # path, including follow-ups drained in-band (which nest inside the
+    # running turn). Published on the persistent event channel — never a
+    # /v1/responses queue, which may already be gone (it closes at the
+    # first reply_final) or belong to a different message.
+
+    @property
+    def _lifecycle(self) -> TurnLifecycle:
+        # Lazy so adapters built via __new__ (test rigs) get one too.
+        lc = self.__dict__.get("_turn_lifecycle")
+        if lc is None:
+            lc = self.__dict__["_turn_lifecycle"] = TurnLifecycle()
+        return lc
+
+    async def on_processing_start(self, event) -> None:
+        chat_id = str(getattr(getattr(event, "source", None), "chat_id", "") or "")
+        if not chat_id:
+            return
+        turn_id = str(getattr(event, "message_id", "") or "") or f"turn_{secrets.token_hex(6)}"
+        env = self._lifecycle.start(
+            chat_id, turn_id, self._lifecycle.user_message_id_for(event))
+        await self._publish_lifecycle(env)
+
+    async def on_processing_complete(self, event, outcome) -> None:
+        chat_id = str(getattr(getattr(event, "source", None), "chat_id", "") or "")
+        if not chat_id:
+            return
+        turn_id = str(getattr(event, "message_id", "") or "")
+        env = self._lifecycle.complete(chat_id, turn_id, outcome)
+        await self._publish_lifecycle(env)
+        # Release the /v1/responses handler waiting on THIS message (a
+        # turn that ended without a reply_final used to hold it — and
+        # turn_active — for the full _TURN_TIMEOUT_S). The chat's queue
+        # may belong to a newer message hermes hasn't started yet; the
+        # handler matches on user_message_id and ignores anyone else's end.
+        queue = self._turn_queues.get(chat_id) if env["user_message_id"] else None
+        if queue is not None:
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(env)
+
+    async def _publish_lifecycle(self, env: Dict[str, Any]) -> None:
+        env["should_push"] = False
+        try:
+            from . import parley_route_events as _route_events  # noqa: WPS433
+            _route_events.publish_out_of_turn(self, env)
+        except Exception as exc:
+            logger.warning("[parley] %s publish failed: %s", env.get("type"), exc)
 
     @staticmethod
     def _image_input_mode_is_native() -> bool:
@@ -2311,6 +2377,8 @@ class ParleyAdapter(BasePlatformAdapter):
             final["interim"] = True
         ok = await self._safe_send_envelope(delta)
         await self._safe_send_envelope(final)
+        if ok and not interim:
+            self._lifecycle.note_reply(chat_id)
         return SendResult(success=ok, message_id=message_id)
 
     # NOTE: We deliberately DO NOT override edit_message. The base class

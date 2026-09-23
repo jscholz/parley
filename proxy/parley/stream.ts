@@ -84,6 +84,11 @@ const FANOUT_TYPES = new Set<string>([
   'status',
   'image',
   'typing',
+  // hermes' processing bracket (on_processing_start/complete — the hooks
+  // Slack's 👀 rides): the authoritative "agent is working on this chat"
+  // signal plus the per-message 👀 → ✓/✗ mark. Never push-eligible.
+  'turn_start',
+  'turn_end',
   'notification',
   'session_changed',
   'error',

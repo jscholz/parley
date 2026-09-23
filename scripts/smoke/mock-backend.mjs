@@ -56,10 +56,22 @@ export async function installMockBackend(page) {
    *  (auto-reply, streamReply, pushReply, or a test's pushEnvelope).
    *  Mirrors the plugin's `_turn_queues` lifecycle. */
   const openTurns = new Set();
+  /** Opt-in (mock.setTurnLifecycle(true)): behave like the hermes plugin
+   *  that brackets turns with turn_start/turn_end from its processing
+   *  hooks. The auto-reply emits the pair; items pages carry
+   *  turnLifecycle + turnAcks; turnActive = a bracketed turn is open.
+   *  Off by default so the inference path (openclaw / claude-code
+   *  backends) keeps its coverage. */
+  let turnLifecycle = false;
+  const lifecycleTurns = new Map();   // chat_id → Set<turn_id>
+  const acksByChat = new Map();       // chat_id → { umid: ack }
   const turnActiveFor = (chatId) => {
     if (turnActiveByChat.has(chatId)) return turnActiveByChat.get(chatId);
+    if (turnLifecycle) return (lifecycleTurns.get(chatId)?.size || 0) > 0;
     return openTurns.has(chatId) || (inflightByChat.get(chatId) || []).length > 0;
   };
+  const lifecycleFields = (chatId) => (turnLifecycle
+    ? { turnLifecycle: true, turnAcks: { ...(acksByChat.get(chatId) || {}) } } : {});
   /** When true (default), POST /api/parley/messages auto-emits a
    *  reply via SSE 50ms later. Tests that want to drive envelopes
    *  manually (e.g. assert the thinking-dots label transitions
@@ -155,6 +167,16 @@ export async function installMockBackend(page) {
       if (t === 'typing' || t === 'reply_delta' || t === 'tool_call' || t === 'tool_result' || t === 'user_message'
           || (t === 'status' && env.state !== 'done')) openTurns.add(env.chat_id);
       else if ((t === 'reply_final' && !env.interim) || (t === 'status' && env.state === 'done') || t === 'error') openTurns.delete(env.chat_id);
+      if (t === 'turn_start' || t === 'turn_end') {
+        const turns = lifecycleTurns.get(env.chat_id) || new Set();
+        lifecycleTurns.set(env.chat_id, turns);
+        if (t === 'turn_start') turns.add(env.turn_id); else turns.delete(env.turn_id);
+        if (env.user_message_id) {
+          const acks = acksByChat.get(env.chat_id) || {};
+          acks[env.user_message_id] = t === 'turn_start' ? 'processing' : (env.outcome || 'success');
+          acksByChat.set(env.chat_id, acks);
+        }
+      }
     }
     envelopeId++;
     const id = envelopeId;
@@ -538,6 +560,7 @@ export async function installMockBackend(page) {
           lastId: typeof lastId === 'number' ? lastId : null,
           hasMoreNewer,
           turnActive: turnActiveFor(chatId),
+          ...lifecycleFields(chatId),
           ...(afterInflight.length > 0 ? { inflight: afterInflight } : {}),
         }),
       });
@@ -565,6 +588,7 @@ export async function installMockBackend(page) {
       firstId: typeof firstId === 'number' ? firstId : null,
       hasMore,
       turnActive: turnActiveFor(chatId),
+      ...lifecycleFields(chatId),
       ...(inflightEnvelopes.length > 0 ? { inflight: inflightEnvelopes } : {}),
     };
     await route.fulfill({
@@ -929,6 +953,8 @@ export async function installMockBackend(page) {
           message_id: userMsgId,
           text,
         });
+        const turnId = `turn_${userMsgId}`;
+        if (turnLifecycle) broadcast({ type: 'turn_start', chat_id: chatId, turn_id: turnId, user_message_id: userMsgId });
         broadcast({ type: 'typing', chat_id: chatId });
         broadcast({
           type: 'reply_delta',
@@ -937,6 +963,10 @@ export async function installMockBackend(page) {
           message_id: messageId,
         });
         broadcast({ type: 'reply_final', chat_id: chatId, message_id: messageId });
+        if (turnLifecycle) {
+          broadcast({ type: 'turn_end', chat_id: chatId, turn_id: turnId, user_message_id: userMsgId,
+                      outcome: 'success', replied: true, active_turns: 0 });
+        }
         chat.messages.push({
           role: 'assistant',
           content: replyText,
@@ -1864,6 +1894,11 @@ export async function installMockBackend(page) {
     activityItems() {
       return Array.from(activityById.values());
     },
+    /** Switch the mock to the hermes plugin's turn_start/turn_end
+     *  lifecycle (see `turnLifecycle` above). Call from MOCK_SETUP. */
+    setTurnLifecycle(on) { turnLifecycle = !!on; },
+    /** Seed per-message marks the items page reports (a reload's view). */
+    setTurnAcks(chatId, acks) { acksByChat.set(chatId, { ...(acks || {}) }); },
     /** Force the items endpoint's `turnActive` for a chat (null = back
      *  to inferred). Models the plugin's authoritative live-turn flag. */
     setTurnActive(chatId, active) {

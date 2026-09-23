@@ -559,6 +559,13 @@ export function project(state: ChatState): BubbleSpec[] {
   // sent, so the live "N tools · running…" line was buried mid-turn
   // (field 2026-09-05). Pin open rows to the tail; on reply_final
   // `complete` flips and the row settles back into chronological order.
+  //
+  // A lifecycle backend's word that the turn is over settles every row:
+  // a tool whose result never arrived is not still running.
+  const lifecycleIdle = state.turnLifecycle === true && state.turnActive === false;
+  if (lifecycleIdle) {
+    for (const s of specs) if (s.kind === 'activityRow' && !s.complete) s.complete = true;
+  }
   {
     const open = specs.filter(s => s.kind === 'activityRow' && !s.complete);
     if (open.length) {
@@ -566,6 +573,29 @@ export function project(state: ChatState): BubbleSpec[] {
       const rest = specs.filter(s => !openSet.has(s));
       specs.length = 0;
       specs.push(...rest, ...open);
+    }
+  }
+
+  // ── 4c. Processing marks (👀 → ✓ / ✗) on the user bubbles hermes has
+  // reported on, plus the inline notice for a turn that failed or was
+  // stopped without answering: "no reply" = no assistant bubble between
+  // this message and the next one.
+  const acks = state.turnAcks;
+  if (acks) {
+    for (let i = 0; i < specs.length; i++) {
+      const s = specs[i];
+      if (s.kind !== 'user') continue;
+      const ack = acks[s.key];
+      if (!ack) continue;
+      s.ack = ack;
+      if (ack !== 'failure' && ack !== 'cancelled') continue;
+      let answered = false;
+      for (let j = i + 1; j < specs.length; j++) {
+        const n = specs[j];
+        if (n.kind === 'user') break;
+        if (n.kind === 'assistant' && (n.text || '').trim()) { answered = true; break; }
+      }
+      if (!answered) s.turnNotice = ack;
     }
   }
 
@@ -615,8 +645,17 @@ export function project(state: ChatState): BubbleSpec[] {
   // nothing below may claim otherwise — not an unanswered user row in
   // history, not an unfinished tool row, not a stale heartbeat.
   const serverSaysIdle = state.turnActive === false;
+  // Lifecycle backend: the indicator is up exactly while hermes says a
+  // turn is running, plus the moment between committing a send and its
+  // turn_start (a young send hermes hasn't marked yet). Nothing else —
+  // not an open tool row, not a heartbeat, not a straggler typing.
+  const lifecycle = state.turnLifecycle === true;
+  const awaitingStart = lifecycle && state.pendingSends.some(p =>
+    !p.failed && now - p.sentAt < PLACEHOLDER_MAX_AGE_MS && !acks?.[p.messageId]
+    && !finalizedTurnUserKeys.has(p.messageId));
+  const lifecycleLive = lifecycle && (state.turnActive === true || awaitingStart);
   let placeholderSpliced = false;
-  if (!serverSaysIdle) {
+  if (lifecycle ? lifecycleLive : !serverSaysIdle) {
     const agentHasSpoken = specs.some(s =>
       s.kind === 'assistant' || s.kind === 'activityRow' || s.kind === 'notification');
     if (agentHasSpoken) {
@@ -663,7 +702,8 @@ export function project(state: ChatState): BubbleSpec[] {
     const openRow = specs.some(s => s.kind === 'activityRow' && !s.complete);
     const liveTurn = specs.some(s =>
       s.kind === 'user' && liveSendKeys.has(s.key) && !finalizedTurnUserKeys.has(s.key));
-    if (!placeholderSpliced && !serverSaysIdle && (openRow || liveTurn || beat)) {
+    const show = lifecycle ? lifecycleLive : (!serverSaysIdle && (openRow || liveTurn || beat));
+    if (!placeholderSpliced && show) {
       const last = specs[specs.length - 1];
       specs.push({
         kind: 'turnStatus',

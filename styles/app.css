@@ -2044,6 +2044,23 @@
     background: rgba(200, 60, 60, 0.1);
   }
 
+  /* hermes' per-message processing mark (👀 → ✓ / ✗), in the user
+     bubble's right gutter above the timestamp, left of the copy button.
+     Must stay inside the box: `.line { content-visibility: auto }`
+     paint-contains, so anything hung outside is clipped. The ✗ for a
+     stopped turn stays muted; only a failure is red. */
+  .line .turn-ack {
+    position: absolute; top: 10px; right: 30px;
+    font-size: 11px; line-height: 1; color: var(--muted);
+    opacity: 0.6; pointer-events: none;
+  }
+  .line .turn-ack[data-ack="processing"] { opacity: 0.9; }
+  .line .turn-ack[data-ack="failure"] { color: #c44; opacity: 0.9; }
+  .line .turn-notice {
+    margin-top: 6px; font-size: 12px; color: var(--muted);
+  }
+  .line .turn-notice[data-kind="failure"] { color: #c44; }
+
   /* Wrap long URLs / unspaced tokens so a single line can't overflow
      the chat and summon a horizontal scrollbar. Wide inline content
      (pre, tables, cards) keeps its own overflow-x: auto — that's a

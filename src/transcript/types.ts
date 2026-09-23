@@ -60,6 +60,18 @@ export interface ChatState {
    *  tool row) — those are circumstantial, this is the fact. `null` =
    *  unknown (older backend / not fetched yet): fall back to inference. */
   turnActive?: boolean | null;
+  /** The backend brackets turns with turn_start/turn_end, so turnActive
+   *  is fact, not inference — the projection stops guessing from open
+   *  tool rows, heartbeats and unanswered sends. */
+  turnLifecycle?: boolean;
+  /** turn_ids hermes has started and not yet ended for this chat (live
+   *  turn_start/turn_end envelopes). More than one while a follow-up
+   *  drains inside a running turn. */
+  activeTurns?: string[];
+  /** Per-message processing marks keyed by the user bubble's id:
+   *  👀 while hermes processes it, then ✓ / ✗. From turn_start/turn_end
+   *  live and the items page's `turn_acks` on resume. */
+  turnAcks?: Record<string, TurnAck>;
   /** Most-recent pagination cursors from the items endpoint. Used by the
    *  load-earlier / load-later paths; not consumed by the projection
    *  itself. `firstId`/`hasMore` page OLDER (toward the head); `lastId`/
@@ -78,6 +90,8 @@ export interface ChatState {
    *  old DOM rows had, now per-chat and replay-safe. */
   decorations: Decoration[];
 }
+
+export type TurnAck = 'processing' | 'success' | 'failure' | 'cancelled';
 
 export type Decoration = SystemDecoration | MemoDecoration;
 
@@ -266,6 +280,11 @@ export interface UserBubbleSpec {
   failed?: boolean;
   source?: 'voice' | 'text' | 'sent';
   attachments?: Array<{ dataUrl: string; mimeType: string; fileName?: string }>;
+  /** hermes' processing mark for this message (👀 / ✓ / ✗). */
+  ack?: TurnAck;
+  /** Set when the turn this message started ended as a failure or was
+   *  stopped AND no reply followed — the inline "no reply" notice. */
+  turnNotice?: 'failure' | 'cancelled';
 }
 
 export interface AssistantBubbleSpec {

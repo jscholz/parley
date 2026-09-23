@@ -22,6 +22,7 @@ import type {
   Decoration,
   PendingSend,
   ParleyEnvelope,
+  TurnAck,
 } from './types.ts';
 
 const states = new Map<string, ChatState>();
@@ -36,6 +37,7 @@ function emptyChatState(): ChatState {
     decorations: [],
     turnStatus: null,
     turnActive: null,
+    ...(lifecycleBackend ? { turnLifecycle: true } : {}),
   };
 }
 
@@ -509,6 +511,109 @@ export function setTurnActive(chatId: string, active: boolean | null): void {
   notify(chatId);
 }
 
+// ── Turn lifecycle (hermes on_processing_start/complete) ─────────────
+//
+// When the backend brackets turns with turn_start/turn_end, those — and
+// the items page's turn_active — are the ONLY things that start or end a
+// turn. typing/status/reply_final keep their jobs (label text, bubbles)
+// but stop being evidence of liveness: a straggler typing after the
+// final used to flip turnActive back on and, with any unfinished tool
+// row, left "Thinking" up for as long as the tab stayed open (field
+// 2026-09-23). One backend per PWA, so the capability is global and
+// sticky once seen.
+
+let lifecycleBackend = false;
+
+export function hasTurnLifecycle(): boolean { return lifecycleBackend; }
+
+export function markTurnLifecycleBackend(): void {
+  if (lifecycleBackend) return;
+  lifecycleBackend = true;
+  // Stamp chats that already exist so projection (a pure function of
+  // ChatState) sees the capability without reading module state.
+  for (const [chatId, s] of states) { s.turnLifecycle = true; notify(chatId); }
+}
+
+/** Test-only: forget the capability between scenarios. */
+export function resetTurnLifecycleBackend(): void { lifecycleBackend = false; }
+
+const TERMINAL_ACKS = new Set<TurnAck>(['success', 'failure', 'cancelled']);
+
+/** Bumped on every live turn_start/turn_end per chat. A history fetch
+ *  snapshots it at issue time: if it moved by the time the page lands,
+ *  the page's turn_active predates what the stream already told us and
+ *  must not overrule it (a page requested just before turn_start used to
+ *  report the new turn idle). */
+const liveTurnSeqs = new Map<string, number>();
+
+export function liveTurnSeq(chatId: string): number { return liveTurnSeqs.get(chatId) ?? 0; }
+
+function bumpLiveTurnSeq(chatId: string): void { liveTurnSeqs.set(chatId, liveTurnSeq(chatId) + 1); }
+
+function setAck(s: ChatState, umid: string | undefined, ack: TurnAck): void {
+  if (!umid) return;
+  s.turnAcks = { ...(s.turnAcks ?? {}), [umid]: ack };
+}
+
+/** Live turn_start. Replays apply too: the ring replays in order, so a
+ *  replayed start is always followed by its end if one happened. */
+export function noteTurnStart(chatId: string, turnId: string, userMessageId?: string): void {
+  markTurnLifecycleBackend();
+  bumpLiveTurnSeq(chatId);
+  const s = getState(chatId);
+  const turns = s.activeTurns ?? [];
+  if (!turns.includes(turnId)) s.activeTurns = [...turns, turnId];
+  setAck(s, userMessageId, 'processing');
+  s.turnActive = true;
+  notify(chatId);
+}
+
+/** Live turn_end. The chat goes idle when hermes reports no other turn
+ *  running (`activeTurns` from the plugin; our own set as a fallback). */
+export function noteTurnEnd(
+  chatId: string, turnId: string, userMessageId: string | undefined,
+  outcome: TurnAck, remaining?: number,
+): void {
+  markTurnLifecycleBackend();
+  bumpLiveTurnSeq(chatId);
+  const s = getState(chatId);
+  s.activeTurns = (s.activeTurns ?? []).filter((t) => t !== turnId);
+  setAck(s, userMessageId, TERMINAL_ACKS.has(outcome) ? outcome : 'success');
+  const idle = typeof remaining === 'number' ? remaining <= 0 : s.activeTurns.length === 0;
+  if (idle) {
+    s.activeTurns = [];
+    s.turnActive = false;
+    s.turnStatus = null;
+  }
+  notify(chatId);
+}
+
+/** The items page's lifecycle fields. Server marks win, except that a
+ *  page fetched before a turn_end we already applied can't walk a
+ *  finished mark back to 👀. A page saying the chat is idle retires any
+ *  👀 it doesn't vouch for — that turn's end was lost (gateway restart). */
+export function applyServerTurnMeta(
+  chatId: string,
+  meta: { turnLifecycle?: boolean; turnAcks?: Record<string, string>; turnActive?: boolean },
+): void {
+  if (meta.turnLifecycle !== true) return;
+  markTurnLifecycleBackend();
+  const s = getState(chatId);
+  const next: Record<string, TurnAck> = { ...(s.turnAcks ?? {}) };
+  if (meta.turnActive === false) {
+    s.activeTurns = [];
+    for (const [k, v] of Object.entries(next)) if (v === 'processing') delete next[k];
+  }
+  for (const [k, raw] of Object.entries(meta.turnAcks ?? {})) {
+    const v = raw as TurnAck;
+    if (v !== 'processing' && !TERMINAL_ACKS.has(v)) continue;
+    if (v === 'processing' && next[k] && TERMINAL_ACKS.has(next[k])) continue;
+    next[k] = v;
+  }
+  s.turnAcks = next;
+  notify(chatId);
+}
+
 /** Drain inflight envelopes — typically called after reply_final once
  *  the next /messages fetch lands and absorbs the turn into durable. */
 export function clearInflight(chatId: string): void {
@@ -539,8 +644,11 @@ export function addPendingSend(chatId: string, send: PendingSend): void {
   // Committing a send IS the start of a turn: flip the authoritative flag
   // optimistically so a chat the server last reported idle shows its dots
   // at once (the items page will confirm; a live reply_final clears it).
+  // A lifecycle backend needs no guess: the projection covers the gap
+  // until turn_start with the young un-acked send itself, and a guess
+  // here would stick if the turn never started.
   const st = getState(chatId);
-  if (st.turnActive !== true) { st.turnActive = true; }
+  if (!lifecycleBackend && st.turnActive !== true) { st.turnActive = true; }
   const s = getState(chatId);
   if (s.pendingSends.find(p => p.messageId === send.messageId)) return;
   s.pendingSends.push(send);
