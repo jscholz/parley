@@ -234,20 +234,6 @@ def _summaries_by_user_id(
                 (SELECT COUNT(*) FROM messages m
                    WHERE m.session_id = s.id AND m.role = 'tool')
             ) AS tool_count,
-            (SELECT COALESCE(s2.title, '')
-               FROM session_root sr2
-               JOIN sessions s2 ON s2.id = sr2.id
-               WHERE sr2.root_user_id = sr.root_user_id
-                 AND sr2.root_source = sr.root_source
-               ORDER BY s2.started_at DESC LIMIT 1) AS title,
-            (SELECT m.content
-               FROM messages m
-               JOIN session_root sr3 ON m.session_id = sr3.id
-               WHERE sr3.root_user_id = sr.root_user_id
-                 AND sr3.root_source = sr.root_source
-                 AND m.role = 'user'
-               ORDER BY m.timestamp ASC, m.id ASC LIMIT 1
-            ) AS first_user_message,
             GROUP_CONCAT(s.id, ' ') AS session_ids
         FROM session_root sr
         JOIN sessions s ON s.id = sr.id
@@ -256,12 +242,41 @@ def _summaries_by_user_id(
         ORDER BY last_active_at DESC
         LIMIT ?
     """
+    # PERF (2026-09-24 — his "Reconnecting…" pill on a stable link): the
+    # title + first-user-message used to be correlated subqueries in the
+    # SELECT above, each re-running the session_root CTE and scanning
+    # messages PER GROUP. Fine at LIMIT 1 (0.3s) but 8.7s at the drawer's
+    # 50 and 18.6s at 200 — the width the unread force-include re-query
+    # uses, which every 30s health probe (limit=1) triggered, timing the
+    # probe out. Now: aggregate + sort + LIMIT first (57ms at 200), then
+    # two indexed lookups over each surviving row's own session ids.
+    title_sql = (
+        "SELECT COALESCE(title, '') FROM sessions WHERE id IN ({ids}) "
+        "ORDER BY started_at DESC LIMIT 1"
+    )
+    first_sql = (
+        "SELECT content FROM messages WHERE session_id IN ({ids}) "
+        "AND role = 'user' ORDER BY timestamp ASC, id ASC LIMIT 1"
+    )
     params = list(sources) + [limit]
     uri = f"file:{adapter._state_db_path}?mode=ro"
     with contextlib.closing(
         sqlite3.connect(uri, uri=True, timeout=2.0)
     ) as conn:
-        rows = conn.execute(sql, params).fetchall()
+        agg = conn.execute(sql, params).fetchall()
+        rows = []
+        for (user_id, source, created_at, last_active_at, mcount,
+             turn_count, tool_count, session_ids) in agg:
+            ids = [x for x in (session_ids or "").split(" ") if x]
+            title = first_user = None
+            if ids:
+                marks = ",".join(["?"] * len(ids))
+                hit = conn.execute(title_sql.format(ids=marks), ids).fetchone()
+                title = hit[0] if hit else ""
+                hit = conn.execute(first_sql.format(ids=marks), ids).fetchone()
+                first_user = hit[0] if hit else None
+            rows.append((user_id, source, created_at, last_active_at, mcount,
+                         turn_count, tool_count, title, first_user, session_ids))
     out = []
     for (user_id, source, created_at, last_active_at, mcount,
          turn_count, tool_count, title, first_user, session_ids) in rows:
