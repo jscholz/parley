@@ -2050,12 +2050,14 @@
      paint-contains, so anything hung outside is clipped. The ✗ for a
      stopped turn stays muted; only a failure is red. */
   .line .turn-ack {
-    position: absolute; top: 10px; right: 30px;
-    font-size: 11px; line-height: 1; color: var(--muted);
-    opacity: 0.6; pointer-events: none;
+    position: absolute; top: 7px; right: 28px;
+    /* 14px + full-strength colour: at 11px/60% grey (first cut, 09-23)
+       the 👀 read as a stray quote mark and the ✓ was invisible. */
+    font-size: 14px; line-height: 1; font-weight: 600;
+    color: var(--muted); pointer-events: none;
   }
-  .line .turn-ack[data-ack="processing"] { opacity: 0.9; }
-  .line .turn-ack[data-ack="failure"] { color: #c44; opacity: 0.9; }
+  .line .turn-ack[data-ack="success"] { color: var(--primary); }
+  .line .turn-ack[data-ack="failure"] { color: #d55; }
   .line .turn-notice {
     margin-top: 6px; font-size: 12px; color: var(--muted);
   }
