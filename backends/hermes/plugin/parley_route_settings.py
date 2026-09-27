@@ -337,16 +337,15 @@ def _runtime_profile_setting(
         "id": "runtime_profile",
         "label": "Runtime profile",
         "description": (
-            "Where every model call goes — chat, auxiliary models, crons and "
-            "memory. New conversations pick the change up immediately; a "
-            "conversation that is already open keeps its current model until "
-            "the agent is evicted (same caveat as the model picker)."
+            "Local = all on this machine, works offline. Cloud = chat in the "
+            "cloud. Memory rows below follow it unless pinned; open chats "
+            "switch once evicted."
         ),
         "category": "Agent",
         # Sub-heading within the Agent category (LOCAL_MODE.md §1 rule 1).
         # The PWA renders `group` as a heading above the first setting
         # carrying it — see the protocol's Setting fields.
-        "group": "Runtime",
+        "group": _RUNTIME_GROUP,
         "type": "enum",
         "value": active,
         "options": options,
@@ -376,7 +375,7 @@ _HINDSIGHT_SETTINGS = {
 # Declared but never accepted on POST. The PWA renders `readonly: true` as a
 # value line and never submits it; apply_setting rejects one anyway, because
 # "the client won't do that" is not a validation strategy.
-_MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state")
+_MEMORY_READONLY = ("memory_status",)
 
 # hindsight rereads its config file per NEW agent/session, not mid-session —
 # repeated verbatim on every writable Hindsight field's description so the
@@ -418,9 +417,13 @@ _MEMORY_LOCATION_CUSTOM = "custom"
 # lands in the Agent pane under these group headings (2026-09-27; the PWA
 # no longer has a Memory pane).
 MEMORY_CATEGORY = "Agent"
-_BUILTIN_FILES = "Memory · Built-in files"
+# Group headings, in pane order: the location rows sit right under the
+# one-click Runtime profile they follow (his 2026-09-28 review: "a new
+# user will never figure that out" when they were a screen apart).
+_RUNTIME_GROUP = "Where models run"
+_FILES_GROUP = "Memory · Hermes notes"
 _HINDSIGHT_GROUP = "Memory · Hindsight"
-_WHERE_IT_RUNS = "Memory · Where it runs"
+_WHERE_IT_RUNS = _RUNTIME_GROUP
 ENV_EMBED_ROUTER_MODE = rp.ENV_EMBED_ROUTER_MODE
 EMBED_ROUTER_MODES = rp.EMBED_MODES
 FOLLOW_PROFILE = "profile"
@@ -510,8 +513,7 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
     p_base = str(pmem.get("llm_base_url") or "").strip()
     p_name = _location_for_spec(locations, p_provider, p_model, p_base)
     resolved = p_name or (f"{p_provider} · {p_model}" if p_provider else "profile sets nothing")
-    options = [{"value": FOLLOW_PROFILE,
-                "label": f"Follow runtime profile ({active} → {resolved})"}]
+    options = [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {resolved}"}]
     for name, loc in locations.items():
         spec = loc.spec
         label = name.capitalize()
@@ -531,17 +533,16 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
         value = FOLLOW_PROFILE if (p_name or _MEMORY_LOCATION_CUSTOM) == current or not p_provider else current
     else:
         value = pinned if pinned == current else current
+    now = " · ".join(x for x in (
+        (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(), (env.get(rp.ENV_MEMORY_MODEL) or "").strip()) if x)
+    base = (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip()
+    now = f"{now} @ {base}" if base else (now or "not configured")
     return {
         "id": MEMORY_LOCATION_SID,
-        "label": "Extraction model location",
+        "label": "Memory model",
         "description": (
-            "Where the memory server runs fact extraction (retain), "
-            "consolidation and reflect. Recall never uses this model. A local "
-            "server handles one save at a time (~2 min each), so under heavy "
-            "traffic saves queue — a cloud location clears the backlog. "
-            "Switching restarts the memory server (seconds; queued saves "
-            "resume). A runtime-profile switch resets this to the profile's "
-            "default."
+            f"Extracts facts when memories are saved (local: ~2 min per save, one at a time). "
+            f"Now: {now}."
         ),
         "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
@@ -585,23 +586,19 @@ def _embed_location_setting(env: Dict[str, str]) -> Dict[str, Any]:
             "cloud": f"Cloud only ({cloud_state})",
         }
         model = str(health.get("model") or "")
-        note = f"Model is fixed ({model}); the stored vectors belong to it. " if model else ""
+        note = f"Now: {model or 'embedding router'}, local {local_state}, cloud {cloud_state}."
     else:
         labels = {"auto": "Auto (local first, cloud if it fails)", "local": "Local only", "cloud": "Cloud only"}
-        note = "Embedding router is not answering — the current value is shown, switching will fail. "
+        note = "Embedding router is not answering; switching will fail."
     return {
         "id": EMBED_LOCATION_SID,
-        "label": "Embedding location",
-        "description": (
-            note + "Where recall queries and new memories are embedded. Local is "
-            "free and fast; cloud costs per token but survives a busy or down "
-            "GPU. Switching restarts the router (seconds)."
-        ),
+        "label": "Memory embeddings",
+        "description": f"Where memories and recall queries are embedded; the model itself is fixed. {note}",
         "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
         "type": "enum",
         "value": value,
-        "options": [{"value": FOLLOW_PROFILE, "label": f"Follow runtime profile ({active} → {p_mode})"}]
+        "options": [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {p_mode}"}]
                    + [{"value": m, "label": labels[m]} for m in EMBED_ROUTER_MODES],
     }
 
@@ -665,7 +662,7 @@ def apply_embed_location_setting(value: Any) -> Dict[str, Any]:
         _write_selected_marker(rp.MEMORY_EMBED_SELECTED_PATH, choice)
     logger.info("[parley] memory embedding location now %s (%s)", choice, mode)
     return _updated_def(EMBED_LOCATION_SID, {
-        "id": EMBED_LOCATION_SID, "label": "Embedding location",
+        "id": EMBED_LOCATION_SID, "label": "Memory embeddings",
         "category": MEMORY_CATEGORY, "group": _WHERE_IT_RUNS, "type": "enum", "value": choice, "options": [],
     })
 
@@ -732,168 +729,56 @@ def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
         _write_selected_marker(rp.MEMORY_LLM_SELECTED_PATH, choice)
     logger.info("[parley] memory LLM location now %s (%s: %s)", choice, name, " ".join(spec.as_args()))
     return _updated_def(MEMORY_LOCATION_SID, {
-        "id": MEMORY_LOCATION_SID, "label": "Extraction model location",
+        "id": MEMORY_LOCATION_SID, "label": "Memory model",
         "category": MEMORY_CATEGORY, "group": _WHERE_IT_RUNS, "type": "enum", "value": choice, "options": [],
     })
 
 
 def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str, Any]]:
-    """Settings › Memory: two groups.
+    """Agent pane, memory part. Two groups after "Where models run":
 
-    ``Built-in files`` — hermes' own MEMORY.md/USER.md notes, unrelated to
-    hindsight (a common source of confusion this relabel exists to fix).
+    ``Memory · Hermes notes`` — hermes' own MEMORY.md/USER.md files.
+    ``Memory · Hindsight``   — the memory SERVER's recall/retain knobs
+    (``parley_hindsight_config.py``) and one status line.
 
-    ``Hindsight`` — the actual memory SERVER's recall/retain behaviour,
-    backed by ``parley_hindsight_config.py``, plus the pre-existing readonly
-    LLM/embeddings/status lines (docs/LOCAL_MODE.md §3).
+    Copy is one sentence per row: the first-time reader scans labels and
+    a short hint; anything longer belongs in docs/LOCAL_MODE.md.
     """
     mem = cfg.get("memory") if isinstance(cfg.get("memory"), dict) else {}
-    hs_path = hc.config_path()
-    hs_cfg = hc.read_config(hs_path)
-    hs = hc.effective_values(hs_cfg)
+    hs = hc.effective_values(hc.read_config(hc.config_path()))
 
-    def _txt(sid: str, label: str, value: str, description: str, group: str = _HINDSIGHT_GROUP) -> Dict[str, Any]:
-        return {
-            "id": sid, "label": label, "description": description,
-            "category": MEMORY_CATEGORY, "group": group, "type": "text", "value": value,
-            "readonly": True,
-        }
-
-    llm = " · ".join(x for x in (
-        (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(),
-        (env.get(rp.ENV_MEMORY_MODEL) or "").strip(),
-    ) if x) or "not configured"
-    base = (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip()
-    if base:
-        llm = f"{llm} @ {base}"
-
-    embeddings = " · ".join(x for x in (
-        (env.get("HINDSIGHT_API_EMBEDDINGS_PROVIDER") or "").strip(),
-        (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL") or "").strip(),
-    ) if x) or "not configured"
-    emb_base = (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL") or "").strip()
-    if emb_base:
-        embeddings = f"{embeddings} @ {emb_base}"
-
-    hindsight_state = (
-        f"hindsight config not found at {hs_path}" if not hs_path.exists()
-        else hc.summary_line(hs_cfg)
-    )
+    def _row(sid: str, label: str, description: str, group: str, **rest: Any) -> Dict[str, Any]:
+        return {"id": sid, "label": label, "description": description,
+                "category": MEMORY_CATEGORY, "group": group, **rest}
 
     return [
-        # ── Built-in files: hermes' own MEMORY.md/USER.md, NOT hindsight ──
-        {
-            "id": "memory_enabled",
-            "label": "Notes file (MEMORY.md)",
-            "description": (
-                "Hermes' built-in file memory — free-form notes hermes writes "
-                "to MEMORY.md. Separate from Hindsight below, which is the "
-                "actual memory server."
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _BUILTIN_FILES,
-            "type": "toggle",
-            "value": bool(mem.get("memory_enabled", True)),
-        },
-        {
-            "id": "memory_user_profile",
-            "label": "User profile file (USER.md)",
-            "description": (
-                "Hermes' built-in file memory — a running profile of the user "
-                "hermes writes to USER.md. Separate from Hindsight below, "
-                "which is the actual memory server."
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _BUILTIN_FILES,
-            "type": "toggle",
-            "value": bool(mem.get("user_profile_enabled", True)),
-        },
-        # ── Hindsight: the actual memory server ───────────────────────────
-        {
-            "id": "memory_recall",
-            "label": "Recall",
-            "description": (
-                "Recall runs in the background after each turn and injects up "
-                "to the token cap (below) into the NEXT turn's prompt — its "
-                "cost is context tokens, not latency. The injected copy is "
-                "replayed with that turn on every later turn until the next "
-                "compaction. " + _APPLIES_TO_NEW_CHATS
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _HINDSIGHT_GROUP,
-            "type": "toggle",
-            "value": hs[hc.KEY_AUTO_RECALL],
-        },
-        {
-            "id": "memory_recall_max_tokens",
-            "label": "Recall token cap",
-            "description": (
-                "Maximum tokens of recalled memory injected per turn. "
-                + _APPLIES_TO_NEW_CHATS
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _HINDSIGHT_GROUP,
-            "type": "slider",
-            "value": hs[hc.KEY_RECALL_MAX_TOKENS],
-            "min": hc.RECALL_MAX_TOKENS_RANGE[0],
-            "max": hc.RECALL_MAX_TOKENS_RANGE[1],
-            "step": 100,
-        },
-        {
-            "id": "memory_recall_budget",
-            "label": "Recall budget",
-            "description": "How thoroughly hindsight searches for recall candidates. " + _APPLIES_TO_NEW_CHATS,
-            "category": MEMORY_CATEGORY,
-            "group": _HINDSIGHT_GROUP,
-            "type": "enum",
-            "value": hs[hc.KEY_RECALL_BUDGET],
-            "options": [{"value": b, "label": b.capitalize()} for b in hc.RECALL_BUDGETS],
-        },
-        {
-            "id": "memory_retain",
-            "label": "Retain",
-            "description": (
-                "The EXPENSIVE one: each save runs fact extraction and "
-                "consolidation on the memory server's own LLM — in local mode "
-                "that is the SAME GPU chat uses (measured 42s of LLM time for "
-                "one consolidation pass), so it competes with turns rather "
-                "than just costing tokens. " + _APPLIES_TO_NEW_CHATS
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _HINDSIGHT_GROUP,
-            "type": "toggle",
-            "value": hs[hc.KEY_AUTO_RETAIN],
-        },
-        {
-            "id": "memory_retain_every_n_turns",
-            "label": "Retain frequency",
-            "description": (
-                "Retain every N turns. Higher = fewer, larger (and cheaper) "
-                "saves. " + _APPLIES_TO_NEW_CHATS
-            ),
-            "category": MEMORY_CATEGORY,
-            "group": _HINDSIGHT_GROUP,
-            "type": "slider",
-            "value": hs[hc.KEY_RETAIN_EVERY_N_TURNS],
-            "min": hc.RETAIN_EVERY_N_TURNS_RANGE[0],
-            "max": hc.RETAIN_EVERY_N_TURNS_RANGE[1],
-            "step": 1,
-        },
-        _txt("memory_status", "Status", memory_status_text(),
-             "hindsight-server, its last retain, and LLM errors in 24h."),
-        _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
-             "Current hindsight recall/retain settings, compactly."),
-        # "Where it runs" last: one contiguous group (the PWA emits a heading
-        # whenever the group changes, so interleaving would print it twice).
-        _memory_location_setting(cfg, env),
-        _embed_location_setting(env),
-        _txt("memory_llm", "Extraction model", llm,
-             "What the memory server extracts facts with (set by 'Extraction "
-             "model location').", _WHERE_IT_RUNS),
-        _txt("memory_embeddings", "Embeddings", embeddings,
-             "The embedding endpoint the memory server indexes with. The model "
-             "is fixed — the stored vectors belong to it, so changing it is a "
-             "full re-index (an ops job, not a setting).", _WHERE_IT_RUNS),
+        _row("memory_enabled", "Notes file (MEMORY.md)",
+             "Hermes' own free-form notes file. Not Hindsight.",
+             _FILES_GROUP, type="toggle", value=bool(mem.get("memory_enabled", True))),
+        _row("memory_user_profile", "User profile (USER.md)",
+             "Hermes' own running profile of you. Not Hindsight.",
+             _FILES_GROUP, type="toggle", value=bool(mem.get("user_profile_enabled", True))),
+        _row("memory_recall", "Recall",
+             "Fetch relevant memories in the background and inject them into the next turn.",
+             _HINDSIGHT_GROUP, type="toggle", value=hs[hc.KEY_AUTO_RECALL]),
+        _row("memory_recall_max_tokens", "Recall token cap",
+             "Most recalled tokens added to a prompt.",
+             _HINDSIGHT_GROUP, type="slider", value=hs[hc.KEY_RECALL_MAX_TOKENS],
+             min=hc.RECALL_MAX_TOKENS_RANGE[0], max=hc.RECALL_MAX_TOKENS_RANGE[1], step=100),
+        _row("memory_recall_budget", "Recall depth",
+             "How far the memory graph is searched per recall.",
+             _HINDSIGHT_GROUP, type="enum", value=hs[hc.KEY_RECALL_BUDGET],
+             options=[{"value": b, "label": b.capitalize()} for b in hc.RECALL_BUDGETS]),
+        _row("memory_retain", "Retain",
+             "Save each turn: facts are extracted by the memory model chosen above (the slow part).",
+             _HINDSIGHT_GROUP, type="toggle", value=hs[hc.KEY_AUTO_RETAIN]),
+        _row("memory_retain_every_n_turns", "Retain every",
+             "Turns between saves; higher = fewer, bigger saves.",
+             _HINDSIGHT_GROUP, type="slider", value=hs[hc.KEY_RETAIN_EVERY_N_TURNS],
+             min=hc.RETAIN_EVERY_N_TURNS_RANGE[0], max=hc.RETAIN_EVERY_N_TURNS_RANGE[1], step=1),
+        _row("memory_status", "Status",
+             "Memory server · last save · LLM errors in 24h.",
+             _HINDSIGHT_GROUP, type="text", value=memory_status_text(), readonly=True),
     ]
 
 
@@ -971,7 +856,7 @@ def build_settings_schema() -> List[Dict[str, Any]]:
         {
             "id": "model",
             "label": "Model",
-            "description": "LLM used for replies",
+            "description": "Answers your messages. Groups = OpenRouter plus every provider hermes is signed into.",
             "category": "Agent",
             "type": "enum",
             "value": current_value,
@@ -979,11 +864,10 @@ def build_settings_schema() -> List[Dict[str, Any]]:
         },
         {
             "id": "preferred_models",
-            "label": "Preferred models",
+            "label": "OpenRouter filter",
             "description": (
-                "Glob patterns that filter the model dropdown above "
-                "(e.g. anthropic/*, google/gemini-*). Empty = full "
-                "openrouter catalog."
+                "Trims the OpenRouter group above (e.g. anthropic/*). Signed-in "
+                "providers always show in full. Empty = whole catalog."
             ),
             "category": "Agent",
             "type": "string-list",
@@ -991,6 +875,9 @@ def build_settings_schema() -> List[Dict[str, Any]]:
             "placeholder": "e.g. anthropic/* + Enter",
         },
         _runtime_profile_setting(active_profile, profiles, probe),
+        # The two memory-model rows follow the profile they default to.
+        _memory_location_setting(cfg, env),
+        _embed_location_setting(env),
         *_memory_settings(cfg, env),
     ]
 
@@ -1078,7 +965,7 @@ def apply_preferred_models_setting(value: Any) -> Dict[str, Any]:
             return s
     return {
         "id": "preferred_models",
-        "label": "Preferred models",
+        "label": "OpenRouter filter",
         "category": "Agent",
         "type": "string-list",
         "value": cleaned,
@@ -1559,7 +1446,7 @@ def apply_memory_toggle(sid: str, value: Any) -> Dict[str, Any]:
         logger.exception("[parley] memory toggle persist failed")
         raise SettingsValidationError(f"failed to write hermes config: {e}")
     return _updated_def(sid, {
-        "id": sid, "label": sid, "category": MEMORY_CATEGORY, "group": _BUILTIN_FILES, "type": "toggle", "value": value,
+        "id": sid, "label": sid, "category": MEMORY_CATEGORY, "group": _FILES_GROUP, "type": "toggle", "value": value,
     })
 
 

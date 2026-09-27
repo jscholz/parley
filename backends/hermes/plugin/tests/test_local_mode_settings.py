@@ -111,7 +111,7 @@ def _by_id(schema):
 
 def test_runtime_profile_setting_is_declared(sandbox):
     d = _by_id(st.build_settings_schema())["runtime_profile"]
-    assert d["type"] == "enum" and d["category"] == "Agent" and d["group"] == "Runtime"
+    assert d["type"] == "enum" and d["category"] == "Agent" and d["group"] == "Where models run"
     assert d["value"] == "cloud"
     assert [o["value"] for o in d["options"]] == ["cloud", "local"]
     assert "evicted" in d["description"]      # the cached-agent caveat
@@ -129,31 +129,37 @@ def test_local_option_description_follows_the_live_probe(sandbox):
 
 def test_memory_section_fields_and_readonly_flags(sandbox):
     schema = _by_id(st.build_settings_schema())
-    memory = [s for s in st.build_settings_schema() if str(s.get("group", "")).startswith("Memory · ")]
-    assert all(s["category"] == "Agent" for s in memory)   # memory is part of the agent — no Memory pane
-    assert [s["id"] for s in memory] == [
+    full = st.build_settings_schema()
+    assert all(s["category"] == "Agent" for s in full)   # memory is part of the agent — no Memory pane
+    # pane order: model + filter, then "Where models run" (profile + the two
+    # memory-model rows that follow it), then the memory groups
+    assert [s["id"] for s in full] == [
+        "model", "preferred_models",
+        "runtime_profile", "memory_llm_location", "memory_embeddings_location",
         "memory_enabled", "memory_user_profile",
         "memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
         "memory_retain", "memory_retain_every_n_turns",
-        "memory_status", "memory_hindsight_state",
-        "memory_llm_location", "memory_embeddings_location",
-        "memory_llm", "memory_embeddings",
+        "memory_status",
     ]
     # each group is contiguous — the PWA prints a heading on every group change
-    groups = [s["group"] for s in memory]
-    assert groups == sorted(groups, key=groups.index) and len(set(groups)) == 3
+    groups = [s.get("group") for s in full]
+    assert groups == sorted(groups, key=groups.index)
+    assert [g for g in dict.fromkeys(groups)] == [None, "Where models run", "Memory · Hermes notes", "Memory · Hindsight"]
+    # every hint is one short sentence or two — the pane is scanned, not read
+    for s_def in full:
+        assert len(s_def.get("description", "")) <= 150, (s_def["id"], len(s_def["description"]))
     # groups
-    assert schema["memory_enabled"]["group"] == "Memory · Built-in files"
-    assert schema["memory_user_profile"]["group"] == "Memory · Built-in files"
+    assert schema["memory_enabled"]["group"] == "Memory · Hermes notes"
+    assert schema["memory_user_profile"]["group"] == "Memory · Hermes notes"
     for sid in ("memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
                 "memory_retain", "memory_retain_every_n_turns",
-                "memory_status", "memory_hindsight_state"):
+                "memory_status"):
         assert schema[sid]["group"] == "Memory · Hindsight"
-    for sid in ("memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"):
-        assert schema[sid]["group"] == "Memory · Where it runs"
+    for sid in ("runtime_profile", "memory_llm_location", "memory_embeddings_location"):
+        assert schema[sid]["group"] == "Where models run"
     # relabeled built-in-file toggles, honest about being separate from hindsight
     assert schema["memory_enabled"]["label"] == "Notes file (MEMORY.md)"
-    assert schema["memory_user_profile"]["label"] == "User profile file (USER.md)"
+    assert schema["memory_user_profile"]["label"] == "User profile (USER.md)"
     assert "Hindsight" in schema["memory_enabled"]["description"]
     assert schema["memory_enabled"]["type"] == "toggle" and schema["memory_enabled"]["value"] is True
     assert schema["memory_user_profile"]["value"] is False
@@ -165,40 +171,37 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
     assert schema["memory_recall_budget"]["type"] == "enum" and schema["memory_recall_budget"]["value"] == "mid"
     assert {o["value"] for o in schema["memory_recall_budget"]["options"]} == {"low", "mid", "high"}
     assert schema["memory_retain"]["value"] is True
-    assert "EXPENSIVE" in schema["memory_retain"]["description"]
+    assert "slow" in schema["memory_retain"]["description"]      # the cost is named, briefly
     assert schema["memory_retain_every_n_turns"]["value"] == 1
     assert schema["memory_retain_every_n_turns"]["min"] == 1 and schema["memory_retain_every_n_turns"]["max"] == 50
-    # readonly text lines
-    for sid in ("memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state"):
-        assert schema[sid]["type"] == "text" and schema[sid]["readonly"] is True
+    # the one readonly line
+    assert schema["memory_status"]["type"] == "text" and schema["memory_status"]["readonly"] is True
+    assert schema["memory_status"]["value"].startswith("hindsight-server active")
     # writable ones must NOT be marked readonly
     assert "readonly" not in schema["memory_enabled"]
     assert "readonly" not in schema["memory_recall"]
-    assert schema["memory_llm"]["value"] == "openai-codex · gpt-5.4-mini"
-    assert schema["memory_embeddings"]["value"] == "openai · text-embedding-3-small @ http://127.0.0.1:8012/v1"
-    assert schema["memory_status"]["value"].startswith("hindsight-server active")
-    assert schema["memory_hindsight_state"]["value"].startswith("hindsight config not found at ")
+    # what the memory model / embeddings currently ARE rides on the two
+    # location rows' hints (the former readonly rows, folded in)
+    assert "Now: openai-codex · gpt-5.4-mini." in schema["memory_llm_location"]["description"]
+    assert "Now: qwen3-embedding-4b, local ready, cloud configured." in schema["memory_embeddings_location"]["description"]
 
 
-def test_memory_hindsight_state_reflects_the_file_once_one_exists(sandbox):
+def test_hindsight_file_values_show_in_the_knobs_once_one_exists(sandbox):
     sandbox["hindsight_path"].write_text(json.dumps({
         "auto_recall": True, "recall_max_tokens": 1500, "recall_budget": "low",
         "auto_retain": True, "retain_every_n_turns": 1,
     }), encoding="utf-8")
     schema = _by_id(st.build_settings_schema())
-    assert schema["memory_hindsight_state"]["value"] == (
-        "recall on · 1500 tok · low | retain on · every 1 turn"
-    )
     assert schema["memory_recall_max_tokens"]["value"] == 1500
     assert schema["memory_recall_budget"]["value"] == "low"
 
 
-def test_memory_llm_shows_the_local_endpoint_in_local_mode(sandbox):
+def test_memory_model_hint_shows_the_local_endpoint_in_local_mode(sandbox):
     sandbox["env"]["HINDSIGHT_API_LLM_PROVIDER"] = "lmstudio"
     sandbox["env"]["HINDSIGHT_API_LLM_MODEL"] = "qwen3.6-35b-a3b"
     sandbox["env"]["HINDSIGHT_API_LLM_BASE_URL"] = "http://127.0.0.1:8000/v1"
-    v = _by_id(st.build_settings_schema())["memory_llm"]["value"]
-    assert v == "lmstudio · qwen3.6-35b-a3b @ http://127.0.0.1:8000/v1"
+    d = _by_id(st.build_settings_schema())["memory_llm_location"]["description"]
+    assert d.endswith("Now: lmstudio · qwen3.6-35b-a3b @ http://127.0.0.1:8000/v1.")
 
 
 def test_model_picker_lists_the_local_server_in_local_mode(sandbox):
@@ -283,9 +286,7 @@ def test_memory_toggle_rejects_a_non_boolean(sandbox):
         st.apply_setting("memory_enabled", "yes")
 
 
-@pytest.mark.parametrize("sid", [
-    "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state",
-])
+@pytest.mark.parametrize("sid", ["memory_status"])
 def test_readonly_settings_reject_writes(sandbox, sid):
     with pytest.raises(st.SettingsValidationError, match="read-only"):
         st.apply_setting(sid, "anything")
@@ -506,13 +507,13 @@ def test_route_post_memory_toggle(sandbox):
 
 def test_memory_location_is_declared_from_config_and_reflects_env(sandbox):
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
-    assert row["type"] == "enum" and row["category"] == "Agent" and row["group"] == "Memory · Where it runs"
+    assert row["type"] == "enum" and row["category"] == "Agent" and row["group"] == "Where models run"
     assert [o["value"] for o in row["options"]] == ["profile", "local", "cloud", "custom"]
     # ENV says openai-codex/gpt-5.4-mini — matches no named location ("custom"
     # is offered) — but the seeded cloud profile is a photograph of that same
     # env and the pin is "profile", so the row honestly reads "following".
     assert row["value"] == "profile"
-    assert row["options"][0]["label"] == "Follow runtime profile (cloud → openai-codex · gpt-5.4-mini)"
+    assert row["options"][0]["label"] == "Follow profile → openai-codex · gpt-5.4-mini"
     sandbox["cfg"]["parley"]["memory_locations"]["llm_selected"] = "local"   # a pin .env doesn't honour
     assert _by_id(st.build_settings_schema())["memory_llm_location"]["value"] == "custom"
     assert "ready" in [o for o in row["options"] if o["value"] == "local"][0]["label"]
@@ -574,15 +575,15 @@ def test_schema_never_contains_a_key_value(sandbox):
 
 def test_embed_location_is_declared_from_router_health(sandbox):
     row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
-    assert row["type"] == "enum" and row["group"] == "Memory · Where it runs"
+    assert row["type"] == "enum" and row["group"] == "Where models run"
     assert [o["value"] for o in row["options"]] == ["profile", "auto", "local", "cloud"]
     # no EMBED_ROUTER_MODE in env (= auto), profile silent (= auto), marker "profile" → follows
     assert row["value"] == "profile"
-    assert row["options"][0]["label"] == "Follow runtime profile (cloud → auto)"
+    assert row["options"][0]["label"] == "Follow profile → auto"
     assert "local ready" in row["options"][1]["label"]
     assert "qwen3-embedding-4b" in row["description"]
-    both = [s for s in st.build_settings_schema() if s.get("group") == "Memory · Where it runs"]
-    assert [s["id"] for s in both] == ["memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"]
+    both = [s for s in st.build_settings_schema() if s.get("group") == "Where models run"]
+    assert [s["id"] for s in both] == ["runtime_profile", "memory_llm_location", "memory_embeddings_location"]
 
 
 def test_embed_location_reflects_env_and_a_dead_router(sandbox):
@@ -617,7 +618,7 @@ def test_follow_profile_for_the_llm_resolves_the_active_profile(sandbox):
     assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
     assert sandbox["markers"] == []            # already on "profile" — nothing to rewrite
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
-    assert row["value"] == "profile" and "(cloud → local)" in row["options"][0]["label"]
+    assert row["value"] == "profile" and row["options"][0]["label"] == "Follow profile → local"
 
 
 def test_profile_switch_leaves_a_pinned_llm_alone_but_follows_for_embeddings(sandbox):
