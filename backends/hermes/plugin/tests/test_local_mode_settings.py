@@ -72,6 +72,10 @@ def sandbox(monkeypatch, tmp_path):
     state["router"] = dict(ROUTER_UP)
     state["router_script"] = []
     monkeypatch.setattr(st, "_probe_embed_router", lambda url: dict(state["router"]))
+    state["markers"] = []
+    def _marker(path, value):
+        state["markers"].append((path, value)); rp.set_path(state["cfg"], path, value)
+    monkeypatch.setattr(st, "_write_selected_marker", _marker)
     def _router_mode(mode):   # the real script writes EMBED_ROUTER_MODE to .env and restarts the unit
         state["router_script"].append(mode); state["env"]["EMBED_ROUTER_MODE"] = mode
     monkeypatch.setattr(st, "_apply_embed_router_mode", _router_mode)
@@ -125,7 +129,8 @@ def test_local_option_description_follows_the_live_probe(sandbox):
 
 def test_memory_section_fields_and_readonly_flags(sandbox):
     schema = _by_id(st.build_settings_schema())
-    memory = [s for s in st.build_settings_schema() if s.get("category") == "Memory"]
+    memory = [s for s in st.build_settings_schema() if str(s.get("group", "")).startswith("Memory · ")]
+    assert all(s["category"] == "Agent" for s in memory)   # memory is part of the agent — no Memory pane
     assert [s["id"] for s in memory] == [
         "memory_enabled", "memory_user_profile",
         "memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
@@ -134,14 +139,14 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
         "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state",
     ]
     # groups
-    assert schema["memory_enabled"]["group"] == "Built-in files"
-    assert schema["memory_user_profile"]["group"] == "Built-in files"
+    assert schema["memory_enabled"]["group"] == "Memory · Built-in files"
+    assert schema["memory_user_profile"]["group"] == "Memory · Built-in files"
     for sid in ("memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
                 "memory_retain", "memory_retain_every_n_turns",
                 "memory_status", "memory_hindsight_state"):
-        assert schema[sid]["group"] == "Hindsight"
+        assert schema[sid]["group"] == "Memory · Hindsight"
     for sid in ("memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"):
-        assert schema[sid]["group"] == "Where it runs"
+        assert schema[sid]["group"] == "Memory · Where it runs"
     # relabeled built-in-file toggles, honest about being separate from hindsight
     assert schema["memory_enabled"]["label"] == "Notes file (MEMORY.md)"
     assert schema["memory_user_profile"]["label"] == "User profile file (USER.md)"
@@ -497,10 +502,15 @@ def test_route_post_memory_toggle(sandbox):
 
 def test_memory_location_is_declared_from_config_and_reflects_env(sandbox):
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
-    assert row["type"] == "enum" and row["category"] == "Memory" and row["group"] == "Where it runs"
-    assert [o["value"] for o in row["options"]] == ["local", "cloud", "custom"]
-    # ENV says openai-codex/gpt-5.4-mini — matches no named location
-    assert row["value"] == "custom"
+    assert row["type"] == "enum" and row["category"] == "Agent" and row["group"] == "Memory · Where it runs"
+    assert [o["value"] for o in row["options"]] == ["profile", "local", "cloud", "custom"]
+    # ENV says openai-codex/gpt-5.4-mini — matches no named location ("custom"
+    # is offered) — but the seeded cloud profile is a photograph of that same
+    # env and the pin is "profile", so the row honestly reads "following".
+    assert row["value"] == "profile"
+    assert row["options"][0]["label"] == "Follow runtime profile (cloud → openai-codex · gpt-5.4-mini)"
+    sandbox["cfg"]["parley"]["memory_locations"]["llm_selected"] = "local"   # a pin .env doesn't honour
+    assert _by_id(st.build_settings_schema())["memory_llm_location"]["value"] == "custom"
     assert "ready" in [o for o in row["options"] if o["value"] == "local"][0]["label"]
 
 
@@ -509,9 +519,10 @@ def test_memory_location_value_matches_env(sandbox):
         "HINDSIGHT_API_LLM_PROVIDER": "lmstudio", "HINDSIGHT_API_LLM_MODEL": "qwen3.6-35b-a3b",
         "HINDSIGHT_API_LLM_BASE_URL": "http://127.0.0.1:8000/v1",
     })
+    sandbox["cfg"]["parley"]["memory_locations"]["llm_selected"] = "local"
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
     assert row["value"] == "local"
-    assert [o["value"] for o in row["options"]] == ["local", "cloud"]   # no 'custom' when matched
+    assert [o["value"] for o in row["options"]] == ["profile", "local", "cloud"]   # no 'custom' when matched
 
 
 def test_apply_memory_location_writes_env_and_restarts(sandbox):
@@ -523,10 +534,11 @@ def test_apply_memory_location_writes_env_and_restarts(sandbox):
         "HINDSIGHT_API_LLM_BASE_URL": "http://127.0.0.1:8000/v1",
     }]
     assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
-    assert sandbox["saved"] == []            # never touches config.yaml
-    # idempotent: same location again = no write, no restart
+    assert sandbox["saved"] == []            # never save_config()s the whole file
+    assert sandbox["markers"] == [("parley.memory_locations.llm_selected", "local")]   # pinned
+    # idempotent: same location again = no write, no restart, no marker write
     st.apply_setting("memory_llm_location", "local")
-    assert len(sandbox["env_writes"]) == 1 and len(sandbox["script"]) == 1
+    assert len(sandbox["env_writes"]) == 1 and len(sandbox["script"]) == 1 and len(sandbox["markers"]) == 1
 
 
 def test_apply_memory_location_cloud_skips_the_probe_and_copies_the_named_key(sandbox):
@@ -558,29 +570,59 @@ def test_schema_never_contains_a_key_value(sandbox):
 
 def test_embed_location_is_declared_from_router_health(sandbox):
     row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
-    assert row["type"] == "enum" and row["group"] == "Where it runs"
-    assert [o["value"] for o in row["options"]] == ["auto", "local", "cloud"]
-    assert row["value"] == "auto"                      # no EMBED_ROUTER_MODE in env
-    assert "local ready" in row["options"][0]["label"]
+    assert row["type"] == "enum" and row["group"] == "Memory · Where it runs"
+    assert [o["value"] for o in row["options"]] == ["profile", "auto", "local", "cloud"]
+    # no EMBED_ROUTER_MODE in env (= auto), profile silent (= auto), marker "profile" → follows
+    assert row["value"] == "profile"
+    assert row["options"][0]["label"] == "Follow runtime profile (cloud → auto)"
+    assert "local ready" in row["options"][1]["label"]
     assert "qwen3-embedding-4b" in row["description"]
-    both = [s for s in st.build_settings_schema() if s.get("group") == "Where it runs"]
+    both = [s for s in st.build_settings_schema() if s.get("group") == "Memory · Where it runs"]
     assert [s["id"] for s in both] == ["memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"]
 
 
 def test_embed_location_reflects_env_and_a_dead_router(sandbox):
     sandbox["env"]["EMBED_ROUTER_MODE"] = "cloud"
+    sandbox["cfg"]["parley"]["memory_locations"]["embeddings_selected"] = "cloud"
     sandbox["router"] = {}
     row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
     assert row["value"] == "cloud" and "not answering" in row["description"]
 
 
-def test_apply_embed_location_runs_the_script_once(sandbox):
+def test_apply_embed_location_runs_the_script_once_and_pins(sandbox):
+    sandbox["cfg"]["parley"]["runtime_profiles"] = {"cloud": {"memory": {"embeddings_mode": "auto"}}}
+    sandbox["cfg"]["parley"]["runtime_profile"] = "cloud"
     out = st.apply_setting("memory_embeddings_location", "cloud")
     assert out["value"] == "cloud" and sandbox["router_script"] == ["cloud"]
-    sandbox["env"]["EMBED_ROUTER_MODE"] = "cloud"
+    assert sandbox["markers"] == [("parley.memory_locations.embeddings_selected", "cloud")]
     st.apply_setting("memory_embeddings_location", "cloud")
     assert sandbox["router_script"] == ["cloud"]        # already there → no restart
     assert sandbox["env_writes"] == [] and sandbox["saved"] == []   # the script owns .env for this key
+    # back to "follow": resolves to the profile's mode (silent → auto) and unpins
+    out = st.apply_setting("memory_embeddings_location", "profile")
+    assert out["value"] == "profile" and sandbox["router_script"] == ["cloud", "auto"]
+    assert sandbox["markers"][-1] == ("parley.memory_locations.embeddings_selected", "profile")
+
+
+def test_follow_profile_for_the_llm_resolves_the_active_profile(sandbox):
+    sandbox["cfg"]["parley"]["runtime_profiles"] = {"cloud": {"memory": {
+        "llm_provider": "lmstudio", "llm_model": "qwen3.6-35b-a3b", "llm_base_url": "http://127.0.0.1:8000/v1"}}}
+    sandbox["cfg"]["parley"]["runtime_profile"] = "cloud"
+    out = st.apply_setting("memory_llm_location", "profile")
+    assert out["value"] == "profile"
+    assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
+    assert sandbox["markers"] == []            # already on "profile" — nothing to rewrite
+    row = _by_id(st.build_settings_schema())["memory_llm_location"]
+    assert row["value"] == "profile" and "(cloud → local)" in row["options"][0]["label"]
+
+
+def test_profile_switch_leaves_a_pinned_llm_alone_but_follows_for_embeddings(sandbox):
+    sandbox["cfg"]["parley"]["memory_locations"]["llm_selected"] = "cloud"       # pinned
+    sandbox["cfg"]["parley"]["memory_locations"]["embeddings_selected"] = "profile"
+    st.apply_setting("runtime_profile", "local")
+    assert sandbox["env_writes"] == []            # LLM keys NOT rewritten by the switch
+    assert sandbox["script"] == []                # no hindsight restart
+    assert sandbox["router_script"] == ["local"]  # the local profile's embeddings_mode
 
 
 @pytest.mark.parametrize("mode,router,needle", [

@@ -61,7 +61,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from .parley_env import env_get
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import parley_hindsight_config as hc
 from . import parley_runtime_profiles as rp
@@ -414,9 +414,16 @@ MEMORY_LOCATIONS_PATH = "parley.memory_locations.llm"
 MEMORY_LOCATION_SID = "memory_llm_location"
 EMBED_LOCATION_SID = "memory_embeddings_location"
 _MEMORY_LOCATION_CUSTOM = "custom"
-_WHERE_IT_RUNS = "Where it runs"
-ENV_EMBED_ROUTER_MODE = "EMBED_ROUTER_MODE"
-EMBED_ROUTER_MODES = ("auto", "local", "cloud")
+# Memory is part of the agent: every memory row is category "Agent" and
+# lands in the Agent pane under these group headings (2026-09-27; the PWA
+# no longer has a Memory pane).
+MEMORY_CATEGORY = "Agent"
+_BUILTIN_FILES = "Memory · Built-in files"
+_HINDSIGHT_GROUP = "Memory · Hindsight"
+_WHERE_IT_RUNS = "Memory · Where it runs"
+ENV_EMBED_ROUTER_MODE = rp.ENV_EMBED_ROUTER_MODE
+EMBED_ROUTER_MODES = rp.EMBED_MODES
+FOLLOW_PROFILE = "profile"
 _DEFAULT_EMBED_ROUTER_SCRIPT = str(
     Path(__file__).resolve().parent.parent / "scripts" / "apply-embed-router-mode.sh"
 )
@@ -426,6 +433,33 @@ _DEFAULT_EMBED_ROUTER_SCRIPT = str(
 class MemoryLocation:
     spec: "rp.MemorySpec"
     api_key_env: str = ""
+
+
+def _selected(cfg: Dict[str, Any], path: str) -> str:
+    return str(rp._get_path(cfg, path) or FOLLOW_PROFILE).strip() or FOLLOW_PROFILE
+
+
+def _write_selected_marker(path: str, value: str) -> None:
+    """Persist a "Where it runs" pin with hermes' comment-preserving
+    single-key writer (save_config would strip the annotated config)."""
+    from hermes_cli.config import get_config_path
+    from utils import atomic_roundtrip_yaml_update
+    atomic_roundtrip_yaml_update(get_config_path(), path, value)
+
+
+def _profile_memory(cfg: Dict[str, Any], env: Dict[str, str]) -> Tuple[str, Dict[str, Any]]:
+    """(active profile name, its memory block) — what "follow profile" resolves to."""
+    active = rp.read_active_profile(cfg)
+    profiles = rp.read_profiles(cfg, env)
+    mem = (profiles.get(active) or {}).get("memory")
+    return active, (dict(mem) if isinstance(mem, dict) else {})
+
+
+def _location_for_spec(locations: Dict[str, MemoryLocation], provider: str, model: str, base_url: str) -> Optional[str]:
+    for name, loc in locations.items():
+        if (loc.spec.provider, loc.spec.model, loc.spec.base_url) == (provider, model, base_url):
+            return name
+    return None
 
 
 def _memory_locations(cfg: Dict[str, Any]) -> Dict[str, MemoryLocation]:
@@ -469,7 +503,15 @@ def _is_loopback(base_url: str) -> bool:
 def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
     locations = _memory_locations(cfg)
     current = _current_memory_location(env, locations)
-    options = []
+    pinned = _selected(cfg, rp.MEMORY_LLM_SELECTED_PATH)
+    active, pmem = _profile_memory(cfg, env)
+    p_provider = str(pmem.get("llm_provider") or "").strip()
+    p_model = str(pmem.get("llm_model") or "").strip()
+    p_base = str(pmem.get("llm_base_url") or "").strip()
+    p_name = _location_for_spec(locations, p_provider, p_model, p_base)
+    resolved = p_name or (f"{p_provider} · {p_model}" if p_provider else "profile sets nothing")
+    options = [{"value": FOLLOW_PROFILE,
+                "label": f"Follow runtime profile ({active} → {resolved})"}]
     for name, loc in locations.items():
         spec = loc.spec
         label = name.capitalize()
@@ -482,6 +524,13 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
         options.append({"value": name, "label": f"{label} ({detail})"})
     if current == _MEMORY_LOCATION_CUSTOM:
         options.append({"value": _MEMORY_LOCATION_CUSTOM, "label": "Custom (as configured in .env)"})
+    # Value: the pin when it is honoured by .env; otherwise what .env says
+    # (a pin the profile switch or a hand edit has since overridden shows
+    # as the explicit current location, never as a stale "follow").
+    if pinned == FOLLOW_PROFILE:
+        value = FOLLOW_PROFILE if (p_name or _MEMORY_LOCATION_CUSTOM) == current or not p_provider else current
+    else:
+        value = pinned if pinned == current else current
     return {
         "id": MEMORY_LOCATION_SID,
         "label": "Extraction model location",
@@ -494,10 +543,10 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
             "resume). A runtime-profile switch resets this to the profile's "
             "default."
         ),
-        "category": "Memory",
+        "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
         "type": "enum",
-        "value": current,
+        "value": value,
         "options": options,
     }
 
@@ -522,6 +571,11 @@ def _embed_location_setting(env: Dict[str, str]) -> Dict[str, Any]:
     current = (env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower()
     if current not in EMBED_ROUTER_MODES:
         current = "auto"
+    cfg = read_hermes_config()
+    pinned = _selected(cfg, rp.MEMORY_EMBED_SELECTED_PATH)
+    active, pmem = _profile_memory(cfg, env)
+    p_mode = str(pmem.get("embeddings_mode") or "").strip().lower() or "auto"
+    value = FOLLOW_PROFILE if (pinned == FOLLOW_PROFILE and p_mode == current) else current
     if health:
         local_state = "ready" if health.get("local_up") else "server not responding"
         cloud_state = "configured" if health.get("remote_configured") else "no key configured"
@@ -543,11 +597,12 @@ def _embed_location_setting(env: Dict[str, str]) -> Dict[str, Any]:
             "free and fast; cloud costs per token but survives a busy or down "
             "GPU. Switching restarts the router (seconds)."
         ),
-        "category": "Memory",
+        "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
         "type": "enum",
-        "value": current,
-        "options": [{"value": m, "label": labels[m]} for m in EMBED_ROUTER_MODES],
+        "value": value,
+        "options": [{"value": FOLLOW_PROFILE, "label": f"Follow runtime profile ({active} → {p_mode})"}]
+                   + [{"value": m, "label": labels[m]} for m in EMBED_ROUTER_MODES],
     }
 
 
@@ -583,12 +638,18 @@ def _apply_embed_router_mode(mode: str) -> None:
 def apply_embed_location_setting(value: Any) -> Dict[str, Any]:
     """POST /v1/settings/memory_embeddings_location — set the embedding
     router's mode: validate against its /health → .env → restart."""
-    if not isinstance(value, str) or value.strip().lower() not in EMBED_ROUTER_MODES:
+    if not isinstance(value, str) or value.strip().lower() not in EMBED_ROUTER_MODES + (FOLLOW_PROFILE,):
         raise SettingsValidationError(
-            f"memory_embeddings_location must be one of {', '.join(EMBED_ROUTER_MODES)}"
+            f"memory_embeddings_location must be one of {', '.join((FOLLOW_PROFILE,) + EMBED_ROUTER_MODES)}"
         )
-    mode = value.strip().lower()
+    choice = value.strip().lower()
     env = read_hermes_env()
+    cfg = read_hermes_config()
+    if choice == FOLLOW_PROFILE:
+        _, pmem = _profile_memory(cfg, env)
+        mode = str(pmem.get("embeddings_mode") or "").strip().lower() or "auto"
+    else:
+        mode = choice
     router_url = (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL") or "").strip()
     health = _probe_embed_router(router_url) if router_url else {}
     if not health:
@@ -600,10 +661,12 @@ def apply_embed_location_setting(value: Any) -> Dict[str, Any]:
     current = (env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower()
     if current != mode:
         _apply_embed_router_mode(mode)
-    logger.info("[parley] memory embedding location now %s", mode)
+    if _selected(cfg, rp.MEMORY_EMBED_SELECTED_PATH) != choice:
+        _write_selected_marker(rp.MEMORY_EMBED_SELECTED_PATH, choice)
+    logger.info("[parley] memory embedding location now %s (%s)", choice, mode)
     return _updated_def(EMBED_LOCATION_SID, {
         "id": EMBED_LOCATION_SID, "label": "Embedding location",
-        "category": "Memory", "group": _WHERE_IT_RUNS, "type": "enum", "value": mode, "options": [],
+        "category": MEMORY_CATEGORY, "group": _WHERE_IT_RUNS, "type": "enum", "value": choice, "options": [],
     })
 
 
@@ -617,17 +680,29 @@ def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
     LLM to a named location: preflight (loopback only) → .env → restart."""
     if not isinstance(value, str) or not value.strip():
         raise SettingsValidationError("memory_llm_location value must be a non-empty string")
-    name = value.strip()
+    choice = value.strip()
     cfg = read_hermes_config()
-    locations = _memory_locations(cfg)
-    loc = locations.get(name)
-    if loc is None:
-        known = ", ".join(sorted(locations)) or "none configured"
-        raise SettingsValidationError(
-            f"unknown memory location {name!r} (known: {known}; add one under {MEMORY_LOCATIONS_PATH})"
-        )
-    spec = loc.spec
     env = read_hermes_env()
+    locations = _memory_locations(cfg)
+    if choice == FOLLOW_PROFILE:
+        active, pmem = _profile_memory(cfg, env)
+        provider = str(pmem.get("llm_provider") or "").strip()
+        model = str(pmem.get("llm_model") or "").strip()
+        base_url = str(pmem.get("llm_base_url") or "").strip()
+        if not (provider and model):
+            raise SettingsValidationError(f"runtime profile {active!r} does not set a memory LLM to follow")
+        name = _location_for_spec(locations, provider, model, base_url)
+        loc = locations[name] if name else MemoryLocation(spec=rp.MemorySpec(provider=provider, model=model, base_url=base_url))
+        name = name or _MEMORY_LOCATION_CUSTOM
+    else:
+        name = choice
+        loc = locations.get(name)
+        if loc is None:
+            known = ", ".join(sorted(locations)) or "none configured"
+            raise SettingsValidationError(
+                f"unknown memory location {name!r} (known: {known}; add one under {MEMORY_LOCATIONS_PATH})"
+            )
+    spec = loc.spec
     if _is_loopback(spec.base_url):
         probe = _probe_memory_location(spec)
         if not probe.ok:
@@ -639,7 +714,9 @@ def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
             raise SettingsValidationError(
                 f"cannot switch memory to {name}: {loc.api_key_env} is not set in .env"
             )
-    if _current_memory_location(env, locations) != name:
+    cur = ((env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(), (env.get(rp.ENV_MEMORY_MODEL) or "").strip(),
+           (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip())
+    if cur != (spec.provider, spec.model, spec.base_url):
         updates: Dict[str, Optional[str]] = {
             rp.ENV_MEMORY_PROVIDER: spec.provider,
             rp.ENV_MEMORY_MODEL: spec.model,
@@ -651,10 +728,12 @@ def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
             updates["HINDSIGHT_API_LLM_API_KEY"] = key_value
         _write_hermes_env(updates)
         _restart_memory_server(spec)
-    logger.info("[parley] memory LLM location now %s (%s)", name, " ".join(spec.as_args()))
+    if _selected(cfg, rp.MEMORY_LLM_SELECTED_PATH) != choice:
+        _write_selected_marker(rp.MEMORY_LLM_SELECTED_PATH, choice)
+    logger.info("[parley] memory LLM location now %s (%s: %s)", choice, name, " ".join(spec.as_args()))
     return _updated_def(MEMORY_LOCATION_SID, {
         "id": MEMORY_LOCATION_SID, "label": "Extraction model location",
-        "category": "Memory", "group": _WHERE_IT_RUNS, "type": "enum", "value": name, "options": [],
+        "category": MEMORY_CATEGORY, "group": _WHERE_IT_RUNS, "type": "enum", "value": choice, "options": [],
     })
 
 
@@ -673,10 +752,10 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
     hs_cfg = hc.read_config(hs_path)
     hs = hc.effective_values(hs_cfg)
 
-    def _txt(sid: str, label: str, value: str, description: str, group: str = "Hindsight") -> Dict[str, Any]:
+    def _txt(sid: str, label: str, value: str, description: str, group: str = _HINDSIGHT_GROUP) -> Dict[str, Any]:
         return {
             "id": sid, "label": label, "description": description,
-            "category": "Memory", "group": group, "type": "text", "value": value,
+            "category": MEMORY_CATEGORY, "group": group, "type": "text", "value": value,
             "readonly": True,
         }
 
@@ -711,8 +790,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "to MEMORY.md. Separate from Hindsight below, which is the "
                 "actual memory server."
             ),
-            "category": "Memory",
-            "group": "Built-in files",
+            "category": MEMORY_CATEGORY,
+            "group": _BUILTIN_FILES,
             "type": "toggle",
             "value": bool(mem.get("memory_enabled", True)),
         },
@@ -724,8 +803,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "hermes writes to USER.md. Separate from Hindsight below, "
                 "which is the actual memory server."
             ),
-            "category": "Memory",
-            "group": "Built-in files",
+            "category": MEMORY_CATEGORY,
+            "group": _BUILTIN_FILES,
             "type": "toggle",
             "value": bool(mem.get("user_profile_enabled", True)),
         },
@@ -740,8 +819,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "replayed with that turn on every later turn until the next "
                 "compaction. " + _APPLIES_TO_NEW_CHATS
             ),
-            "category": "Memory",
-            "group": "Hindsight",
+            "category": MEMORY_CATEGORY,
+            "group": _HINDSIGHT_GROUP,
             "type": "toggle",
             "value": hs[hc.KEY_AUTO_RECALL],
         },
@@ -752,8 +831,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "Maximum tokens of recalled memory injected per turn. "
                 + _APPLIES_TO_NEW_CHATS
             ),
-            "category": "Memory",
-            "group": "Hindsight",
+            "category": MEMORY_CATEGORY,
+            "group": _HINDSIGHT_GROUP,
             "type": "slider",
             "value": hs[hc.KEY_RECALL_MAX_TOKENS],
             "min": hc.RECALL_MAX_TOKENS_RANGE[0],
@@ -764,8 +843,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
             "id": "memory_recall_budget",
             "label": "Recall budget",
             "description": "How thoroughly hindsight searches for recall candidates. " + _APPLIES_TO_NEW_CHATS,
-            "category": "Memory",
-            "group": "Hindsight",
+            "category": MEMORY_CATEGORY,
+            "group": _HINDSIGHT_GROUP,
             "type": "enum",
             "value": hs[hc.KEY_RECALL_BUDGET],
             "options": [{"value": b, "label": b.capitalize()} for b in hc.RECALL_BUDGETS],
@@ -780,8 +859,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "one consolidation pass), so it competes with turns rather "
                 "than just costing tokens. " + _APPLIES_TO_NEW_CHATS
             ),
-            "category": "Memory",
-            "group": "Hindsight",
+            "category": MEMORY_CATEGORY,
+            "group": _HINDSIGHT_GROUP,
             "type": "toggle",
             "value": hs[hc.KEY_AUTO_RETAIN],
         },
@@ -792,8 +871,8 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
                 "Retain every N turns. Higher = fewer, larger (and cheaper) "
                 "saves. " + _APPLIES_TO_NEW_CHATS
             ),
-            "category": "Memory",
-            "group": "Hindsight",
+            "category": MEMORY_CATEGORY,
+            "group": _HINDSIGHT_GROUP,
             "type": "slider",
             "value": hs[hc.KEY_RETAIN_EVERY_N_TURNS],
             "min": hc.RETAIN_EVERY_N_TURNS_RANGE[0],
@@ -1441,6 +1520,7 @@ def apply_runtime_profile_setting(value: Any) -> Dict[str, Any]:
             write_config=_write_hermes_config,
             write_env=_write_hermes_env,
             restart_memory=_restart_memory_server,
+            apply_embed_mode=_apply_embed_router_mode,
             apply_memory_recall=_apply_memory_recall,
             load=lambda: (read_hermes_config(), read_hermes_env()),
         )
@@ -1477,7 +1557,7 @@ def apply_memory_toggle(sid: str, value: Any) -> Dict[str, Any]:
         logger.exception("[parley] memory toggle persist failed")
         raise SettingsValidationError(f"failed to write hermes config: {e}")
     return _updated_def(sid, {
-        "id": sid, "label": sid, "category": "Memory", "type": "toggle", "value": value,
+        "id": sid, "label": sid, "category": MEMORY_CATEGORY, "group": _BUILTIN_FILES, "type": "toggle", "value": value,
     })
 
 
@@ -1504,7 +1584,7 @@ def apply_hindsight_setting(sid: str, value: Any) -> Dict[str, Any]:
         logger.exception("[parley] hindsight config persist failed")
         raise SettingsValidationError(f"failed to write hindsight config: {e}")
     return _updated_def(sid, {
-        "id": sid, "label": sid, "category": "Memory", "group": "Hindsight", "value": value,
+        "id": sid, "label": sid, "category": MEMORY_CATEGORY, "group": _HINDSIGHT_GROUP, "value": value,
     })
 
 

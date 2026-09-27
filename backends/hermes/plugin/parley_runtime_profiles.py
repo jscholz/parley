@@ -62,6 +62,12 @@ ENV_MEMORY_PROVIDER = "HINDSIGHT_API_LLM_PROVIDER"
 ENV_MEMORY_MODEL = "HINDSIGHT_API_LLM_MODEL"
 ENV_MEMORY_BASE_URL = "HINDSIGHT_API_LLM_BASE_URL"
 MEMORY_ENV_KEYS = (ENV_MEMORY_PROVIDER, ENV_MEMORY_MODEL, ENV_MEMORY_BASE_URL)
+# Embedding router policy (scripts/embed-router.py reads it at start).
+ENV_EMBED_ROUTER_MODE = "EMBED_ROUTER_MODE"
+EMBED_MODES = ("auto", "local", "cloud")
+# "Where it runs" pins — see parley_route_settings (the rows that write them).
+MEMORY_LLM_SELECTED_PATH = "parley.memory_locations.llm_selected"
+MEMORY_EMBED_SELECTED_PATH = "parley.memory_locations.embeddings_selected"
 
 # The only config roots a profile apply is allowed to touch. Asserted by
 # plan_apply so a future profile key cannot quietly widen the blast radius
@@ -254,6 +260,8 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
             "llm_provider": (env.get(ENV_MEMORY_PROVIDER) or "").strip(),
             "llm_model": (env.get(ENV_MEMORY_MODEL) or "").strip(),
             "llm_base_url": (env.get(ENV_MEMORY_BASE_URL) or "").strip(),
+            # photograph of the router policy too; "auto" when unset
+            "embeddings_mode": (env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower(),
             "recall_max_tokens": DEFAULT_RECALL_MAX_TOKENS,
             "recall_budget": DEFAULT_RECALL_BUDGET,
         },
@@ -314,6 +322,9 @@ def seed_default_profiles(cfg: Mapping[str, Any], env: Mapping[str, str]) -> Dic
             "llm_provider": "lmstudio",
             "llm_model": LOCAL_MODEL,
             "llm_base_url": LOCAL_SERVER_BASE_URL,
+            # off-grid: embeddings on the local server only — never spend,
+            # never wait on a dead network for the cloud fallback
+            "embeddings_mode": "local",
             # hindsight injects up to this many tokens of recalled facts into
             # every non-trivial turn (docs/LOCAL_MODE.md §2); capped lower
             # than cloud's default so recall does not eat the diet's savings.
@@ -406,6 +417,9 @@ class MemorySpec:
     provider: str
     model: str
     base_url: str = ""
+    # Embedding router policy the profile wants (auto/local/cloud); applied
+    # through the ops script, not .env directly. None = profile is silent.
+    embeddings_mode: Optional[str] = None
     recall_max_tokens: Optional[int] = None
     recall_budget: Optional[str] = None
     auto_recall: Optional[bool] = None
@@ -460,6 +474,10 @@ class ApplyPlan:
     memory: Optional[MemorySpec]
     restart_memory: bool
     profile: Dict[str, Any] = field(default_factory=dict)
+    # Embedding router mode to apply (None = leave it): only when the
+    # embeddings row is on "follow runtime profile" AND the profile's mode
+    # differs from what .env has.
+    embed_mode: Optional[str] = None
 
     def touched_config_paths(self) -> List[str]:
         return sorted(set(self.snapshot_updates) | set(self.config_updates) | set(self.marker_updates))
@@ -487,6 +505,7 @@ class ApplyPlan:
                 "retain_every_n_turns": self.memory.retain_every_n_turns,
             },
             "restart_memory": self.restart_memory,
+            "embed_mode": self.embed_mode,
             "touched_config_paths": self.touched_config_paths(),
             "touched_env_keys": self.touched_env_keys(),
         }
@@ -712,13 +731,29 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
         recall_max_tokens, auto_recall, auto_retain, retain_every_n_turns,
     ))
 
-    if provider or model:
+    # "Where it runs" pins (parley.memory_locations.*_selected, written by
+    # the Settings rows): a role pinned to an explicit location is NOT
+    # rerouted by a profile switch — only roles on "profile" follow.
+    llm_follows = str(_get_path(cfg, MEMORY_LLM_SELECTED_PATH) or "profile").strip() == "profile"
+    embed_follows = str(_get_path(cfg, MEMORY_EMBED_SELECTED_PATH) or "profile").strip() == "profile"
+    embeddings_mode = str(mem.get("embeddings_mode") or "").strip().lower() or None
+    if embeddings_mode is not None and embeddings_mode not in EMBED_MODES:
+        raise ProfileError(
+            f"profile {name!r}: memory.embeddings_mode must be one of {', '.join(EMBED_MODES)}, got {embeddings_mode!r}"
+        )
+    if (provider or model) and llm_follows:
         env_updates[ENV_MEMORY_PROVIDER] = provider
         env_updates[ENV_MEMORY_MODEL] = model
         env_updates[ENV_MEMORY_BASE_URL] = base_url or None
+    embed_mode: Optional[str] = None
+    if embeddings_mode and embed_follows:
+        current_mode = (str(env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower() or "auto")
+        if current_mode != embeddings_mode:
+            embed_mode = embeddings_mode
     if provider or model or has_hindsight_file_updates:
         memory = MemorySpec(
             provider=provider, model=model, base_url=base_url,
+            embeddings_mode=embeddings_mode,
             recall_max_tokens=recall_max_tokens, recall_budget=recall_budget,
             auto_recall=auto_recall, auto_retain=auto_retain,
             retain_every_n_turns=retain_every_n_turns,
@@ -744,6 +779,7 @@ def plan_apply(cfg: Mapping[str, Any], env: Mapping[str, str], target: str) -> A
         memory=memory,
         restart_memory=restart,
         profile=copy.deepcopy(profile),
+        embed_mode=embed_mode,
     )
 
     # Blast-radius assertion. Cheap, and it turns "someone added a profile
@@ -868,6 +904,7 @@ def apply_runtime_profile(
     restart_memory: Callable[[MemorySpec], None],
     apply_memory_recall: Callable[[MemorySpec], None],
     load: Callable[[], Tuple[Dict[str, Any], Dict[str, str]]],
+    apply_embed_mode: Optional[Callable[[str], None]] = None,
 ) -> ApplyPlan:
     """Switch runtime profiles. Every side effect is injected.
 
@@ -908,6 +945,8 @@ def apply_runtime_profile(
         write_env(plan.env_updates)
     if plan.restart_memory and plan.memory is not None:
         restart_memory(plan.memory)
+    if plan.embed_mode and apply_embed_mode is not None:
+        apply_embed_mode(plan.embed_mode)
     if plan.memory is not None and plan.memory.has_hindsight_file_updates():
         apply_memory_recall(plan.memory)
 
@@ -915,9 +954,9 @@ def apply_runtime_profile(
     write_config(cfg)
 
     logger.info(
-        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s hindsight=%s)",
+        "[parley] runtime profile %s -> %s (config=%s env=%s restart_memory=%s embed_mode=%s hindsight=%s)",
         plan.leaving, plan.target, plan.touched_config_paths(),
-        plan.touched_env_keys(), plan.restart_memory,
+        plan.touched_env_keys(), plan.restart_memory, plan.embed_mode,
         None if plan.memory is None else plan.memory.hindsight_file_updates() or None,
     )
     return plan

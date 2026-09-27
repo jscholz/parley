@@ -2,9 +2,11 @@
 // (docs/ABSTRACT_AGENT_PROTOCOL.md "Optional settings extension",
 // docs/LOCAL_MODE.md §1 and §3) — an optional `group` sub-heading
 // within a category, an optional `readonly` flag on any setting type,
-// and the new Settings › Memory section/category. The PWA renders all
-// three generically; it never special-cases hermes, hindsight, or the
-// local model by name.
+// and the "Memory" category. Memory is part of the agent (2026-09-27):
+// there is no Memory pane; Memory-category rows render in the Agent pane
+// under the backend's `group` headings. The PWA renders all of this
+// generically; it never special-cases hermes, hindsight, or the local
+// model by name.
 //
 // Test plan (mocked):
 //   1. Declare `runtime_profile` (category Agent, group "Runtime", an
@@ -15,10 +17,10 @@
 //      both options, directly under an "Runtime" sub-heading — proves
 //      `group` groups within a category without needing its own nav
 //      section.
-//   3. Open Settings › Memory: the empty-state placeholder is hidden,
-//      all three fields render, and the two readonly fields show a
-//      value line (no <input>/<select> in their row) with the exact
-//      backend-supplied text.
+//   3. Still in Settings › Agent: the three Memory-category fields render
+//      there (no Memory nav button exists), under their group heading,
+//      and the two readonly fields show a value line (no <input>/<select>
+//      in their row) with the exact backend-supplied text.
 //   4. Toggle memory_enabled → exactly one POST to
 //      /api/parley/settings/memory_enabled with {value:false} (the
 //      settings-schema write route every other agent-setting smoke
@@ -68,7 +70,7 @@ function schema({ memoryEnabled = true, memoryStatus = MEMORY_STATUS_INITIAL } =
     },
     {
       id: 'memory_enabled', label: 'Memory', description: 'hermes memory.memory_enabled',
-      category: 'Memory', type: 'toggle', value: memoryEnabled,
+      category: 'Memory', group: 'Memory · Built-in files', type: 'toggle', value: memoryEnabled,
     },
     {
       id: 'memory_llm', label: 'Memory LLM', description: 'follows the runtime profile; not editable here',
@@ -117,11 +119,12 @@ export default async function run({ page, log, mock }) {
     `local option keeps its label + description (rendered as title); got ${JSON.stringify(runtimeRow.options)}`);
   log('runtime_profile enum renders under an Agent › Runtime sub-heading, options + descriptions intact');
 
-  // ── 3. Memory section: empty-state gone, three fields, readonly value lines ──
-  await switchSection(page, 'memory');
-  await page.waitForSelector('#settings-group-memory [data-agent-setting="memory_status"]', { timeout: 3_000 });
-  const memory = await page.$eval('#settings-group-memory', (host) => {
-    const emptyState = host.querySelector('[data-memory-empty]');
+  // ── 3. Memory rows live in the Agent pane (no Memory pane, no nav button) ──
+  await page.waitForSelector('#settings-group-agent [data-agent-setting="memory_status"]', { timeout: 3_000 });
+  const memory = await page.$eval('#settings-group-agent', (host) => {
+    const emptyState = null;
+    const navMemory = document.querySelector('.settings-nav-btn[data-target="memory"]');
+    const heading = Array.from(host.querySelectorAll('[data-agent-setting-group]')).find((h) => h.textContent === 'Memory · Built-in files');
     const row = (id) => host.querySelector(`[data-agent-setting="${id}"]`);
     const readonlyInfo = (id) => {
       const r = row(id);
@@ -131,22 +134,25 @@ export default async function run({ page, log, mock }) {
       };
     };
     return {
-      emptyHidden: emptyState ? (emptyState.hidden || getComputedStyle(emptyState).display === 'none') : null,
+      navMemoryGone: navMemory == null,
+      headingPresent: !!heading,
       toggleIsCheckbox: row('memory_enabled')?.querySelector('input[type=checkbox]') != null,
       llm: readonlyInfo('memory_llm'),
       status: readonlyInfo('memory_status'),
     };
   });
-  assert(memory.emptyHidden === true, `Memory empty-state must be hidden once fields exist; got ${memory.emptyHidden}`);
+  assert(memory.navMemoryGone, 'there must be no Memory nav button — memory rows belong to the Agent pane');
+  assert(memory.headingPresent, 'Memory rows render under their backend-declared group heading in the Agent pane');
   assert(memory.toggleIsCheckbox, 'memory_enabled renders as a real checkbox input');
   assert(!memory.llm.hasInput && memory.llm.value === MEMORY_LLM,
     `memory_llm readonly value line; got ${JSON.stringify(memory.llm)}`);
   assert(!memory.status.hasInput && memory.status.value === MEMORY_STATUS_INITIAL,
     `memory_status readonly value line; got ${JSON.stringify(memory.status)}`);
-  log('Memory section: empty-state hidden, toggle + two readonly value lines all present');
+  log('Memory rows in the Agent pane: no Memory nav, group heading, toggle + two readonly value lines all present');
+  await page.screenshot({ path: '/tmp/settings-agent-pane.png', fullPage: false });
 
   // ── 4. Toggle memory_enabled → exactly one POST to /settings/memory_enabled ──
-  await page.click('#settings-group-memory [data-agent-setting="memory_enabled"] input[type=checkbox]');
+  await page.click('#settings-group-agent [data-agent-setting="memory_enabled"] input[type=checkbox]');
   // Poll the mock for the POST (not the DOM checkbox state — it flips
   // synchronously on click, before the POST necessarily lands). Same
   // approach as settings-agent-schema.mjs.
@@ -169,14 +175,14 @@ export default async function run({ page, log, mock }) {
   // value row lives in a hidden (not removed) container so we can read
   // its text without reopening.
   await page.waitForFunction(
-    (expected) => document.querySelector('#settings-group-memory [data-agent-setting="memory_status"] [data-agent-setting-value]')?.textContent === expected,
+    (expected) => document.querySelector('#settings-group-agent [data-agent-setting="memory_status"] [data-agent-setting-value]')?.textContent === expected,
     MEMORY_STATUS_UPDATED,
     { timeout: 3_000 },
   );
   log('close-time refresh updated the readonly field while the panel was hidden');
-  await openSettingsSection(page, 'memory');
+  await openSettingsSection(page, 'agent');
   const statusAfterReopen = await page.$eval(
-    '#settings-group-memory [data-agent-setting="memory_status"] [data-agent-setting-value]',
+    '#settings-group-agent [data-agent-setting="memory_status"] [data-agent-setting-value]',
     (e) => e.textContent,
   );
   assert(statusAfterReopen === MEMORY_STATUS_UPDATED, `reopened panel shows updated status; got ${statusAfterReopen}`);

@@ -56,7 +56,7 @@ export interface AgentSettingDef {
    *  selectable — same treatment as Cron/Health card text) instead of
    *  an input, for ANY `type`. Never POSTed back. Protocol addition:
    *  docs/ABSTRACT_AGENT_PROTOCOL.md "Optional settings extension".
-   *  hermes' Memory section uses this for `memory_llm` /
+   *  hermes' memory rows use this for `memory_llm` /
    *  `memory_embeddings` / `memory_status` — values that follow the
    *  active runtime profile and aren't independently editable here
    *  (docs/LOCAL_MODE.md §3). */
@@ -424,7 +424,10 @@ function categoryToSection(category: string | undefined): string {
     case 'plugins':
     case 'session':
       return 'agent';
-    case 'memory': return 'memory';
+    // Memory is part of the agent (2026-09-27): rows land in the Agent
+    // pane under whatever `group` the backend declares. Older backends
+    // still sending category "Memory" get the same treatment.
+    case 'memory': return 'agent';
     case 'voice input':
     case 'voice-input': return 'voice-input';
     case 'voice output':
@@ -481,7 +484,6 @@ export async function load() {
   }
   if (schema.length === 0) {
     lastSchema = [];
-    updateMemoryEmptyState(hostBySection.get('memory'));
     return;
   }
   lastSchema = schema;
@@ -530,7 +532,6 @@ export async function load() {
   // "zero Memory-category rows" is the only signal we get — could mean
   // the plugin doesn't build the section yet, or the user disabled
   // memory upstream entirely).
-  updateMemoryEmptyState(hostBySection.get('memory'));
   // Notify subscribers (composer attach-button gate, etc.) that the
   // agent settings schema is now populated. Fired once per successful
   // load — listeners read getCurrentValue() to react.
@@ -539,22 +540,6 @@ export async function load() {
   } catch { /* SSR-safe */ }
 }
 
-/** Toggle the Memory section's static empty-state row (index.html,
- *  `[data-memory-empty]`) based on whether any Memory-category rows
- *  actually landed in the host this load(). Called both when the whole
- *  schema is empty and after a normal render, so re-declaring (or
- *  fully removing) Memory settings on a later load flips it back. */
-function updateMemoryEmptyState(memoryHost: HTMLElement | undefined) {
-  if (!memoryHost) return;
-  const emptyEl = memoryHost.querySelector<HTMLElement>('[data-memory-empty]');
-  if (!emptyEl) return;
-  const hasRows = memoryHost.querySelectorAll('[data-agent-setting]').length > 0;
-  emptyEl.hidden = hasRows;
-  // `.row` is display:flex, which beats the `hidden` attribute alone —
-  // same fix cronSettings.ts/healthSettings.ts already apply to their
-  // placeholders.
-  emptyEl.style.display = hasRows ? 'none' : '';
-}
 
 /** Read the most recently-loaded value for an agent setting. Returns
  *  undefined if no schema has loaded or the setting id isn't declared

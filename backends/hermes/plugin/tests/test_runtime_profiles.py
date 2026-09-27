@@ -56,7 +56,7 @@ def test_cloud_profile_is_seeded_from_live_values_not_from_the_doc():
     assert set(cloud["auxiliary"]) == {"vision"}
     assert cloud["auxiliary"]["vision"] == LIVE_CFG["auxiliary"]["vision"]
     assert cloud["fallback_providers"] == LIVE_CFG["fallback_providers"]
-    assert cloud["memory"] == {"llm_provider": "openai-codex",
+    assert cloud["memory"] == {"llm_provider": "openai-codex", "embeddings_mode": "auto",
                                "llm_model": "gpt-5.4-mini", "llm_base_url": "",
                                "recall_max_tokens": 4096, "recall_budget": "mid"}
     assert cloud["compression"] == {"threshold": 0.7}
