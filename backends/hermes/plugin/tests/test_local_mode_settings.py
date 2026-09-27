@@ -27,7 +27,15 @@ CFG = {
     "fallback_providers": [{"provider": "custom:local-fallback", "model": "qwen3.6-35b-a3b"}],
     "compression": {"enabled": True, "threshold": 0.7},
     "memory": {"memory_enabled": True, "user_profile_enabled": False},
-    "parley": {"preferred_models": ["anthropic/*"]},
+    "parley": {
+        "preferred_models": ["anthropic/*"],
+        "memory_llm_locations": {
+            "local": {"llm_provider": "lmstudio", "llm_model": "qwen3.6-35b-a3b",
+                      "llm_base_url": "http://127.0.0.1:8000/v1"},
+            "cloud": {"llm_provider": "openai", "llm_model": "gpt-5.6-luna",
+                      "llm_base_url": "https://api.openai.com/v1"},
+        },
+    },
 }
 ENV = {
     "HINDSIGHT_API_LLM_PROVIDER": "openai-codex",
@@ -57,6 +65,7 @@ def sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(st, "read_hermes_config", lambda: json.loads(json.dumps(state["cfg"])))
     monkeypatch.setattr(st, "read_hermes_env", lambda: dict(state["env"]))
     monkeypatch.setattr(st, "_probe_local_server", lambda profile: state["probe"])
+    monkeypatch.setattr(st, "_probe_memory_location", lambda spec: state["probe"])
     monkeypatch.setattr(st, "_cloud_model_catalog", lambda *a, **k: [
         {"value": "openai-codex:gpt-5.6-sol", "label": "gpt-5.6-sol", "group": "OpenAI Codex"},
         {"value": "anthropic/claude-opus-4.6", "label": "claude opus", "group": "OpenRouter"},
@@ -112,6 +121,7 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
         "memory_enabled", "memory_user_profile",
         "memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
         "memory_retain", "memory_retain_every_n_turns",
+        "memory_llm_location",
         "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state",
     ]
     # groups
@@ -469,3 +479,61 @@ def test_route_post_readonly_is_400_and_unknown_is_404(sandbox):
 def test_route_post_memory_toggle(sandbox):
     r = _run_coro(st.handle_update(_Adapter(), _Request("memory_user_profile", {"value": True})))
     assert r.status == 200 and json.loads(r.text)["value"] is True
+
+
+
+# ── memory_llm_location (2026-09-27) ────────────────────────────────────
+
+def test_memory_location_is_declared_from_config_and_reflects_env(sandbox):
+    row = _by_id(st.build_settings_schema())["memory_llm_location"]
+    assert row["type"] == "enum" and row["category"] == "Memory" and row["group"] == "Hindsight"
+    assert [o["value"] for o in row["options"]] == ["local", "cloud", "custom"]
+    # ENV says openai-codex/gpt-5.4-mini — matches no named location
+    assert row["value"] == "custom"
+    assert "ready" in [o for o in row["options"] if o["value"] == "local"][0]["label"]
+
+
+def test_memory_location_value_matches_env(sandbox):
+    sandbox["env"].update({
+        "HINDSIGHT_API_LLM_PROVIDER": "lmstudio", "HINDSIGHT_API_LLM_MODEL": "qwen3.6-35b-a3b",
+        "HINDSIGHT_API_LLM_BASE_URL": "http://127.0.0.1:8000/v1",
+    })
+    row = _by_id(st.build_settings_schema())["memory_llm_location"]
+    assert row["value"] == "local"
+    assert [o["value"] for o in row["options"]] == ["local", "cloud"]   # no 'custom' when matched
+
+
+def test_apply_memory_location_writes_env_and_restarts(sandbox):
+    out = st.apply_setting("memory_llm_location", "local")
+    assert out["id"] == "memory_llm_location" and out["value"] == "local"
+    assert sandbox["env_writes"] == [{
+        "HINDSIGHT_API_LLM_PROVIDER": "lmstudio",
+        "HINDSIGHT_API_LLM_MODEL": "qwen3.6-35b-a3b",
+        "HINDSIGHT_API_LLM_BASE_URL": "http://127.0.0.1:8000/v1",
+    }]
+    assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
+    assert sandbox["saved"] == []            # never touches config.yaml
+    # idempotent: same location again = no write, no restart
+    st.apply_setting("memory_llm_location", "local")
+    assert len(sandbox["env_writes"]) == 1 and len(sandbox["script"]) == 1
+
+
+def test_apply_memory_location_cloud_skips_the_probe(sandbox):
+    sandbox["probe"] = DOWN
+    st.apply_setting("memory_llm_location", "cloud")
+    assert sandbox["script"] == [["openai", "gpt-5.6-luna", "https://api.openai.com/v1"]]
+
+
+def test_apply_memory_location_rejects_a_dead_local_server(sandbox):
+    sandbox["probe"] = DOWN
+    with pytest.raises(st.SettingsValidationError, match="not answering"):
+        st.apply_setting("memory_llm_location", "local")
+    assert sandbox["env_writes"] == [] and sandbox["script"] == []
+
+
+@pytest.mark.parametrize("value,needle", [
+    ("", "non-empty"), (7, "non-empty"), ("mars", "unknown memory location"), ("custom", "unknown memory location"),
+])
+def test_apply_memory_location_rejects_bad_values(sandbox, value, needle):
+    with pytest.raises(st.SettingsValidationError, match=needle):
+        st.apply_setting("memory_llm_location", value)

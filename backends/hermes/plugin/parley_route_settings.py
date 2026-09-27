@@ -19,6 +19,7 @@ Plus the helpers:
   - apply_preferred_models    persist the glob list
   - apply_model_setting       persist model.default + provider
   - apply_runtime_profile_setting   switch runtime profiles (LOCAL_MODE.md §1)
+  - apply_memory_location_setting   reroute the memory server's LLM to a named location
   - apply_memory_toggle       hermes' BUILT-IN file-memory booleans (MEMORY.md/USER.md)
   - apply_hindsight_setting   hindsight's OWN recall/retain knobs (parley_hindsight_config.py)
 
@@ -381,6 +382,129 @@ _MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status", "memory_
 _APPLIES_TO_NEW_CHATS = "Applies to new chats — an already-open conversation keeps what it read until it resets."
 
 
+# ── memory_llm_location ──────────────────────────────────────────────
+#
+# Where the memory server's extraction LLM runs, as a plain enum whose
+# options come from ``parley.memory_llm_locations`` in hermes' config:
+#
+#   parley:
+#     memory_llm_locations:
+#       local: {llm_provider: lmstudio, llm_model: qwen3.6-35b-a3b, llm_base_url: http://127.0.0.1:8000/v1}
+#       cloud: {llm_provider: openai,   llm_model: gpt-5.6-luna,   llm_base_url: https://api.openai.com/v1}
+#
+# The PWA renders the enum and POSTs a name; everything that knows what a
+# name means (env keys, restart, which server to probe) lives here. Adding
+# a location is a config edit, never a PWA change. The value is derived
+# from what .env actually says, so a runtime-profile switch (which also
+# writes these keys) is reflected truthfully rather than remembered.
+MEMORY_LOCATIONS_PATH = "parley.memory_llm_locations"
+MEMORY_LOCATION_SID = "memory_llm_location"
+_MEMORY_LOCATION_CUSTOM = "custom"
+
+
+def _memory_locations(cfg: Dict[str, Any]) -> Dict[str, "rp.MemorySpec"]:
+    raw = rp._get_path(cfg, MEMORY_LOCATIONS_PATH)
+    out: Dict[str, rp.MemorySpec] = {}
+    if not isinstance(raw, dict):
+        return out
+    for name, spec in raw.items():
+        if not isinstance(spec, dict):
+            continue
+        provider = str(spec.get("llm_provider") or "").strip()
+        model = str(spec.get("llm_model") or "").strip()
+        if provider and model:
+            out[str(name)] = rp.MemorySpec(
+                provider=provider, model=model,
+                base_url=str(spec.get("llm_base_url") or "").strip(),
+            )
+    return out
+
+
+def _current_memory_location(env: Dict[str, str], locations: Dict[str, "rp.MemorySpec"]) -> str:
+    cur = (
+        (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(),
+        (env.get(rp.ENV_MEMORY_MODEL) or "").strip(),
+        (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip(),
+    )
+    for name, spec in locations.items():
+        if (spec.provider, spec.model, spec.base_url) == cur:
+            return name
+    return _MEMORY_LOCATION_CUSTOM
+
+
+def _is_loopback(base_url: str) -> bool:
+    host = (base_url.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0]).lower()
+    return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+
+
+def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
+    locations = _memory_locations(cfg)
+    current = _current_memory_location(env, locations)
+    options = []
+    for name, spec in locations.items():
+        label = name.capitalize()
+        detail = f"{spec.provider} · {spec.model}"
+        if _is_loopback(spec.base_url):
+            probe = _probe_memory_location(spec)
+            detail += " — " + ("ready" if probe.ok else probe.detail)
+        options.append({"value": name, "label": f"{label} ({detail})"})
+    if current == _MEMORY_LOCATION_CUSTOM:
+        options.append({"value": _MEMORY_LOCATION_CUSTOM, "label": "Custom (as configured in .env)"})
+    return {
+        "id": MEMORY_LOCATION_SID,
+        "label": "Extraction model location",
+        "description": (
+            "Where the memory server runs fact extraction (retain) and "
+            "reflect. Recall never uses this model. Switching restarts the "
+            "memory server (a few seconds; queued saves resume). A runtime "
+            "profile switch also resets this to the profile's default."
+        ),
+        "category": "Memory",
+        "group": "Hindsight",
+        "type": "enum",
+        "value": current,
+        "options": options,
+    }
+
+
+def _probe_memory_location(spec: "rp.MemorySpec") -> "rp.ServerProbe":
+    """Readiness of a loopback location's server. Module-level seam for tests."""
+    return rp.probe_model_server(spec.base_url, spec.model, timeout=_LOCAL_PROBE_TIMEOUT)
+
+
+def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
+    """POST /v1/settings/memory_llm_location — reroute the memory server's
+    LLM to a named location: preflight (loopback only) → .env → restart."""
+    if not isinstance(value, str) or not value.strip():
+        raise SettingsValidationError("memory_llm_location value must be a non-empty string")
+    name = value.strip()
+    cfg = read_hermes_config()
+    locations = _memory_locations(cfg)
+    spec = locations.get(name)
+    if spec is None:
+        known = ", ".join(sorted(locations)) or "none configured"
+        raise SettingsValidationError(
+            f"unknown memory location {name!r} (known: {known}; add one under {MEMORY_LOCATIONS_PATH})"
+        )
+    if _is_loopback(spec.base_url):
+        probe = _probe_memory_location(spec)
+        if not probe.ok:
+            raise SettingsValidationError(f"cannot switch memory to {name}: {probe.detail}")
+    env = read_hermes_env()
+    if _current_memory_location(env, locations) != name:
+        _write_hermes_env({
+            rp.ENV_MEMORY_PROVIDER: spec.provider,
+            rp.ENV_MEMORY_MODEL: spec.model,
+            rp.ENV_MEMORY_BASE_URL: spec.base_url or None,
+        })
+        _restart_memory_server(spec)
+    logger.info("[parley] memory LLM location now %s (%s)", name, " ".join(spec.as_args()))
+    return _updated_def(MEMORY_LOCATION_SID, {
+        "id": MEMORY_LOCATION_SID, "label": "Extraction model location",
+        "category": "Memory", "group": "Hindsight", "type": "enum", "value": name, "options": [],
+    })
+
+
 def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str, Any]]:
     """Settings › Memory: two groups.
 
@@ -415,6 +539,9 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
         (env.get("HINDSIGHT_API_EMBEDDINGS_PROVIDER") or "").strip(),
         (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL") or "").strip(),
     ) if x) or "not configured"
+    emb_base = (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL") or "").strip()
+    if emb_base:
+        embeddings = f"{embeddings} @ {emb_base}"
 
     hindsight_state = (
         f"hindsight config not found at {hs_path}" if not hs_path.exists()
@@ -520,11 +647,14 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
             "max": hc.RETAIN_EVERY_N_TURNS_RANGE[1],
             "step": 1,
         },
+        _memory_location_setting(cfg, env),
         _txt("memory_llm", "Extraction model", llm,
-             "Follows the runtime profile — change it there, not here."),
+             "What the memory server extracts facts with. Pick where it runs "
+             "with 'Extraction model location' above."),
         _txt("memory_embeddings", "Embeddings", embeddings,
-             "Stays on OpenAI in every profile: the stored vectors are "
-             "1536-d, so changing the embedder needs a full re-index."),
+             "The embedding endpoint the memory server indexes with. Not a "
+             "switch: the stored vectors belong to this model, so changing it "
+             "is a full re-index (an ops job, not a setting)."),
         _txt("memory_status", "Status", memory_status_text(),
              "hindsight-server, its last retain, and LLM errors in 24h."),
         _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
@@ -641,6 +771,8 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
         return apply_preferred_models_setting(value)
     if sid == "runtime_profile":
         return apply_runtime_profile_setting(value)
+    if sid == MEMORY_LOCATION_SID:
+        return apply_memory_location_setting(value)
     if sid in _MEMORY_TOGGLES:
         return apply_memory_toggle(sid, value)
     if sid in _HINDSIGHT_SETTINGS:
