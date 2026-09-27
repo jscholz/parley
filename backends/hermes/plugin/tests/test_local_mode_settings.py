@@ -135,9 +135,13 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
         "memory_enabled", "memory_user_profile",
         "memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
         "memory_retain", "memory_retain_every_n_turns",
+        "memory_status", "memory_hindsight_state",
         "memory_llm_location", "memory_embeddings_location",
-        "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state",
+        "memory_llm", "memory_embeddings",
     ]
+    # each group is contiguous — the PWA prints a heading on every group change
+    groups = [s["group"] for s in memory]
+    assert groups == sorted(groups, key=groups.index) and len(set(groups)) == 3
     # groups
     assert schema["memory_enabled"]["group"] == "Memory · Built-in files"
     assert schema["memory_user_profile"]["group"] == "Memory · Built-in files"

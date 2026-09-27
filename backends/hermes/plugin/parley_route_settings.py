@@ -879,6 +879,12 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
             "max": hc.RETAIN_EVERY_N_TURNS_RANGE[1],
             "step": 1,
         },
+        _txt("memory_status", "Status", memory_status_text(),
+             "hindsight-server, its last retain, and LLM errors in 24h."),
+        _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
+             "Current hindsight recall/retain settings, compactly."),
+        # "Where it runs" last: one contiguous group (the PWA emits a heading
+        # whenever the group changes, so interleaving would print it twice).
         _memory_location_setting(cfg, env),
         _embed_location_setting(env),
         _txt("memory_llm", "Extraction model", llm,
@@ -888,10 +894,6 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
              "The embedding endpoint the memory server indexes with. The model "
              "is fixed — the stored vectors belong to it, so changing it is a "
              "full re-index (an ops job, not a setting).", _WHERE_IT_RUNS),
-        _txt("memory_status", "Status", memory_status_text(),
-             "hindsight-server, its last retain, and LLM errors in 24h."),
-        _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
-             "Current hindsight recall/retain settings, compactly."),
     ]
 
 
