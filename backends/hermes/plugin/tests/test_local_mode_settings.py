@@ -29,12 +29,12 @@ CFG = {
     "memory": {"memory_enabled": True, "user_profile_enabled": False},
     "parley": {
         "preferred_models": ["anthropic/*"],
-        "memory_llm_locations": {
+        "memory_locations": {"llm": {
             "local": {"llm_provider": "lmstudio", "llm_model": "qwen3.6-35b-a3b",
                       "llm_base_url": "http://127.0.0.1:8000/v1"},
-            "cloud": {"llm_provider": "openai", "llm_model": "gpt-5.6-luna",
-                      "llm_base_url": "https://api.openai.com/v1"},
-        },
+            "cloud": {"llm_provider": "openrouter", "llm_model": "qwen/qwen3.6-35b-a3b",
+                      "llm_api_key_env": "OPENROUTER_API_KEY"},
+        }},
     },
 }
 ENV = {
@@ -42,7 +42,10 @@ ENV = {
     "HINDSIGHT_API_LLM_MODEL": "gpt-5.4-mini",
     "HINDSIGHT_API_EMBEDDINGS_PROVIDER": "openai",
     "HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL": "text-embedding-3-small",
+    "HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL": "http://127.0.0.1:8012/v1",
+    "OPENROUTER_API_KEY": "sk-or-test",
 }
+ROUTER_UP = {"status": "ok", "mode": "auto", "local_up": True, "remote_configured": True, "model": "qwen3-embedding-4b"}
 READY = rp.ServerProbe(True, "http://127.0.0.1:8000 ready", ("qwen3.6-35b-a3b",))
 DOWN = rp.ServerProbe(False, "http://127.0.0.1:8000 is not answering")
 
@@ -66,6 +69,12 @@ def sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(st, "read_hermes_env", lambda: dict(state["env"]))
     monkeypatch.setattr(st, "_probe_local_server", lambda profile: state["probe"])
     monkeypatch.setattr(st, "_probe_memory_location", lambda spec: state["probe"])
+    state["router"] = dict(ROUTER_UP)
+    state["router_script"] = []
+    monkeypatch.setattr(st, "_probe_embed_router", lambda url: dict(state["router"]))
+    def _router_mode(mode):   # the real script writes EMBED_ROUTER_MODE to .env and restarts the unit
+        state["router_script"].append(mode); state["env"]["EMBED_ROUTER_MODE"] = mode
+    monkeypatch.setattr(st, "_apply_embed_router_mode", _router_mode)
     monkeypatch.setattr(st, "_cloud_model_catalog", lambda *a, **k: [
         {"value": "openai-codex:gpt-5.6-sol", "label": "gpt-5.6-sol", "group": "OpenAI Codex"},
         {"value": "anthropic/claude-opus-4.6", "label": "claude opus", "group": "OpenRouter"},
@@ -121,7 +130,7 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
         "memory_enabled", "memory_user_profile",
         "memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
         "memory_retain", "memory_retain_every_n_turns",
-        "memory_llm_location",
+        "memory_llm_location", "memory_embeddings_location",
         "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state",
     ]
     # groups
@@ -129,8 +138,10 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
     assert schema["memory_user_profile"]["group"] == "Built-in files"
     for sid in ("memory_recall", "memory_recall_max_tokens", "memory_recall_budget",
                 "memory_retain", "memory_retain_every_n_turns",
-                "memory_llm", "memory_embeddings", "memory_status", "memory_hindsight_state"):
+                "memory_status", "memory_hindsight_state"):
         assert schema[sid]["group"] == "Hindsight"
+    for sid in ("memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"):
+        assert schema[sid]["group"] == "Where it runs"
     # relabeled built-in-file toggles, honest about being separate from hindsight
     assert schema["memory_enabled"]["label"] == "Notes file (MEMORY.md)"
     assert schema["memory_user_profile"]["label"] == "User profile file (USER.md)"
@@ -155,7 +166,7 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
     assert "readonly" not in schema["memory_enabled"]
     assert "readonly" not in schema["memory_recall"]
     assert schema["memory_llm"]["value"] == "openai-codex · gpt-5.4-mini"
-    assert schema["memory_embeddings"]["value"] == "openai · text-embedding-3-small"
+    assert schema["memory_embeddings"]["value"] == "openai · text-embedding-3-small @ http://127.0.0.1:8012/v1"
     assert schema["memory_status"]["value"].startswith("hindsight-server active")
     assert schema["memory_hindsight_state"]["value"].startswith("hindsight config not found at ")
 
@@ -486,7 +497,7 @@ def test_route_post_memory_toggle(sandbox):
 
 def test_memory_location_is_declared_from_config_and_reflects_env(sandbox):
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
-    assert row["type"] == "enum" and row["category"] == "Memory" and row["group"] == "Hindsight"
+    assert row["type"] == "enum" and row["category"] == "Memory" and row["group"] == "Where it runs"
     assert [o["value"] for o in row["options"]] == ["local", "cloud", "custom"]
     # ENV says openai-codex/gpt-5.4-mini — matches no named location
     assert row["value"] == "custom"
@@ -518,10 +529,71 @@ def test_apply_memory_location_writes_env_and_restarts(sandbox):
     assert len(sandbox["env_writes"]) == 1 and len(sandbox["script"]) == 1
 
 
-def test_apply_memory_location_cloud_skips_the_probe(sandbox):
+def test_apply_memory_location_cloud_skips_the_probe_and_copies_the_named_key(sandbox):
     sandbox["probe"] = DOWN
     st.apply_setting("memory_llm_location", "cloud")
-    assert sandbox["script"] == [["openai", "gpt-5.6-luna", "https://api.openai.com/v1"]]
+    assert sandbox["script"] == [["openrouter", "qwen/qwen3.6-35b-a3b"]]
+    assert sandbox["env_writes"] == [{
+        "HINDSIGHT_API_LLM_PROVIDER": "openrouter",
+        "HINDSIGHT_API_LLM_MODEL": "qwen/qwen3.6-35b-a3b",
+        "HINDSIGHT_API_LLM_BASE_URL": None,
+        "HINDSIGHT_API_LLM_API_KEY": "sk-or-test",
+    }]
+
+
+def test_apply_memory_location_refuses_when_the_named_key_is_missing(sandbox):
+    sandbox["env"].pop("OPENROUTER_API_KEY")
+    with pytest.raises(st.SettingsValidationError, match="OPENROUTER_API_KEY is not set"):
+        st.apply_setting("memory_llm_location", "cloud")
+    assert sandbox["env_writes"] == [] and sandbox["script"] == []
+    label = [o for o in _by_id(st.build_settings_schema())["memory_llm_location"]["options"] if o["value"] == "cloud"][0]["label"]
+    assert "no OPENROUTER_API_KEY" in label
+
+
+def test_schema_never_contains_a_key_value(sandbox):
+    assert "sk-or-test" not in json.dumps(st.build_settings_schema())
+
+
+# ── memory_embeddings_location ──────────────────────────────────────────
+
+def test_embed_location_is_declared_from_router_health(sandbox):
+    row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
+    assert row["type"] == "enum" and row["group"] == "Where it runs"
+    assert [o["value"] for o in row["options"]] == ["auto", "local", "cloud"]
+    assert row["value"] == "auto"                      # no EMBED_ROUTER_MODE in env
+    assert "local ready" in row["options"][0]["label"]
+    assert "qwen3-embedding-4b" in row["description"]
+    both = [s for s in st.build_settings_schema() if s.get("group") == "Where it runs"]
+    assert [s["id"] for s in both] == ["memory_llm_location", "memory_embeddings_location", "memory_llm", "memory_embeddings"]
+
+
+def test_embed_location_reflects_env_and_a_dead_router(sandbox):
+    sandbox["env"]["EMBED_ROUTER_MODE"] = "cloud"
+    sandbox["router"] = {}
+    row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
+    assert row["value"] == "cloud" and "not answering" in row["description"]
+
+
+def test_apply_embed_location_runs_the_script_once(sandbox):
+    out = st.apply_setting("memory_embeddings_location", "cloud")
+    assert out["value"] == "cloud" and sandbox["router_script"] == ["cloud"]
+    sandbox["env"]["EMBED_ROUTER_MODE"] = "cloud"
+    st.apply_setting("memory_embeddings_location", "cloud")
+    assert sandbox["router_script"] == ["cloud"]        # already there → no restart
+    assert sandbox["env_writes"] == [] and sandbox["saved"] == []   # the script owns .env for this key
+
+
+@pytest.mark.parametrize("mode,router,needle", [
+    ("local", {**ROUTER_UP, "local_up": False}, "not responding"),
+    ("cloud", {**ROUTER_UP, "remote_configured": False}, "no cloud key"),
+    ("auto", {}, "not answering"),
+    ("gpu", ROUTER_UP, "must be one of"),
+])
+def test_apply_embed_location_rejects(sandbox, mode, router, needle):
+    sandbox["router"] = router
+    with pytest.raises(st.SettingsValidationError, match=needle):
+        st.apply_setting("memory_embeddings_location", mode)
+    assert sandbox["router_script"] == []
 
 
 def test_apply_memory_location_rejects_a_dead_local_server(sandbox):

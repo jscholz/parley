@@ -20,6 +20,7 @@ Plus the helpers:
   - apply_model_setting       persist model.default + provider
   - apply_runtime_profile_setting   switch runtime profiles (LOCAL_MODE.md §1)
   - apply_memory_location_setting   reroute the memory server's LLM to a named location
+  - apply_embed_location_setting    set the embedding router's mode (auto/local/cloud)
   - apply_memory_toggle       hermes' BUILT-IN file-memory booleans (MEMORY.md/USER.md)
   - apply_hindsight_setting   hindsight's OWN recall/retain knobs (parley_hindsight_config.py)
 
@@ -55,6 +56,7 @@ import logging
 import os
 import re
 import subprocess
+from dataclasses import dataclass
 import time
 from datetime import datetime
 from pathlib import Path
@@ -382,29 +384,53 @@ _MEMORY_READONLY = ("memory_llm", "memory_embeddings", "memory_status", "memory_
 _APPLIES_TO_NEW_CHATS = "Applies to new chats — an already-open conversation keeps what it read until it resets."
 
 
-# ── memory_llm_location ──────────────────────────────────────────────
+# ── Settings › Memory › "Where it runs" ───────────────────────────────
 #
-# Where the memory server's extraction LLM runs, as a plain enum whose
-# options come from ``parley.memory_llm_locations`` in hermes' config:
+# Two enums, side by side, for the two models the memory server uses:
 #
-#   parley:
-#     memory_llm_locations:
-#       local: {llm_provider: lmstudio, llm_model: qwen3.6-35b-a3b, llm_base_url: http://127.0.0.1:8000/v1}
-#       cloud: {llm_provider: openai,   llm_model: gpt-5.6-luna,   llm_base_url: https://api.openai.com/v1}
+#   memory_llm_location        the extraction/reflect LLM. Options come from
+#                              ``parley.memory_locations.llm`` in hermes' config:
+#       parley:
+#         memory_locations:
+#           llm:
+#             local: {llm_provider: lmstudio,   llm_model: qwen3.6-35b-a3b, llm_base_url: http://127.0.0.1:8000/v1}
+#             cloud: {llm_provider: openrouter, llm_model: qwen/qwen3.6-35b-a3b, llm_api_key_env: OPENROUTER_API_KEY}
+#                              ``llm_api_key_env`` names the .env variable whose
+#                              value becomes HINDSIGHT_API_LLM_API_KEY on switch
+#                              (hindsight has ONE key slot for every provider);
+#                              only the NAME ever leaves the server.
+#   memory_embeddings_location the embedding endpoint's policy. The model is
+#                              fixed (the stored vectors belong to it); what
+#                              can change is where it is computed, which is the
+#                              embedding router's mode: auto / local / cloud.
+#                              Options and readiness come from the router's
+#                              own /health, so nothing here names a vendor.
 #
-# The PWA renders the enum and POSTs a name; everything that knows what a
-# name means (env keys, restart, which server to probe) lives here. Adding
-# a location is a config edit, never a PWA change. The value is derived
-# from what .env actually says, so a runtime-profile switch (which also
-# writes these keys) is reflected truthfully rather than remembered.
-MEMORY_LOCATIONS_PATH = "parley.memory_llm_locations"
+# The PWA renders the enums and POSTs a name; everything that knows what a
+# name means (env keys, restarts, probes) lives here. Both values are
+# derived from what .env actually says — a runtime-profile switch (which
+# also writes the LLM keys) is reflected truthfully, not remembered.
+MEMORY_LOCATIONS_PATH = "parley.memory_locations.llm"
 MEMORY_LOCATION_SID = "memory_llm_location"
+EMBED_LOCATION_SID = "memory_embeddings_location"
 _MEMORY_LOCATION_CUSTOM = "custom"
+_WHERE_IT_RUNS = "Where it runs"
+ENV_EMBED_ROUTER_MODE = "EMBED_ROUTER_MODE"
+EMBED_ROUTER_MODES = ("auto", "local", "cloud")
+_DEFAULT_EMBED_ROUTER_SCRIPT = str(
+    Path(__file__).resolve().parent.parent / "scripts" / "apply-embed-router-mode.sh"
+)
 
 
-def _memory_locations(cfg: Dict[str, Any]) -> Dict[str, "rp.MemorySpec"]:
+@dataclass(frozen=True)
+class MemoryLocation:
+    spec: "rp.MemorySpec"
+    api_key_env: str = ""
+
+
+def _memory_locations(cfg: Dict[str, Any]) -> Dict[str, MemoryLocation]:
     raw = rp._get_path(cfg, MEMORY_LOCATIONS_PATH)
-    out: Dict[str, rp.MemorySpec] = {}
+    out: Dict[str, MemoryLocation] = {}
     if not isinstance(raw, dict):
         return out
     for name, spec in raw.items():
@@ -413,21 +439,24 @@ def _memory_locations(cfg: Dict[str, Any]) -> Dict[str, "rp.MemorySpec"]:
         provider = str(spec.get("llm_provider") or "").strip()
         model = str(spec.get("llm_model") or "").strip()
         if provider and model:
-            out[str(name)] = rp.MemorySpec(
-                provider=provider, model=model,
-                base_url=str(spec.get("llm_base_url") or "").strip(),
+            out[str(name)] = MemoryLocation(
+                spec=rp.MemorySpec(
+                    provider=provider, model=model,
+                    base_url=str(spec.get("llm_base_url") or "").strip(),
+                ),
+                api_key_env=str(spec.get("llm_api_key_env") or "").strip(),
             )
     return out
 
 
-def _current_memory_location(env: Dict[str, str], locations: Dict[str, "rp.MemorySpec"]) -> str:
+def _current_memory_location(env: Dict[str, str], locations: Dict[str, MemoryLocation]) -> str:
     cur = (
         (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(),
         (env.get(rp.ENV_MEMORY_MODEL) or "").strip(),
         (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip(),
     )
-    for name, spec in locations.items():
-        if (spec.provider, spec.model, spec.base_url) == cur:
+    for name, loc in locations.items():
+        if (loc.spec.provider, loc.spec.model, loc.spec.base_url) == cur:
             return name
     return _MEMORY_LOCATION_CUSTOM
 
@@ -441,12 +470,15 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
     locations = _memory_locations(cfg)
     current = _current_memory_location(env, locations)
     options = []
-    for name, spec in locations.items():
+    for name, loc in locations.items():
+        spec = loc.spec
         label = name.capitalize()
         detail = f"{spec.provider} · {spec.model}"
         if _is_loopback(spec.base_url):
             probe = _probe_memory_location(spec)
             detail += " — " + ("ready" if probe.ok else probe.detail)
+        elif loc.api_key_env and not (env.get(loc.api_key_env) or "").strip():
+            detail += f" — no {loc.api_key_env} in .env"
         options.append({"value": name, "label": f"{label} ({detail})"})
     if current == _MEMORY_LOCATION_CUSTOM:
         options.append({"value": _MEMORY_LOCATION_CUSTOM, "label": "Custom (as configured in .env)"})
@@ -454,17 +486,125 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
         "id": MEMORY_LOCATION_SID,
         "label": "Extraction model location",
         "description": (
-            "Where the memory server runs fact extraction (retain) and "
-            "reflect. Recall never uses this model. Switching restarts the "
-            "memory server (a few seconds; queued saves resume). A runtime "
-            "profile switch also resets this to the profile's default."
+            "Where the memory server runs fact extraction (retain), "
+            "consolidation and reflect. Recall never uses this model. A local "
+            "server handles one save at a time (~2 min each), so under heavy "
+            "traffic saves queue — a cloud location clears the backlog. "
+            "Switching restarts the memory server (seconds; queued saves "
+            "resume). A runtime-profile switch resets this to the profile's "
+            "default."
         ),
         "category": "Memory",
-        "group": "Hindsight",
+        "group": _WHERE_IT_RUNS,
         "type": "enum",
         "value": current,
         "options": options,
     }
+
+
+def _probe_embed_router(base_url: str) -> Dict[str, Any]:
+    """The embedding router's /health (mode, local_up, remote_configured,
+    model). Empty dict when it does not answer. Module-level seam for tests."""
+    root = rp._server_root(base_url)
+    if not root:
+        return {}
+    try:
+        status, body = rp._http_get(f"{root}/health", _LOCAL_PROBE_TIMEOUT)
+        payload = json.loads(body.decode("utf-8", "replace")) if body else {}
+        return payload if isinstance(payload, dict) and status in (200, 503) else {}
+    except Exception:
+        return {}
+
+
+def _embed_location_setting(env: Dict[str, str]) -> Dict[str, Any]:
+    router_url = (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL") or "").strip()
+    health = _probe_embed_router(router_url) if router_url else {}
+    current = (env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower()
+    if current not in EMBED_ROUTER_MODES:
+        current = "auto"
+    if health:
+        local_state = "ready" if health.get("local_up") else "server not responding"
+        cloud_state = "configured" if health.get("remote_configured") else "no key configured"
+        labels = {
+            "auto": f"Auto (local first, cloud if it fails — local {local_state})",
+            "local": f"Local only ({local_state})",
+            "cloud": f"Cloud only ({cloud_state})",
+        }
+        model = str(health.get("model") or "")
+        note = f"Model is fixed ({model}); the stored vectors belong to it. " if model else ""
+    else:
+        labels = {"auto": "Auto (local first, cloud if it fails)", "local": "Local only", "cloud": "Cloud only"}
+        note = "Embedding router is not answering — the current value is shown, switching will fail. "
+    return {
+        "id": EMBED_LOCATION_SID,
+        "label": "Embedding location",
+        "description": (
+            note + "Where recall queries and new memories are embedded. Local is "
+            "free and fast; cloud costs per token but survives a busy or down "
+            "GPU. Switching restarts the router (seconds)."
+        ),
+        "category": "Memory",
+        "group": _WHERE_IT_RUNS,
+        "type": "enum",
+        "value": current,
+        "options": [{"value": m, "label": labels[m]} for m in EMBED_ROUTER_MODES],
+    }
+
+
+def _embed_router_script() -> Path:
+    return Path(os.environ.get("PARLEY_EMBED_ROUTER_SCRIPT") or _DEFAULT_EMBED_ROUTER_SCRIPT).expanduser()
+
+
+def _apply_embed_router_mode(mode: str) -> None:
+    """Hand the router's mode change to the repo script and wait for it."""
+    script = _embed_router_script()
+    if not script.exists():
+        raise SettingsValidationError(
+            f"embed router script not found at {script}; set PARLEY_EMBED_ROUTER_SCRIPT "
+            f"or check backends/hermes/scripts/ in this repo"
+        )
+    try:
+        proc = subprocess.run(
+            [str(script), mode], capture_output=True, text=True, timeout=_memory_script_timeout(),
+        )
+    except subprocess.TimeoutExpired:
+        raise SettingsValidationError(
+            f"embed router script did not finish within {_memory_script_timeout():.0f}s"
+        )
+    except OSError as e:
+        raise SettingsValidationError(f"could not run {script}: {e}")
+    if proc.returncode != 0:
+        tail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
+        raise SettingsValidationError(
+            "embedding location switch failed: " + (tail[-1] if tail else f"exit {proc.returncode}")
+        )
+
+
+def apply_embed_location_setting(value: Any) -> Dict[str, Any]:
+    """POST /v1/settings/memory_embeddings_location — set the embedding
+    router's mode: validate against its /health → .env → restart."""
+    if not isinstance(value, str) or value.strip().lower() not in EMBED_ROUTER_MODES:
+        raise SettingsValidationError(
+            f"memory_embeddings_location must be one of {', '.join(EMBED_ROUTER_MODES)}"
+        )
+    mode = value.strip().lower()
+    env = read_hermes_env()
+    router_url = (env.get("HINDSIGHT_API_EMBEDDINGS_OPENAI_BASE_URL") or "").strip()
+    health = _probe_embed_router(router_url) if router_url else {}
+    if not health:
+        raise SettingsValidationError("embedding router is not answering; cannot switch its mode")
+    if mode == "local" and not health.get("local_up"):
+        raise SettingsValidationError("cannot switch embeddings to local only: the local embedding server is not responding")
+    if mode == "cloud" and not health.get("remote_configured"):
+        raise SettingsValidationError("cannot switch embeddings to cloud only: the router has no cloud key configured")
+    current = (env.get(ENV_EMBED_ROUTER_MODE) or "auto").strip().lower()
+    if current != mode:
+        _apply_embed_router_mode(mode)
+    logger.info("[parley] memory embedding location now %s", mode)
+    return _updated_def(EMBED_LOCATION_SID, {
+        "id": EMBED_LOCATION_SID, "label": "Embedding location",
+        "category": "Memory", "group": _WHERE_IT_RUNS, "type": "enum", "value": mode, "options": [],
+    })
 
 
 def _probe_memory_location(spec: "rp.MemorySpec") -> "rp.ServerProbe":
@@ -480,28 +620,41 @@ def apply_memory_location_setting(value: Any) -> Dict[str, Any]:
     name = value.strip()
     cfg = read_hermes_config()
     locations = _memory_locations(cfg)
-    spec = locations.get(name)
-    if spec is None:
+    loc = locations.get(name)
+    if loc is None:
         known = ", ".join(sorted(locations)) or "none configured"
         raise SettingsValidationError(
             f"unknown memory location {name!r} (known: {known}; add one under {MEMORY_LOCATIONS_PATH})"
         )
+    spec = loc.spec
+    env = read_hermes_env()
     if _is_loopback(spec.base_url):
         probe = _probe_memory_location(spec)
         if not probe.ok:
             raise SettingsValidationError(f"cannot switch memory to {name}: {probe.detail}")
-    env = read_hermes_env()
+    key_value = None
+    if loc.api_key_env:
+        key_value = (env.get(loc.api_key_env) or "").strip()
+        if not key_value:
+            raise SettingsValidationError(
+                f"cannot switch memory to {name}: {loc.api_key_env} is not set in .env"
+            )
     if _current_memory_location(env, locations) != name:
-        _write_hermes_env({
+        updates: Dict[str, Optional[str]] = {
             rp.ENV_MEMORY_PROVIDER: spec.provider,
             rp.ENV_MEMORY_MODEL: spec.model,
             rp.ENV_MEMORY_BASE_URL: spec.base_url or None,
-        })
+        }
+        if key_value:
+            # hindsight has one key slot for every provider; copy the named
+            # key into it. The value never appears in the schema or the log.
+            updates["HINDSIGHT_API_LLM_API_KEY"] = key_value
+        _write_hermes_env(updates)
         _restart_memory_server(spec)
     logger.info("[parley] memory LLM location now %s (%s)", name, " ".join(spec.as_args()))
     return _updated_def(MEMORY_LOCATION_SID, {
         "id": MEMORY_LOCATION_SID, "label": "Extraction model location",
-        "category": "Memory", "group": "Hindsight", "type": "enum", "value": name, "options": [],
+        "category": "Memory", "group": _WHERE_IT_RUNS, "type": "enum", "value": name, "options": [],
     })
 
 
@@ -520,10 +673,10 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
     hs_cfg = hc.read_config(hs_path)
     hs = hc.effective_values(hs_cfg)
 
-    def _txt(sid: str, label: str, value: str, description: str) -> Dict[str, Any]:
+    def _txt(sid: str, label: str, value: str, description: str, group: str = "Hindsight") -> Dict[str, Any]:
         return {
             "id": sid, "label": label, "description": description,
-            "category": "Memory", "group": "Hindsight", "type": "text", "value": value,
+            "category": "Memory", "group": group, "type": "text", "value": value,
             "readonly": True,
         }
 
@@ -648,13 +801,14 @@ def _memory_settings(cfg: Dict[str, Any], env: Dict[str, str]) -> List[Dict[str,
             "step": 1,
         },
         _memory_location_setting(cfg, env),
+        _embed_location_setting(env),
         _txt("memory_llm", "Extraction model", llm,
-             "What the memory server extracts facts with. Pick where it runs "
-             "with 'Extraction model location' above."),
+             "What the memory server extracts facts with (set by 'Extraction "
+             "model location').", _WHERE_IT_RUNS),
         _txt("memory_embeddings", "Embeddings", embeddings,
-             "The embedding endpoint the memory server indexes with. Not a "
-             "switch: the stored vectors belong to this model, so changing it "
-             "is a full re-index (an ops job, not a setting)."),
+             "The embedding endpoint the memory server indexes with. The model "
+             "is fixed — the stored vectors belong to it, so changing it is a "
+             "full re-index (an ops job, not a setting).", _WHERE_IT_RUNS),
         _txt("memory_status", "Status", memory_status_text(),
              "hindsight-server, its last retain, and LLM errors in 24h."),
         _txt("memory_hindsight_state", "Recall & retain", hindsight_state,
@@ -773,6 +927,8 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
         return apply_runtime_profile_setting(value)
     if sid == MEMORY_LOCATION_SID:
         return apply_memory_location_setting(value)
+    if sid == EMBED_LOCATION_SID:
+        return apply_embed_location_setting(value)
     if sid in _MEMORY_TOGGLES:
         return apply_memory_toggle(sid, value)
     if sid in _HINDSIGHT_SETTINGS:
