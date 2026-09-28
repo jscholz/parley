@@ -120,6 +120,11 @@ function formatReadonlyValue(def: AgentSettingDef): string {
  *  under the row on touch screens (his 2026-09-28 review: the pane read as
  *  a wall of prose with the hints inline). The `.hint` element stays in
  *  the DOM, hidden, so tests and screen readers still find the text. */
+/** Hints the user has opened, by setting id. load() re-renders every row
+ *  (panel open/close, reconnect), so the open state must outlive the DOM
+ *  node or a tapped hint vanishes on the next refresh. */
+const openHints = new Set<string>();
+
 function attachHint(row: HTMLElement, label: HTMLElement, def: AgentSettingDef): void {
   if (!def.description) return;
   const btn = document.createElement('button');
@@ -134,9 +139,14 @@ function attachHint(row: HTMLElement, label: HTMLElement, def: AgentSettingDef):
   hint.id = `agent-hint-${def.id}`;
   hint.textContent = def.description;
   btn.setAttribute('aria-controls', hint.id);
+  if (openHints.has(def.id)) {
+    row.classList.add('hint-open');
+    btn.setAttribute('aria-expanded', 'true');
+  }
   btn.onclick = (e) => {
     e.preventDefault(); e.stopPropagation();
     const open = row.classList.toggle('hint-open');
+    if (open) openHints.add(def.id); else openHints.delete(def.id);
     btn.setAttribute('aria-expanded', String(open));
   };
   label.appendChild(btn);
