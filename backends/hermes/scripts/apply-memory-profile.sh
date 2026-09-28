@@ -45,7 +45,22 @@
 set -euo pipefail
 
 HERMES="${HERMES:-$HOME/.hermes}"
-H_PY="${H_PY:-${HERMES}/hermes-agent/venv/bin/python}"
+# hermes' live interpreter. Since hermes went PM-managed (2026-09-28) it is a
+# generation venv under ~/.hermes/installs/…, recorded in installs/*/facts.json;
+# the legacy hermes-agent/venv still exists but is stale. Resolve, then fall
+# back. Override with H_PY for tests.
+_hermes_py() {
+  local facts env_dir
+  for facts in "${HERMES}"/installs/*/facts.json; do
+    [[ -f "$facts" ]] || continue
+    env_dir=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["packages"]["venv"]["environment"])' "$facts" 2>/dev/null || true)
+    [[ -n "$env_dir" && -x "$env_dir/bin/python" ]] && { echo "$env_dir/bin/python"; return; }
+  done
+  echo "${HERMES}/hermes-agent/venv/bin/python"
+}
+H_PY="${H_PY:-$(_hermes_py)}"
+# HERMES_DISABLE_LAZY_INSTALLS=1 on the call below: a process importing hermes_cli
+# is otherwise re-launched onto the bare store interpreter and loses the venv.
 HS_URL="${HS_URL:-http://127.0.0.1:8765}"
 HS_UNIT="${HS_UNIT:-hindsight-server.service}"
 HS_WAIT_SECONDS="${HS_WAIT_SECONDS:-90}"
@@ -69,7 +84,7 @@ echo "→ hindsight LLM: provider=${PROVIDER} model=${MODEL} base_url=${BASE_URL
 # hindsight reads `os.getenv(...) or None`, so the two are equivalent to it,
 # but a file that only lists what is actually set is the one you can read in
 # an incident.
-env -u PYTHONPATH "${H_PY}" - "${PROVIDER}" "${MODEL}" "${BASE_URL}" <<'PY'
+env -u PYTHONPATH HERMES_DISABLE_LAZY_INSTALLS=1 "${H_PY}" - "${PROVIDER}" "${MODEL}" "${BASE_URL}" <<'PY'
 import sys
 from hermes_cli.config import get_env_path, remove_env_value, save_env_value
 

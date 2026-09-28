@@ -21,7 +21,22 @@
 # ``_apply_embed_router_mode``); process control stays out of Parley's Python.
 set -euo pipefail
 HERMES="${HERMES:-$HOME/.hermes}"
-H_PY="${H_PY:-${HERMES}/hermes-agent/venv/bin/python}"
+# hermes' live interpreter. Since hermes went PM-managed (2026-09-28) it is a
+# generation venv under ~/.hermes/installs/…, recorded in installs/*/facts.json;
+# the legacy hermes-agent/venv still exists but is stale. Resolve, then fall
+# back. Override with H_PY for tests.
+_hermes_py() {
+  local facts env_dir
+  for facts in "${HERMES}"/installs/*/facts.json; do
+    [[ -f "$facts" ]] || continue
+    env_dir=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["packages"]["venv"]["environment"])' "$facts" 2>/dev/null || true)
+    [[ -n "$env_dir" && -x "$env_dir/bin/python" ]] && { echo "$env_dir/bin/python"; return; }
+  done
+  echo "${HERMES}/hermes-agent/venv/bin/python"
+}
+H_PY="${H_PY:-$(_hermes_py)}"
+# HERMES_DISABLE_LAZY_INSTALLS=1 on the call below: a process importing hermes_cli
+# is otherwise re-launched onto the bare store interpreter and loses the venv.
 ER_URL="${EMBED_ROUTER_URL:-http://127.0.0.1:8012}"
 ER_UNIT="${EMBED_ROUTER_UNIT:-parley-embed-router.service}"
 ER_WAIT_SECONDS="${ER_WAIT_SECONDS:-60}"
@@ -33,7 +48,7 @@ case "${MODE}" in auto|local|cloud) ;; *) usage ;; esac
 [[ -x "${H_PY}" ]] || { echo "no hermes python at ${H_PY}" >&2; exit 1; }
 
 echo "→ embedding router mode: ${MODE}"
-env -u PYTHONPATH "${H_PY}" - "${MODE}" <<'PY'
+env -u PYTHONPATH HERMES_DISABLE_LAZY_INSTALLS=1 "${H_PY}" - "${MODE}" <<'PY'
 import sys
 from hermes_cli.config import get_env_path, save_env_value
 save_env_value("EMBED_ROUTER_MODE", sys.argv[1])
