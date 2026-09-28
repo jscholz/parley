@@ -28,6 +28,15 @@ provides_hooks:
   - pre_tool_call
   - post_tool_call
 provides_tools: []
+# Python packages this plugin needs beyond hermes core. Since hermes went
+# PM-managed (2026-09-28) every plugin install/update mints a fresh, locked
+# environment from core + the ENABLED plugins' declarations; anything
+# installed by hand (`uv pip install …`) vanishes with the next generation —
+# which is exactly how Parley lost web push (py_vapid) after that update.
+# aiohttp / pyyaml / cryptography ride in with core.
+pip_dependencies:
+  - "pywebpush>=2.0.0"
+  - "py-vapid>=1.9.0"
 requires_env:
   - name: PARLEY_PLATFORM_TOKEN
     description: "Bearer token the parley proxy uses on every WS message + HTTP call to this plugin"
