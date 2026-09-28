@@ -145,9 +145,9 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
     groups = [s.get("group") for s in full]
     assert groups == sorted(groups, key=groups.index)
     assert [g for g in dict.fromkeys(groups)] == [None, "Where models run", "Memory · Hermes notes", "Memory · Hindsight"]
-    # every hint is one short sentence or two — the pane is scanned, not read
+    # every hint is a short tooltip — the pane is scanned, not read
     for s_def in full:
-        assert len(s_def.get("description", "")) <= 150, (s_def["id"], len(s_def["description"]))
+        assert len(s_def.get("description", "")) <= 200, (s_def["id"], len(s_def["description"]))
     # groups
     assert schema["memory_enabled"]["group"] == "Memory · Hermes notes"
     assert schema["memory_user_profile"]["group"] == "Memory · Hermes notes"
@@ -180,10 +180,12 @@ def test_memory_section_fields_and_readonly_flags(sandbox):
     # writable ones must NOT be marked readonly
     assert "readonly" not in schema["memory_enabled"]
     assert "readonly" not in schema["memory_recall"]
-    # what the memory model / embeddings currently ARE rides on the two
-    # location rows' hints (the former readonly rows, folded in)
-    assert "Now: openai-codex · gpt-5.4-mini." in schema["memory_llm_location"]["description"]
-    assert "Now: qwen3-embedding-4b, local ready, cloud configured." in schema["memory_embeddings_location"]["description"]
+    # the model names ride on the rows themselves (option labels / the
+    # embeddings label), never in the hint — "everything after ; is TMI"
+    assert schema["memory_llm_location"]["options"][0]["label"] == "Follow profile → openai-codex (gpt-5.4-mini)"
+    assert schema["memory_embeddings_location"]["label"] == "Memory embeddings (qwen3-embedding-4b)"
+    assert "Now:" not in schema["memory_llm_location"]["description"]
+    assert ";" not in schema["memory_embeddings_location"]["description"]
 
 
 def test_hindsight_file_values_show_in_the_knobs_once_one_exists(sandbox):
@@ -196,12 +198,15 @@ def test_hindsight_file_values_show_in_the_knobs_once_one_exists(sandbox):
     assert schema["memory_recall_budget"]["value"] == "low"
 
 
-def test_memory_model_hint_shows_the_local_endpoint_in_local_mode(sandbox):
-    sandbox["env"]["HINDSIGHT_API_LLM_PROVIDER"] = "lmstudio"
-    sandbox["env"]["HINDSIGHT_API_LLM_MODEL"] = "qwen3.6-35b-a3b"
-    sandbox["env"]["HINDSIGHT_API_LLM_BASE_URL"] = "http://127.0.0.1:8000/v1"
-    d = _by_id(st.build_settings_schema())["memory_llm_location"]["description"]
-    assert d.endswith("Now: lmstudio · qwen3.6-35b-a3b @ http://127.0.0.1:8000/v1.")
+def test_memory_model_options_carry_the_model_and_only_flag_problems(sandbox):
+    opts = {o["value"]: o["label"] for o in _by_id(st.build_settings_schema())["memory_llm_location"]["options"]}
+    assert opts["local"] == "Local (qwen3.6-35b-a3b)"          # ready → no suffix
+    assert opts["cloud"] == "Cloud (qwen/qwen3.6-35b-a3b)"
+    sandbox["probe"] = DOWN
+    sandbox["env"].pop("OPENROUTER_API_KEY")
+    opts = {o["value"]: o["label"] for o in _by_id(st.build_settings_schema())["memory_llm_location"]["options"]}
+    assert opts["local"] == "Local (qwen3.6-35b-a3b) — not responding"
+    assert opts["cloud"] == "Cloud (qwen/qwen3.6-35b-a3b) — no OPENROUTER_API_KEY"
 
 
 def test_model_picker_lists_the_local_server_in_local_mode(sandbox):
@@ -513,10 +518,10 @@ def test_memory_location_is_declared_from_config_and_reflects_env(sandbox):
     # is offered) — but the seeded cloud profile is a photograph of that same
     # env and the pin is "profile", so the row honestly reads "following".
     assert row["value"] == "profile"
-    assert row["options"][0]["label"] == "Follow profile → openai-codex · gpt-5.4-mini"
+    assert row["options"][0]["label"] == "Follow profile → openai-codex (gpt-5.4-mini)"
     sandbox["cfg"]["parley"]["memory_locations"]["llm_selected"] = "local"   # a pin .env doesn't honour
     assert _by_id(st.build_settings_schema())["memory_llm_location"]["value"] == "custom"
-    assert "ready" in [o for o in row["options"] if o["value"] == "local"][0]["label"]
+    assert [o for o in row["options"] if o["value"] == "local"][0]["label"] == "Local (qwen3.6-35b-a3b)"
 
 
 def test_memory_location_value_matches_env(sandbox):
@@ -564,7 +569,7 @@ def test_apply_memory_location_refuses_when_the_named_key_is_missing(sandbox):
         st.apply_setting("memory_llm_location", "cloud")
     assert sandbox["env_writes"] == [] and sandbox["script"] == []
     label = [o for o in _by_id(st.build_settings_schema())["memory_llm_location"]["options"] if o["value"] == "cloud"][0]["label"]
-    assert "no OPENROUTER_API_KEY" in label
+    assert label.endswith("— no OPENROUTER_API_KEY")
 
 
 def test_schema_never_contains_a_key_value(sandbox):
@@ -579,9 +584,9 @@ def test_embed_location_is_declared_from_router_health(sandbox):
     assert [o["value"] for o in row["options"]] == ["profile", "auto", "local", "cloud"]
     # no EMBED_ROUTER_MODE in env (= auto), profile silent (= auto), marker "profile" → follows
     assert row["value"] == "profile"
-    assert row["options"][0]["label"] == "Follow profile → auto"
-    assert "local ready" in row["options"][1]["label"]
-    assert "qwen3-embedding-4b" in row["description"]
+    assert row["options"][0]["label"] == "Follow profile → Auto"
+    assert row["options"][1]["label"] == "Auto (local first, cloud if it fails)"   # ready → no suffix
+    assert row["label"] == "Memory embeddings (qwen3-embedding-4b)"
     both = [s for s in st.build_settings_schema() if s.get("group") == "Where models run"]
     assert [s["id"] for s in both] == ["runtime_profile", "memory_llm_location", "memory_embeddings_location"]
 
@@ -591,7 +596,7 @@ def test_embed_location_reflects_env_and_a_dead_router(sandbox):
     sandbox["cfg"]["parley"]["memory_locations"]["embeddings_selected"] = "cloud"
     sandbox["router"] = {}
     row = _by_id(st.build_settings_schema())["memory_embeddings_location"]
-    assert row["value"] == "cloud" and "not answering" in row["description"]
+    assert row["value"] == "cloud" and "not answering" in row["description"] and row["label"] == "Memory embeddings"
 
 
 def test_apply_embed_location_runs_the_script_once_and_pins(sandbox):
@@ -618,7 +623,7 @@ def test_follow_profile_for_the_llm_resolves_the_active_profile(sandbox):
     assert sandbox["script"] == [["lmstudio", "qwen3.6-35b-a3b", "http://127.0.0.1:8000/v1"]]
     assert sandbox["markers"] == []            # already on "profile" — nothing to rewrite
     row = _by_id(st.build_settings_schema())["memory_llm_location"]
-    assert row["value"] == "profile" and row["options"][0]["label"] == "Follow profile → local"
+    assert row["value"] == "profile" and row["options"][0]["label"] == "Follow profile → Local (qwen3.6-35b-a3b)"
 
 
 def test_profile_switch_leaves_a_pinned_llm_alone_but_follows_for_embeddings(sandbox):

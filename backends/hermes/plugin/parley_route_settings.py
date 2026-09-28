@@ -512,18 +512,29 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
     p_model = str(pmem.get("llm_model") or "").strip()
     p_base = str(pmem.get("llm_base_url") or "").strip()
     p_name = _location_for_spec(locations, p_provider, p_model, p_base)
-    resolved = p_name or (f"{p_provider} · {p_model}" if p_provider else "profile sets nothing")
-    options = [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {resolved}"}]
-    for name, loc in locations.items():
+
+    def _option_label(name: str, loc: MemoryLocation) -> str:
+        """``Local (qwen3.6-35b-a3b)`` — the model in parentheses; a problem
+        (server down, key missing) is appended only when there is one."""
         spec = loc.spec
-        label = name.capitalize()
-        detail = f"{spec.provider} · {spec.model}"
+        label = f"{name.capitalize()} ({spec.model})"
         if _is_loopback(spec.base_url):
             probe = _probe_memory_location(spec)
-            detail += " — " + ("ready" if probe.ok else probe.detail)
+            if not probe.ok:
+                label += " — not responding"
         elif loc.api_key_env and not (env.get(loc.api_key_env) or "").strip():
-            detail += f" — no {loc.api_key_env} in .env"
-        options.append({"value": name, "label": f"{label} ({detail})"})
+            label += f" — no {loc.api_key_env}"
+        return label
+
+    if p_name:
+        resolved = _option_label(p_name, locations[p_name])
+    elif p_provider:
+        resolved = f"{p_provider} ({p_model})"
+    else:
+        resolved = "nothing set"
+    options = [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {resolved}"}]
+    for name, loc in locations.items():
+        options.append({"value": name, "label": _option_label(name, loc)})
     if current == _MEMORY_LOCATION_CUSTOM:
         options.append({"value": _MEMORY_LOCATION_CUSTOM, "label": "Custom (as configured in .env)"})
     # Value: the pin when it is honoured by .env; otherwise what .env says
@@ -533,16 +544,13 @@ def _memory_location_setting(cfg: Dict[str, Any], env: Dict[str, str]) -> Dict[s
         value = FOLLOW_PROFILE if (p_name or _MEMORY_LOCATION_CUSTOM) == current or not p_provider else current
     else:
         value = pinned if pinned == current else current
-    now = " · ".join(x for x in (
-        (env.get(rp.ENV_MEMORY_PROVIDER) or "").strip(), (env.get(rp.ENV_MEMORY_MODEL) or "").strip()) if x)
-    base = (env.get(rp.ENV_MEMORY_BASE_URL) or "").strip()
-    now = f"{now} @ {base}" if base else (now or "not configured")
     return {
         "id": MEMORY_LOCATION_SID,
         "label": "Memory model",
         "description": (
-            f"Extracts facts when memories are saved (local: ~2 min per save, one at a time). "
-            f"Now: {now}."
+            "Extracts facts when memories are saved. Local runs one save at a "
+            "time (about 2 min each); pick Cloud to clear a backlog. Switching "
+            "restarts the memory server."
         ),
         "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
@@ -577,28 +585,30 @@ def _embed_location_setting(env: Dict[str, str]) -> Dict[str, Any]:
     active, pmem = _profile_memory(cfg, env)
     p_mode = str(pmem.get("embeddings_mode") or "").strip().lower() or "auto"
     value = FOLLOW_PROFILE if (pinned == FOLLOW_PROFILE and p_mode == current) else current
+    labels = {"auto": "Auto (local first, cloud if it fails)", "local": "Local only", "cloud": "Cloud only"}
+    model = str(health.get("model") or "") if health else ""
     if health:
-        local_state = "ready" if health.get("local_up") else "server not responding"
-        cloud_state = "configured" if health.get("remote_configured") else "no key configured"
-        labels = {
-            "auto": f"Auto (local first, cloud if it fails — local {local_state})",
-            "local": f"Local only ({local_state})",
-            "cloud": f"Cloud only ({cloud_state})",
-        }
-        model = str(health.get("model") or "")
-        note = f"Now: {model or 'embedding router'}, local {local_state}, cloud {cloud_state}."
-    else:
-        labels = {"auto": "Auto (local first, cloud if it fails)", "local": "Local only", "cloud": "Cloud only"}
-        note = "Embedding router is not answering; switching will fail."
+        # a problem is appended only when there is one
+        if not health.get("local_up"):
+            labels["local"] += " — not responding"
+            labels["auto"] += " — local not responding"
+        if not health.get("remote_configured"):
+            labels["cloud"] += " — no key"
+    label = f"Memory embeddings ({model})" if model else "Memory embeddings"
+    problem = "" if health else " The embedding router is not answering, so switching will fail."
     return {
         "id": EMBED_LOCATION_SID,
-        "label": "Memory embeddings",
-        "description": f"Where memories and recall queries are embedded; the model itself is fixed. {note}",
+        "label": label,
+        "description": (
+            "Where memories and recall queries are embedded. Auto tries the local "
+            "server first and falls back to the cloud. The model is fixed, so "
+            "changing it means a re-index." + problem
+        ),
         "category": MEMORY_CATEGORY,
         "group": _WHERE_IT_RUNS,
         "type": "enum",
         "value": value,
-        "options": [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {p_mode}"}]
+        "options": [{"value": FOLLOW_PROFILE, "label": f"Follow profile → {labels[p_mode].split(' (')[0].split(' —')[0]}"}]
                    + [{"value": m, "label": labels[m]} for m in EMBED_ROUTER_MODES],
     }
 

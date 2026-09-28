@@ -115,6 +115,34 @@ function formatReadonlyValue(def: AgentSettingDef): string {
 /** Render one SettingDef into a `.row` element. Returns null when the
  *  type is unknown so the caller can skip silently — forks may declare
  *  new types we don't render here (no harm done; they just don't show). */
+/** A setting's description is help, not content: it lives behind an ⓘ
+ *  next to the label — native tooltip on hover, tap to reveal the line
+ *  under the row on touch screens (his 2026-09-28 review: the pane read as
+ *  a wall of prose with the hints inline). The `.hint` element stays in
+ *  the DOM, hidden, so tests and screen readers still find the text. */
+function attachHint(row: HTMLElement, label: HTMLElement, def: AgentSettingDef): void {
+  if (!def.description) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'agent-hint-btn';
+  btn.textContent = 'ⓘ';
+  btn.title = def.description;
+  btn.setAttribute('aria-label', `About ${def.label}`);
+  btn.setAttribute('aria-expanded', 'false');
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.id = `agent-hint-${def.id}`;
+  hint.textContent = def.description;
+  btn.setAttribute('aria-controls', hint.id);
+  btn.onclick = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const open = row.classList.toggle('hint-open');
+    btn.setAttribute('aria-expanded', String(open));
+  };
+  label.appendChild(btn);
+  row.appendChild(hint);
+}
+
 function renderRow(def: AgentSettingDef): HTMLElement | null {
   const row = document.createElement('div');
   row.className = 'row';
@@ -136,12 +164,7 @@ function renderRow(def: AgentSettingDef): HTMLElement | null {
     val.dataset.agentSettingValue = def.id;
     val.textContent = formatReadonlyValue(def);
     row.appendChild(val);
-    if (def.description) {
-      const hint = document.createElement('span');
-      hint.className = 'hint';
-      hint.textContent = def.description;
-      row.appendChild(hint);
-    }
+    attachHint(row, label, def);
     return row;
   }
 
@@ -303,12 +326,7 @@ function renderRow(def: AgentSettingDef): HTMLElement | null {
 
   row.appendChild(input);
 
-  if (def.description) {
-    const hint = document.createElement('span');
-    hint.className = 'hint';
-    hint.textContent = def.description;
-    row.appendChild(hint);
-  }
+  attachHint(row, label, def);
   return row;
 }
 

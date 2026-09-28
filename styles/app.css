@@ -1508,7 +1508,6 @@
       grid-template-columns: minmax(0, 1fr) auto;
     }
     #settings .row[data-agent-setting]:not(.row-wide):has(input[type=range]) > input[type=range] { grid-column: 1 / -1; }
-    #settings .row[data-agent-setting]:not(.row-wide) > .hint { grid-column: 1 / -1; margin-top: 2px; }
     /* Hint drops to its own line below the input on phones — the third
        column has no width to spare for prose, and squeezing it produced
        one-word-per-line wrapping. Mirrors the .row-wide treatment. */
@@ -1643,23 +1642,36 @@
     background: var(--surface-2);
   }
   #settings .row { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
-  /* Agent-declared rows (src/agentSettings.ts renderRow): a fixed three-
-     column grid — label | control | hint — so toggles, selects and value
-     lines line up down the pane instead of each row packing its own way
-     (his 2026-09-28 review: "the col alignment is shit"). The string-list
-     row (chips + input) stays a wrapped flex row. Mobile (below) collapses
-     the grid so the hint drops under the control. */
+  /* Agent-declared rows (src/agentSettings.ts renderRow): label | control on
+     a fixed grid so toggles, selects and value lines line up down the pane.
+     The description is help, not content: an ⓘ after the label carries it
+     as a tooltip; tapping the ⓘ (touch screens have no hover) reveals the
+     `.hint` line under the row. Slider rows add a narrow column for the
+     value readout (the range and readout are separate grid children). The
+     string-list row (chips + input) stays a wrapped flex row. */
   #settings .row[data-agent-setting]:not(.row-wide) {
-    display: grid; grid-template-columns: 190px minmax(220px, 1fr) minmax(0, 1.3fr);
+    display: grid; grid-template-columns: 220px minmax(220px, 1fr);
     column-gap: 16px; align-items: center;
   }
-  /* Slider rows: the range + its value readout are separate grid children
-     (renderRow wraps them in display:contents), so give the readout its
-     own narrow column and keep the hint in the last one. */
   #settings .row[data-agent-setting]:not(.row-wide):has(input[type=range]) {
-    grid-template-columns: 190px minmax(180px, 1fr) 3.5em minmax(0, 1.3fr);
+    grid-template-columns: 220px minmax(180px, 1fr) 3.5em;
   }
+  #settings .row[data-agent-setting]:not(.row-wide) > label { min-width: 0; }
+  #settings .row[data-agent-setting]:not(.row-wide) > select,
+  #settings .row[data-agent-setting]:not(.row-wide) > input[type=text],
+  #settings .row[data-agent-setting]:not(.row-wide) > input[type=range] { width: 100%; justify-self: stretch; }
+  #settings .row[data-agent-setting]:not(.row-wide) > .agent-setting-value { min-width: 0; }
   #settings .row[data-agent-setting]:not(.row-wide) > .val { text-align: right; font-family: var(--font-mono); }
+  #settings .row[data-agent-setting] > .hint { display: none; }
+  #settings .row[data-agent-setting].hint-open > .hint {
+    display: block; grid-column: 1 / -1; margin: 2px 0 4px; min-width: 0;
+  }
+  #settings .agent-hint-btn {
+    background: none; border: none; color: var(--muted); opacity: 0.6;
+    font-size: calc(var(--content-size) - 1px); line-height: 1; padding: 0 4px; margin-left: 2px;
+    cursor: help; vertical-align: middle;
+  }
+  #settings .agent-hint-btn:hover, #settings .row.hint-open .agent-hint-btn { opacity: 1; color: var(--primary); }
   #settings .row[data-agent-setting]:not(.row-wide) > label { min-width: 0; }
   #settings .row[data-agent-setting]:not(.row-wide) > select,
   #settings .row[data-agent-setting]:not(.row-wide) > input[type=text],
