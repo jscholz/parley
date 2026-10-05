@@ -496,7 +496,8 @@ export function init(): void {
  *  client did. `lastEventId` advances so reconnects resume from the
  *  cursor and pick up the plugin's bounded replay ring without
  *  re-rendering the recent firehose. */
-async function runUpstreamEventsLoop(
+/** Exported for the leak regression test (stream-events-loop.test.ts); production enters via init(). */
+export async function runUpstreamEventsLoop(
   upstream: UpstreamAgent,
   signal: AbortSignal,
 ): Promise<void> {
@@ -522,12 +523,19 @@ async function runUpstreamEventsLoop(
       Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)
     ];
     attempt += 1;
+    // The abort listener must come OFF when the timer fires normally:
+    // `signal` lives for the whole process and this loop reconnects every
+    // few minutes (the upstream SSE is terminated on a cadence), so a
+    // `{ once: true }` listener that only fires on abort was one more
+    // listener per reconnect forever — 2,600 of them and a
+    // MaxListenersExceededWarning every reconnect by 2026-10-05.
     await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, delay);
-      signal.addEventListener('abort', () => {
-        clearTimeout(t);
+      const onAbort = () => { clearTimeout(t); resolve(); };
+      const t = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
         resolve();
-      }, { once: true });
+      }, delay);
+      signal.addEventListener('abort', onAbort, { once: true });
     });
   }
 }
