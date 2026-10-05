@@ -2143,6 +2143,41 @@ class ParleyAdapter(BasePlatformAdapter):
                 "[parley] notification persist failed (non-fatal): %s", exc
             )
 
+    async def open_branch_destination(self, source, title: str):
+        """``/branch`` destination: a NEW Parley chat carrying the clone.
+
+        Hermes forks a session with ``/branch`` and, on thread platforms,
+        opens a sibling thread for the copy so the current chat stays on
+        the original (#66023). Parley has no threads and routes purely by
+        chat_id, so the sibling is a fresh chat: mint an id in the same
+        bare-uuid shape the PWA's ``mintChatId()`` produces, build the
+        source exactly as an inbound message on that chat would (same
+        session key, ``dm``, one user per chat), and hand back a markdown
+        link the PWA deep-links through (``/?chat=parley:<id>``). The
+        drawer picks the new row up on its next poll (≤5 s; the summaries
+        cache is flushed here so that poll sees it). Hermes calls this via
+        the galatea-local ``open_branch_destination`` hook in
+        ``gateway/slash_commands_session.py`` — see
+        hermes-agent-private/hermes-local-patches/branch_open_destination.patch.
+        Returning None would branch in place (the pre-2026-10-05 behaviour).
+        """
+        new_chat_id = str(uuid.uuid4())
+        self._known_chat_ids.add(new_chat_id)
+        dest = self.build_source(
+            chat_id=new_chat_id,
+            chat_name=f"parley:{new_chat_id[:8]}",
+            chat_type="dm",
+            user_id=new_chat_id,
+            user_name="parley-user",
+        )
+        ref = f"[open the new chat](/?chat={PARLEY_SOURCE}:{new_chat_id})"
+        with contextlib.suppress(Exception):
+            self.invalidate_session_rows_cache()
+            from . import parley_route_conversations as _route_conv
+            _route_conv.invalidate_summaries_cache()
+        logger.info("[parley] /branch → new chat %s (%r)", new_chat_id, title)
+        return dest, ref
+
     def _resolve_session_id_for_chat(self, chat_id_bare: str) -> Optional[str]:
         """Best-effort: return the latest active state.db session_id
         for a parley chat. Used by notification persistence so the
