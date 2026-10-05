@@ -7,7 +7,7 @@
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'capture-start-recorder-throw-aborts-in-place';
-export const DESCRIPTION = 'MediaRecorder.start() throw: pending → failed via abort-start; no DELETE, no activation';
+export const DESCRIPTION = 'MediaRecorder.start() throw: no server capture is ever created (offline-first start); no DELETE, no activation';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -25,27 +25,26 @@ export default async function run({ page, log, mock }) {
 
   await page.keyboard.press('Control+Shift+M');
 
+  // Offline-first start (2026-10-05): the server capture is created by the
+  // uploader AFTER a verified recorder, so a recorder that throws leaves
+  // nothing server-side at all — no pending husk, no abort-start, no DELETE.
   const t0 = Date.now();
-  let cap = null;
+  let hidden = false;
   while (Date.now() - t0 < 10_000) {
-    cap = mock.getCaptures()[0] || null;
-    if (cap && cap.status === 'failed') break;
+    hidden = await page.evaluate(() => { const el = document.getElementById('capture-pill'); return !el || el.hidden; });
+    if (hidden) break;
     await new Promise((r) => setTimeout(r, 100));
   }
-  assert(cap, 'no capture was created');
-  assert(cap.status === 'failed', `capture should be failed in place, got ${cap.status}`);
-  assert(/MediaRecorder/i.test(cap.failed_reason || ''),
-    `failed_reason should name the recorder, got: "${cap.failed_reason}"`);
-
-  const actions = mock.getCaptureLifecycle().map((e) => e.action);
-  assert(actions.includes('abort-start'),
-    `abort-start missing from lifecycle (got: ${actions.join(', ')})`);
-  assert(!actions.includes('delete'),
-    'DELETE was called on a recorder-start failure — the postmortem data-loss path');
-  assert(!actions.includes('activate') && !actions.includes('activate-implied'),
-    'a recorder that never started must never activate the capture');
-
-  const hidden = await page.evaluate(() => document.getElementById('capture-pill')?.hidden);
   assert(hidden, 'pill should be hidden after the startup failure');
-  log(`recorder-start throw → failed in place ("${cap.failed_reason}"); lifecycle: ${actions.join(' → ')}`);
+  await new Promise((r) => setTimeout(r, 500));
+  assert(mock.getCaptures().length === 0,
+    `a recorder that never started must leave no server capture, got ${mock.getCaptures().length}`);
+  const actions = mock.getCaptureLifecycle().map((e) => e.action);
+  assert(actions.length === 0, `no lifecycle call may fire (got: ${actions.join(', ')})`);
+  const ledger = await page.evaluate(async () => {
+    const mod = await import('/build/capture/segmentStore.mjs');
+    return (await mod.listLedger()).length;
+  });
+  assert(ledger === 0, `ledger should be empty after a failed start, got ${ledger} row(s)`);
+  log('recorder-start throw → nothing server-side, pill hidden, ledger empty');
 }

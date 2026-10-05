@@ -637,11 +637,17 @@ export async function installMockBackend(page) {
   const captures = new Map();
   const captureLifecycle = [];   // { action, id, body? } in arrival order
   let captureOutage = false;
+  // `setCaptureOffline(true)` = NO network at all for the capture API:
+  // every request aborts like a phone in a windowless room (offline-first
+  // meeting mode, 2026-10-05). Distinct from the outage, which answers.
+  let captureOffline = false;
+  const offlineAbort = (route) => route.abort('internetdisconnected');
   // Regex, not the '**/api/parley/captures' glob: globs must match the
   // FULL url, so `?include=discarded` (the Recently-Deleted UI's opt-in
   // view, B2) fell through to the real isolated server — which knows
   // none of the mock's captures and answered an empty list.
   await page.route(/.*\/api\/parley\/captures(?:\?.*)?$/, async (route) => {
+    if (captureOffline) return offlineAbort(route);
     // GET = the capture list meetingsIndex fetches at boot (and on
     // capture_changed envelopes). Served from the mock's map so
     // has-recording drawer state is test-controlled — falling back to
@@ -661,13 +667,27 @@ export async function installMockBackend(page) {
     if (route.request().method() !== 'POST') return route.fallback();
     let body;
     try { body = JSON.parse(route.request().postData() || '{}'); } catch { body = {}; }
-    const id = `cap_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    // Client-minted id (offline-first recorder): adopt it verbatim; a
+    // replay of a known id answers 200 with the existing manifest —
+    // matches proxy/parley/capture.ts createOrGetCapture.
+    if (typeof body.id === 'string' && body.id) {
+      if (!/^cap_[0-9]+_[0-9a-f]{6}$/.test(body.id)) {
+        return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: `invalid capture id: ${body.id}` }) });
+      }
+      const existing = captures.get(body.id);
+      if (existing) {
+        captureLifecycle.push({ action: 'create-replay', id: body.id });
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ capture: existing }) });
+      }
+    }
+    const id = (typeof body.id === 'string' && body.id) || `cap_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
     const capture = {
       id,
       title: body.title || `Meeting ${new Date().toISOString().slice(0, 10)}`,
       linked_chat: body.linked_chat === 'new'
         ? `parley:mock-capture-${Math.random().toString(16).slice(2, 8)}`
         : (body.linked_chat || null),
+      ...(body.minted_session === true ? { minted_session: true } : {}),
       diarize: body.diarize !== false,
       status: 'pending',
       started_at: Date.now(),
@@ -683,6 +703,7 @@ export async function installMockBackend(page) {
   // Two-phase lifecycle verbs (postmortem 2026-08-18): activate,
   // abort-start, discard, restore, purge. One route, dispatch on tail.
   await page.route(/.*\/api\/parley\/captures\/[^/]+\/(activate|abort-start|discard|restore|purge)$/, async (route) => {
+    if (captureOffline) return offlineAbort(route);
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname
       .match(/\/captures\/([^/]+)\/(activate|abort-start|discard|restore|purge)$/);
@@ -735,6 +756,7 @@ export async function installMockBackend(page) {
     return reply(200, { ok: true, purged: cap.id });
   });
   await page.route(/.*\/api\/parley\/captures\/[^/]+\/segments\/\d+$/, async (route) => {
+    if (captureOffline) return offlineAbort(route);
     if (route.request().method() !== 'POST') return route.fallback();
     if (captureOutage) {
       return route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"outage"}' });
@@ -765,6 +787,7 @@ export async function installMockBackend(page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, seq, duplicate }) });
   });
   await page.route(/.*\/api\/parley\/captures\/[^/]+\/stop$/, async (route) => {
+    if (captureOffline) return offlineAbort(route);
     if (route.request().method() !== 'POST') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)\/stop$/);
     const cap = captures.get(m ? m[1] : '');
@@ -1780,6 +1803,8 @@ export async function installMockBackend(page) {
       }
     },
     setCaptureOutage(on) { captureOutage = !!on; },
+    /** No network at all for the capture API (requests abort). */
+    setCaptureOffline(on) { captureOffline = !!on; },
     getCaptures() { return Array.from(captures.values()); },
     /** Force a capture into a terminal state SERVER-SIDE without the
      *  client doing it — models the stale-heal sweep failing a recording

@@ -12,7 +12,7 @@
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'capture-start-delayed-gum-honest-pill';
-export const DESCRIPTION = 'hanging gUM: pill shows Starting…, capture stays pending, zero transitions; grant → single activate';
+export const DESCRIPTION = 'hanging gUM: pill shows Starting…, nothing exists server-side, zero transitions; grant → single create + activate';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 // The incident was an iPhone — run the delayed-gUM scenario in the
@@ -49,12 +49,14 @@ export default async function run({ page, log, mock }) {
   // Hold the acquisition (bounded miniature of the 21-minute hang;
   // well under the client's 20s startup timeout).
   await new Promise((r) => setTimeout(r, 3000));
-  let cap = mock.getCaptures()[0];
-  assert(cap, 'a pending capture should exist server-side');
-  assert(cap.status === 'pending', `capture must STAY pending while gUM hangs, got ${cap.status}`);
-  const during = mock.getCaptureLifecycle().map((e) => e.action).filter((a) => a !== 'create');
+  // Offline-first start (2026-10-05): the server is told about a capture
+  // only once a recorder is verified running, so during the hang there
+  // is nothing server-side at all — the strongest possible "no announce".
+  assert(mock.getCaptures().length === 0,
+    `nothing may exist server-side while gUM hangs, got ${mock.getCaptures().length} capture(s)`);
+  const during = mock.getCaptureLifecycle().map((e) => e.action);
   assert(during.length === 0,
-    `no lifecycle transition may fire while gUM is pending (got: ${during.join(', ')})`);
+    `no lifecycle call may fire while gUM is pending (got: ${during.join(', ')})`);
   const stillStarting = await page.evaluate(() => {
     const pill = document.getElementById('capture-pill');
     return !!(pill && !pill.hidden && pill.classList.contains('starting'));
@@ -75,12 +77,15 @@ export default async function run({ page, log, mock }) {
   while (Date.now() - t0 < 5000 && mock.getCaptures()[0]?.status !== 'recording') {
     await new Promise((r) => setTimeout(r, 100));
   }
-  cap = mock.getCaptures()[0];
+  const cap = mock.getCaptures()[0];
+  assert(cap, 'the grant should register exactly one capture server-side');
   assert(cap.status === 'recording', `capture should be recording after the grant, got ${cap.status}`);
+  const creates = mock.getCaptureLifecycle().filter((e) => e.action === 'create').length;
   const activates = mock.getCaptureLifecycle()
     .filter((e) => e.action === 'activate' || e.action === 'activate-implied').length;
+  assert(creates === 1, `exactly one create expected, got ${creates}`);
   assert(activates === 1, `exactly one activation expected, got ${activates}`);
-  log('grant → single activate → recording');
+  log('grant → single create + activate → recording');
 
   // Normal stop still works after the slow start.
   await page.keyboard.press('Control+Shift+M');

@@ -526,3 +526,75 @@ test('stall: healthy audio never trips the detector', async () => {
   assert.equal(m.stalled_since, undefined, 'recent audio must not be flagged');
   assert.equal(m.status, 'recording');
 });
+
+// ── offline-first meeting mode (2026-10-05) ───────────────────────────
+
+test('client-minted id: create adopts it verbatim; a replay returns the same capture (created=false)', async () => {
+  const { createOrGetCapture } = await import('../capture.ts');
+  const first = await createOrGetCapture({ id: 'cap_1700000000000_abcdef', title: 'Room with no wifi', linkedChat: 'parley:x', mintedSession: true });
+  assert.equal(first.created, true);
+  assert.equal(first.manifest.id, 'cap_1700000000000_abcdef');
+  assert.equal(first.manifest.minted_session, true);
+  await activateCapture(first.manifest.id);
+  const again = await createOrGetCapture({ id: 'cap_1700000000000_abcdef', title: 'ignored' });
+  assert.equal(again.created, false);
+  assert.equal(again.manifest.status, 'recording');       // untouched by the replay
+  assert.equal(again.manifest.title, 'Room with no wifi');
+  // The one-active rule does not fire on the replay of the active capture itself.
+  await assert.rejects(createCapture({ title: 'Someone else' }), (e: any) => e.status === 409);
+});
+
+test('client-minted id must have the server shape (path safety)', async () => {
+  const { createOrGetCapture } = await import('../capture.ts');
+  await assert.rejects(createOrGetCapture({ id: '../etc' }), (e: any) => e.status === 400);
+  await assert.rejects(createOrGetCapture({ id: 'cap_x_zz' }), (e: any) => e.status === 400);
+});
+
+async function ageOut(id: string): Promise<void> {
+  const mp = path.join(dir, id, 'manifest.json');
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  const raw = JSON.parse(await fs.readFile(mp, 'utf8'));
+  raw.started_at = Date.now() - 12 * 60 * 1000;
+  await fs.writeFile(mp, JSON.stringify(raw));
+  await fs.utimes(mp, old, old);
+}
+
+test('offline meeting: stale-heal marks healed_by_sweep; a late segment REOPENS instead of freezing; stop closes it', async () => {
+  const a = await createCapture({ title: 'Conference room' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('first 45s'), { t0Ms: 0, mime: 'audio/mp4' });
+  await ageOut(a.id);
+  await sweepCaptures();
+  let m = await getCapture(a.id);
+  assert.equal(m.status, 'complete');
+  assert.equal(m.healed_by_sweep, true);
+
+  // The phone comes back online an hour later with the rest of the meeting.
+  await putSegment(a.id, 1, Buffer.from('second 45s'), { t0Ms: 45_000, mime: 'audio/mp4' });
+  m = await getCapture(a.id);
+  assert.equal(m.status, 'recording');
+  assert.equal(m.ended_at, null);
+  assert.equal(m.healed_by_sweep, undefined);
+  assert.equal(m.segments.length, 2);
+
+  // The client's deferred /stop lands → a real, client-decided completion.
+  const stopped = await stopCapture(a.id);
+  assert.equal(stopped.status, 'complete');
+  assert.equal(stopped.healed_by_sweep, undefined);
+  // …after which late segments ARE frozen (the user said stop).
+  await assert.rejects(
+    putSegment(a.id, 2, Buffer.from('tail'), { t0Ms: 90_000, mime: 'audio/mp4' }),
+    (e: any) => e.status === 409 && /frozen/.test(e.message),
+  );
+});
+
+test('a capture the USER stopped stays frozen — reopen is only for the sweep verdict', async () => {
+  const a = await createCapture({ title: 'Normal' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('x'), { t0Ms: 0, mime: 'audio/mp4' });
+  await stopCapture(a.id);
+  await assert.rejects(
+    putSegment(a.id, 1, Buffer.from('y'), { t0Ms: 45_000, mime: 'audio/mp4' }),
+    (e: any) => e.status === 409 && /frozen/.test(e.message),
+  );
+});

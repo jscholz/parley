@@ -8,7 +8,7 @@
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'capture-start-mic-denied-fails-in-place';
-export const DESCRIPTION = 'gUM rejection: pending → failed via abort-start; DELETE never called; no recording claim';
+export const DESCRIPTION = 'gUM rejection: no server capture is ever created (offline-first start); no DELETE, no activation; no recording claim';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 // The incident was an iPhone — run the rejection scenario in the
@@ -28,37 +28,33 @@ export default async function run({ page, log, mock }) {
 
   await page.keyboard.press('Control+Shift+M');
 
-  // Poll node-side for the abort-start outcome; meanwhile the pill
-  // must never leave 'starting' into a red recording claim.
+  // Offline-first start (2026-10-05): the recorder no longer creates a
+  // server capture before the mic. A denied mic therefore leaves NOTHING
+  // server-side — no pending husk, no abort-start, and certainly no
+  // DELETE. Meanwhile the pill must never leave 'starting' into a red
+  // recording claim, and must end hidden (the toast is the surface).
   const t0 = Date.now();
-  let cap = null;
+  let hidden = false;
   while (Date.now() - t0 < 10_000) {
-    cap = mock.getCaptures()[0] || null;
-    if (cap && cap.status === 'failed') break;
-    const claimed = await page.evaluate(() => {
-      const pill = document.getElementById('capture-pill');
-      return !!(pill && !pill.hidden && !pill.classList.contains('starting'));
+    const pill = await page.evaluate(() => {
+      const el = document.getElementById('capture-pill');
+      return { hidden: !el || el.hidden, starting: !!el?.classList.contains('starting') };
     });
-    assert(!claimed, 'pill claimed an active recording while the mic was denied');
+    assert(pill.hidden || pill.starting, 'pill claimed an active recording while the mic was denied');
+    if (pill.hidden) { hidden = true; break; }
     await new Promise((r) => setTimeout(r, 100));
   }
-  assert(cap, 'no capture was created');
-  assert(cap.status === 'failed', `capture should be failed in place, got ${cap.status}`);
-  assert(/mic acquisition failed/i.test(cap.failed_reason || ''),
-    `failed_reason should carry the cause, got: "${cap.failed_reason}"`);
-
-  const actions = mock.getCaptureLifecycle().map((e) => e.action);
-  assert(actions.includes('abort-start'),
-    `abort-start missing from lifecycle (got: ${actions.join(', ')})`);
-  assert(!actions.includes('delete'),
-    'DELETE was called on a startup failure — the exact postmortem data-loss path');
-  assert(!actions.includes('discard'),
-    'discard is a user verb; automatic startup failure must use abort-start');
-  assert(!actions.includes('activate') && !actions.includes('activate-implied'),
-    'a denied mic must never activate the capture');
-
-  // The pill ends hidden — the visible failure surface is the toast.
-  const hidden = await page.evaluate(() => document.getElementById('capture-pill')?.hidden);
   assert(hidden, 'pill should be hidden after the startup failure');
-  log(`mic denial → failed in place ("${cap.failed_reason}"); lifecycle: ${actions.join(' → ')}`);
+  await new Promise((r) => setTimeout(r, 500));   // give any stray lifecycle call time to show up
+  assert(mock.getCaptures().length === 0,
+    `a denied mic must leave no server capture, got ${mock.getCaptures().length}`);
+  const actions = mock.getCaptureLifecycle().map((e) => e.action);
+  assert(actions.length === 0, `no lifecycle call may fire for a meeting that never recorded (got: ${actions.join(', ')})`);
+  // …and no ledger row is left to sync a meeting that never existed.
+  const ledger = await page.evaluate(async () => {
+    const mod = await import('/build/capture/segmentStore.mjs');
+    return (await mod.listLedger()).length;
+  });
+  assert(ledger === 0, `ledger should be empty after a failed start, got ${ledger} row(s)`);
+  log('mic denial → nothing server-side, pill hidden, ledger empty');
 }

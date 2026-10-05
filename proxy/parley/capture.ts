@@ -74,6 +74,11 @@ export interface CaptureManifest {
    *                 directory and audio stay on disk, restorable, until
    *                 an explicit /purge or the retention sweep. */
   status: 'pending' | 'recording' | 'transcribing' | 'complete' | 'failed' | 'discarded';
+  /** The stale sweep completed this capture on its own (no /stop from a
+   *  client — a dead phone, or one that was simply OFFLINE for 10+ min).
+   *  While set, a late segment REOPENS the capture instead of being
+   *  frozen out (offline meeting mode, 2026-10-05); /stop clears it. */
+  healed_by_sweep?: boolean;
   /** Why the capture ended 'failed' (abort-start reason, pending TTL
    *  expiry, supersede, stale heal). Kept in place — never deleted. */
   failed_reason?: string;
@@ -514,6 +519,11 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
             reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m — healed in place`,
           });
           m.status = next;
+          // The verdict is the SWEEP's, not a client's: a phone that was
+          // offline in a conference room still holds the rest of this
+          // meeting in its buffer. Its late segments reopen the capture
+          // (putSegmentLocked) rather than parking forever as "frozen".
+          if (next === 'complete') m.healed_by_sweep = true;
           if (next === 'failed') m.failed_reason = 'stale recording — no activity, no audio';
           m.ended_at = Date.now();
           await saveManifest(m);
@@ -557,28 +567,49 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
   }
 }
 
-export function createCapture(opts: {
+export interface CreateCaptureOpts {
   title?: string;
   linkedChat?: string | null;
   diarize?: boolean;
   autoIngest?: boolean;
   mintedSession?: boolean;
+  /** Client-minted id (offline-first meeting mode, 2026-10-05): the
+   *  recorder names the capture before it has any network, buffers
+   *  audio under that name, and registers it here when it can. Must
+   *  match CAPTURE_ID_RE. An id that already exists returns the existing
+   *  manifest unchanged (lost-ack retry), whatever its status. */
+  id?: string;
   actor?: CaptureActor;
-}): Promise<CaptureManifest> {
+}
+
+export function createCapture(opts: CreateCaptureOpts): Promise<CaptureManifest> {
   // Global-key lock: the one-active rule is check-then-act, so two
   // concurrent creates must serialize (audit 2026-07-09).
   return withCaptureLock('__create__', () => createCaptureLocked(opts));
 }
 
-async function createCaptureLocked(opts: {
-  title?: string;
-  linkedChat?: string | null;
-  diarize?: boolean;
-  autoIngest?: boolean;
-  mintedSession?: boolean;
-  actor?: CaptureActor;
-}): Promise<CaptureManifest> {
+/** `{ manifest, created }` — `created=false` is the idempotent replay of a
+ *  client-minted id the server already knows (HTTP answers 200, not 201). */
+export function createOrGetCapture(opts: CreateCaptureOpts): Promise<{ manifest: CaptureManifest; created: boolean }> {
+  return withCaptureLock('__create__', async () => {
+    if (opts.id) {
+      assertValidId(opts.id);
+      try {
+        return { manifest: await readManifest(opts.id), created: false };
+      } catch { /* unknown — fall through to create */ }
+    }
+    return { manifest: await createCaptureLocked(opts), created: true };
+  });
+}
+
+async function createCaptureLocked(opts: CreateCaptureOpts): Promise<CaptureManifest> {
   await fs.mkdir(capturesDir(), { recursive: true });
+  if (opts.id) {
+    assertValidId(opts.id);
+    // Idempotent for the direct API too: a replayed create of a known id
+    // is the same capture, not a one-active-rule violation.
+    try { return await readManifest(opts.id); } catch { /* new */ }
+  }
   // Heal/expire first, then enforce one ACTIVE capture at a time
   // (plan §3.1, v1). Pending placeholders never block — they are
   // superseded (failed in place) by the sweep above.
@@ -588,7 +619,7 @@ async function createCaptureLocked(opts: {
       throw new CaptureError(409, `capture ${row.id} is already recording`);
     }
   }
-  const id = `cap_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const id = opts.id || `cap_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
   const manifest: CaptureManifest = {
     id,
     title: opts.title?.trim() || `Meeting ${new Date().toISOString().slice(0, 10)}`,
@@ -688,6 +719,18 @@ async function putSegmentLocked(
   // means the tail segments arrive after /stop). Only terminal states
   // refuse. 'frozen' in the message is load-bearing: the client
   // uploader parks (keeps its durable IDB copy) on /frozen/i.
+  //
+  // One terminal state is provisional: a capture the stale SWEEP
+  // completed (no client ever said /stop). Audio arriving for it means
+  // the client was offline, not dead — reopen and keep recording; the
+  // client's deferred /stop (or the next heal) closes it again.
+  let reopened = false;
+  if (m.status === 'complete' && m.healed_by_sweep) {
+    m.status = 'recording';
+    m.ended_at = null;
+    delete m.healed_by_sweep;
+    reopened = true;
+  }
   if (m.status === 'complete' || m.status === 'failed' || m.status === 'discarded') {
     throw new CaptureError(409, `capture ${id} is ${m.status}; segments are frozen`);
   }
@@ -731,6 +774,13 @@ async function putSegmentLocked(
   const wasStalled = m.stalled_since != null;
   delete m.stalled_since;
   await saveManifest(m);
+  if (reopened) {
+    void audit(m, 'reopen', {
+      actor, priorStatus: 'complete', newStatus: 'recording',
+      reason: 'segment arrived after a stale-heal — the client was offline, not gone',
+    });
+    notifyChanged(m, 'reopened');
+  }
   if (wasStalled) {
     void audit(m, 'stall-cleared', {
       actor, reason: 'segment arrived after a stall warning',
@@ -883,6 +933,7 @@ async function stopCaptureLocked(id: string, actor?: CaptureActor): Promise<Capt
   // fails it in place, and no ingest/announce debris is created).
   if (m.status !== 'recording') return m;
   m.ended_at = Date.now();
+  delete m.healed_by_sweep;
   // A registered pipeline (captureTranscribe) may CLAIM finalization —
   // the capture parks in 'transcribing' until finalizeCapture(). No
   // claimant (unit tests, transcription-less installs) → complete now.
@@ -1118,7 +1169,7 @@ export async function listCaptures(opts?: { includeDiscarded?: boolean }): Promi
  *  without refetching on every segment. */
 function notifyChanged(
   m: CaptureManifest,
-  kind: 'created' | 'activated' | 'patched' | 'stopped' | 'completed' | 'discarded' | 'restored' | 'deleted' | 'stalled' | 'recovered',
+  kind: 'created' | 'activated' | 'patched' | 'stopped' | 'completed' | 'discarded' | 'restored' | 'deleted' | 'stalled' | 'recovered' | 'reopened',
 ): void {
   try {
     pushEnvelope({
@@ -1208,8 +1259,15 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
     if (body.linked_chat === 'new') {
       linkedChat = `parley:${crypto.randomUUID()}`;
       mintedSession = true;
-    } else if (typeof body.linked_chat === 'string' && body.linked_chat) linkedChat = body.linked_chat;
-    const manifest = await createCapture({
+    } else if (typeof body.linked_chat === 'string' && body.linked_chat) {
+      linkedChat = body.linked_chat;
+      // An offline-first client mints the chat id itself (same shape as
+      // "new" would have produced) and says so, so titling still treats
+      // the session as this meeting's own.
+      mintedSession = body.minted_session === true;
+    }
+    const { manifest, created } = await createOrGetCapture({
+      id: typeof body.id === 'string' && body.id ? body.id : undefined,
       title: typeof body.title === 'string' ? body.title : undefined,
       linkedChat,
       mintedSession,
@@ -1217,7 +1275,7 @@ export async function handleCaptureCreate(req: IncomingMessage, res: ServerRespo
       autoIngest: typeof body.auto_ingest === 'boolean' ? body.auto_ingest : undefined,
       actor: actorFromReq(req),
     });
-    sendJson(res, 201, { capture: manifest });
+    sendJson(res, created ? 201 : 200, { capture: manifest });
   } catch (err) { sendError(res, err); }
 }
 

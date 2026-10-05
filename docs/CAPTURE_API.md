@@ -34,7 +34,9 @@ POST /captures/{id}/purge         irreversible removal (discarded-only)
 DELETE /captures/{id}             legacy verb, safety-mapped (see below)
 ```
 
-`status` walks `pending → recording → transcribing → complete` (or
+`status` walks `pending → recording → transcribing → complete` (a
+sweep-healed `complete` carries `healed_by_sweep: true` and reopens on a
+late segment — see *Offline-first clients*) (or
 `failed`, in place, with a `failed_reason`; or `discarded`, a
 recoverable tombstone). A pending capture that never activates expires
 to `failed` after ~2 minutes and is superseded immediately by a new
@@ -50,6 +52,30 @@ and remote address are recorded regardless), prior→new status, and
 pre-action segment/byte counts.
 
 ## Endpoints
+
+### Offline-first clients (2026-10-05)
+
+The PWA recorder no longer needs the server to **start**: it mints the
+capture id itself (same `cap_<epoch ms>_<6 hex>` shape the server uses),
+buffers 45 s segments in IndexedDB, and registers the capture upstream
+when a connection exists — `POST /captures` with `{id, …}`, `/activate`,
+the segments, then the deferred `/stop`. Every step is replayed from a
+durable per-capture ledger on the next launch, so a meeting recorded in a
+room with no network syncs whenever the device gets one, however long
+later. Server-side rules that make this safe:
+
+- `POST /captures` accepts a client `id` (must match the id shape; `400`
+  otherwise). A known id answers `200` with the existing manifest,
+  untouched — a lost-ack retry is not a second meeting and never trips the
+  one-active rule. Pass `minted_session: true` with a client-minted
+  `linked_chat` so titling treats the session as the meeting's own.
+- The 10-minute stale heal still completes a `recording` capture nothing
+  has uploaded to, but it marks it `healed_by_sweep`. A segment arriving
+  for such a capture **reopens** it (`recording`, `ended_at` cleared,
+  `capture_changed` kind `reopened`) instead of answering `409 frozen` —
+  the client was offline, not gone. `/stop` (from the client, or the next
+  heal) closes it again and clears the flag; a capture the user stopped is
+  frozen as before.
 
 ### `POST /api/parley/captures` — start
 Body (all optional):

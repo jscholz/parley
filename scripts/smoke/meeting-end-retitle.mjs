@@ -14,6 +14,15 @@
 
 import { waitForReady, openSidebar, assert } from './lib.mjs';
 
+/** Offline-first recorder (2026-10-05): the server learns about a capture
+ *  from the uploader a tick AFTER the mic is live, not before — so a
+ *  node-side assertion on mock.getCaptures() must give it that tick. */
+async function waitForServerCaptures(mock, n, ms = 4000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms && mock.getCaptures().length < n) await new Promise((r) => setTimeout(r, 50));
+  return mock.getCaptures();
+}
+
 export const NAME = 'meeting-end-retitle';
 export const DESCRIPTION = 'end-of-meeting re-title (session_changed after capture stop) lands on the minted session row';
 export const STATUS = 'implemented';
@@ -45,11 +54,14 @@ export default async function run({ page, log, mock }) {
     },
     null, { timeout: 8000, polling: 50 },
   );
-  const cap = mock.getCaptures()[0];
+  const cap = (await waitForServerCaptures(mock, 1))[0];
+  assert(cap, 'app-level start should register a capture server-side');
   const minted = cap.linked_chat;
+  // Offline-first recorder (2026-10-05): the client mints the session id
+  // itself (same `parley:<uuid>` shape) and flags it minted_session.
   assert(
-    String(minted || '').startsWith('parley:mock-capture-'),
-    `app-level start should mint a session, got: ${minted}`,
+    /^parley:[0-9a-f-]{36}$/.test(String(minted || '')) && cap.minted_session === true,
+    `app-level start should mint a session, got: ${minted} (minted_session=${cap.minted_session})`,
   );
   log(`capture ${cap.id} recording into minted session ${minted}`);
 

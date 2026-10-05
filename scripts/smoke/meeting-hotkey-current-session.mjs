@@ -6,6 +6,15 @@
 
 import { waitForReady, openSidebar, assert } from './lib.mjs';
 
+/** Offline-first recorder (2026-10-05): the server learns about a capture
+ *  from the uploader a tick AFTER the mic is live, not before — so a
+ *  node-side assertion on mock.getCaptures() must give it that tick. */
+async function waitForServerCaptures(mock, n, ms = 4000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms && mock.getCaptures().length < n) await new Promise((r) => setTimeout(r, 50));
+  return mock.getCaptures();
+}
+
 export const NAME = 'meeting-hotkey-current-session';
 export const DESCRIPTION = 'Cmd+Shift+M toggles meeting capture in the current session: start → pill, press again → stop';
 export const STATUS = 'implemented';
@@ -51,8 +60,10 @@ export default async function run({ page, log, mock }) {
     },
     null, { timeout: 15000, polling: 50 },
   );
-  const caps = mock.getCaptures();
+  const caps = await waitForServerCaptures(mock, 1);
   assert(caps.length === 1, `expected 1 capture after hotkey start, got ${caps.length}`);
+  const t1 = Date.now();
+  while (Date.now() - t1 < 4000 && caps[0].status !== 'recording') await new Promise((r) => setTimeout(r, 50));
   assert(
     caps[0].linked_chat === activeId,
     `hotkey start must link the CURRENT session (${activeId}), got: ${caps[0].linked_chat}`,
@@ -83,7 +94,7 @@ export default async function run({ page, log, mock }) {
     () => !document.getElementById('capture-pill')?.hidden,
     null, { timeout: 15000, polling: 50 },
   );
-  const caps2 = mock.getCaptures();
+  const caps2 = await waitForServerCaptures(mock, 2);
   assert(caps2.length === 2, `expected a second capture, got ${caps2.length}`);
   assert(caps2[1].linked_chat === activeId, 'restart must link the current session again');
   log('third press starts a fresh capture — toggle re-arms');

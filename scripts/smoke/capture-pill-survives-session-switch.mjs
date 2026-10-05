@@ -15,6 +15,15 @@
 
 import { waitForReady } from './lib.mjs';
 
+/** Offline-first recorder (2026-10-05): the server learns about a capture
+ *  from the uploader a tick AFTER the mic is live, not before — so a
+ *  node-side assertion on mock.getCaptures() must give it that tick. */
+async function waitForServerCaptures(mock, n, ms = 4000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms && mock.getCaptures().length < n) await new Promise((r) => setTimeout(r, 50));
+  return mock.getCaptures();
+}
+
 export const NAME = 'capture-pill-survives-session-switch';
 export const DESCRIPTION = 'Meeting capture is app-global: pill + recorder survive session switches; marks + stop land server-side';
 export const STATUS = 'implemented';
@@ -63,8 +72,9 @@ export default async function run({ page, log, mock }) {
   }
   // Placement semantics (field UX 2026-07-09): the COMPOSER menu item
   // records into the ACTIVE session, not a freshly minted one.
-  const linked = mock.getCaptures()[0]?.linked_chat || '';
-  if (linked.startsWith('parley:mock-capture-')) {
+  const first = (await waitForServerCaptures(mock, 1))[0];
+  const linked = first?.linked_chat || '';
+  if (first?.minted_session) {
     throw new Error(`composer-menu start must link the ACTIVE chat, got minted session: ${linked}`);
   }
   if (!linked) throw new Error('composer-menu start produced no linked_chat');
@@ -93,10 +103,12 @@ export default async function run({ page, log, mock }) {
 
   // 3. Flag a moment.
   await page.click('#capture-pill-flag');
-  await page.waitForFunction(
-    () => true, null, { timeout: 500 },
-  ).catch(() => {});
-  await new Promise((r) => setTimeout(r, 300));
+  // A mark queued before registration rides the uploader's next pass;
+  // give it that pass.
+  const tm = Date.now();
+  while (Date.now() - tm < 4000 && (mock.getCaptures()[0]?.marks?.length ?? 0) < 1) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
   const marks = mock.getCaptures()[0]?.marks?.length ?? 0;
   if (marks !== 1) throw new Error(`expected 1 mark on the manifest, got ${marks}`);
   log('flag button lands a mark server-side');
@@ -129,9 +141,10 @@ export default async function run({ page, log, mock }) {
     spinner: document.getElementById('transcript')?.classList.contains('transcript-loading') ?? false,
     focused: document.activeElement?.id || document.activeElement?.tagName,
   }));
-  const linked2 = mock.getCaptures()[1]?.linked_chat || '';
-  if (!linked2.startsWith('parley:mock-capture-')) {
-    throw new Error(`app-level start must mint a new session, got: ${linked2}`);
+  const second = (await waitForServerCaptures(mock, 2))[1];
+  const linked2 = second?.linked_chat || '';
+  if (!/^parley:[0-9a-f-]{36}$/.test(linked2) || second?.minted_session !== true) {
+    throw new Error(`app-level start must mint a new session, got: ${linked2} (minted_session=${second?.minted_session})`);
   }
   if (landing.spinner) throw new Error('optimistic landing must not show the switch spinner');
   log(`app-level start landed in minted session (${linked2}); shell painted, no spinner (focus: ${landing.focused})`);

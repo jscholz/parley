@@ -19,7 +19,8 @@
 // capture-pill-survives-session-switch smoke).
 
 import * as mic from '../audio/shared/capture.ts';
-import { putSegment, clearExpired } from './segmentStore.ts';
+import { putSegment, clearExpired, putLedger, getLedger, updateLedger, removeLedger } from './segmentStore.ts';
+import { mintChatId } from '../conversations.ts';
 import { createUploader, type Uploader } from './uploader.ts';
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
@@ -52,6 +53,14 @@ export interface CaptureUiState {
   marks: number;
   /** Wall-clock ms spent paused/interrupted so far (completed spans). */
   stalledTotalMs: number;
+  /** The server has acknowledged this capture (create acked). False
+   *  from an offline start until the uploader registers it — the
+   *  recording is real either way; this only gates server-side extras
+   *  (health pings, live transcript, the start announcement). */
+  registered: boolean;
+  /** Last upload attempt could not reach the server. Audio keeps
+   *  buffering locally; the pill says so ("Offline — saving locally"). */
+  offline: boolean;
   /** Start of the CURRENT paused/interrupted span (null while
    *  recording). The pill timer shows RECORDED time — it freezes
    *  during pause (field nit 2026-07-09) — while segment t0/marks stay
@@ -95,7 +104,7 @@ const MIC_CONSTRAINTS: MediaTrackConstraints = {
 let state: CaptureUiState = {
   active: false, captureId: null, title: '', chatId: null,
   startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-  stalledTotalMs: 0, stalledSince: null,
+  stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
 };
 
 let stream: MediaStream | null = null;
@@ -129,10 +138,44 @@ function emit(): void {
 export function getCaptureState(): CaptureUiState { return { ...state }; }
 
 function ensureUploader(): Uploader {
-  uploader ??= createUploader({
+  if (uploader) return uploader;
+  uploader = createUploader({
     onDrained: () => { state.uploaderPending = 0; emit(); },
     onDropped: () => { syncPending(); },
+    onNetwork: (online) => {
+      if (state.offline === !online) return;
+      state.offline = !online;
+      emit();
+    },
+    onRegistered: (entry, capture) => {
+      log(`[capture] ${entry.id}: registered with the server${capture?.linked_chat ? ` chat=${capture.linked_chat}` : ''}`);
+      if (entry.id !== state.captureId) return;
+      state.registered = true;
+      if (capture?.title && !state.title) state.title = capture.title;
+      if (capture?.linked_chat) state.chatId = capture.linked_chat;
+      emit();
+      if (state.active) {
+        startHealthPings();
+        startResumeReconcile();
+      }
+    },
+    onRegisterFailed: (entry, reason) => {
+      log(`[capture] ${entry.id}: server refused the capture — ${reason}`);
+      if (entry.id !== state.captureId || !state.active) return;
+      // The audio is safe in the buffer; the recording cannot sync. Say so
+      // the way a server-side write-off is said (phase 'failed' is the
+      // honest terminal pill), without touching the buffered segments.
+      void forceLocalStop('refused');
+      state.failedReason = `The server refused this recording (${reason}). Audio is kept on this device.`;
+      emit();
+    },
+    onStopped: (captureId) => { log(`[capture] ${captureId}: deferred stop landed`); },
   });
+  // Coming back online is the moment the backlog can move; don't wait
+  // for the backoff timer to expire.
+  try {
+    window.addEventListener('online', () => { uploader?.kick(); });
+  } catch { /* non-browser */ }
   return uploader;
 }
 
@@ -163,6 +206,15 @@ function pickMime(): string {
 }
 
 function nowMs(): number { return Date.now() - state.startedAt; }
+
+/** Same shape the server mints (`cap_<epoch ms>_<6 hex>`, CAPTURE_ID_RE in
+ *  proxy/parley/capture.ts) so an offline-minted id is adopted verbatim. */
+function mintCaptureId(): string {
+  const bytes = new Uint8Array(3);
+  try { crypto.getRandomValues(bytes); } catch { for (let i = 0; i < 3; i++) bytes[i] = Math.floor(Math.random() * 256); }
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `cap_${Date.now()}_${hex}`;
+}
 
 /** One segment = one MediaRecorder lifetime. onstop seals + persists
  *  the blob and (while still active) starts the next segment.
@@ -342,7 +394,7 @@ function healthSnapshot(): Record<string, unknown> {
 
 async function pingHealth(): Promise<void> {
   const id = state.captureId;
-  if (!id) return;
+  if (!id || !state.registered) return;   // nothing upstream to report to yet
   try {
     await fetch(apiUrl(`/api/parley/captures/${id}/health`), {
       method: 'POST',
@@ -368,6 +420,14 @@ async function reconcileWithServer(reason: string): Promise<void> {
     if (!res.ok) return;                       // transient — keep recording
     const remote = await res.json();
     const status = String(remote?.status ?? remote?.capture?.status ?? '');
+    const healed = !!(remote?.healed_by_sweep ?? remote?.capture?.healed_by_sweep);
+    if (status === 'complete' && healed) {
+      // The server gave up waiting (10 min with nothing arriving — we were
+      // offline), not a verdict on the meeting: our next segment reopens
+      // it. Keep recording.
+      log(`[capture] server stale-healed ${id} while we were away (${reason}) — the backlog will reopen it`);
+      return;
+    }
     if (status === 'failed' || status === 'discarded' || status === 'complete') {
       log(`[capture] server says ${id} is ${status} (${reason}) — standing down a recording that no longer exists`);
       await forceLocalStop(status);
@@ -477,7 +537,7 @@ function startResumeReconcile(): void {
 const IDLE_STATE: CaptureUiState = {
   active: false, captureId: null, title: '', chatId: null,
   startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-  stalledTotalMs: 0, stalledSince: null,
+  stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
 };
 
 /** getUserMedia with a hard deadline. The incident's acquire hung 21
@@ -537,46 +597,51 @@ export async function startMeetingCapture(
   // points omit it → 'new' mints a dedicated meeting session (§3.6);
   // the composer mic-menu passes the viewed chat → the meeting lands
   // in the session the user is standing in.
-  let capture: { id: string; title: string; linked_chat: string | null };
+  // OFFLINE-FIRST (2026-10-05): the capture is named and recorded HERE,
+  // with no network at all — same promise memo mode makes. The id has the
+  // server's own shape (CAPTURE_ID_RE) so the server adopts it verbatim;
+  // the uploader registers the capture upstream when it can
+  // (uploader.ts ensureRegistered), then drains the audio behind it.
+  // Until then nothing is announced in the chat — the server does that
+  // on activation, as before; it just happens later.
+  const capture = {
+    id: mintCaptureId(),
+    title: opts.title?.trim() || `Meeting ${new Date().toISOString().slice(0, 10)}`,
+    linked_chat: opts.linkedChat || mintChatId(),
+    minted_session: !opts.linkedChat,
+  };
   try {
-    const res = await fetch(apiUrl('/api/parley/captures'), {
-      method: 'POST',
-      headers: lifecycleHeaders(true),
-      body: JSON.stringify({
-        title: opts.title || undefined,
-        linked_chat: opts.linkedChat || 'new',
-        // Settings → Meetings defaults (field 2026-07-09 #9); the pill
-        // sheet's PATCH can still flip diarize mid-recording.
-        diarize: settings.get().captureDiarize,
-        auto_ingest: settings.get().captureAutoIngest,
-      }),
+    await putLedger({
+      id: capture.id, title: capture.title, linkedChat: capture.linked_chat,
+      mintedSession: capture.minted_session,
+      diarize: settings.get().captureDiarize !== false,
+      autoIngest: settings.get().captureAutoIngest,
+      createdAt: Date.now(), registered: false, activated: false,
+      stopRequested: false, marks: [],
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err?.error || `capture create failed (${res.status})`);
-    }
-    ({ capture } = await res.json());
   } catch (e) {
+    // No durable ledger → no way to sync later; but the recording itself
+    // would still work for the session. Prefer honesty: fail the start.
     failToIdle();
     throw e;
   }
-  // Startup failure → abort-start: fails the pending capture IN PLACE
-  // with the reason. NEVER the delete endpoint (postmortem root cause:
-  // the old rollback here shared the irreversible DELETE with explicit
-  // discard, and erased a real meeting). If this call can't get
-  // through, the server's pending TTL reaches the same 'failed' state.
-  const abortStart = (reason: string) => fetch(
-    apiUrl(`/api/parley/captures/${capture.id}/abort-start`),
-    { method: 'POST', headers: lifecycleHeaders(true), body: JSON.stringify({ reason }) },
-  ).catch(() => { /* unreachable — pending TTL fails it in place */ });
+  // A start that dies before any audio exists leaves nothing worth
+  // syncing: drop the ledger row (and tell the server, if it already
+  // knows — which, this early, it never does).
+  const abortStart = (reason: string) => {
+    log(`[capture] ${capture.id}: start aborted — ${reason}`);
+    void getLedger(capture.id).then(async (entry) => {
+      if (entry?.registered) {
+        await fetch(apiUrl(`/api/parley/captures/${capture.id}/abort-start`), {
+          method: 'POST', headers: lifecycleHeaders(true), body: JSON.stringify({ reason }),
+        }).catch(() => { /* pending TTL fails it in place */ });
+      }
+      await removeLedger(capture.id).catch(() => { /* retention janitor */ });
+    });
+  };
 
-  // Same re-check as the post-getUserMedia one below, one await
-  // earlier: a stop/cancel can land while the create POST is in
-  // flight, and stamping this capture's id onto the freshly-idled
-  // state (or onto a NEWER start attempt's) would resurrect a capture
-  // the user already stood down.
   if (startEpoch !== myEpoch || state.phase !== 'starting') {
-    void abortStart('startup superseded on the client');
+    abortStart('startup superseded on the client');
     return getCaptureState();
   }
   state.captureId = capture.id;
@@ -587,16 +652,14 @@ export async function startMeetingCapture(
   try {
     stream = await acquireMicBounded();
   } catch (e) {
-    void abortStart(`mic acquisition failed: ${String((e as Error)?.message || e)}`);
+    abortStart(`mic acquisition failed: ${String((e as Error)?.message || e)}`);
     failToIdle();
     throw e;
   }
-  // Re-check after the await: a reload/cancel that landed while
-  // getUserMedia was pending must not resurrect the capture.
   if (state.phase !== 'starting' || state.captureId !== capture.id) {
     try { mic.release('meeting'); } catch { /* fine */ }
     stream = null;
-    void abortStart('startup superseded on the client');
+    abortStart('startup superseded on the client');
     return getCaptureState();
   }
 
@@ -606,47 +669,28 @@ export async function startMeetingCapture(
     active: true, captureId: capture.id, title: capture.title,
     chatId: capture.linked_chat, startedAt: Date.now(), phase: 'recording',
     uploaderPending: 0, sealedSegments: 0, marks: 0,
-    stalledTotalMs: 0, stalledSince: null,
+    stalledTotalMs: 0, stalledSince: null, registered: false, offline: state.offline,
   };
   // No emit yet — the pill stays on "Starting microphone…" until the
   // recorder start is VERIFIED below.
   if (!startSegment()) {
     try { mic.release('meeting'); } catch { /* fine */ }
     stream = null;
-    void abortStart('MediaRecorder.start() threw');
+    abortStart('MediaRecorder.start() threw');
     failToIdle();
     throw new Error('recorder failed to start');
   }
 
-  // Mic owned + recorder running → tell the server (this transition
-  // fires the "Recording started" message and session title). A
-  // network failure here is non-fatal: the first uploaded segment
-  // implies activation server-side. A 409 means the pending capture
-  // was superseded/expired while we started — stand down cleanly, no
-  // destructive calls (the server already resolved its fate).
-  let refused = false;
-  try {
-    const res = await fetch(apiUrl(`/api/parley/captures/${capture.id}/activate`), {
-      method: 'POST', headers: lifecycleHeaders(),
-    });
-    refused = res.status === 409;
-  } catch {
-    log(`[capture] ${capture.id}: activate unreachable — first segment will imply activation`);
-  }
-  if (refused) {
-    state.captureId = null;   // seal below skips persistence
-    sealCurrent();
-    try { mic.release('meeting'); } catch { /* fine */ }
-    stream = null;
-    failToIdle();
-    throw new Error('recording was superseded before it could start — try again');
-  }
+  // Mic owned + recorder running. The server learns about it from the
+  // uploader (create → activate → segments), on whatever connection the
+  // room has; the activation there is what fires "Recording started".
+  // Nothing here waits on the network — that was the whole bug.
+  ensureUploader().kick();
 
   watchTracks();
   startWatchdog();
   chunkCount = 0;
-  startHealthPings();
-  startResumeReconcile();
+  startResumeReconcile();     // health pings begin once the server knows us
   emit();   // NOW the pill flips to the real red recording state
   log(`[capture] started ${capture.id} ("${capture.title}") chat=${capture.linked_chat}`);
   return getCaptureState();
@@ -698,28 +742,30 @@ export async function stopMeetingCapture(): Promise<void> {
   // background; the server's stale-heal completes (not fails) a
   // segment-bearing capture if we die first.
   await new Promise((r) => setTimeout(r, 400));
-  const postStop = async () => {
-    try {
-      await fetch(apiUrl(`/api/parley/captures/${captureId}/stop`), {
-        method: 'POST', headers: lifecycleHeaders(),
-      });
-    } catch { /* server unreachable — stale heal completes it server-side */ }
-  };
+  // The /stop itself is the uploader's job: it fires once every segment
+  // is acked (and, for an offline start, once the capture is registered
+  // at all), survives a reload via the ledger row, and is what runs the
+  // transcription pipeline. The pill's 'finishing' state is capped at
+  // 15s; the sync continues in the background — or next launch.
+  const ledgerOk = await updateLedger(captureId, { stopRequested: true }).catch(() => null);
+  if (!ledgerOk) {
+    // Pre-ledger capture (started before this build): stop it the old way.
+    void ensureUploader().drained().then(() => fetch(apiUrl(`/api/parley/captures/${captureId}/stop`), {
+      method: 'POST', headers: lifecycleHeaders(),
+    }).catch(() => { /* server unreachable — stale heal completes it server-side */ }));
+  }
   const drainP = ensureUploader().drained();
   const drainedInTime = await Promise.race([
     drainP.then(() => true),
     new Promise<boolean>((r) => setTimeout(() => r(false), 15_000)),
   ]);
-  if (drainedInTime) {
-    await postStop();
-  } else {
+  if (!drainedInTime) {
     log(`[capture] ${captureId}: uploads still draining — stop deferred until they land`);
-    void drainP.then(postStop);
   }
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-    stalledTotalMs: 0, stalledSince: null,
+    stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
   };
   emit();
   log(`[capture] stopped ${captureId}`);
@@ -753,6 +799,16 @@ export async function cancelMeetingCapture(): Promise<string | null> {
   sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
   try { mic.release('meeting'); } catch { /* fine */ }
   stream = null;
+  const entry = await getLedger(captureId).catch(() => null);
+  if (entry && !entry.registered) {
+    // The server never heard of this capture, so there is nothing to
+    // tombstone there. Mark the row refused so the uploader PARKS the
+    // buffered audio (kept for the retention window) instead of trying
+    // to register a meeting the user just threw away.
+    await updateLedger(captureId, { registerFailed: 'discarded before it synced' }).catch(() => null);
+    log(`[capture] canceled ${captureId} before it synced — audio kept on device for the retention window`);
+    return null;
+  }
   try {
     const res = await fetch(apiUrl(`/api/parley/captures/${captureId}/discard`), {
       method: 'POST',
@@ -827,11 +883,20 @@ export function markMoment(): void {
   if (!state.active || !state.captureId) return;
   state.marks += 1;
   emit();
-  void fetch(apiUrl(`/api/parley/captures/${state.captureId}/marks`), {
+  const tMs = nowMs();
+  const captureId = state.captureId;
+  if (!state.registered || state.offline) {
+    // Queue it; the uploader delivers marks right after registration.
+    void updateLedger(captureId, (e) => { e.marks.push(tMs); }).then(() => ensureUploader().kick());
+    return;
+  }
+  void fetch(apiUrl(`/api/parley/captures/${captureId}/marks`), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ t_ms: nowMs() }),
-  }).catch(() => { /* mark is decorative; never disturb the recording */ });
+    body: JSON.stringify({ t_ms: tMs }),
+  }).catch(() => {
+    void updateLedger(captureId, (e) => { e.marks.push(tMs); });   // mark is decorative; retried later
+  });
 }
 
 /** Rename / re-link from the pill sheet — thin PATCH passthrough. */
@@ -839,9 +904,15 @@ export async function renameCapture(title: string): Promise<void> {
   if (!state.captureId) return;
   state.title = title;
   emit();
-  await fetch(apiUrl(`/api/parley/captures/${state.captureId}`), {
+  const captureId = state.captureId;
+  // Unregistered: the title rides the create. Registered: PATCH now, and
+  // leave a titleDirty flag the uploader clears if this PATCH fails.
+  const entry = await updateLedger(captureId, (e) => { e.title = title; if (e.registered) e.titleDirty = true; }).catch(() => null);
+  if (entry && !entry.registered) return;
+  await fetch(apiUrl(`/api/parley/captures/${captureId}`), {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ title }),
-  }).catch(() => { /* retryable via sheet */ });
+  }).then((res) => { if (res.ok) void updateLedger(captureId, { titleDirty: false }); })
+    .catch(() => { /* titleDirty → the uploader retries */ });
 }

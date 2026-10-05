@@ -77,6 +77,7 @@ function render(state: CaptureUiState): void {
   pill.classList.toggle('paused', state.phase === 'paused');
   pill.classList.toggle('finishing', state.phase === 'finishing');
   pill.classList.toggle('failed', state.phase === 'failed');
+  pill.classList.toggle('offline', !!state.offline && state.phase !== 'failed');
   if (!show) {
     if (timerInterval != null) { window.clearInterval(timerInterval); timerInterval = null; }
     return;
@@ -91,11 +92,16 @@ function render(state: CaptureUiState): void {
   // gets no word — red pulsing dot + running timer are that state.
   const stateEl = document.getElementById('capture-pill-state');
   if (stateEl) {
+    // Offline (2026-10-05): the recording is fine — audio buffers on the
+    // device and syncs when the network returns — but the user in the
+    // windowless room deserves to know the server has not seen it yet.
+    const offline = state.offline && state.phase !== 'failed';
     const word = state.phase === 'paused' ? 'Paused'
       : state.phase === 'interrupted' ? 'Reconnecting…'
-        : state.phase === 'finishing' ? 'Uploading…'
+        : state.phase === 'finishing' ? (offline ? 'Offline — will sync' : 'Uploading…')
           : state.phase === 'failed' ? 'Not recorded'
-            : '';
+            : (offline && state.phase === 'recording') ? 'Offline — saving locally'
+              : '';
     stateEl.textContent = word;
     stateEl.hidden = !word;
   }

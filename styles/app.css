@@ -5677,6 +5677,13 @@
   border-color: color-mix(in srgb, #f1c40f 60%, transparent);
   color: #f1c40f;
 }
+/* Offline (2026-10-05): same amber as interrupted — it is a "the server
+   is not hearing this" state — but calmer: the recording itself is fine,
+   audio buffers on the device and syncs when the network returns. */
+.capture-pill.offline .capture-pill-state {
+  border-color: color-mix(in srgb, #f1c40f 45%, transparent);
+  color: color-mix(in srgb, #f1c40f 85%, #fff);
+}
 /* Per-phase controls: hide the buttons that CANNOT ACT in the current
    phase (his report 2026-08-27 — the Stop button hanging outside the
    pill on a 1:22:15 upload).
