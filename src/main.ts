@@ -65,6 +65,7 @@ import { initTranscriptHighlight } from './transcriptHighlight.ts';
 import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as approvalActions from './notifications/approvalActions.ts';
 import { installExternalLinkHandler } from './native/externalLinks.ts';
+import { parseChatDeepLink } from './util/chatDeepLink.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
 import { createDrawer } from './Drawer.ts';
@@ -1273,6 +1274,21 @@ async function boot() {
   // Capacitor shell: target=_blank anchors are dead in WKWebView — hand
   // off-origin links to the native Browser sheet. No-op in the PWA.
   installExternalLinkHandler();
+  // In-app chat links (`/?chat=<id>[&msg=<id>]` — the grammar hermes'
+  // /branch reply uses to point at the new chat) switch in place through
+  // the notification-tap path instead of reloading the app. Capture phase
+  // so bubble-level click handlers (message menus, selection) never see
+  // it as a plain click; anything the parser rejects falls through.
+  document.addEventListener('click', (e: MouseEvent) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const a = (e.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+    if (!a) return;
+    const link = parseChatDeepLink(a.getAttribute('href'), window.location.origin);
+    if (!link) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openChatFromNotification(link.chatId, link.msgId);
+  }, true);
   // Transcript approval cards fire through the registry (the reconciler
   // can't import the shell). A card whose tray record lost its chat id
   // falls back to the chat on screen — the card is rendered inside it.
