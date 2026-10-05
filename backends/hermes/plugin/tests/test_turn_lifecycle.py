@@ -223,3 +223,48 @@ def test_real_reply_marks_turn_replied_interim_does_not(plugin, monkeypatch):
     asyncio.run(adapter.send("c1", "done!"))
     asyncio.run(adapter.on_processing_complete(ev, _Outcome.SUCCESS))
     assert published[-1]["replied"] is True
+
+
+# ── events with no message_id (hermes-internal injections) ──────────────
+
+
+def test_internal_event_without_message_id_closes_its_own_turn(plugin, monkeypatch):
+    """Field 2026-10-05: a watch-pattern / delegation-complete injection is a
+    ``MessageEvent(internal=True)`` with NO message_id. start() minted a
+    random turn id, complete() looked up "" — the turn never closed and the
+    chat showed "Thinking" after every later turn until a gateway restart."""
+    adapter, published = _adapter(plugin, monkeypatch)
+    ev = _event(message_id=None)
+    asyncio.run(adapter.on_processing_start(ev))
+    assert route_items.turn_is_active(adapter, "c1") is True
+    asyncio.run(adapter.on_processing_complete(ev, _Outcome.SUCCESS))
+    assert route_items.turn_is_active(adapter, "c1") is False
+    assert [e["type"] for e in published] == ["turn_start", "turn_end"]
+    assert published[0]["turn_id"] == published[1]["turn_id"]
+    assert published[1]["active_turns"] == 0
+
+
+def test_internal_turn_does_not_outlive_a_later_real_turn(plugin, monkeypatch):
+    adapter, published = _adapter(plugin, monkeypatch)
+    internal = _event(message_id=None)
+    asyncio.run(adapter.on_processing_start(internal))
+    asyncio.run(adapter.on_processing_complete(internal, _Outcome.SUCCESS))
+    real = _event(message_id="evt-2", umid="umsg_2")
+    asyncio.run(adapter.on_processing_start(real))
+    asyncio.run(adapter.on_processing_complete(real, _Outcome.SUCCESS))
+    assert published[-1]["active_turns"] == 0
+    assert route_items.turn_is_active(adapter, "c1") is False
+
+
+def test_nameless_complete_closes_the_oldest_anonymous_turn_only():
+    lc = TurnLifecycle()
+    lc.start("c1", "anon-a")                       # no bubble
+    lc.start("c1", "real-b", "umsg_b")             # a real user turn
+    lc.start("c1", "anon-c")
+    env = lc.complete("c1", "", "success")
+    assert env["turn_id"] == "anon-a" and env["active_turns"] == 2
+    assert lc.acks("c1") == {"umsg_b": "processing"}
+    lc.complete("c1", "", "success")
+    assert lc.is_active("c1") is True              # real-b still runs
+    lc.complete("c1", "real-b", "success")
+    assert lc.is_active("c1") is False

@@ -94,6 +94,15 @@ class TurnLifecycle:
         name = outcome_name(outcome)
         turns = self._active.get(chat_id)
         entry = turns.pop(turn_id, None) if turns else None
+        if entry is None and turns and not turn_id:
+            # A complete that cannot name its turn (an event with no
+            # message_id whose minted id did not survive) still ends ONE
+            # anonymous turn — the oldest without a Parley bubble — rather
+            # than leaving the chat active forever (field 2026-10-05).
+            for anon_id, anon in turns.items():
+                if not anon.get("user_message_id"):
+                    turn_id, entry = anon_id, turns.pop(anon_id)
+                    break
         if turns is not None and not turns:
             self._active.pop(chat_id, None)
         umid = (entry or {}).get("user_message_id", "")

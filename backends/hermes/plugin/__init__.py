@@ -249,6 +249,10 @@ SESSION_ROWS_CACHE_TTL_S = float(
 # on this package's __init__. Re-exported here for backward compat
 # with any caller that still references them from the package root.
 from .parley_turn_lifecycle import TurnLifecycle
+
+# Attribute on a hermes MessageEvent that has no message_id: the turn id
+# on_processing_start minted, read back by on_processing_complete.
+_SYNTH_TURN_ID_ATTR = "_parley_turn_id"
 from .parley_ids import (  # noqa: F401
     GATEWAY_DRAWER_SOURCES,
     PARLEY_SOURCE,
@@ -946,7 +950,18 @@ class ParleyAdapter(BasePlatformAdapter):
         chat_id = str(getattr(getattr(event, "source", None), "chat_id", "") or "")
         if not chat_id:
             return
-        turn_id = str(getattr(event, "message_id", "") or "") or f"turn_{secrets.token_hex(6)}"
+        turn_id = str(getattr(event, "message_id", "") or "")
+        if not turn_id:
+            # hermes-synthesized events (watch-pattern / delegation-complete
+            # injections, wake, goals, startup resumes) carry no message_id.
+            # Mint one and pin it on the event so on_processing_complete
+            # closes THIS turn — until 2026-10-05 complete() looked up ""
+            # and the turn stayed active forever: a chat that received one
+            # delegation-complete notice showed "Thinking" after every
+            # later turn until the gateway restarted.
+            turn_id = f"turn_{secrets.token_hex(6)}"
+            with contextlib.suppress(Exception):
+                setattr(event, _SYNTH_TURN_ID_ATTR, turn_id)
         env = self._lifecycle.start(
             chat_id, turn_id, self._lifecycle.user_message_id_for(event))
         await self._publish_lifecycle(env)
@@ -955,7 +970,8 @@ class ParleyAdapter(BasePlatformAdapter):
         chat_id = str(getattr(getattr(event, "source", None), "chat_id", "") or "")
         if not chat_id:
             return
-        turn_id = str(getattr(event, "message_id", "") or "")
+        turn_id = (str(getattr(event, "message_id", "") or "")
+                   or str(getattr(event, _SYNTH_TURN_ID_ATTR, "") or ""))
         env = self._lifecycle.complete(chat_id, turn_id, outcome)
         await self._publish_lifecycle(env)
         # Release the /v1/responses handler waiting on THIS message (a
