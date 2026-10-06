@@ -447,6 +447,8 @@ export function project(state: ChatState): BubbleSpec[] {
           text: env.content || '',
           timestamp: inflightTs++,
           notificationKind: env.kind || 'notification',
+          ...(typeof env.command === 'string' ? { command: env.command } : {}),
+          ...(typeof env.reason === 'string' ? { reason: env.reason } : {}),
         });
         break;
       }

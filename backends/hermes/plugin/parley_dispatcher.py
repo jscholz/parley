@@ -181,9 +181,21 @@ _META_LINE_RE = re.compile(
     re.IGNORECASE,
 )
 _SEP_OR_BLANK_RE = re.compile(r"^\s*(?:-{3,}|=+|\*+)?\s*$")
-_APPROVAL_HEADER_RE = re.compile(r"Dangerous command requires approval", re.IGNORECASE)
-_APPROVAL_REASON_RE = re.compile(r"^Reason:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
-_APPROVAL_REPLY_RE = re.compile(r"^Reply\s+/approve", re.IGNORECASE | re.MULTILINE)
+# Two generations of hermes wording. Pre-0.21.5: "⚠️ Dangerous command
+# requires approval:" + "Reason: …" + "Reply /approve …". 0.21.5+
+# (gateway/platforms/base_exec_approval.py): "⚠️ **Hermes wants to run a
+# command that needs your OK**" + "Why it was flagged: …" + "Reply
+# `/approve` to run it once, …". The 2026-09-28 update switched wording
+# silently and every approval rendered as plain prose for a week (his
+# 2026-10-06 report: "my approval popups and activity bar buttons are
+# gone"). The STRUCTURED path (ParleyAdapter._send_exec_approval_prompt)
+# is now primary; these regexes are the fallback for text that still
+# arrives through send().
+_APPROVAL_HEADER_RE = re.compile(
+    r"Dangerous command requires approval|wants to run a command that needs your OK", re.IGNORECASE)
+_APPROVAL_REASON_RE = re.compile(
+    r"^\**(?:Reason|Why it was flagged)\**:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_APPROVAL_REPLY_RE = re.compile(r"^\**Reply\s+`?/approve", re.IGNORECASE | re.MULTILINE)
 
 
 # Gateway progress heartbeat, emitted every _NOTIFY_INTERVAL of a long turn
@@ -225,8 +237,10 @@ def _approval_preview(raw: str) -> str:
             if command_lines:
                 command_lines.append("")
             continue
-        if stripped.lower().startswith("reason:") or _APPROVAL_REPLY_RE.match(stripped):
+        if _APPROVAL_REASON_RE.match(stripped) or _APPROVAL_REPLY_RE.match(stripped):
             break
+        if stripped.startswith("```"):
+            continue   # 0.21.5+ fences the command; the fence is not the command
         command_lines.append(line.rstrip())
 
     command = "\n".join(command_lines).strip()

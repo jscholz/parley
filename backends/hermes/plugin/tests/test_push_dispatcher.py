@@ -602,3 +602,25 @@ def test_dispatch_payload_includes_unread_total(db, monkeypatch):
                         unread_total_fn=lambda: (_ for _ in ()).throw(RuntimeError("boom")))
     d3.dispatch_envelope({"type": "reply_final", "chat_id": "abc", "text": "yo"})
     assert "badge" not in _json.loads(sent[0])  # compute failure never blocks the push
+
+
+# ── hermes 0.21.5 wording (2026-09-28 update; his 2026-10-06 report) ──
+
+NEW_PROMPT = (
+    "⚠️ **Hermes wants to run a command that needs your OK**\n"
+    "```\n"
+    "python3 -c 'import pathlib,json; p=pathlib.Path(\"/home/x/api_key\")'\n"
+    "```\n"
+    "Why it was flagged: Security scan — [HIGH] Inline interpreter with suspicious payload\n\n"
+    "Reply `/approve` to run it once, `/approve session` to allow this pattern for the rest of this "
+    "session, `/approve always` to allow it permanently, or `/deny` to cancel.\n"
+    "If you don't answer within 5 minutes it will NOT run."
+)
+
+
+def test_new_wording_is_still_an_approval_prompt_with_a_usable_preview():
+    assert is_approval_prompt(NEW_PROMPT)
+    preview = _approval_preview(NEW_PROMPT)
+    assert preview.startswith("Security scan — [HIGH] Inline interpreter with suspicious payload:")
+    assert "python3 -c" in preview
+    assert "```" not in preview and "Reply" not in preview and "NOT run" not in preview

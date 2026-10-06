@@ -928,6 +928,72 @@ class ParleyAdapter(BasePlatformAdapter):
         await self.handle_message(event)
 
     # ------------------------------------------------------------------
+    # Exec approvals — hermes' structured prompt (0.21.5+)
+    # ------------------------------------------------------------------
+    #
+    # hermes brackets a gated command with ``send_exec_approval`` → this
+    # hook when the adapter overrides it (``supports_exec_approval_buttons``),
+    # else a plain-text ``/approve`` prompt through send(). Until
+    # 2026-10-06 Parley only had the text path, matched by regex on the
+    # OLD wording — the 2026-09-28 update changed the words and every
+    # approval rendered as prose with no card, no banner, no tray buttons
+    # for a week. The structured prompt carries the command, the reason
+    # and the allowed choices; the PWA's card still answers with the
+    # typed ``/approve [session|always]`` / ``/deny`` the gateway resolves.
+
+    @staticmethod
+    def _approval_timeout_s() -> int:
+        """The gateway's real approval window (approvals.timeout, default
+        300s in 0.21.5+) so the PWA pop-up dies WITH the approval instead
+        of the user approving a corpse ("/approve → No pending command",
+        field 2026-07-13)."""
+        try:
+            from gateway.platforms.base_exec_approval import approval_timeout_seconds  # noqa: WPS433
+            return int(approval_timeout_seconds() or 300)
+        except Exception:
+            pass
+        try:
+            from hermes_cli.config import load_config  # noqa: WPS433
+            _cfg = load_config() or {}
+            return int(((_cfg.get("approvals", {}) or {}).get("timeout", 300)) or 300)
+        except Exception:
+            return 300
+
+    async def _send_approval_envelope(
+        self, chat_id: str, content: str, extra: Optional[Dict[str, Any]] = None,
+    ) -> "SendResult":
+        if chat_id not in self._known_chat_ids:
+            self._known_chat_ids.add(chat_id)
+        env: Dict[str, Any] = {
+            "type": "notification",
+            "chat_id": chat_id,
+            "kind": "approval",
+            "content": content,
+            "text": content,
+            "urgent": True,
+            "expires_at": int((time.time() + self._approval_timeout_s()) * 1000),
+        }
+        if extra:
+            env.update(extra)
+        ok = await self._safe_send_envelope(env)
+        return SendResult(success=ok, message_id=env.get("parley_id") or "")
+
+    async def _send_exec_approval_prompt(self, prompt) -> "SendResult":
+        """hermes' structured exec-approval prompt → Parley approval card."""
+        actions = [
+            {"label": label, "choice": choice, "style": style or ""}
+            for label, choice, style in (getattr(prompt, "actions", None) or [])
+        ]
+        return await self._send_approval_envelope(
+            str(prompt.chat_id), str(prompt.text or ""), {
+                "command": str(getattr(prompt, "command", "") or ""),
+                "reason": str(getattr(prompt, "description", "") or ""),
+                "actions": actions,
+                "choices": [a["choice"] for a in actions],
+                "smart_denied": bool(getattr(prompt, "smart_denied", False)),
+            })
+
+    # ------------------------------------------------------------------
     # Processing lifecycle — hermes' authoritative turn bracket
     # ------------------------------------------------------------------
     #
@@ -2318,34 +2384,9 @@ class ParleyAdapter(BasePlatformAdapter):
         # Parley-owned urgent notification before the regular reply
         # path persists/renders them as assistant prose.
         if is_approval_prompt(content or ""):
-            if chat_id not in self._known_chat_ids:
-                self._known_chat_ids.add(chat_id)
-            # expires_at (epoch ms) mirrors the gateway's real approval
-            # window (tools.approval, config approvals.timeout, default
-            # 60s) so the PWA pop-up can live exactly as long as the
-            # approval does and render EXPIRED when it dies — instead of
-            # the user approving a corpse ("/approve → No pending
-            # command", field 2026-07-13).
-            approval_timeout_s = 60
-            try:
-                from hermes_cli.config import load_config  # noqa: WPS433
-                _cfg = load_config() or {}
-                approval_timeout_s = int(
-                    ((_cfg.get("approvals", {}) or {}).get("timeout", 60)) or 60
-                )
-            except Exception:
-                pass
-            env = {
-                "type": "notification",
-                "chat_id": chat_id,
-                "kind": "approval",
-                "content": content,
-                "text": content,
-                "urgent": True,
-                "expires_at": int((time.time() + approval_timeout_s) * 1000),
-            }
-            ok = await self._safe_send_envelope(env)
-            return SendResult(success=ok, message_id=env.get("parley_id") or "")
+            # Text fallback (hermes < 0.21.5 wording, or a surface that
+            # bypassed the structured hook below): classify by regex.
+            return await self._send_approval_envelope(chat_id, content or "")
 
         # Hermes cron delivery naturally arrives here through the live
         # platform adapter as a regular send() with a canonical wrapper.

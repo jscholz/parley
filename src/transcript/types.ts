@@ -183,7 +183,7 @@ export type ParleyEnvelope =
    *  bubble. Not persisted; ignored on ring replay. */
   | { type: 'status'; chat_id: string; message_id?: string; text?: string; state?: 'working' | 'done'; ts?: number }
   | { type: 'image'; chat_id: string; url: string; caption?: string }
-  | { type: 'notification'; chat_id: string; kind: string; content: string; parley_id?: string }
+  | { type: 'notification'; chat_id: string; kind: string; content: string; parley_id?: string; command?: string; reason?: string }
   | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
   | { type: 'user_message'; chat_id: string; message_id: string; text: string }
   | { type: 'error'; chat_id: string; message: string };
@@ -312,6 +312,11 @@ export interface NotificationBubbleSpec {
   timestamp: number;
   /** 'cron' / 'reminder' / etc. — emoji + label dispatch. */
   notificationKind: string;
+  /** Approval cards (hermes 0.21.5+): the gated command and the reason,
+   *  as the plugin's exec-approval hook put them on the envelope — the
+   *  card prefers these over parsing the prompt text. */
+  command?: string;
+  reason?: string;
 }
 
 export interface ActivityRowSpec {

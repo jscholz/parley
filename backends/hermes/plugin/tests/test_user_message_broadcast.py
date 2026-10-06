@@ -729,3 +729,42 @@ def test_active_turn_reply_delta_stays_on_response_queue_only(plugin):
     assert turn_q.get_nowait()["type"] == "reply_delta"
     assert event_q.empty()
     assert adapter._event_replay_ring == []
+
+
+def test_structured_exec_approval_prompt_becomes_an_approval_card(plugin):
+    """hermes 0.21.5 hands adapters that override _send_exec_approval_prompt
+    a structured prompt (command, reason, allowed choices). The 2026-09-28
+    update switched the text wording and Parley's regex-only path missed
+    every approval for a week — the hook is the fix; the envelope carries
+    the structure so the card never parses prose again."""
+    import types as _types
+    adapter = _make_adapter(plugin)
+    adapter._turn_buffer = None
+    sent: list[dict] = []
+
+    async def capture_envelope(env):
+        env["parley_id"] = "notif_structured"
+        sent.append(dict(env))
+        return True
+
+    adapter._safe_send_envelope = capture_envelope
+    # The gateway picks the hook over the text fallback when the adapter
+    # OVERRIDES _send_exec_approval_prompt (BasePlatformAdapter
+    # .supports_exec_approval_buttons compares the class attribute; the
+    # test rig stubs the base class, so compare the same way here).
+    assert "_send_exec_approval_prompt" in vars(plugin.ParleyAdapter)
+    prompt = _types.SimpleNamespace(
+        chat_id="approval-chat", session_key="agent:main:parley:dm:approval-chat",
+        text="⚠️ Hermes wants to run a command that needs your OK\n```\nrm -rf frames\n```\nWhy it was flagged: recursive delete\n\nIf you don't answer within 5 minutes it will NOT run.",
+        actions=[("Allow Once", "once", "primary"), ("Allow Session", "session", ""), ("Deny", "deny", "danger")],
+        command="rm -rf frames", description="recursive delete", smart_denied=False, metadata=None,
+    )
+    result = asyncio.run(adapter._send_exec_approval_prompt(prompt))
+    assert result.success and result.message_id == "notif_structured"
+    env = sent[0]
+    assert env["type"] == "notification" and env["kind"] == "approval" and env["urgent"] is True
+    assert env["command"] == "rm -rf frames" and env["reason"] == "recursive delete"
+    assert env["choices"] == ["once", "session", "deny"]
+    assert env["actions"][0] == {"label": "Allow Once", "choice": "once", "style": "primary"}
+    assert isinstance(env["expires_at"], int) and env["expires_at"] > time.time() * 1000
+    assert "approval-chat" in adapter._known_chat_ids

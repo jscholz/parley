@@ -17,8 +17,18 @@
 export interface ApprovalPrompt {
   /** The gated command, trimmed; '' when the prompt didn't match. */
   command: string;
-  /** The "Reason:" line body, '' when absent. */
+  /** The "Reason:" / "Why it was flagged:" line body, '' when absent. */
   reason: string;
+}
+
+/** Prefer the structured fields the plugin's exec-approval hook puts on
+ *  the envelope (hermes 0.21.5+ hands it the command and reason directly);
+ *  fall back to parsing the prompt text. */
+export function approvalFromEnvelope(env: { text?: string; content?: string; command?: string; reason?: string } | null | undefined): ApprovalPrompt {
+  const command = typeof env?.command === 'string' ? env.command.trim() : '';
+  const reason = typeof env?.reason === 'string' ? env.reason.trim() : '';
+  if (command || reason) return { command, reason };
+  return parseApprovalPrompt(String(env?.text ?? env?.content ?? ''));
 }
 
 const META_LINE_RE = /^\s*(?:session_id|job_id|chat_id|message_id|user_id|run_id|trace_id)\s*:\s*\S/i;
@@ -31,15 +41,26 @@ export function stripLeadingMetadata(s: string): string {
   return lines.slice(i).join('\n');
 }
 
+// Two generations of gateway wording (hermes 0.21.5, 2026-09-28, changed
+// the words and nobody's card matched for a week): the old
+// "⚠️ Dangerous command requires approval:" / "Reason:" / "Reply /approve …"
+// and the new "⚠️ **Hermes wants to run a command that needs your OK**" /
+// fenced command / "Why it was flagged: …" / "Reply `/approve` to run it once…".
+const HEADER_RE = /Dangerous command requires approval|wants to run a command that needs your OK/i;
+const REASON_RE = /^\**(?:Reason|Why it was flagged)\**:\s*(.+)$/im;
+const REASON_LINE_RE = /^\**(?:Reason|Why it was flagged)\**:/i;
+const REPLY_LINE_RE = /^\**Reply\s+`?\/approve/i;
+const DEADLINE_LINE_RE = /^If you don't answer within/i;
+
 export function parseApprovalPrompt(raw: string): ApprovalPrompt {
   const text = stripLeadingMetadata(raw || '');
-  const reason = /^Reason:\s*(.+)$/im.exec(text)?.[1]?.trim() || '';
+  const reason = REASON_RE.exec(text)?.[1]?.trim() || '';
   const lines = text.split('\n');
   const command: string[] = [];
   let inCommand = false;
   for (const line of lines) {
     const trimmed = line.trim();
-    if (/Dangerous command requires approval/i.test(trimmed)) {
+    if (HEADER_RE.test(trimmed)) {
       inCommand = true;
       continue;
     }
@@ -48,7 +69,8 @@ export function parseApprovalPrompt(raw: string): ApprovalPrompt {
       if (command.length) command.push('');
       continue;
     }
-    if (/^Reason:/i.test(trimmed) || /^Reply\s+\/approve/i.test(trimmed)) break;
+    if (REASON_LINE_RE.test(trimmed) || REPLY_LINE_RE.test(trimmed) || DEADLINE_LINE_RE.test(trimmed)) break;
+    if (trimmed.startsWith('```')) continue;   // the fence is not the command
     command.push(line.replace(/\s+$/, ''));
   }
   return {

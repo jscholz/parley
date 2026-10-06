@@ -32,7 +32,7 @@ import { applyBubbleState as applyReplyPlayerState } from '../audio/turn-based/r
 import { rehydrateCards, ensureHistoricalCards } from '../cards/attach.ts';
 import * as memoCardMod from '../memoCard.ts';
 import * as activityStore from '../notifications/activityStore.ts';
-import { parseApprovalPrompt } from '../notifications/approvalText.ts';
+import { approvalFromEnvelope } from '../notifications/approvalText.ts';
 import {
   APPROVAL_ACTION_LABELS, APPROVAL_RESOLUTION_LABELS, sendApprovalAction,
 } from '../notifications/approvalActions.ts';
@@ -383,7 +383,7 @@ function createNotification(spec: NotificationBubbleSpec, batch: boolean): HTMLE
 // or the outcome pill. State comes from the Activity store (the same
 // record the tray renders), so approving anywhere flips the card.
 
-const APPROVAL_SPEAKER = '⚠️ Dangerous command requires approval';
+const APPROVAL_SPEAKER = '⚠️ Hermes wants to run a command that needs your OK';
 const APPROVAL_PEEK_MAX = 72;
 
 function approvalItemFor(key: string): activityStore.ActivityItem | null {
@@ -404,7 +404,7 @@ function renderApprovalCard(el: HTMLElement, spec: NotificationBubbleSpec): void
   if (text.dataset.approvalRendered !== spec.key) {
     text.dataset.approvalRendered = spec.key;
     text.innerHTML = '';
-    const { command, reason } = parseApprovalPrompt(spec.text);
+    const { command, reason } = approvalFromEnvelope({ text: spec.text, command: spec.command, reason: spec.reason });
     const card = document.createElement('div');
     card.className = 'approval-card';
     if (reason) {
