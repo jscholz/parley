@@ -97,3 +97,27 @@ describe('cardHash — dedup predicate', () => {
     assert.notEqual(cardHash(a), cardHash(b));
   });
 });
+
+// ── attachment lane (2026-10-08) ──────────────────────────────────────
+
+describe('attachment links', () => {
+  it('a markdown link into /api/parley/attachments becomes an attachment card, not a links card', () => {
+    const text = 'Corrected deck\n📎 [R2 deck.pptx (2.0 KB)](/api/parley/attachments/a1b2c3d4e5f60718/R2%20deck.pptx)';
+    const cards = parseCardsFromText(text);
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0].kind, 'attachment');
+    assert.equal(cards[0].payload.url, '/api/parley/attachments/a1b2c3d4e5f60718/R2%20deck.pptx');
+    assert.equal(cards[0].payload.label, 'R2 deck.pptx (2.0 KB)');
+  });
+
+  it('an absolute attachment URL is classified once (no duplicate links card)', () => {
+    const text = 'here: [notes.md](https://galatea.tail.ts.net:3001/api/parley/attachments/0123456789abcdef/notes.md)';
+    const cards = parseCardsFromText(text);
+    assert.deepEqual(cards.map((c) => c.kind), ['attachment']);
+  });
+
+  it('a media image link still renders as media, not an attachment', () => {
+    const cards = parseCardsFromText('![x](/api/parley/media/00c0ffee00c0ffee.png)');
+    assert.deepEqual(cards.map((c) => c.kind), ['image']);
+  });
+});

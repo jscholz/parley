@@ -134,6 +134,21 @@ from gateway.platforms.base import (
 
 logger = logging.getLogger(__name__)
 
+
+def _human_size(n: Any) -> str:
+    """1234567 → "1.2 MB"; '' for anything that is not a non-negative number."""
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        return ""
+    if v < 0:
+        return ""
+    for unit in ("B", "KB", "MB", "GB"):
+        if v < 1024 or unit == "GB":
+            return f"{int(v)} {unit}" if unit == "B" else f"{v:.1f} {unit}".replace(".0 ", " ")
+        v /= 1024
+    return ""
+
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8645
 PROTOCOL_VERSION = 1
@@ -2624,29 +2639,80 @@ class ParleyAdapter(BasePlatformAdapter):
         metadata: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> SendResult:
-        """Deliver a local file when the registry will serve it.
+        """Deliver a local file: media lane first, attachment lane otherwise.
 
-        The registry is a *media* lane, so true documents (.pdf, .svg,
-        .csv) are refused and we fall back to the base notice — which
-        names the file, so the user can still retrieve it themselves.
         Media that hermes happened to route as a document (an .mp4 or
-        .png selected by mimetype) does get through: the markdown
-        reference rides plain reply text and the client's card fallback
-        parser classifies it by extension.
+        .png selected by mimetype) rides the media registry as an inline
+        card. Everything else — .pptx, .pdf, .csv, .zip, the deck that
+        came back as "⚠️ Couldn't deliver" on 2026-10-08 — goes through
+        the proxy's ATTACHMENT registry (proxy/parley/attachments.ts):
+        download-only serving, any type, and the client renders a card
+        with a Download button from the markdown link below. Only when
+        both lanes refuse (proxy down, path outside the allowed roots)
+        do we fall back to the base notice, which names the file.
         """
         entry = await self._register_media(file_path)
+        if entry:
+            label = caption or file_name or entry.get("filename") or "attachment"
+            return await self.send(
+                chat_id=chat_id,
+                content=f"![{label}]({entry['url']})",
+                reply_to=reply_to,
+                metadata=metadata,
+            )
+        entry = await self._register_attachment(file_path)
         if not entry:
             return await super().send_document(
                 chat_id, file_path, caption=caption, file_name=file_name,
                 reply_to=reply_to, metadata=metadata, **kwargs,
             )
-        label = caption or file_name or entry.get("filename") or "attachment"
+        name = file_name or entry.get("filename") or "attachment"
+        size = _human_size(entry.get("size"))
+        label = f"{name} ({size})" if size else name
+        text = f"📎 [{label}]({entry['url']})"
+        if caption:
+            text = f"{caption}\n{text}"
         return await self.send(
             chat_id=chat_id,
-            content=f"![{label}]({entry['url']})",
+            content=text,
             reply_to=reply_to,
             metadata=metadata,
         )
+
+    async def _register_attachment(self, raw_path: str) -> Optional[Dict[str, Any]]:
+        """Register a file with the proxy's general-file lane. Same path
+        guard as media first (hermes' own, so a prompt-injected path to
+        a credential file never leaves this process); the proxy applies
+        its own roots/dotfile/size rules on top and we trust its answer."""
+        safe = self.validate_media_delivery_path(raw_path)
+        if not safe:
+            logger.warning(
+                "[%s] attachment path rejected by the delivery guard: %s", self.name, raw_path
+            )
+            return None
+        try:
+            import aiohttp  # guarded — unit tests stub the runtime install
+        except ImportError:
+            logger.warning("[%s] aiohttp unavailable; cannot register attachment", self.name)
+            return None
+        url = f"{self._proxy_origin()}/api/parley/attachments/register"
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json={"path": safe}) as resp:
+                    body = await resp.json(content_type=None)
+                    if resp.status != 200 or not (body or {}).get("url"):
+                        logger.warning(
+                            "[%s] attachment register refused %s: HTTP %s %s",
+                            self.name, safe, resp.status, (body or {}).get("error", ""),
+                        )
+                        return None
+                    return body
+        except Exception as exc:  # proxy down, network, bad JSON — all non-fatal
+            logger.warning(
+                "[%s] attachment register failed for %s: %s", self.name, safe, exc
+            )
+            return None
 
     async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
         return {"name": chat_id, "type": "parley", "chat_id": chat_id}

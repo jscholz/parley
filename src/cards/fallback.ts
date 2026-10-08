@@ -61,6 +61,21 @@ export function parseCardsFromText(text) {
     });
   }
 
+  // 1b. Agent-pushed ATTACHMENTS (proxy/parley/attachments.ts): a markdown
+  // link to the download-only lane becomes a card with a Download button.
+  // The plugin writes `📎 [name (size)](/api/parley/attachments/<id>/name)`;
+  // an absolute form (another host, a pasted link) matches too.
+  for (const m of text.matchAll(/\[([^\]]*)\]\(((?:https?:\/\/[^/\s)]+)?\/api\/parley\/attachments\/[a-f0-9]{16}(?:\/[^)\s]*)?)\)/g)) {
+    if (seen.has(m[2])) continue;
+    seen.add(m[2]);
+    cards.push({
+      v: 1,
+      kind: 'attachment',
+      payload: { url: m[2], label: m[1] || '' },
+      meta: { title: (m[1] || 'Attachment').slice(0, 40), source: 'fallback' },
+    });
+  }
+
   // 2. Enumerate all URLs, classify each
   const urlRe = /https?:\/\/[^\s<)\]"'`]+/gi;
   const leftovers = [];

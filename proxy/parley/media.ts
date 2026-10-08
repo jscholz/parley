@@ -112,9 +112,12 @@ export class MediaError extends Error {
   }
 }
 
-/** Validate + register a file; returns the entry id. Exported for the
- *  route handler and for tests. */
-export async function registerMedia(rawPath: string): Promise<{ id: string; entry: MediaEntry }> {
+/** The filesystem guard both agent-push lanes share (media here,
+ *  attachments.ts for everything else): realpath BEFORE the checks so a
+ *  symlink cannot launder a path in, allowed roots only, no dotfile
+ *  components (~/.ssh, ~/.hermes, ~/.parley stay out of reach even though
+ *  $HOME is a root), regular files only. Returns the resolved path + stat. */
+export async function resolveServablePath(rawPath: string): Promise<{ real: string; size: number }> {
   if (typeof rawPath !== 'string' || !rawPath.trim()) {
     throw new MediaError(400, 'path required');
   }
@@ -128,14 +131,19 @@ export async function registerMedia(rawPath: string): Promise<{ id: string; entr
   if (!roots.some((r) => real === r || real.startsWith(r + path.sep))) {
     throw new MediaError(403, `path outside allowed roots (${roots.join(', ')})`);
   }
-  // No dotfile path components: keeps ~/.ssh, ~/.hermes, ~/.parley &
-  // co. unreachable even though $HOME is an allowed root. Checked on
-  // the RESOLVED path so a symlink can't launder one in.
   if (real.split(path.sep).some((seg) => seg.startsWith('.') && seg !== '.' && seg !== '..')) {
     throw new MediaError(403, 'dotfile path components are not served');
   }
   const st = await fs.stat(real);
   if (!st.isFile()) throw new MediaError(400, 'not a regular file');
+  return { real, size: st.size };
+}
+
+/** Validate + register a file; returns the entry id. Exported for the
+ *  route handler and for tests. */
+export async function registerMedia(rawPath: string): Promise<{ id: string; entry: MediaEntry }> {
+  const { real, size } = await resolveServablePath(rawPath);
+  const st = { size };
   const mime = MIME_BY_EXT[path.extname(real).toLowerCase()];
   if (!mime) {
     throw new MediaError(415, `unsupported extension (known: ${Object.keys(MIME_BY_EXT).join(' ')})`);

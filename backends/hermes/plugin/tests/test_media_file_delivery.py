@@ -249,3 +249,75 @@ def test_proxy_origin_defaults_and_is_overridable(plugin, monkeypatch):
 
     monkeypatch.setenv("PARLEY_PROXY_ORIGIN", "http://10.0.0.5:3001/")
     assert a._proxy_origin() == "http://10.0.0.5:3001"   # trailing / stripped
+
+
+# ── 4. the attachment lane (2026-10-08): documents are DELIVERED now ──────
+
+def test_document_refused_by_media_lane_rides_the_attachment_lane(plugin, monkeypatch, tmp_path):
+    """A .pptx used to end as the base '⚠️ Couldn't deliver' notice. The
+    media registry still refuses it (415); the attachment registry takes
+    it and the reply carries a download link the client renders as a card."""
+    a = _adapter(plugin)
+    deck = tmp_path / "R2 deck.pptx"
+    deck.write_bytes(b"PK" + b"0" * 2000)
+    monkeypatch.setattr(plugin.ParleyAdapter, "validate_media_delivery_path",
+                        staticmethod(lambda p, session_key="": p))
+    calls = []
+
+    class _Resp:
+        def __init__(self, url):
+            self.url = url
+            self.status = 415 if url.endswith("/media/register") else 200
+
+        async def json(self, content_type=None):
+            if self.status != 200:
+                return {"error": "unsupported extension"}
+            return {"id": "a1b2c3d4e5f60718", "url": "/api/parley/attachments/a1b2c3d4e5f60718/R2%20deck.pptx",
+                    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "size": 2002, "filename": "R2 deck.pptx"}
+
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    class _Session:
+        def __init__(self, *a, **kw): pass
+        def post(self, url, json=None):
+            calls.append(url)
+            return _Resp(url)
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+
+    fake = types.ModuleType("aiohttp")
+    fake.ClientSession = _Session
+    fake.ClientTimeout = lambda **kw: None
+    monkeypatch.setitem(sys.modules, "aiohttp", fake)
+
+    result = asyncio.run(a.send_document("chat-1", str(deck), caption="Corrected deck"))
+
+    assert result.success
+    assert a.fallbacks == []                       # never the "couldn't deliver" notice
+    assert [u.rsplit("/api/parley/", 1)[1] for u in calls] == ["media/register", "attachments/register"]
+    assert len(a.sends) == 1
+    chat_id, content = a.sends[0]
+    assert chat_id == "chat-1"
+    assert content == "Corrected deck\n📎 [R2 deck.pptx (2 KB)](/api/parley/attachments/a1b2c3d4e5f60718/R2%20deck.pptx)"
+
+
+def test_both_lanes_refusing_still_falls_back_to_the_notice(plugin, monkeypatch, tmp_path):
+    a = _adapter(plugin)
+    f = tmp_path / "x.pdf"
+    f.write_bytes(b"%PDF")
+    monkeypatch.setattr(plugin.ParleyAdapter, "validate_media_delivery_path",
+                        staticmethod(lambda p, session_key="": p))
+    _install_fake_aiohttp(monkeypatch, status=403, body={"error": "path outside allowed roots"})
+    asyncio.run(a.send_document("chat-1", str(f)))
+    assert a.sends == []
+    assert len(a.fallbacks) == 1
+
+
+def test_human_size(plugin):
+    hs = plugin._human_size if hasattr(plugin, "_human_size") else None
+    assert hs is not None
+    assert hs(0) == "0 B" and hs(900) == "900 B" and hs(2002) == "2 KB" and hs(1536) == "1.5 KB"
+    assert hs(1_258_291) == "1.2 MB" and hs(3 * 1024 ** 3) == "3 GB"
+    assert hs(None) == "" and hs("x") == "" and hs(-5) == ""

@@ -57,3 +57,34 @@ browser PWA and the Capacitor iOS shell.
 Server implementation: `proxy/parley/media.ts` (registry + Range
 streamer). Client classification: `src/cards/fallback.ts` (markdown
 image → video/image card by extension), `src/cards/kinds/video.ts`.
+
+## Any other file: the attachment lane (2026-10-08)
+
+The media registry is a *media* lane and refuses documents on purpose
+(it serves inline; an inline .html/.svg is scriptable). For everything
+else — decks, PDFs, spreadsheets, zips, code — use the **attachment**
+lane, which serves download-only (`Content-Disposition: attachment`,
+`nosniff`, octet-stream for unknown types) and renders as a card with a
+**Download** button:
+
+```bash
+curl -s -X POST http://127.0.0.1:3001/api/parley/attachments/register \
+  -H 'content-type: application/json' \
+  -d '{"path": "/tmp/out/R2 deck v3.pptx"}'
+# → {"id":"a1b2…","url":"/api/parley/attachments/a1b2…/R2%20deck%20v3.pptx",
+#    "mime":"application/vnd.openxmlformats-…presentation","size":1258291,"filename":"R2 deck v3.pptx"}
+```
+
+Reference it as a plain markdown **link** (not image syntax):
+
+```
+Corrected deck: 📎 [R2 deck v3.pptx (1.2 MB)](/api/parley/attachments/a1b2…/R2%20deck%20v3.pptx)
+```
+
+The hermes plugin does this for you: a `MEDIA:/abs/path` tag whose file
+the media lane refuses is registered here automatically and delivered as
+`📎 [name (size)](url)` — the "⚠️ Couldn't deliver the file attachment"
+notice now only appears when the path is outside the allowed roots or the
+proxy is down. Same roots/dotfile/symlink rules as media; size cap 500 MB
+(`PARLEY_ATTACHMENT_MAX_MB`). Under the CAP shell the Download button opens
+the URL in the OS browser (WKWebView cannot save files itself).

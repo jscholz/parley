@@ -1314,6 +1314,19 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (mediaGet) {
       return parley.handleMediaGet(req, res, mediaGet[1]);
     }
+    // Agent-pushed ATTACHMENTS (proxy/parley/attachments.ts): the general-
+    // file sibling of the media lane — any file type, download-only
+    // (Content-Disposition: attachment, nosniff), rendered as a card with a
+    // Download button. The hermes plugin's send_document falls back to it
+    // when the media registry refuses a document (2026-10-08).
+    if (req.method === 'POST' && req.url === '/api/parley/attachments/register') {
+      return parley.handleAttachmentRegister(req, res);
+    }
+    const attachmentGet = (req.method === 'GET' || req.method === 'HEAD')
+      && req.url.match(/^\/api\/parley\/attachments\/([a-f0-9]{16})(?:\/[^/?]*)?(?:\?.*)?$/);
+    if (attachmentGet) {
+      return parley.handleAttachmentGet(req, res, attachmentGet[1]);
+    }
     const capPurge = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/purge-audio$/);
     if (capPurge) {
