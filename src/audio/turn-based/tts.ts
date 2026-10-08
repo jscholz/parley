@@ -81,6 +81,17 @@ function emit(name: TtsEventName, payload: any): void {
 let activeReplyId: string | null = null;
 let state: TtsState = 'idle';
 
+/** Who paused the current reply, and when. A SYSTEM 'play' (AirPods
+ *  connecting, an interruption ending, CarPlay, Control Center — iOS
+ *  routes all of those to the last now-playing app) may only resume a
+ *  pause the USER made recently. A barge pause is the user talking over
+ *  the agent: resuming that minutes later on a headset connect is
+ *  exactly the "it just started talking" he has reported three times. */
+export type PauseReason = 'user' | 'remote' | 'barge' | 'system';
+let pauseReason: PauseReason | null = null;
+let pausedAt = 0;
+let remoteResumeWindowMs = 10 * 60 * 1000;
+
 /** Identifier of the reply currently being driven by playReplyTts. */
 export function getActiveReplyId(): string | null { return activeReplyId; }
 
@@ -305,8 +316,10 @@ function ensurePlayerListenersAttached(player: HTMLAudioElement): void {
 // ── Public lifecycle API ─────────────────────────────────────────────
 
 /** Pause the in-flight playback without tearing down the blob URL. */
-export function pauseReplyTts(): void {
+export function pauseReplyTts(reason: PauseReason = 'user'): void {
   if (!active) return;
+  pauseReason = reason;
+  pausedAt = Date.now();
   if (active.kind === 'server') {
     try { active.audio.pause(); } catch { /* noop */ }
     return;
@@ -325,6 +338,22 @@ export function pauseReplyTts(): void {
 }
 
 /** Resume previously-paused playback. */
+/** Whether a system/headset 'play' is allowed to resume right now: a
+ *  reply must be PAUSED (never ended/idle/loading — nothing restarts
+ *  from a cold state), the pause must have been deliberate ('user' from
+ *  the bubble, 'remote' from a headset/lock-screen pause button) and
+ *  recent. Everything else is ignored, loudly, by the caller. */
+export function remoteResumeDecision(now: number = Date.now()): { ok: boolean; why: string } {
+  if (state !== 'paused' || !active) return { ok: false, why: `state=${state}` };
+  if (pauseReason !== 'user' && pauseReason !== 'remote') return { ok: false, why: `paused by ${pauseReason ?? 'unknown'}` };
+  const age = now - pausedAt;
+  if (age > remoteResumeWindowMs) return { ok: false, why: `paused ${Math.round(age / 60000)} min ago` };
+  return { ok: true, why: `paused by ${pauseReason} ${Math.round(age / 1000)}s ago` };
+}
+
+/** Test seam: shrink the window so a smoke can age a pause out. */
+export function __setRemoteResumeWindowForTests(ms: number): void { remoteResumeWindowMs = ms; }
+
 export async function resumeReplyTts(): Promise<void> {
   if (!active) return;
   if (active.kind === 'server') {

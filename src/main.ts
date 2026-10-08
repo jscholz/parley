@@ -675,18 +675,22 @@ async function boot() {
   // these toggle the active call (mic stream / talk) on or off.
   audioSession.init({
     onPlay: () => {
-      // BT play priority order:
-      //   1. If a TTS reply is paused mid-stream, resume it (per-reply
-      //      replay nav — pairs with onPause below).
-      //   2. Otherwise, if a WebRTC call isn't open, open one via the
-      //      mic button (respects user's call/PTT/auto-send toggles).
-      if (ttsModule.isPaused()) {
+      // Media Session 'play' is NOT reliably a person pressing play: iOS
+      // fires it on AirPods connect, interruption end, CarPlay, Control
+      // Center resume — and routes it to the last now-playing app, which
+      // is us after any reply. So (2026-10-08, third "it started talking
+      // by itself" report): resume only a reply the user paused recently
+      // (tts.remoteResumeDecision), never a barge pause, never from
+      // idle/ended — and never open a call from here. The old "idle play
+      // → tap the mic button" branch opened a LIVE CALL (mic + agent
+      // audio) on a headset connect; a call starts from the mic button
+      // or the hotkey, both deliberate.
+      const d = ttsModule.remoteResumeDecision();
+      if (d.ok) {
         void ttsModule.resumeReplyTts();
-        return;
+      } else {
+        diag(`[media-session] play ignored — ${d.why}`);
       }
-      if (webrtcControls.isOpen()) return;
-      const btnMicEl = document.getElementById('btn-mic');
-      if (btnMicEl) btnMicEl.click();
     },
     onPause: () => {
       // BT pause priority order:
@@ -694,7 +698,7 @@ async function boot() {
       //      replay nav — "truck driving by, lemme pause" UX).
       //   2. Otherwise close any open WebRTC call.
       if (ttsModule.getActiveReplyId() && !ttsModule.isPaused()) {
-        ttsModule.pauseReplyTts();
+        ttsModule.pauseReplyTts('remote');
         return;
       }
       if (webrtcControls.isOpen()) {
@@ -3993,7 +3997,7 @@ async function boot() {
         // re-arms via the 'paused' tts event subscribed at boot).
         // The barge bleed itself isn't shipped — the NEXT clean turn
         // is what gets committed if the user keeps talking.
-        try { ttsModule.pauseReplyTts(); } catch { /* noop */ }
+        try { ttsModule.pauseReplyTts('barge'); } catch { /* noop */ }
       },
       onState: (s) => {
         if (btnMic) {

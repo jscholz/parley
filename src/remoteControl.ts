@@ -49,11 +49,22 @@ function dispatch(action: RemoteAction | string): void {
   }
   const ttsState = ttsModule.getState();
   if (action === 'pause' || (action === 'togglePlayPause' && ttsState === 'playing')) {
-    try { ttsModule.pauseReplyTts(); } catch { /* noop */ }
+    try { ttsModule.pauseReplyTts('remote'); } catch { /* noop */ }
     return;
   }
   if (action === 'play' || (action === 'togglePlayPause' && ttsState === 'paused')) {
-    void ttsModule.resumeReplyTts();
+    // iOS sends 'play' for things that are not a person pressing play:
+    // AirPods connecting, a phone call / Siri ending, CarPlay, Control
+    // Center "resume". Only a reply the user paused recently may resume;
+    // never a barge pause, never from idle/ended (field 2026-10-08, the
+    // third report of audio starting by itself in the CAP app).
+    const d = ttsModule.remoteResumeDecision();
+    if (d.ok) {
+      log(`[remote-control] action=${action} → resume (${d.why})`);
+      void ttsModule.resumeReplyTts();
+    } else {
+      log(`[remote-control] action=${action} ignored — ${d.why}`);
+    }
     return;
   }
   // togglePlayPause when nothing's playing: no-op. iOS still shows the
