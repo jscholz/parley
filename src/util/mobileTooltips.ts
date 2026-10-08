@@ -14,7 +14,7 @@
 // On touch-primary devices, native tooltips pop up on tap, which is
 // disruptive; they should be suppressed on mobile entirely.
 
-function isTouchPrimary(): boolean {
+export function isTouchPrimary(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     if (window.matchMedia?.('(pointer: coarse)').matches) return true;

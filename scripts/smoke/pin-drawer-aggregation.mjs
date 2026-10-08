@@ -107,6 +107,17 @@ export default async function run({ page, log }) {
   assert(bannerHidden, 'pin numeric badge is retired (one-number rule) and must stay hidden');
   log('pin numeric badge stays hidden (one-number rule) ✓');
 
+  // ── Inventory chip (2026-10-08): a muted "how many pinned" count on the
+  //    Pins rail button — a different element from the attention badge,
+  //    so the one-number rule above is untouched.
+  const chip = await page.evaluate(() => {
+    const el = document.getElementById('pin-drawer-total-rail');
+    return el ? { hidden: el.hidden, text: el.textContent } : null;
+  });
+  assert(chip && !chip.hidden && chip.text === '2',
+    `pins rail chip should show the pinned total (2), got ${JSON.stringify(chip)}`);
+  log('pins rail chip shows the pinned total ✓');
+
   // ── Open the drawer ──────────────────────────────────────────────
   await openPinDrawer(page);
   const items = await drawerItems(page);

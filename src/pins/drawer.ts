@@ -11,7 +11,7 @@ import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHand
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
-import { hydrateDoc, listDocs, selectDoc } from '../rightDrawer/docStore.ts';
+import { hydrateDoc, listDocs, selectDoc, docCount } from '../rightDrawer/docStore.ts';
 import { reconcileStaleCaptureDocs } from '../rightDrawer/docReconcile.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
@@ -79,6 +79,26 @@ function refreshCountBanner(): void {
   // Pins: numeric badge retired under the one-number rule.
   for (const banner of countBanners) { banner.hidden = true; }
   refreshCombinedBanner();
+  refreshRailCounts();
+}
+
+/** Inventory chips (his ask 2026-10-08): how many messages are pinned,
+ *  how many documents are open — on the Pins / Docs rail buttons. Not
+ *  attention badges: a different element and a muted look (.rail-count),
+ *  so the one-number rule above still holds for the primary badge. */
+function refreshRailCounts(): void {
+  const pins = document.getElementById('pin-drawer-total-rail');
+  if (pins) {
+    const n = totalPinCount();
+    pins.hidden = n === 0;
+    pins.textContent = n > 99 ? '99+' : String(n);
+  }
+  const docs = document.getElementById('doc-drawer-count-rail');
+  if (docs) {
+    const n = docCount();
+    docs.hidden = n === 0;
+    docs.textContent = n > 99 ? '99+' : String(n);
+  }
 }
 
 function refreshCombinedBanner(): void {
@@ -320,6 +340,7 @@ export function initPinDrawer(opts: {
       setDocDot(true);
     }
     if (isOpen() && activePanel === 'doc') drawerHost?.render();
+    refreshRailCounts();
   });
   window.addEventListener('parley:pin-error', (ev) => {
     const detail = (ev as CustomEvent<{ message?: string }>).detail;
@@ -329,6 +350,7 @@ export function initPinDrawer(opts: {
   // untouched. Say exactly that (field nit 2026-07-07: the old trash
   // icon + "Removed" wording read as deletion).
   window.addEventListener('parley:doc-removed', (ev) => {
+    refreshRailCounts();
     const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
     // info, not error: closing a doc is benign (red implied breakage).
     showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`, 'info');

@@ -5522,6 +5522,23 @@
   pointer-events: none;
 }
 .doc-drawer-dot[hidden] { display: none; }
+/* Inventory count chips on the Pins / Docs rail buttons (his ask
+ * 2026-10-08: "a small badge showing how many messages pinned, same for
+ * docs"). Deliberately NOT the .pin-count-banner costume: the one-number
+ * rule (pins/drawer.ts) reserves the primary-coloured top-right badge for
+ * attention (unreads, approvals). These are muted, bottom-right, and read
+ * as "how many are in here", so the two never get confused. */
+.rail-count {
+  position: absolute; bottom: 1px; right: 1px;
+  min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 7px;
+  background: var(--surface-2); color: var(--muted);
+  border: 1px solid var(--border);
+  font-size: 9px; font-weight: 600; line-height: 12px;
+  text-align: center; pointer-events: none;
+}
+.rail-count[hidden] { display: none; }
+.right-drawer-rail-btn[aria-selected="true"] .rail-count { color: var(--primary); }
 /* Close-from-shelf (reader header) — an ✕ scoped to THIS doc, beside
  * the doc's own actions. Non-destructive (the file stays on disk; only
  * the shelf entry goes), so the hover is neutral, not danger-red. */

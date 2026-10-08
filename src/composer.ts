@@ -18,6 +18,7 @@
  */
 
 import { diag } from './util/log.ts';
+import { isTouchPrimary } from './util/mobileTooltips.ts';
 import { diffEdit, shiftPoint } from './util/textAnchor.ts';
 
 let inputEl: HTMLTextAreaElement | null = null;
@@ -185,15 +186,32 @@ export function releaseAnchor(id: number | null | undefined): void {
  *  inserted text, and dispatches its own 'input' event. Falls back to direct
  *  assignment when execCommand is unavailable (jsdom in tests, or a future
  *  engine that drops it); `fallbackCaret` is the absolute caret for that path. */
+/** Whether a dictation/quote insert may call focus() on the textarea.
+ *  execCommand('insertText') needs focus — but on a phone, focus() RAISES
+ *  THE SOFT KEYBOARD, which then covers the composer the dictation is
+ *  filling (his 2026-10-08 report: tap ✓ to drop the keyboard, tap the
+ *  text to see it, repeat). Hands-free dictation must not summon a
+ *  keyboard the user never asked for: on touch-primary devices we only
+ *  steal focus when the textarea already has it (the user is editing),
+ *  and otherwise take the direct-assignment path, which costs the undo
+ *  entry for that insert but keeps the keyboard down. */
+function mayStealFocus(el: HTMLTextAreaElement): boolean {
+  if (typeof document === 'undefined') return true;
+  if (document.activeElement === el) return true;
+  return !isTouchPrimary();
+}
+
 function insertAtCursor(text: string, fallbackCaret: number) {
   const el = inputEl;
   if (!el) return;
-  el.focus();
   let ok = false;
-  try {
-    ok = document.execCommand('insertText', false, text);
-  } catch {
-    ok = false;
+  if (mayStealFocus(el)) {
+    el.focus();
+    try {
+      ok = document.execCommand('insertText', false, text);
+    } catch {
+      ok = false;
+    }
   }
   if (!ok) {
     const val = el.value;
@@ -219,13 +237,15 @@ function insertAtAnchor(text: string, pos: number) {
   if (!el) return;
   const savedStart = el.selectionStart;
   const savedEnd = el.selectionEnd;
-  el.focus();
-  el.setSelectionRange(pos, pos);
   let ok = false;
-  try {
-    ok = document.execCommand('insertText', false, text);
-  } catch {
-    ok = false;
+  if (mayStealFocus(el)) {
+    el.focus();
+    el.setSelectionRange(pos, pos);
+    try {
+      ok = document.execCommand('insertText', false, text);
+    } catch {
+      ok = false;
+    }
   }
   if (!ok) {
     const val = el.value;
