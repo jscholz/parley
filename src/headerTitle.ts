@@ -29,7 +29,6 @@ import * as sessionDrawer from './sessionDrawer.ts';
 import { meetingsFor } from './capture/meetingsIndex.ts';
 
 let el: HTMLElement | null = null;
-let transcriptBtn: HTMLButtonElement | null = null;
 
 /** Grab the header title element. Idempotent — safe to call once at boot
  *  (sessionDrawer.init() does this) and harmless if called again. */
@@ -50,38 +49,115 @@ export function sync(): void {
   syncTranscriptButton();
 }
 
-/** "◉ Transcript" next to the title whenever the VIEWED chat has a
- *  meeting (his 2026-10-09 ask: no way back to the transcript after
- *  closing it). Opens the newest meeting's transcript — on the shelf or
- *  rebuilt from the server (pins/drawer.ts openCaptureTranscript). */
+/** Transcript control (his 2026-10-09 asks): lives in the TOOLBAR row —
+ *  it is an action, not part of the session's name — styled like the
+ *  reader's "Open chat" link so the vocabulary matches. One click opens
+ *  the newest meeting's transcript (on the shelf or rebuilt from the
+ *  server — pins/drawer.ts openCaptureTranscript); when the chat has
+ *  several meetings a ▾ caret lists them all, closed ones included
+ *  (the Docs tab only shows what is still open). */
+const SVG_TRANSCRIPT = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
+
+let transcriptWrap: HTMLElement | null = null;
+let transcriptMain: HTMLButtonElement | null = null;
+let transcriptCaret: HTMLButtonElement | null = null;
+let transcriptMenu: HTMLElement | null = null;
+
+function fmtClock(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function fmtDur(ms: number | undefined): string {
+  if (!ms || !Number.isFinite(ms)) return '';
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m} min`;
+}
+function openTranscript(captureId: string): void {
+  window.dispatchEvent(new CustomEvent('parley:open-transcript', { detail: { captureId } }));
+}
+function closeTranscriptMenu(): void {
+  if (transcriptMenu) { transcriptMenu.remove(); transcriptMenu = null; }
+  transcriptCaret?.setAttribute('aria-expanded', 'false');
+}
+
 function syncTranscriptButton(): void {
-  if (!el) return;
   const viewed = switchCtl.viewedId();
   const meetings = viewed && viewed === (switchCtl.optimisticId() || viewed) ? meetingsFor(viewed) : [];
   if (!meetings.length) {
-    if (transcriptBtn) { transcriptBtn.remove(); transcriptBtn = null; }
+    closeTranscriptMenu();
+    if (transcriptWrap) { transcriptWrap.remove(); transcriptWrap = null; transcriptMain = null; transcriptCaret = null; }
     return;
   }
   const newest = meetings[0];
-  if (!transcriptBtn) {
-    transcriptBtn = document.createElement('button');
-    transcriptBtn.type = 'button';
-    transcriptBtn.id = 'header-transcript-btn';
-    transcriptBtn.className = 'header-transcript-btn';
-    transcriptBtn.onclick = (e) => {
+  if (!transcriptWrap) {
+    const toolbar = document.querySelector('.toolbar');
+    const anchor = document.getElementById('btn-lock');
+    if (!toolbar) return;
+    transcriptWrap = document.createElement('div');
+    transcriptWrap.className = 'transcript-ctl';
+    transcriptMain = document.createElement('button');
+    transcriptMain.type = 'button';
+    transcriptMain.id = 'header-transcript-btn';
+    transcriptMain.className = 'transcript-ctl-main';
+    transcriptMain.onclick = (e) => {
       e.preventDefault();
-      const id = transcriptBtn?.dataset.captureId;
-      if (id) window.dispatchEvent(new CustomEvent('parley:open-transcript', { detail: { captureId: id } }));
+      closeTranscriptMenu();
+      const id = transcriptMain?.dataset.captureId;
+      if (id) openTranscript(id);
     };
-    el.insertAdjacentElement('afterend', transcriptBtn);
+    transcriptCaret = document.createElement('button');
+    transcriptCaret.type = 'button';
+    transcriptCaret.id = 'header-transcript-menu-btn';
+    transcriptCaret.className = 'transcript-ctl-caret';
+    transcriptCaret.textContent = '▾';
+    transcriptCaret.setAttribute('aria-label', 'All transcripts in this chat');
+    transcriptCaret.setAttribute('aria-haspopup', 'menu');
+    transcriptCaret.setAttribute('aria-expanded', 'false');
+    transcriptCaret.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      if (transcriptMenu) { closeTranscriptMenu(); return; }
+      const list = switchCtl.viewedId() ? meetingsFor(switchCtl.viewedId()!) : [];
+      const menu = document.createElement('div');
+      menu.className = 'transcript-menu';
+      menu.setAttribute('role', 'menu');
+      for (const mref of list) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'transcript-menu-item';
+        item.setAttribute('role', 'menuitem');
+        item.dataset.captureId = mref.id;
+        const live = mref.status === 'recording' || mref.status === 'transcribing';
+        const when = `${fmtClock(mref.started_at)}${live ? ' · live' : (fmtDur(mref.duration_ms) ? ` · ${fmtDur(mref.duration_ms)}` : '')}`;
+        item.innerHTML = `<span class="transcript-menu-title"></span><span class="transcript-menu-meta"></span>`;
+        (item.firstElementChild as HTMLElement).textContent = mref.title;
+        (item.lastElementChild as HTMLElement).textContent = when;
+        item.onclick = (ev) => { ev.preventDefault(); closeTranscriptMenu(); openTranscript(mref.id); };
+        menu.appendChild(item);
+      }
+      transcriptWrap!.appendChild(menu);
+      transcriptMenu = menu;
+      transcriptCaret!.setAttribute('aria-expanded', 'true');
+      const onDoc = (ev: Event) => {
+        if (transcriptMenu && !transcriptWrap!.contains(ev.target as Node)) { closeTranscriptMenu(); document.removeEventListener('click', onDoc, true); }
+      };
+      document.addEventListener('click', onDoc, true);
+      document.addEventListener('keydown', function onKey(ev) {
+        if (ev.key === 'Escape') { closeTranscriptMenu(); document.removeEventListener('keydown', onKey); }
+      });
+    };
+    transcriptWrap.appendChild(transcriptMain);
+    transcriptWrap.appendChild(transcriptCaret);
+    if (anchor && anchor.parentElement === toolbar) toolbar.insertBefore(transcriptWrap, anchor);
+    else toolbar.appendChild(transcriptWrap);
   }
-  transcriptBtn.dataset.captureId = newest.id;
+  transcriptMain!.dataset.captureId = newest.id;
   const live = newest.status === 'recording' || newest.status === 'transcribing';
-  transcriptBtn.textContent = live ? '◉ Transcript (live)' : '◉ Transcript';
-  transcriptBtn.title = meetings.length > 1
-    ? `Open the newest of ${meetings.length} transcripts in this chat (the Docs tab lists them all)`
-    : `Open the transcript: ${newest.title}`;
-  transcriptBtn.setAttribute('aria-label', transcriptBtn.title);
+  transcriptMain!.innerHTML = `${SVG_TRANSCRIPT}<span class="transcript-ctl-label"></span>`;
+  (transcriptMain!.lastElementChild as HTMLElement).textContent = live ? 'Transcript (live)' : 'Transcript';
+  transcriptMain!.title = `Open the transcript: ${newest.title}`;
+  transcriptMain!.setAttribute('aria-label', transcriptMain!.title);
+  transcriptCaret!.hidden = meetings.length < 2;
+  transcriptCaret!.title = `${meetings.length} transcripts in this chat`;
 }
 
 function computeText(): string {

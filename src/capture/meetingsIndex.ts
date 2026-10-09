@@ -16,6 +16,8 @@ export interface MeetingRef {
   title: string;
   status: string;
   started_at: number;
+  ended_at?: number | null;
+  duration_ms?: number;
 }
 
 let byChat = new Map<string, MeetingRef[]>();
@@ -36,7 +38,7 @@ export async function refreshMeetingsIndex(): Promise<void> {
     for (const c of (data?.captures ?? [])) {
       if (!c?.linked_chat) continue;
       const list = next.get(c.linked_chat) ?? [];
-      list.push({ id: c.id, title: c.title, status: c.status, started_at: c.started_at });
+      list.push({ id: c.id, title: c.title, status: c.status, started_at: c.started_at, ended_at: c.ended_at ?? null, duration_ms: c.duration_ms });
       next.set(c.linked_chat, list);
     }
     byChat = next;

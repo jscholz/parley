@@ -673,3 +673,39 @@ test('PATCH rename_session renames the linked chat through the seam', async () =
   assert.equal(body.session_titled, true);
   assert.deepEqual(renames, [['parley:abc', 'Squarepeg IC']]);
 });
+
+// ── stale heal goes through the pipeline; reopen keeps a speaker pass (2026-10-09) ──
+
+test('stale heal of a segment-bearing capture claims the pipeline (transcribing → finalize), not a bare complete', async () => {
+  const { setCaptureHooks, finalizeCapture } = await import('../capture.ts');
+  const events: string[] = [];
+  setCaptureHooks({
+    onStopRequested(m: CaptureManifest) { events.push(`claim:${m.status}`); return true; },
+    onStopCommitted(m: CaptureManifest) { events.push(`committed:${m.status}`); void finalizeCapture(m.id); },
+  });
+  const a = await createCapture({ title: 'Stalled' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('x'), { t0Ms: 0, mime: 'audio/mp4' });
+  await ageOut(a.id);
+  await sweepCaptures();
+  assert.deepEqual(events, ['claim:recording', 'committed:transcribing']);
+  // The hook's finalize waits for the sweep to release the capture lock
+  // (fire-and-forget, like the real pipeline) — poll for it.
+  let m = await getCapture(a.id);
+  for (let i = 0; i < 50 && m.status !== 'complete'; i++) {
+    await new Promise((r) => setTimeout(r, 10));
+    m = await getCapture(a.id);
+  }
+  assert.equal(m.status, 'complete');          // the (test) pipeline finalized it
+  assert.equal(m.healed_by_sweep, true);       // late segments may still reopen it
+  setCaptureHooks(null);
+});
+
+test('markCapture stamps and clears diarized_at / ingested_at', async () => {
+  const { markCapture } = await import('../capture.ts');
+  const a = await createCapture({ title: 'Marks' });
+  let m = await markCapture(a.id, { diarized_at: 123, ingested_at: 456 });
+  assert.equal(m.diarized_at, 123); assert.equal(m.ingested_at, 456);
+  m = await markCapture(a.id, { diarized_at: null });
+  assert.equal(m.diarized_at, undefined); assert.equal(m.ingested_at, 456);
+});

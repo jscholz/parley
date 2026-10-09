@@ -28,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath, captureDurationMs,
-  transcriptFilePath, sendJson, sendError, patchCapture, displayTitle,
+  transcriptFilePath, sendJson, sendError, patchCapture, displayTitle, markCapture,
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
@@ -343,6 +343,12 @@ async function drain(id: string): Promise<void> {
       const seg = j.queue.shift()!;
       const m = await getCapture(id);
       await transcribeSegment(m, seg);
+      if (m.diarized_at) {
+        // Reopened after a speaker pass (late segments from an offline
+        // phone): keep the diarized transcript on the shelf; the text is
+        // in seg/<n>.txt and the next finalize re-runs the full pass.
+        continue;
+      }
       await rebuildTranscript(id);
       void pushDoc(id);
     }
@@ -442,6 +448,7 @@ async function runDiarizePass(id: string): Promise<boolean> {
     // the start-message promised the agent).
     const file = transcriptPath(m);
     await fs.copyFile(file, path.join(captureDirPath(m.id), 'transcript.plain.md')).catch(() => { /* first render may not exist */ });
+    await markCapture(m.id, { diarized_at: Date.now() }).catch(() => { /* bookkeeping only */ });
     const body = renderDiarized(m, utterances);
     const tmp = `${file}.tmp-${process.pid}-${tmpCounter++}`;
     await fs.writeFile(tmp, body);
@@ -483,12 +490,19 @@ async function finalizeInner(id: string): Promise<void> {
   if (!diarized) await rebuildTranscript(id);
   await pushDoc(id, { immediate: true });
   const done = await getCapture(id);
+  if (done.ingested_at) {
+    // Second finalize (reopen → heal/stop): transcript + speakers were
+    // refreshed above; the chat already has its summary and title.
+    jobs.delete(id);
+    return;
+  }
   // End-of-meeting topical re-title BEFORE the ingest turn so the
   // agent (and every drawer) sees the titled session. Never clobbers
   // a user-set title; no-op on empty/near-empty transcripts.
   await retitleFromTranscript(done);
   const wantIngest = done.auto_ingest ?? cfg?.autoIngest ?? true;   // per-capture setting wins
   if (wantIngest && done.linked_chat && done.segments.length > 0) {
+    await markCapture(id, { ingested_at: Date.now() }).catch(() => { /* bookkeeping only */ });
     const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
       done.linked_chat,
       `📼 Recording "${done.title}" finished (${fmtOffset((done.ended_at ?? done.started_at) - done.started_at)}, `

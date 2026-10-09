@@ -23,6 +23,8 @@ const MEET_CHAT = 'mock-meeting-chat';
 const PLAIN_CHAT = 'mock-plain-chat';
 const CAP = 'cap_1759936000000_abc123';
 const PATH = `/home/x/.parley/captures/${CAP}/transcript.md`;
+const OLDER_CAP = 'cap_1759900000000_def456';
+const OLDER_PATH = `/home/x/.parley/captures/${OLDER_CAP}/transcript.md`;
 
 export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 600;
@@ -40,9 +42,17 @@ export function MOCK_SETUP(mock) {
     lastActiveAt: Date.now() - 2000,
   });
   mock.addCapture(MEET_CHAT, {
-    id: CAP, title: 'Meeting 2026-10-08 15:03', status: 'complete',
+    id: CAP, title: 'Meeting 2026-10-08 15:03', status: 'complete', startedAt: Date.now() - 3_600_000,
     transcript: '# Meeting 2026-10-08\n\n_Recorded 2026-10-08 15:03 · 1:12:00_\n\n**[+0:00]** REOPEN-MARKER the words of the meeting.',
     transcript_path: PATH,
+  });
+  // An OLDER meeting in the same chat: reachable from the ▾ menu even
+  // though it is not on the shelf (his 2026-10-09 nit: the Docs tab only
+  // lists what is still open).
+  mock.addCapture(MEET_CHAT, {
+    id: OLDER_CAP, title: 'Earlier sync', status: 'complete', startedAt: Date.now() - 86_400_000,
+    transcript: '# Earlier sync\n\n**[+0:00]** OLDER-MARKER yesterday.',
+    transcript_path: OLDER_PATH,
   });
 }
 
@@ -67,9 +77,15 @@ export default async function run({ page, log, mock }) {
     const b = document.getElementById('header-transcript-btn');
     return { text: b?.textContent, cap: b?.dataset.captureId };
   });
-  assert(btnInfo.cap === CAP, `button should target the chat's capture; got ${JSON.stringify(btnInfo)}`);
+  assert(btnInfo.cap === CAP, `button should target the chat's NEWEST capture; got ${JSON.stringify(btnInfo)}`);
   assert(/Transcript/.test(btnInfo.text || ''), `button label wrong: ${btnInfo.text}`);
-  log('header button present only on the meeting chat ✓');
+  const placement = await page.evaluate(() => {
+    const b = document.getElementById('header-transcript-btn');
+    return { inToolbar: !!b?.closest('.toolbar'), caretHidden: document.getElementById('header-transcript-menu-btn')?.hidden };
+  });
+  assert(placement.inToolbar, 'the Transcript control belongs in the toolbar row, not the title row');
+  assert(placement.caretHidden === false, 'a chat with two meetings must show the ▾ caret');
+  log('Transcript control in the toolbar, newest meeting, caret for the rest ✓');
 
   // 2. click → doc rebuilt from the server and opened in the reader
   await page.click('#header-transcript-btn');
@@ -121,4 +137,20 @@ export default async function run({ page, log, mock }) {
     `expected a PATCH with rename_session; got ${JSON.stringify(patch)}`);
   assert(mock.getCaptures().find((c) => c.id === CAP)?.title === 'Riot investor call', 'mock capture title should update');
   log('✎ renamed the meeting and asked for the chat rename ✓');
+
+  // 5. ▾ lists every meeting of the chat; picking the older one (not on
+  //    the shelf) reopens it from the server.
+  await page.click('#header-transcript-menu-btn');
+  await page.waitForSelector('.transcript-menu .transcript-menu-item', { timeout: 3_000 });
+  const items = await page.evaluate(() => [...document.querySelectorAll('.transcript-menu-item')].map((i) => i.dataset.captureId));
+  assert(items.length === 2 && items[0] === CAP && items[1] === OLDER_CAP, `menu should list newest first: ${JSON.stringify(items)}`);
+  await page.click(`.transcript-menu-item[data-capture-id="${OLDER_CAP}"]`);
+  await pollUntil(page, async () => {
+    const ds = await import('/build/rightDrawer/docStore.mjs');
+    const d = ds.currentDoc();
+    return !!(d && d.captureId === 'cap_1759900000000_def456' && /OLDER-MARKER/.test(d.content));
+  }, undefined, { timeout: 8_000, label: 'older transcript did not open from the menu' });
+  const two = await page.evaluate(async () => (await import('/build/rightDrawer/docStore.mjs')).docCount());
+  assert(two === 2, `both transcripts should now be on the shelf, got ${two}`);
+  log('▾ menu lists all meetings and reopens the older one ✓');
 }

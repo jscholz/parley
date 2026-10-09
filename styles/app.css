@@ -415,15 +415,36 @@
     color: var(--muted);
   }
   .header .header-title:empty { display: none; }
-  /* "◉ Transcript" (2026-10-09): the way back into a meeting's transcript
-   * from its chat. Sits right after the title; muted until hovered. */
-  .header .header-transcript-btn {
-    flex: none; margin-left: 8px;
-    background: none; border: 1px solid var(--border); border-radius: 999px;
-    color: var(--muted); font: inherit; font-size: 12px; padding: 2px 10px;
-    cursor: pointer; white-space: nowrap; min-height: 26px;
+  /* Transcript control (2026-10-09): in the TOOLBAR row (an action, not
+   * part of the session name), same vocabulary as the reader's "Open
+   * chat" link (.doc-drawer-openchat): icon + muted text, underline on
+   * hover. The ▾ caret (only when the chat has several meetings) opens a
+   * menu listing every transcript, closed ones included. */
+  .toolbar .transcript-ctl { position: relative; display: inline-flex; align-items: center; gap: 0; }
+  .toolbar .transcript-ctl-main, .toolbar .transcript-ctl-caret {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: none; border: none; cursor: pointer; font: inherit;
+    font-size: 12px; color: var(--muted); padding: 4px 4px;
+    border-radius: 4px; white-space: nowrap; transition: color 0.12s; min-height: 28px;
   }
-  .header .header-transcript-btn:hover { color: var(--primary); border-color: var(--primary); }
+  .toolbar .transcript-ctl-main:hover { color: var(--fg); text-decoration: underline; }
+  .toolbar .transcript-ctl-main svg { flex-shrink: 0; }
+  .toolbar .transcript-ctl-caret { padding: 4px 6px; }
+  .toolbar .transcript-ctl-caret:hover { color: var(--fg); }
+  .toolbar .transcript-ctl-caret[hidden] { display: none; }
+  .transcript-menu {
+    position: absolute; top: 100%; left: 0; z-index: 60; min-width: 260px; max-width: 360px;
+    margin-top: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .transcript-menu-item {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%;
+    background: none; border: none; cursor: pointer; font: inherit; color: var(--fg);
+    text-align: left; padding: 7px 10px; border-radius: 6px;
+  }
+  .transcript-menu-item:hover { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+  .transcript-menu-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+  .transcript-menu-meta { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
   .header .status {
     margin-left: auto; font-family: var(--font-mono); font-size: calc(var(--content-size) - 3px);
     color: var(--muted); letter-spacing: 0.04em;

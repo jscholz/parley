@@ -79,6 +79,15 @@ export interface CaptureManifest {
    *  While set, a late segment REOPENS the capture instead of being
    *  frozen out (offline meeting mode, 2026-10-05); /stop clears it. */
   healed_by_sweep?: boolean;
+  /** The full-audio speaker pass has run (finalize or retro). While set,
+   *  the rolling per-segment rebuild must NOT touch transcript.md — a
+   *  reopened capture's late segments go to seg/*.txt only and the next
+   *  finalize re-runs the pass over everything (2026-10-09: a reopen
+   *  overwrote a diarized transcript with the plain rolling render). */
+  diarized_at?: number;
+  /** The post-meeting ingest turn was dispatched once; a second finalize
+   *  (reopen → heal) must not summarise the meeting into the chat again. */
+  ingested_at?: number;
   /** Why the capture ended 'failed' (abort-start reason, pending TTL
    *  expiry, supersede, stale heal). Kept in place — never deleted. */
   failed_reason?: string;
@@ -517,21 +526,42 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
             void warnStalledCapture(m, audioSilentFor);
           }
           if (Date.now() - await lastActivityMs(m) <= STALE_RECORDING_MS) return;
-          const next = m.segments.length ? 'complete' : 'failed';
-          void audit(m, 'stale-heal', {
-            actor: { source: 'sweep' }, priorStatus: m.status, newStatus: next,
-            reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m — healed in place`,
-          });
-          m.status = next;
-          // The verdict is the SWEEP's, not a client's: a phone that was
-          // offline in a conference room still holds the rest of this
-          // meeting in its buffer. Its late segments reopen the capture
+          if (!m.segments.length) {
+            void audit(m, 'stale-heal', {
+              actor: { source: 'sweep' }, priorStatus: m.status, newStatus: 'failed',
+              reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m — healed in place`,
+            });
+            m.status = 'failed';
+            m.failed_reason = 'stale recording — no activity, no audio';
+            m.ended_at = Date.now();
+            await saveManifest(m);
+            notifyChanged(m, 'completed');
+            return;
+          }
+          // A segment-bearing capture is a real meeting: heal it the way a
+          // /stop would — through the transcription pipeline's claim, so it
+          // gets its final transcript, the speaker pass and the ingest turn.
+          // Flipping straight to 'complete' (the pre-2026-10-09 heal) left
+          // every stalled meeting without speaker labels and still saying
+          // "recording in progress" in the reader.
+          // The verdict is still the SWEEP's, not a client's: a phone that
+          // was offline in a conference room still holds the rest of this
+          // meeting in its buffer, so late segments reopen the capture
           // (putSegmentLocked) rather than parking forever as "frozen".
-          if (next === 'complete') m.healed_by_sweep = true;
-          if (next === 'failed') m.failed_reason = 'stale recording — no activity, no audio';
+          m.healed_by_sweep = true;
           m.ended_at = Date.now();
+          let claimed = false;
+          try { claimed = hooks?.onStopRequested?.(m) === true; } catch { /* hook errors never break the heal */ }
+          m.status = claimed ? 'transcribing' : 'complete';
+          void audit(m, 'stale-heal', {
+            actor: { source: 'sweep' }, priorStatus: 'recording', newStatus: m.status,
+            reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m — healed ${claimed ? 'via the transcription pipeline' : 'in place'}`,
+          });
           await saveManifest(m);
-          notifyChanged(m, 'completed');
+          notifyChanged(m, claimed ? 'stopped' : 'completed');
+          if (claimed) {
+            try { hooks?.onStopCommitted?.(m); } catch { /* hook errors never break the heal */ }
+          }
         });
       } else if (row.status === 'pending') {
         await withCaptureLock(row.id, async () => {
@@ -925,6 +955,18 @@ async function patchCaptureLocked(id: string, patch: {
   notifyChanged(m, 'patched');
   try { hooks?.onPatched?.(m); } catch { /* hook errors never break patch */ }
   return m;
+}
+
+/** Pipeline bookkeeping stamps (diarized_at / ingested_at) — locked
+ *  read-modify-write so a concurrent segment write can't drop them. */
+export function markCapture(id: string, patch: { diarized_at?: number | null; ingested_at?: number | null }): Promise<CaptureManifest> {
+  return withCaptureLock(id, async () => {
+    const m = await readManifest(id);
+    if (patch.diarized_at !== undefined) { if (patch.diarized_at === null) delete m.diarized_at; else m.diarized_at = patch.diarized_at; }
+    if (patch.ingested_at !== undefined) { if (patch.ingested_at === null) delete m.ingested_at; else m.ingested_at = patch.ingested_at; }
+    await saveManifest(m);
+    return m;
+  });
 }
 
 /** The name a shelf tab / transcript reader shows. Same-day meetings all
