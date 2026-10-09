@@ -549,7 +549,7 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
           // meeting in its buffer, so late segments reopen the capture
           // (putSegmentLocked) rather than parking forever as "frozen".
           m.healed_by_sweep = true;
-          m.ended_at = Date.now();
+          m.ended_at = endedAtFor(m);
           let claimed = false;
           try { claimed = hooks?.onStopRequested?.(m) === true; } catch { /* hook errors never break the heal */ }
           m.status = claimed ? 'transcribing' : 'complete';
@@ -957,6 +957,18 @@ async function patchCaptureLocked(id: string, patch: {
   return m;
 }
 
+/** When a capture ends. A normal stop ends now. A capture that STALLED
+ *  (no audio for STALL_WARN_MS — phone died, app frozen, the heal, a
+ *  repair stop hours later) ends when its audio did: last segment +
+ *  one segment length. Otherwise the meeting's recorded length is the
+ *  wall-clock gap to whoever pressed stop (a 46-minute meeting read
+ *  "4:11:33" on 2026-10-09). */
+export function endedAtFor(m: Pick<CaptureManifest, 'stalled_since' | 'last_segment_at' | 'started_at'>, now: number = Date.now()): number {
+  const SEGMENT_MS = 45_000;
+  if (m.stalled_since != null && m.last_segment_at) return Math.min(now, m.last_segment_at + SEGMENT_MS);
+  return now;
+}
+
 /** Pipeline bookkeeping stamps (diarized_at / ingested_at) — locked
  *  read-modify-write so a concurrent segment write can't drop them. */
 export function markCapture(id: string, patch: { diarized_at?: number | null; ingested_at?: number | null }): Promise<CaptureManifest> {
@@ -992,7 +1004,7 @@ async function stopCaptureLocked(id: string, actor?: CaptureActor): Promise<Capt
   // before any recorder ever ran is not a meeting — the TTL sweep
   // fails it in place, and no ingest/announce debris is created).
   if (m.status !== 'recording') return m;
-  m.ended_at = Date.now();
+  m.ended_at = endedAtFor(m);
   delete m.healed_by_sweep;
   // A registered pipeline (captureTranscribe) may CLAIM finalization —
   // the capture parks in 'transcribing' until finalizeCapture(). No
