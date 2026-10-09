@@ -56,7 +56,9 @@ export function sync(): void {
  *  server — pins/drawer.ts openCaptureTranscript); when the chat has
  *  several meetings a ▾ caret lists them all, closed ones included
  *  (the Docs tab only shows what is still open). */
-const SVG_TRANSCRIPT = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
+// Same diagonal arrow as the reader's "Open chat" (modules/doc.ts) — the
+// two are each other's inverse, so they share the glyph (his nit 2026-10-09).
+const SVG_TRANSCRIPT = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
 
 let transcriptWrap: HTMLElement | null = null;
 let transcriptMain: HTMLButtonElement | null = null;
