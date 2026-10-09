@@ -3,6 +3,7 @@
 // clear pattern: create a module, register it below, and listen for its
 // store-change event here.
 
+import { progressLabel } from '../capture/meetingsIndex.ts';
 import { totalPinCount, hydrate as hydratePins } from './store.ts';
 import { log } from '../util/log.ts';
 import { createRightDrawerHost, type RightDrawerHost } from '../rightDrawer/host.ts';
@@ -74,9 +75,9 @@ export async function openCaptureTranscript(captureId: string): Promise<boolean>
       showPinStatus('That meeting is in Recently Deleted — restore it to read the transcript.', 'info');
       return false;
     }
-    const live = data.status === 'recording' || data.status === 'transcribing';
+    const prog = progressLabel({ status: String(data.status || '') });
     setDoc({
-      title: `${data.title || 'Meeting'}${live ? ' (live)' : ''}`,
+      title: `${data.title || 'Meeting'}${prog ? ` (${prog})` : ''}`,
       content: data.content,
       format: typeof data.format === 'string' && data.format ? data.format : 'markdown',
       path: typeof data.path === 'string' ? data.path : undefined,

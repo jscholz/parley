@@ -556,6 +556,18 @@ function scheduleReconcile(gapMs: number): void {
     reconcileTimer = null;
     const gap = pendingReconcileGapMs;
     pendingReconcileGapMs = 0;
+    // Anything that mirrors server state FROM ENVELOPES (the meetings
+    // index, …) is as stale as the on-screen transcript after a long
+    // gap — the 128-entry ring cannot replay 12 hours of a phone in a
+    // pocket. Field 2026-10-09: the header said "Transcript (live)" the
+    // morning after a meeting that completed at 19:51 the night before,
+    // because the capture_changed → complete envelope was evicted
+    // before the phone came back. Announce the gap once so those
+    // mirrors refetch; the chat transcript refetch below is the same
+    // decision for the transcript.
+    if (gap >= RECONCILE_GAP_MS || reconcileOwed) {
+      try { window.dispatchEvent(new CustomEvent('parley:stream-gap', { detail: { gapMs: gap, owed: reconcileOwed } })); } catch {}
+    }
     reconcileActiveChat(gap).catch((e: any) => {
       diag(`proxy-client: reconcile failed: ${e.message}`);
     });

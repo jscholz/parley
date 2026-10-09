@@ -26,7 +26,7 @@
 
 import * as switchCtl from './switchController.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
-import { meetingsFor } from './capture/meetingsIndex.ts';
+import { meetingsFor, progressLabel, reverifyIfInProgress } from './capture/meetingsIndex.ts';
 
 let el: HTMLElement | null = null;
 
@@ -128,8 +128,8 @@ function syncTranscriptButton(): void {
         item.className = 'transcript-menu-item';
         item.setAttribute('role', 'menuitem');
         item.dataset.captureId = mref.id;
-        const live = mref.status === 'recording' || mref.status === 'transcribing';
-        const when = `${fmtClock(mref.started_at)}${live ? ' · live' : (fmtDur(mref.duration_ms) ? ` · ${fmtDur(mref.duration_ms)}` : '')}`;
+        const prog = progressLabel(mref);
+        const when = `${fmtClock(mref.started_at)}${prog ? ` · ${prog}` : (fmtDur(mref.duration_ms) ? ` · ${fmtDur(mref.duration_ms)}` : '')}`;
         item.innerHTML = `<span class="transcript-menu-title"></span><span class="transcript-menu-meta"></span>`;
         (item.firstElementChild as HTMLElement).textContent = mref.title;
         (item.lastElementChild as HTMLElement).textContent = when;
@@ -153,9 +153,14 @@ function syncTranscriptButton(): void {
     else toolbar.appendChild(transcriptWrap);
   }
   transcriptMain!.dataset.captureId = newest.id;
-  const live = newest.status === 'recording' || newest.status === 'transcribing';
+  // "(live)" = mic still open, "(processing)" = mic stopped, finalize
+  // pass running. Both are the ONLY states that can be stale on screen
+  // (a missed completion envelope), so re-verify against the server
+  // before claiming either; parley:meetings-changed repaints us.
+  const prog = progressLabel(newest);
+  if (prog) reverifyIfInProgress(newest);
   transcriptMain!.innerHTML = `${SVG_TRANSCRIPT}<span class="transcript-ctl-label"></span>`;
-  (transcriptMain!.lastElementChild as HTMLElement).textContent = live ? 'Transcript (live)' : 'Transcript';
+  (transcriptMain!.lastElementChild as HTMLElement).textContent = prog ? `Transcript (${prog})` : 'Transcript';
   transcriptMain!.title = `Open the transcript: ${newest.title}`;
   transcriptMain!.setAttribute('aria-label', transcriptMain!.title);
   transcriptCaret!.hidden = meetings.length < 2;
