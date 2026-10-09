@@ -2,11 +2,12 @@
 //
 // PWA → POST /transcribe (raw audio body) → proxy forwards to
 // audio-bridge /v1/transcribe → bridge calls Deepgram REST →
-// transcript returns. The fixture says "hello parley" (synthesized
-// once via Deepgram Aura — see scripts/smoke/fixtures/README if/when
-// we need to regenerate). The assertion is a substring match —
-// Deepgram may capitalize / punctuate ("Hello, parley.") and we
-// don't want to spec-fight model drift.
+// transcript returns. The fixture says "hello sidekick" (synthesized
+// once via Deepgram Aura under the product's former name — see
+// scripts/smoke/fixtures/README if/when we need to regenerate; the
+// recording's content is legacy by design, 91de729). The assertion is
+// a substring match — Deepgram may capitalize / punctuate ("Hello,
+// sidekick.") and we don't want to spec-fight model drift.
 //
 // What this catches that audio-bridge-health doesn't:
 //  - Bridge ↔ Deepgram auth (key set in env, not just declared
@@ -29,14 +30,16 @@ export const STATUS = 'implemented';
 export const BACKEND = 'real';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// Fixture filename stays legacy: the WAV is a RECORDING of the spoken
-// word "parley" (see EXPECT_SUBSTRING below). Renaming the file would
-// make the name lie about its audio content — same invariant as the
-// persisted-form fixtures in d1b1fef.
+// Fixture filename AND expectation stay legacy: the WAV is a RECORDING
+// of the spoken word "sidekick" (see EXPECT_SUBSTRING below). Renaming
+// the file, or expecting the new name, would make the test lie about
+// its audio content — same invariant as the persisted-form fixtures in
+// d1b1fef. (fc3e2ab flipped the expectation to "parley" and the smoke
+// has been red since — the audio never changed.)
 const FIXTURE = path.join(__dirname, 'fixtures', 'hello-sidekick.wav');
 /** Substring match — Deepgram normalizes (capitalizes, may add a
  *  period). Assert on the unique noun rather than exact equality. */
-const EXPECT_SUBSTRING = 'parley';
+const EXPECT_SUBSTRING = 'sidekick';
 
 export default async function run({ url, log }) {
   const bytes = await readFile(FIXTURE);

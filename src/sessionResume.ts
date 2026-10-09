@@ -315,12 +315,22 @@ export function replaySessionMessages(
   // reconciler bring the DOM into agreement. NO clear/iterate loop —
   // the reconciler walks both old and new keys, updates in place,
   // removes orphans. NO divergence-heal — the store IS the source.
-  if (opts?.preserveScrollIfLive && sameSession) {
-    // Background reconcile refetch of the ON-SCREEN chat (the post-reply
-    // durable refresh / disconnect reconcile) fetches only the TAIL page.
-    // Merge it so loaded-earlier history the user scrolled up to load
-    // survives (field bug 2026-06-15). A fresh navigation / boot resume —
-    // which doesn't pass preserveScrollIfLive — still replaces wholesale.
+  if (sameSession && !targetMessageId) {
+    // A re-render of the chat ALREADY ON SCREEN fetches only the TAIL
+    // page. Merge it so loaded-earlier history the user scrolled up to
+    // load survives (field bug 2026-06-15 for the post-reply durable
+    // refresh / disconnect reconcile). The drawer switch's own late
+    // server callback is the same situation: the cache render committed
+    // the view seconds ago, the user has been scrolling since and
+    // load-earlier has already prepended older pages — field 2026-10-09
+    // (morning walk, cellular): the page landed ~2s after the tap,
+    // replaced the buffer wholesale, ~100 rows above the viewport
+    // vanished, and the transcript collapsed under the user's finger
+    // (a 9000px correction, then a re-fetch and a second jump). With no
+    // older head in the buffer mergeTailRefresh IS setDurable, so a
+    // boot/reload resume (sameSession by construction) loses nothing.
+    // A different-session switch and a drill (targetMessageId) still
+    // replace wholesale.
     transcriptStore.mergeTailRefresh(id, messages, {
       firstId: pagination?.firstId ?? null,
       hasMore: !!pagination?.hasMore,

@@ -2001,6 +2001,15 @@ export async function installMockBackend(page) {
       if (typeof ms === 'number' && ms > 0) messageDelays.set(chatId, ms);
       else messageDelays.delete(chatId);
     },
+    /** Tell every connected stream client its cursor predates the replay
+     *  ring (#204 `replay_gap`): proxyClient marks a reconcile owed and
+     *  refetches the on-screen transcript — the same path a long
+     *  foreground gap takes, without a fake clock. Not recorded in
+     *  `recent` (the real server emits it per-connection, un-numbered). */
+    emitReplayGap(reason = 'test') {
+      const frame = `event: replay_gap\ndata: ${JSON.stringify({ reason })}\n\n`;
+      for (const sub of streamSubs) { try { sub.write(frame); } catch {} }
+    },
     setSessionsFailure(status = 503) {
       sessionsFailStatus = status > 0 ? status : 0;
     },
