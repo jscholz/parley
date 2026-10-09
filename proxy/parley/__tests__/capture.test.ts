@@ -710,10 +710,13 @@ test('markCapture stamps and clears diarized_at / ingested_at', async () => {
   assert.equal(m.diarized_at, undefined); assert.equal(m.ingested_at, 456);
 });
 
-test('endedAtFor: a stalled capture ends at its last audio, a normal stop ends now', async () => {
+test('endedAtFor: a stalled capture ends at its last AUDIO (t0-based), a normal stop ends now', async () => {
   const { endedAtFor } = await import('../capture.ts');
   const now = 10_000_000;
-  assert.equal(endedAtFor({ started_at: 0, last_segment_at: 5_000_000, stalled_since: 5_200_000 }, now), 5_045_000);
-  assert.equal(endedAtFor({ started_at: 0, last_segment_at: 9_990_000, stalled_since: 9_995_000 }, now), now);   // never in the future
-  assert.equal(endedAtFor({ started_at: 0, last_segment_at: 5_000_000 }, now), now);                            // no stall → stop time
+  const segs = (...t0s: number[]) => t0s.map((t0_ms, seq) => ({ seq, t0_ms, bytes: 1, mime: 'audio/mp4', sha256: '' })) as any;
+  // Started at 1,000,000; audio through t0=2,700,000 (+45s) → ends 3,745,000, however late it arrived.
+  assert.equal(endedAtFor({ started_at: 1_000_000, stalled_since: 5_000_000, segments: segs(0, 2_700_000) }, now), 3_745_000);
+  assert.equal(endedAtFor({ started_at: 9_990_000, stalled_since: 9_995_000, segments: segs(0) }, now), now);   // never in the future
+  assert.equal(endedAtFor({ started_at: 1_000_000, segments: segs(0, 2_700_000) }, now), now);                   // no stall → stop time
+  assert.equal(endedAtFor({ started_at: 1_000_000, stalled_since: 2_000_000, segments: [] }, now), now);        // nothing recorded
 });

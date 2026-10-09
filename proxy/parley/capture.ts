@@ -959,13 +959,19 @@ async function patchCaptureLocked(id: string, patch: {
 
 /** When a capture ends. A normal stop ends now. A capture that STALLED
  *  (no audio for STALL_WARN_MS — phone died, app frozen, the heal, a
- *  repair stop hours later) ends when its audio did: last segment +
- *  one segment length. Otherwise the meeting's recorded length is the
- *  wall-clock gap to whoever pressed stop (a 46-minute meeting read
- *  "4:11:33" on 2026-10-09). */
-export function endedAtFor(m: Pick<CaptureManifest, 'stalled_since' | 'last_segment_at' | 'started_at'>, now: number = Date.now()): number {
+ *  repair stop hours later) ends when its AUDIO did: the latest
+ *  segment's capture-relative t0 plus one segment length. NOT
+ *  last_segment_at — that is the arrival clock, and an offline phone
+ *  uploads its buffer hours later (a 46-minute meeting read "4:01:04"
+ *  on 2026-10-09 from exactly that). Never in the future. */
+export function endedAtFor(
+  m: Pick<CaptureManifest, 'stalled_since' | 'started_at' | 'segments'>, now: number = Date.now(),
+): number {
   const SEGMENT_MS = 45_000;
-  if (m.stalled_since != null && m.last_segment_at) return Math.min(now, m.last_segment_at + SEGMENT_MS);
+  if (m.stalled_since != null && m.segments.length) {
+    const lastT0 = Math.max(...m.segments.map((s) => s.t0_ms));
+    return Math.min(now, m.started_at + lastT0 + SEGMENT_MS);
+  }
   return now;
 }
 
