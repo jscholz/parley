@@ -28,7 +28,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   getCapture, finalizeCapture, segmentPath, setCaptureHooks, captureDirPath, captureDurationMs,
-  transcriptFilePath, sendJson, sendError,
+  transcriptFilePath, sendJson, sendError, patchCapture, displayTitle,
   type CaptureManifest, type SegmentMeta,
 } from './capture.ts';
 import { pushEnvelope } from './stream.ts';
@@ -196,6 +196,10 @@ async function retitleFromTranscript(m: CaptureManifest): Promise<void> {
     const title = topicalTitleFromTranscript(transcript);
     if (!title) return;   // not enough content — keep the placeholder
     await renameWithRetry(m.id, m.linked_chat, title);
+    // The CAPTURE keeps the same name (2026-10-09): until now only the
+    // session was re-titled and every shelf tab still read "Meeting
+    // 2026-10-08". onPatched re-pushes the doc under the new title.
+    await patchCapture(m.id, { title });
   } catch (e) {
     console.warn(`[capture-transcribe] ${m.id}: end-of-meeting re-title failed: ${String(e)}`);
   }
@@ -271,7 +275,7 @@ async function pushDoc(id: string, opts?: { immediate?: boolean }): Promise<void
     pushEnvelope({
       type: 'doc_show',
       chat_id: m.linked_chat || '',
-      title: live ? `${m.title} (live)` : m.title,
+      title: live ? `${displayTitle(m)} (live)` : displayTitle(m),
       content,
       format: 'markdown',
       path: transcriptPath(m),
@@ -490,7 +494,12 @@ async function finalizeInner(id: string): Promise<void> {
       `📼 Recording "${done.title}" finished (${fmtOffset((done.ended_at ?? done.started_at) - done.started_at)}, `
       + `${done.segments.length} segments). Transcript: ${transcriptPath(done)}\n\n`
       + 'Ingest it now following the meeting-transcript-ingest skill if available; '
-      + 'otherwise read it and give me a tight summary with decisions and action items.',
+      + 'otherwise read it and give me a tight summary with decisions and action items.\n\n'
+      + 'Then name the meeting: if the transcript (and my calendar for that time, if you have a calendar tool) '
+      + 'makes the subject and participants clear, set a short specific title with '
+      + `\`curl -s -X PATCH http://127.0.0.1:3001/api/parley/captures/${done.id} -H 'content-type: application/json' `
+      + `-d '{"title":"<title>","rename_session":true}'\` — it renames the meeting and this chat together. `
+      + 'Skip it if the current title is already specific.',
     );
     if (!sent) console.warn(`[capture-transcribe] ${id}: ingest turn not dispatched (no upstream)`);
   }
@@ -525,6 +534,12 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
     onSegmentStored(m, seg) {
       job(m.id).queue.push(seg);
       void drain(m.id);
+    },
+    onPatched(m) {
+      // A rename (reader ✎, pipeline re-title, pill sheet) must reach the
+      // shelf: re-push the doc under the new title — only if a transcript
+      // exists yet (a rename during the first minute has nothing to push).
+      void fs.access(transcriptPath(m)).then(() => pushDoc(m.id, { immediate: true })).catch(() => {});
     },
     onStopRequested(m) {
       // Pure claim — no work here; the stop state isn't saved yet

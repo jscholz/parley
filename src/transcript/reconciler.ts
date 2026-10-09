@@ -24,7 +24,7 @@
  */
 
 import * as chat from '../chat.ts';
-import { miniMarkdown, renderUserText } from '../util/markdown.ts';
+import { miniMarkdown, renderUserText, linkifyCaptureDocs } from '../util/markdown.ts';
 import { escapeHtml } from '../util/dom.ts';
 import * as settings from '../settings.ts';
 import { getAgentLabel } from '../config.ts';
@@ -722,7 +722,11 @@ function updateAssistant(el: HTMLElement, spec: AssistantBubbleSpec): void {
  *  (incl. cron) carry real markdown, so this mirrors the assistant path
  *  rather than emitting escaped plaintext. */
 export function renderNotificationHtml(text: string | undefined): string {
-  return miniMarkdown(text || '');
+  // The "Recording started … /transcript.md" notice is a notification
+  // bubble; its path must be a doc-open link like it is in agent bubbles
+  // (2026-10-09 — the only transcript affordance in a meeting chat was
+  // plain text).
+  return linkifyCaptureDocs(miniMarkdown(text || ''));
 }
 
 function updateNotification(el: HTMLElement, spec: NotificationBubbleSpec): void {

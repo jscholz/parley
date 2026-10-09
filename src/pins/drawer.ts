@@ -11,7 +11,8 @@ import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHand
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
-import { hydrateDoc, listDocs, selectDoc, docCount } from '../rightDrawer/docStore.ts';
+import { hydrateDoc, listDocs, selectDoc, docCount, setDoc } from '../rightDrawer/docStore.ts';
+import { apiUrl } from '../apiBase.ts';
 import { reconcileStaleCaptureDocs } from '../rightDrawer/docReconcile.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
@@ -45,6 +46,50 @@ export function openAllDocs(): boolean {
   docModuleRef.setView('list');
   drawerHost.select('doc', { open: true });
   return true;
+}
+
+/** Put a meeting's transcript in the reader. On the shelf → select it;
+ *  closed earlier (his 2026-10-09 ask: "I click back to meeting sessions
+ *  after closing the meeting notes and don't know how to get the
+ *  transcript back") → rebuild the doc from GET /captures/{id}/transcript,
+ *  which carries the path identity, so a later live push refreshes the
+ *  same entry instead of adding a twin. */
+export async function openCaptureTranscript(captureId: string): Promise<boolean> {
+  const doc = listDocs().find((d) => d.captureId === captureId);
+  if (doc) {
+    selectDoc(doc.id);
+    docModuleRef?.setView('reader');
+    drawerHost?.select('doc', { open: true });
+    return true;
+  }
+  try {
+    const res = await fetch(apiUrl(`/api/parley/captures/${encodeURIComponent(captureId)}/transcript`));
+    if (res.status === 404) {
+      showPinStatus('That transcript isn\'t available yet — it appears within a minute of the recording starting.', 'info');
+      return false;
+    }
+    if (!res.ok) { showPinStatus(`Could not load the transcript (HTTP ${res.status}).`); return false; }
+    const data = await res.json();
+    if (typeof data?.content !== 'string') {
+      showPinStatus('That meeting is in Recently Deleted — restore it to read the transcript.', 'info');
+      return false;
+    }
+    const live = data.status === 'recording' || data.status === 'transcribing';
+    setDoc({
+      title: `${data.title || 'Meeting'}${live ? ' (live)' : ''}`,
+      content: data.content,
+      format: typeof data.format === 'string' && data.format ? data.format : 'markdown',
+      path: typeof data.path === 'string' ? data.path : undefined,
+      chatId: typeof data.chat_id === 'string' ? data.chat_id : undefined,
+      source: 'capture',
+      captureId,
+      durationMs: typeof data.duration_ms === 'number' ? data.duration_ms : undefined,
+    }, { autoOpen: true });   // the doc-changed autoOpen handler opens the reader
+    return true;
+  } catch (e) {
+    showPinStatus(`Could not load the transcript: ${(e as Error)?.message || e}`);
+    return false;
+  }
 }
 
 function defaultDrawerWidthPx(): number {
@@ -364,14 +409,13 @@ export function initPinDrawer(opts: {
     if (!a) return;
     ev.preventDefault();
     const captureId = (a.getAttribute('href') || '').slice(5);
-    const doc = listDocs().find((d) => d.captureId === captureId);
-    if (doc) {
-      selectDoc(doc.id);
-      docModule?.setView('reader');
-      drawerHost?.select('doc', { open: true });
-    } else {
-      showPinStatus('That transcript isn\'t on the shelf yet — it appears within a minute of the recording starting.', 'info');
-    }
+    void openCaptureTranscript(captureId);
+  });
+  // Header "Transcript" button (headerTitle.ts) and anything else that
+  // wants a meeting's transcript on screen without importing this module.
+  window.addEventListener('parley:open-transcript', (ev) => {
+    const captureId = (ev as CustomEvent<{ captureId?: string }>).detail?.captureId;
+    if (captureId) void openCaptureTranscript(captureId);
   });
 
   refreshCountBanner();

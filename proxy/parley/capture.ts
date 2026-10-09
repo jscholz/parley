@@ -155,6 +155,10 @@ export interface CaptureHooks {
   /** The stop state is durably saved — a claimant starts (or
    *  schedules) finalization HERE. */
   onStopCommitted?(m: CaptureManifest): void;
+  /** Title / link / diarize changed (PATCH, or the pipeline's own
+   *  end-of-meeting re-title). The transcript pipeline re-pushes the
+   *  doc so shelf tabs follow the new name (2026-10-09). */
+  onPatched?(m: CaptureManifest): void;
   /** Soft-discard (Recently Deleted tombstone) — pipelines drop queued
    *  work; the data stays on disk, restorable. */
   onDiscarded?(id: string): void;
@@ -919,7 +923,21 @@ async function patchCaptureLocked(id: string, patch: {
   }
   await saveManifest(m);
   notifyChanged(m, 'patched');
+  try { hooks?.onPatched?.(m); } catch { /* hook errors never break patch */ }
   return m;
+}
+
+/** The name a shelf tab / transcript reader shows. Same-day meetings all
+ *  mint the placeholder "Meeting YYYY-MM-DD", which is why he could not
+ *  tell five open transcripts apart (2026-10-09); a placeholder gets its
+ *  start time appended. A topical or user title is shown as is. */
+export function displayTitle(m: Pick<CaptureManifest, 'title' | 'started_at'>): string {
+  const t = (m.title || '').trim();
+  if (!/^Meeting \d{4}-\d{2}-\d{2}$/.test(t)) return t || 'Meeting';
+  const d = new Date(m.started_at);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${t} ${hh}:${mm}`;
 }
 
 export function stopCapture(id: string, actor?: CaptureActor): Promise<CaptureManifest> {
@@ -1365,6 +1383,23 @@ export async function handleCaptureStop(
   catch (err) { sendError(res, err); }
 }
 
+/** Session rename used by PATCH's rename_session. Default goes through
+ *  the configured upstream and the user-titled marker; tests inject. */
+let renameSessionFn: (chatId: string, title: string) => Promise<boolean> = async (chatId, title) => {
+  const { getUpstream } = await import('./index.ts');
+  const up = getUpstream();
+  if (!up) return false;
+  const result = await up.renameConversation(chatId, title);
+  try {
+    const { markUserTitled } = await import('./userTitles.ts');
+    await markUserTitled(chatId, result.title);
+  } catch { /* marker is advisory */ }
+  return true;
+};
+export function __setRenameSessionForTests(fn: typeof renameSessionFn | null): void {
+  if (fn) renameSessionFn = fn;
+}
+
 /** PATCH /api/parley/captures/{id} — rename / re-link / diarize
  *  toggle (the annotate-later sheet, §3.4). */
 export async function handleCapturePatch(
@@ -1378,7 +1413,18 @@ export async function handleCapturePatch(
         : (typeof body.linked_chat === 'string' && body.linked_chat ? body.linked_chat : null),
       diarize: typeof body.diarize === 'boolean' ? body.diarize : undefined,
     });
-    sendJson(res, 200, { capture: manifest });
+    // rename_session (2026-10-09): one rename from the transcript reader
+    // names the meeting AND its chat, and marks the chat user-titled so
+    // the pipeline's topical re-title never overwrites it.
+    let sessionTitled = false;
+    if (body.rename_session === true && typeof body.title === 'string' && body.title.trim() && manifest.linked_chat) {
+      try {
+        sessionTitled = await renameSessionFn(manifest.linked_chat, body.title.trim());
+      } catch (e: any) {
+        console.warn(`[capture] ${id}: session rename failed: ${e?.message || e}`);
+      }
+    }
+    sendJson(res, 200, { capture: manifest, session_titled: sessionTitled });
   } catch (err) { sendError(res, err); }
 }
 
@@ -1475,10 +1521,15 @@ export async function handleCaptureTranscript(
     sendJson(res, 200, {
       capture_id: m.id,
       status: m.status,
-      title: m.title,
+      title: displayTitle(m),
       format: 'markdown',
       content,
       duration_ms: captureDurationMs(m),
+      // Reopen support (2026-10-09): a client that closed the shelf doc
+      // rebuilds it from here — path is the doc's identity key.
+      path: transcriptFilePath(id),
+      chat_id: m.linked_chat,
+      started_at: m.started_at,
     });
   } catch (err) { sendError(res, err); }
 }

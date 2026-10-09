@@ -55,6 +55,12 @@ export function hasMeetings(chatId: string): boolean {
   return meetingCountFor(chatId) > 0;
 }
 
+/** The chat's meetings, newest first (the header's Transcript button
+ *  opens the newest; the Docs tab lists them all). */
+export function meetingsFor(chatId: string): MeetingRef[] {
+  return [...(byChat.get(chatId) ?? [])].sort((a, b) => b.started_at - a.started_at);
+}
+
 export function meetingChatIds(): Set<string> {
   return new Set(byChat.keys());
 }

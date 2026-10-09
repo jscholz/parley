@@ -35,11 +35,12 @@
 // `doc-html-images-render` smoke, which asserts both halves.
 
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
+import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
   currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
-  type DocState,
+  type DocState, setDoc,
 } from '../docStore.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
@@ -312,6 +313,54 @@ export function createDocModule(opts: {
     appendCaptureGlyph(titleText, doc);
     titleText.appendChild(document.createTextNode(doc.title));
     titleEl.appendChild(titleText);
+    if (doc.source === 'capture' && doc.captureId) {
+      // Rename (2026-10-09): one ✎ names the meeting AND its chat
+      // (PATCH /captures/{id} rename_session) and marks the chat
+      // user-titled so the pipeline's auto re-title keeps its hands off.
+      // Inline input, not window.prompt (iOS standalone dialogs are
+      // unreliable — 2026-08-18 incident).
+      const rename = document.createElement('button');
+      rename.className = 'doc-drawer-rename';
+      rename.textContent = '✎';
+      rename.title = 'Rename this meeting (and its chat)';
+      rename.setAttribute('aria-label', rename.title);
+      rename.onclick = (e) => {
+        e.stopPropagation();
+        if (titleEl.querySelector('.doc-drawer-title-input')) return;
+        const input = document.createElement('input');
+        input.className = 'doc-drawer-title-input';
+        input.value = doc.title.replace(/\s*\(live\)\s*$/, '');
+        input.setAttribute('aria-label', 'Meeting title');
+        const restore = () => { input.replaceWith(titleText); };
+        const commit = async () => {
+          const title = input.value.trim();
+          if (!title || title === doc.title) { restore(); return; }
+          input.disabled = true;
+          try {
+            const res = await fetch(apiUrl(`/api/parley/captures/${encodeURIComponent(doc.captureId!)}`), {
+              method: 'PATCH', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ title, rename_session: true }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            // Optimistic: the server's onPatched re-push arrives too, under
+            // the same path identity, so this never doubles the doc.
+            setDoc({ ...doc, title }, { autoOpen: false });
+          } catch (err) {
+            window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message: `Rename failed: ${(err as Error)?.message || err}` } }));
+            restore();
+          }
+        };
+        input.onkeydown = (ke) => {
+          if (ke.key === 'Enter') { ke.preventDefault(); void commit(); }
+          if (ke.key === 'Escape') { ke.preventDefault(); restore(); }
+        };
+        input.onblur = () => { if (!input.disabled) void commit(); };
+        titleText.replaceWith(input);
+        input.focus();
+        input.select();
+      };
+      titleEl.appendChild(rename);
+    }
     titleEl.appendChild(rm);
     opts.body.appendChild(titleEl);
 

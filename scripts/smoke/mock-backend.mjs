@@ -845,6 +845,10 @@ export async function installMockBackend(page) {
     return reply(200, {
       capture_id: cap.id, status: cap.status, title: cap.title,
       format: 'markdown', content: cap.transcript,
+      // Reopen support (2026-10-09): identity + chat, like the real server.
+      path: cap.transcript_path || `/w/${cap.id}/transcript.md`,
+      chat_id: cap.linked_chat || null,
+      started_at: cap.started_at,
     });
   });
   await page.route(/.*\/api\/parley\/captures\/[^/]+$/, async (route) => {
@@ -859,6 +863,16 @@ export async function installMockBackend(page) {
         status: gcap ? 200 : 404, contentType: 'application/json',
         body: JSON.stringify(gcap ? { capture: gcap } : { error: 'unknown capture' }),
       });
+    }
+    if (route.request().method() === 'PATCH') {
+      const pm = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
+      const pcap = captures.get(pm ? pm[1] : '');
+      if (!pcap) return route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"unknown capture"}' });
+      let pbody; try { pbody = JSON.parse(route.request().postData() || '{}'); } catch { pbody = {}; }
+      if (typeof pbody.title === 'string' && pbody.title.trim()) pcap.title = pbody.title.trim();
+      captureLifecycle.push({ action: 'patch', id: pcap.id, body: pbody });
+      return route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ capture: pcap, session_titled: pbody.rename_session === true && !!pcap.linked_chat }) });
     }
     if (route.request().method() !== 'DELETE') return route.fallback();
     const m = new URL(route.request().url()).pathname.match(/\/captures\/([^/]+)$/);
@@ -1848,6 +1862,7 @@ export async function installMockBackend(page) {
         // Served by the mocked GET /captures/{id}/transcript (stale-doc
         // reconcile). Omit for "no transcript ever landed" → 404 there.
         ...(typeof opts.transcript === 'string' ? { transcript: opts.transcript } : {}),
+        ...(typeof opts.transcript_path === 'string' ? { transcript_path: opts.transcript_path } : {}),
         // Seeding a TOMBSTONE (status:'discarded') carries the discard
         // bookkeeping a real /discard writes: discarded_at drives the
         // Recently-Deleted UI's "Deleted 2h ago", pre_discard_status is

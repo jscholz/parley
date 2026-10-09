@@ -392,12 +392,19 @@ test('transcript endpoint: content for finished captures, 404s, discarded tombst
   assert.equal(ok.status, 200);
   // duration_ms rides along (meeting length without loading audio,
   // 2026-09-19) — wall-clock derived, so assert its type, not its value.
-  const { duration_ms: okDurationMs, ...okBody } = ok.body;
+  // path / chat_id / started_at ride along too (reopen support,
+  // 2026-10-09): assert them by shape, the rest exactly. The placeholder
+  // title comes back time-suffixed (displayTitle) so same-day meetings
+  // are distinguishable on the shelf.
+  const { duration_ms: okDurationMs, path: okPath, chat_id: okChat, started_at: okStart, ...okBody } = ok.body;
   assert.equal(typeof okDurationMs, 'number');
+  assert.equal(okPath, transcriptFilePath(cap.id));
+  assert.equal(okChat, null);
+  assert.equal(typeof okStart, 'number');
   assert.deepEqual(okBody, {
     capture_id: cap.id,
     status: 'complete',
-    title: 'Meeting 2026-08-24',
+    title: `Meeting 2026-08-24 ${String(new Date(cap.started_at).getHours()).padStart(2, '0')}:${String(new Date(cap.started_at).getMinutes()).padStart(2, '0')}`,
     format: 'markdown',
     content: body,
   });
@@ -597,4 +604,72 @@ test('a capture the USER stopped stays frozen — reopen is only for the sweep v
     putSegment(a.id, 1, Buffer.from('y'), { t0Ms: 45_000, mime: 'audio/mp4' }),
     (e: any) => e.status === 409 && /frozen/.test(e.message),
   );
+});
+
+// ── transcript reopen / naming (2026-10-09) ───────────────────────────
+
+function fakeRes() {
+  const chunks: Buffer[] = [];
+  let statusCode = 0;
+  let headers: Record<string, unknown> = {};
+  let resolveDone: () => void;
+  const done = new Promise<void>((r) => { resolveDone = r; });
+  const res: any = {
+    writeHead(code: number, h: Record<string, unknown>) { statusCode = code; headers = h || {}; return res; },
+    write(c: any) { chunks.push(Buffer.from(c)); return true; },
+    end(c?: any) { if (c) chunks.push(Buffer.from(c)); resolveDone(); },
+    on() { return res; }, once() { return res; }, emit() { return false; },
+    get status() { return statusCode; },
+    get headers() { return headers; },
+    get body() { return Buffer.concat(chunks); },
+    done,
+  };
+  return res;
+}
+
+test('displayTitle: a placeholder gets its start time; a real title is untouched', async () => {
+  const { displayTitle } = await import('../capture.ts');
+  const at = new Date(2026, 9, 8, 15, 3).getTime();
+  assert.equal(displayTitle({ title: 'Meeting 2026-10-08', started_at: at }), 'Meeting 2026-10-08 15:03');
+  assert.equal(displayTitle({ title: 'NEA IC prep', started_at: at }), 'NEA IC prep');
+  assert.equal(displayTitle({ title: '', started_at: at }), 'Meeting');
+});
+
+test('patch fires onPatched; the transcript endpoint carries path/chat_id for reopen', async () => {
+  const { patchCapture, setCaptureHooks, handleCaptureTranscript, transcriptFilePath } = await import('../capture.ts');
+  const patched: string[] = [];
+  setCaptureHooks({ onPatched(m) { patched.push(m.title); } });
+  const c = await createCapture({ title: 'Meeting 2026-10-08', linkedChat: 'parley:abc' });
+  await activateCapture(c.id);
+  await putSegment(c.id, 0, Buffer.from('x'), { t0Ms: 0, mime: 'audio/mp4' });
+  await patchCapture(c.id, { title: 'Riot investor call' });
+  assert.deepEqual(patched, ['Riot investor call']);
+  await fs.mkdir(path.dirname(transcriptFilePath(c.id)), { recursive: true });
+  await fs.writeFile(transcriptFilePath(c.id), '# Riot investor call\n\nwords');
+  const res = fakeRes();
+  await handleCaptureTranscript({} as any, res, c.id);
+  await res.done;
+  const body = JSON.parse(res.body.toString());
+  assert.equal(body.title, 'Riot investor call');
+  assert.equal(body.path, transcriptFilePath(c.id));
+  assert.equal(body.chat_id, 'parley:abc');
+  assert.equal(typeof body.started_at, 'number');
+  setCaptureHooks(null);
+});
+
+test('PATCH rename_session renames the linked chat through the seam', async () => {
+  const { handleCapturePatch, __setRenameSessionForTests } = await import('../capture.ts');
+  const renames: [string, string][] = [];
+  __setRenameSessionForTests(async (chatId, title) => { renames.push([chatId, title]); return true; });
+  const c = await createCapture({ title: 'Meeting 2026-10-08', linkedChat: 'parley:abc' });
+  const { Readable } = await import('node:stream');
+  const req: any = Readable.from([Buffer.from(JSON.stringify({ title: 'Squarepeg IC', rename_session: true }))]);
+  req.headers = {};
+  const res = fakeRes();
+  await handleCapturePatch(req, res, c.id);
+  await res.done;
+  const body = JSON.parse(res.body.toString());
+  assert.equal(body.capture.title, 'Squarepeg IC');
+  assert.equal(body.session_titled, true);
+  assert.deepEqual(renames, [['parley:abc', 'Squarepeg IC']]);
 });
