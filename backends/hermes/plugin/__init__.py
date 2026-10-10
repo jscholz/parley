@@ -3298,6 +3298,15 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
         register_display_doc_tool(lambda: _active_adapter)
     except Exception:
         logger.exception("[parley] display_doc tool wiring failed")
+    # 3. Agent guidance (2026-10-11): a bounded system-prompt section that
+    #    tells the agent how to use Parley — voice tag, display_doc, the
+    #    media/attachment lanes, canvas, meeting captures — with this
+    #    install's proxy origin and skills dir. See parley_agent_guidance.
+    try:
+        from .parley_agent_guidance import register_agent_guidance
+        register_agent_guidance(ctx)
+    except Exception:
+        logger.exception("[parley] agent guidance wiring failed")
 
     def _pre(**kwargs: Any) -> None:
         adapter = _active_adapter
