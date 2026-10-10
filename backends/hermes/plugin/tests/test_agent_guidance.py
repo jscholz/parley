@@ -26,11 +26,14 @@ def test_section_is_bounded_and_covers_every_lane(guidance, monkeypatch):
     assert "PARLEY_PROXY_ORIGIN=http://127.0.0.1:4001" in text
     assert f"PARLEY_SKILLS_DIR={guidance.SKILLS_DIR}" in text
     for must in ("[voice]", "display_doc", "/api/parley/media/register",
-                 "/api/parley/attachments/register", "canvas.mjs",
+                 "/api/parley/attachments/register", "YouTube", "Spotify", "![caption](url)",
                  "meeting-transcript-ingest", "parley-pdf-rasterize"):
         assert must in text, must
     # the curl examples carry the install's origin, never the single-tenant default
     assert "127.0.0.1:3001" not in text
+    # the old canvas CLI (POST /canvas/show) no longer exists on the proxy;
+    # cards come from reply text. Never send the agent to a dead endpoint.
+    assert "canvas" not in text.lower()
 
 
 def test_proxy_origin_precedence(guidance, monkeypatch):

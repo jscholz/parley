@@ -7,9 +7,9 @@
 #   1. The parley plugin is enabled (plugins.enabled) — it registers the
 #      display_doc tool AND a bounded system-prompt section that tells the
 #      agent how to use Parley (voice tag, docs panel, media/attachment
-#      lanes, canvas, meeting captures) with this install's proxy origin.
+#      lanes, link/media cards, meeting captures) with this install's proxy origin.
 #      Nothing to configure for that part; it happens on gateway start.
-#   2. The plugin's shipped skills (canvas, parley-pdf-rasterize,
+#   2. The plugin's shipped skills (parley-pdf-rasterize,
 #      meeting-transcript-ingest) are on hermes' skill path via
 #      `skills.external_dirs`, so they appear in the agent's skill list.
 #      This script adds that entry — comment-preserving, once.
@@ -75,7 +75,7 @@ fi
 cat <<EON
 
 The agent now knows Parley (after a gateway restart):
-  - prompt section 'parley' (plugin-injected): voice tag, display_doc, media + attachment lanes, canvas, meeting captures
+  - prompt section 'parley' (plugin-injected): voice tag, display_doc, media + attachment lanes, link/media cards, meeting captures
   - skills: $(ls "$SKILLS_DIR" | tr '\n' ' ')
 Restart: systemctl --user restart hermes-gateway.service
 EON
