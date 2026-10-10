@@ -38,6 +38,7 @@ SECTION_ID = "parley"
 SECTION_MAX_CHARS = 4_000
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 SKILL_NAMES = ("parley-pdf-rasterize", "meeting-transcript-ingest")
+REGISTERED: dict = {"section": False}
 
 
 def proxy_origin() -> str:
@@ -99,6 +100,7 @@ def register_agent_guidance(ctx: Any) -> bool:
         return False
     try:
         reg(SECTION_ID, render_section, position="after_memory", max_chars=SECTION_MAX_CHARS)
+        REGISTERED["section"] = True
         return True
     except Exception:
         logger.exception("[parley] registering the agent guidance section failed")

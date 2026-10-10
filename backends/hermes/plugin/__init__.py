@@ -862,11 +862,39 @@ class ParleyAdapter(BasePlatformAdapter):
     # ------------------------------------------------------------------
 
     async def _handle_health(self, request: "web.Request") -> "web.Response":
+        # Agent-facing contract, so a health check can assert it (2026-10-11:
+        # a session without display_doc went unnoticed until a user hit it):
+        #   tools.display_doc — the tool is in the toolset parley sessions
+        #     resolve (hermes-parley = core tools + registry tools under the
+        #     bare platform name), not merely registered somewhere;
+        #   guidance — the plugin's system-prompt section is registered.
+        tools: Dict[str, Any] = {}
+        try:
+            from toolsets import resolve_toolset  # hermes core
+            resolved = set(resolve_toolset("hermes-parley"))
+            tools["display_doc"] = "display_doc" in resolved
+            tools["resolved_count"] = len(resolved)
+        except Exception as exc:  # pragma: no cover - older hermes
+            tools["display_doc"] = None
+            tools["error"] = str(exc)[:120]
+        try:
+            from .parley_doc_tool import REGISTERED
+            tools["registered_via"] = REGISTERED.get("via")
+        except Exception:
+            pass
+        guidance = None
+        try:
+            from .parley_agent_guidance import REGISTERED as _g
+            guidance = bool(_g.get("section"))
+        except Exception:
+            pass
         return web.json_response(
             {
                 "status": "ok",
                 "platform": "parley",
                 "protocol_version": PROTOCOL_VERSION,
+                "tools": tools,
+                "guidance": guidance,
             }
         )
 
@@ -3295,7 +3323,7 @@ def register(ctx) -> None:  # noqa: ANN001 — PluginContext type is internal
     # per call so adapter restarts don't strand a stale reference.
     try:
         from .parley_doc_tool import register_display_doc_tool
-        register_display_doc_tool(lambda: _active_adapter)
+        register_display_doc_tool(lambda: _active_adapter, ctx=ctx)
     except Exception:
         logger.exception("[parley] display_doc tool wiring failed")
     # 3. Agent guidance (2026-10-11): a bounded system-prompt section that

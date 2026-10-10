@@ -373,35 +373,59 @@ def _check_display_doc() -> bool:
         return os.getenv("HERMES_SESSION_PLATFORM", "") == "parley"
 
 
-def register_display_doc_tool(get_adapter: Callable[[], Any]) -> bool:
-    """Register display_doc against hermes' tool registry, if present.
+REGISTERED: Dict[str, Any] = {"display_doc": False, "via": None}
 
-    Returns True when registered; never raises — a hermes tree without
-    ``tools.registry`` (or with an incompatible register signature) just
-    leaves the Docs panel agent-less.
+
+def register_display_doc_tool(get_adapter: Callable[[], Any], ctx: Any = None) -> bool:
+    """Register display_doc for parley sessions. Returns True when registered;
+    never raises — a hermes without either API just leaves the Docs panel
+    agent-less (the plugin's /health reports it, see ``REGISTERED``).
+
+    Preferred path: ``ctx.register_tool`` (hermes' PluginContext API). It
+    registers into the plugin's profile SCOPE and tracks ownership; a direct
+    ``tools.registry.register`` from plugin code lands in the global slot,
+    which hermes 0.21.6 no longer resolves into a session's toolset — Akhil's
+    agent on 0.21.6 reported "display_doc isn't available" while the owner's
+    0.21.5 kept working (2026-10-11). The direct call stays as the fallback
+    for a hermes that predates ``register_tool``.
     """
+    kwargs: Dict[str, Any] = dict(
+        name="display_doc",
+        # Bare platform name — NEVER "hermes-parley". See module docstring:
+        # a registered toolset named hermes-parley shadows the auto-generated
+        # core-tools composite and strips file/terminal/web from every
+        # parley session.
+        toolset="parley",
+        schema=DISPLAY_DOC_SCHEMA,
+        handler=_make_display_doc_handler(get_adapter),
+        check_fn=_check_display_doc,
+        emoji="📄",
+    )
+    reg = getattr(ctx, "register_tool", None) if ctx is not None else None
+    if reg is not None:
+        try:
+            handle = reg(**kwargs)
+            if handle is None:
+                logger.warning("[parley] display_doc not registered — hermes refused it (shadowing a global tool?)")
+                REGISTERED.update(display_doc=False, via="ctx.register_tool")
+                return False
+            REGISTERED.update(display_doc=True, via="ctx.register_tool")
+            logger.info("[parley] display_doc tool registered via ctx.register_tool (toolset=parley)")
+            return True
+        except Exception:
+            logger.exception("[parley] display_doc registration via ctx.register_tool failed; trying the registry directly")
     try:
         from tools.registry import registry
     except Exception:
-        logger.info(
-            "[parley] tools.registry unavailable — display_doc not registered"
-        )
+        logger.info("[parley] tools.registry unavailable — display_doc not registered")
+        REGISTERED.update(display_doc=False, via=None)
         return False
     try:
-        registry.register(
-            name="display_doc",
-            # Bare platform name — NEVER "hermes-parley". See module
-            # docstring: a registered toolset named hermes-parley shadows
-            # the auto-generated core-tools composite and strips file/
-            # terminal/web from every parley session.
-            toolset="parley",
-            schema=DISPLAY_DOC_SCHEMA,
-            handler=_make_display_doc_handler(get_adapter),
-            check_fn=_check_display_doc,
-            emoji="📄",
-        )
+        registry.register(**kwargs)
+        REGISTERED.update(display_doc=True, via="tools.registry")
         logger.info("[parley] display_doc tool registered (toolset=parley)")
         return True
     except Exception:
         logger.exception("[parley] display_doc registration failed")
+        REGISTERED.update(display_doc=False, via="tools.registry")
         return False
