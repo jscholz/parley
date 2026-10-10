@@ -880,8 +880,32 @@ class ParleyAdapter(BasePlatformAdapter):
         try:
             from .parley_doc_tool import REGISTERED
             tools["registered_via"] = REGISTERED.get("via")
+            tools["check_uncached"] = REGISTERED.get("check_uncached")
         except Exception:
             pass
+        # Diagnostics for the per-platform plugin-toolset path hermes uses when
+        # it builds a session (hermes_cli.tools_config._enabled_plugin_toolsets):
+        # the keys it would consider, and whether the registry's unscoped lookup
+        # finds our tool (2026-10-11: scoped registration invisible on 0.21.6?).
+        try:
+            from hermes_cli.plugins import get_plugin_toolsets, get_plugin_manager
+            tools["plugin_toolset_keys"] = sorted(k for k, _, _ in get_plugin_toolsets())
+            mgr = get_plugin_manager()
+            tools["tracked_by_manager"] = "display_doc" in getattr(mgr, "_plugin_tool_names", set())
+            tools["manager_scope"] = getattr(mgr, "scope_key", None)
+        except Exception as exc:
+            tools["plugin_toolsets_error"] = str(exc)[:120]
+        try:
+            from tools.registry import registry
+            e = registry.get_entry("display_doc")
+            tools["entry_unscoped"] = bool(e)
+            tools["entry_toolset"] = getattr(e, "toolset", None)
+            try:
+                tools["entry_scoped"] = bool(registry.get_entry("display_doc", scope=registry.current_scope_key()))
+            except Exception:
+                pass
+        except Exception as exc:
+            tools["registry_error"] = str(exc)[:120]
         guidance = None
         try:
             from .parley_agent_guidance import REGISTERED as _g

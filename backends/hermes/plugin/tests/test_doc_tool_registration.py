@@ -24,7 +24,7 @@ def test_prefers_ctx_register_tool(doc_tool):
     assert doc_tool.register_display_doc_tool(lambda: None, ctx=Ctx()) is True
     assert calls and calls[0]["name"] == "display_doc" and calls[0]["toolset"] == "parley"
     assert callable(calls[0]["handler"]) and callable(calls[0]["check_fn"])
-    assert doc_tool.REGISTERED == {"display_doc": True, "via": "ctx.register_tool"}
+    assert doc_tool.REGISTERED["display_doc"] is True and doc_tool.REGISTERED["via"] == "ctx.register_tool"
 
 
 def test_refused_registration_is_reported_not_hidden(doc_tool):
@@ -46,3 +46,11 @@ def test_ctx_without_register_tool_falls_back(doc_tool, monkeypatch):
     assert doc_tool.register_display_doc_tool(lambda: None, ctx=object()) is True
     assert reg_calls and reg_calls[0]["toolset"] == "parley"
     assert doc_tool.REGISTERED["via"] == "tools.registry"
+
+
+def test_platform_gate_is_registered_uncached(doc_tool):
+    """A session-dependent check_fn must bypass the registry's per-profile TTL
+    cache, or a non-parley probe poisons every parley session for 30 s."""
+    from tools.registry import _NO_CACHE_CHECK_FNS
+    assert doc_tool._check_display_doc in _NO_CACHE_CHECK_FNS
+    assert doc_tool.REGISTERED["check_uncached"] is True

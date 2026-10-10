@@ -362,10 +362,17 @@ def _remember_open_doc(chat_id: str, doc_id: str, title: str) -> list:
 
 
 def _check_display_doc() -> bool:
-    """Offer the tool only inside parley sessions. (The registry's
-    check_fn TTL cache can bleed availability across sessions for ~15s —
-    same accepted trade-off as react_to_message's platform gate; a
-    mis-listed call still fails gracefully on the chat-id guard.)"""
+    """Offer the tool only inside parley sessions.
+
+    Registered UNCACHED (``tools.registry.no_cache_check_fn``, below): the
+    registry memoises check_fn verdicts for 30 s per profile, and this one
+    depends on the SESSION (platform contextvar), not on config. A probe from
+    any non-parley context inside the window — boot-time probes, cron ticks,
+    the session_changed poller — cached ``False`` and every parley session
+    on hermes 0.21.6 inherited it: "display_doc isn't available" with the
+    tool registered and resolved (2026-10-11). The read is a contextvar
+    lookup; skipping the cache costs nothing.
+    """
     try:
         from gateway.session_context import get_session_env
         return get_session_env("HERMES_SESSION_PLATFORM", "") == "parley"
@@ -373,7 +380,15 @@ def _check_display_doc() -> bool:
         return os.getenv("HERMES_SESSION_PLATFORM", "") == "parley"
 
 
-REGISTERED: Dict[str, Any] = {"display_doc": False, "via": None}
+try:  # both 0.21.5 and 0.21.6 export it; a hermes without it just caches (old behaviour)
+    from tools.registry import no_cache_check_fn as _no_cache_check_fn
+    _check_display_doc = _no_cache_check_fn(_check_display_doc)
+    _CHECK_UNCACHED = True
+except Exception:  # pragma: no cover
+    _CHECK_UNCACHED = False
+
+
+REGISTERED: Dict[str, Any] = {"display_doc": False, "via": None, "check_uncached": _CHECK_UNCACHED}
 
 
 def register_display_doc_tool(get_adapter: Callable[[], Any], ctx: Any = None) -> bool:
