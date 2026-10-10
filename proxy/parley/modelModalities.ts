@@ -22,7 +22,9 @@
 import http from 'node:http';
 import { readEnv } from '../env.mjs';
 
-const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
+// PARLEY_PLATFORM_URL is the documented knob (server.ts); UPSTREAM_URL is the
+// legacy alias — see upload.ts.
+const UPSTREAM_URL = (process.env.PARLEY_PLATFORM_URL || process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
 const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 // ── Auxiliary vision advertisement ────────────────────────────────────

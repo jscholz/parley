@@ -34,6 +34,7 @@ back restores the user's most recent picker choice, not a stale default.
 
 from __future__ import annotations
 
+import os
 import copy
 import json
 import logging
@@ -106,7 +107,9 @@ _PROFILE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 # Seed values for the `local` profile (LOCAL_MODE.md §1). Only used when
 # `parley.runtime_profiles` is MISSING entirely; once seeded the YAML is
 # the editor (per-profile toolsets etc. are hand-edited there).
-LOCAL_SERVER_BASE_URL = "http://127.0.0.1:8000/v1"
+# Overridable so a second tenant on the box (or a different llama.cpp port)
+# can point the local profile elsewhere without a code change.
+LOCAL_SERVER_BASE_URL = os.environ.get("PARLEY_LOCAL_LLM_BASE_URL", "").strip() or "http://127.0.0.1:8000/v1"
 LOCAL_PROVIDER = "custom:local-fallback"      # `providers.local-fallback` in hermes config
 LOCAL_MODEL = "qwen3.6-35b-a3b"               # llama-server --alias
 

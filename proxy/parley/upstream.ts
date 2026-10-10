@@ -331,7 +331,9 @@ export class UpstreamHTTPError extends Error {
 // HTTPAgentUpstream — the production impl. Talks /v1/* HTTP+SSE.
 // ────────────────────────────────────────────────────────────────────
 
-const DEFAULT_URL = process.env.UPSTREAM_URL || 'http://127.0.0.1:8645';
+// PARLEY_PLATFORM_URL is the documented knob (server.ts passes it explicitly via
+// init); UPSTREAM_URL is the legacy alias kept for callers that never init.
+const DEFAULT_URL = process.env.PARLEY_PLATFORM_URL || process.env.UPSTREAM_URL || 'http://127.0.0.1:8645';
 // Fall back to the same shared secret the WS path uses; this lets
 // backends/hermes/plugin auth both transports with one env var.
 // PARLEY_/PARLEY_ fallback matches proxy/env.mjs (this module stays

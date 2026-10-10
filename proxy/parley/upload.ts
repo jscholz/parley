@@ -13,7 +13,11 @@
 
 import { readEnv } from '../env.mjs';
 
-const UPSTREAM_URL = (process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
+// Same knob server.ts resolves the agent from (PARLEY_PLATFORM_URL); UPSTREAM_URL
+// is the legacy alias. A second tenant on one box sets only the documented
+// name — reading a different one here would route his uploads to the
+// OTHER tenant's gateway (2026-10-10 second-tenant review).
+const UPSTREAM_URL = (process.env.PARLEY_PLATFORM_URL || process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
 const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 export async function handleParleyUpload(req, res) {
