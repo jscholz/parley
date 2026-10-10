@@ -13,8 +13,9 @@
 #      meeting-transcript-ingest) are on hermes' skill path via
 #      `skills.external_dirs`, so they appear in the agent's skill list.
 #      This script adds that entry — comment-preserving, once.
-#   2b. platform_toolsets.parley lists `hermes-parley` + `parley`, so the
-#      plugin's registry toolset (display_doc) is part of every session.
+#   2b. platform_toolsets.parley is REMOVED if present: the default composite
+#      already includes the plugin's toolset, and an explicit row collapses
+#      the session on hermes 0.21.6.
 #   3. PARLEY_PROXY_ORIGIN is sanity-checked: a second tenant on a shared
 #      box runs on another port and must set it in ~/.hermes/.env.
 # Restart the gateway afterwards (`systemctl --user restart hermes-gateway`)
@@ -54,19 +55,19 @@ if "parley" not in enabled:
     print("plugins.enabled: + parley")
 else:
     print("plugins.enabled: parley ✓")
-# 1b. platform_toolsets.parley — hermes seeds this map for its built-in
-#     platforms only; without a parley row the session never includes the
-#     plugin's `parley` registry toolset and display_doc is "not available"
-#     (Akhil's first doc attempt, 2026-10-11). Mirror the owner's entry.
+# 1b. platform_toolsets.parley must NOT exist. The default composite for a
+#     plugin platform (hermes-parley = core tools + plugin toolsets, which are
+#     on by default) is what both hermes lines resolve correctly. An explicit
+#     row — the owner's old `[hermes-parley, parley]` — is read by 0.21.6 as an
+#     explicit selection and collapsed the session to the memory tools only
+#     (Akhil, 2026-10-11). display_doc reaches the session through the plugin
+#     toolset ('parley') with an UNCACHED platform gate, no config needed.
 pts = dict((doc.get("platform_toolsets") or {}))
-row = list(pts.get("parley") or [])
-want = ["hermes-parley", "parley"]
-if any(w not in row for w in want):
-    row = row + [w for w in want if w not in row]
-    atomic_roundtrip_yaml_update(cfg, "platform_toolsets.parley", row)
-    print(f"platform_toolsets.parley: {row}")
+if "parley" in pts:
+    atomic_roundtrip_yaml_update(cfg, "platform_toolsets.parley", None)
+    print(f"platform_toolsets.parley: removed {pts['parley']!r} (default composite is correct on 0.21.5 and 0.21.6)")
 else:
-    print(f"platform_toolsets.parley: {row} ✓")
+    print("platform_toolsets.parley: absent ✓")
 # 2. skills.external_dirs
 ext = list(((doc.get("skills") or {}).get("external_dirs")) or [])
 if skills_dir not in ext:
