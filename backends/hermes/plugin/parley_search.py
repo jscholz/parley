@@ -431,6 +431,46 @@ def resolve_roots(conn: sqlite3.Connection, session_ids: Iterable[str],
     return out
 
 
+def resolve_parley_ids(parley_db, candidates: List[Tuple[Any, ...]]) -> List[Tuple[Any, ...]]:
+    """Fill a candidate's ``parley_id`` from parley.db when state.db has no
+    link for it. Since transcript v3 the links live in parley.db
+    (``msg_links.agent_row_id`` = state.db row id, stringified; the
+    legacy ``parley_msg_links`` table on state.db is gone on a migrated
+    install — the live db has none), and the items route serves bubbles
+    keyed by ``msg_links.id``. One IN query for the whole candidate
+    list; best-effort — a failure leaves the rowids, which still fetch
+    (``around=`` accepts both) even if the PWA cannot find them."""
+    if parley_db is None:
+        return candidates
+    missing = [c for c in candidates if len(c) < 8 or not c[7]]
+    if not missing:
+        return candidates
+    ids = sorted({str(c[0]) for c in missing})
+    links: Dict[str, str] = {}
+    try:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            rows = parley_db.fetchall(
+                f"SELECT agent_row_id, id FROM msg_links "
+                f"WHERE agent_row_id IN ({','.join('?' for _ in chunk)})",
+                chunk)
+            for (agent_row_id, pid) in rows:
+                if agent_row_id is not None and pid:
+                    links.setdefault(str(agent_row_id), str(pid))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("[parley] search: parley.db link lookup failed: %s", exc)
+        return candidates
+    if not links:
+        return candidates
+    out: List[Tuple[Any, ...]] = []
+    for c in candidates:
+        pid = c[7] if len(c) > 7 else None
+        if not pid:
+            pid = links.get(str(c[0]))
+        out.append(tuple(c[:7]) + (pid,))
+    return out
+
+
 def build_hits(candidates: Iterable[Tuple[Any, ...]], terms: Sequence[str],
                limit: int, names: Dict[Tuple[str, str], str],
                per_chat_cap: int = PER_CHAT_CAP) -> List[Dict[str, Any]]:
@@ -524,6 +564,7 @@ def search_conversations(adapter, q: str, limit: int, sources: Sequence[str],
     with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as conn:
         id_rows = session_id_matches(conn, q, sources)
         candidates = fetch_candidates(conn, q, sources, candidate_limit)
+    candidates = resolve_parley_ids(getattr(adapter, "_parley_db", None), candidates)
 
     # Id matches lead: when the query looks like a session id, the
     # resolved chat is almost certainly what the user wants.

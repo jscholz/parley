@@ -361,3 +361,32 @@ def test_build_hits_accepts_the_older_seven_tuple_shape(plugin, ps):
         [(7, "user", "fix cron tonight", 1001.0, "chat-a", "parley", "Ops")],
         ["fix", "cron"], 10, {})
     assert hits[0]["message_id"] == 7 and hits[0]["row_id"] == 7
+
+
+class _FakeParleyDb:
+    """parley.db stand-in: msg_links(agent_row_id → id), the v3 home of
+    message links (the legacy state.db table is gone on a migrated
+    install — the live galatea db has none)."""
+    def __init__(self, links):
+        self.links = {str(k): v for k, v in links.items()}
+        self.queries = []
+
+    def fetchall(self, sql, params=()):
+        self.queries.append((sql, tuple(params)))
+        assert "FROM msg_links" in sql
+        return [(k, self.links[k]) for k in params if k in self.links]
+
+
+def test_hit_message_id_resolves_through_parley_db_links(plugin, ps, state_db):
+    _session(state_db, "s1", "chat-a", 1000.0, title="Ops")
+    linked = _msg(state_db, "s1", "assistant", "the Super Heavy booster has 33 Raptors", 1001.0)
+    legacy = _msg(state_db, "s1", "user", "raptors are the engines", 1002.0)
+    adapter = _adapter(plugin, state_db)
+    adapter._parley_db = _FakeParleyDb({linked: "msg_11ae30a9b2902d3238aa"})
+    from importlib import import_module
+    import_module(f"{plugin.__name__}.parley_route_conversations").invalidate_summaries_cache()
+    _, hits = ps.search_conversations(adapter, "raptors", 20, ("parley", "telegram"))
+    by_row = {h["row_id"]: h for h in hits}
+    assert by_row[linked]["message_id"] == "msg_11ae30a9b2902d3238aa"
+    assert by_row[legacy]["message_id"] == legacy
+    assert len(adapter._parley_db.queries) == 1          # one IN query for the whole list
