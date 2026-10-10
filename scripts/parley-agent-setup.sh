@@ -32,7 +32,9 @@ py=""
 for facts in "${HERMES_HOME}"/installs/*/facts.json; do
   [[ -f "$facts" ]] || continue
   env_dir=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["packages"]["venv"]["environment"])' "$facts" 2>/dev/null || true)
-  [[ -n "$env_dir" && -x "${env_dir}/venv/bin/python" ]] && py="${env_dir}/venv/bin/python"
+  for cand in "${env_dir}/bin/python" "${env_dir}/venv/bin/python"; do
+    [[ -n "$env_dir" && -x "$cand" ]] && py="$cand"
+  done
 done
 [[ -x "$py" ]] || { echo "could not find the hermes generation python under ${HERMES_HOME}/installs" >&2; exit 1; }
 HERMES_SRC="${HERMES_HOME}/hermes-agent"
