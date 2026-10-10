@@ -24,7 +24,10 @@ function resolveUrl(url) {
 /** "R2 deck.pptx (1.2 MB)" → { name, size } — the plugin folds the size
  *  into the link label; keep the parse forgiving. Exported for tests. */
 export function splitAttachmentLabel(label) {
-  const m = /^(.*?)\s*\(([\d.]+\s*(?:B|KB|MB|GB))\)\s*$/i.exec(label || '');
+  // The plugin writes "(1.6 KB)"; an agent following the prompt section
+  // may write "(1,630 bytes)", "(1.6 kB)" or "(2 MiB)" — accept the lot
+  // (2026-10-11: a live delivery rendered the size inside the name).
+  const m = /^(.*?)\s*\((\d[\d,]*(?:\.\d+)?\s*(?:bytes?|[KMG]i?B))\)\s*$/i.exec(label || '');
   if (m) return { name: m[1].trim(), size: m[2].trim() };
   return { name: (label || '').trim(), size: '' };
 }
