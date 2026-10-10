@@ -871,9 +871,9 @@ async function handleParleyConfigSet(req, res, key: string) {
 //
 // When the PWA has `?debug-relay=1` (or `localStorage.debug_relay=1`), it
 // POSTs batches of log lines here every 250ms. We append to a per-session
-// file under `${tmpdir}/parley-debug/` and update a `latest.log` symlink
+// file under `${tmpdir}/parley-debug-<user>/` and update a `latest.log` symlink
 // to the most recent file. AI agents and developers can
-// `cat /tmp/parley-debug/latest.log` to see live diagnostic output
+// `cat /tmp/parley-debug-$USER/latest.log` to see live diagnostic output
 // without copy-pasting from the browser console.
 //
 // /tmp is the right home: ephemeral by definition (tmpfs on Pi, cleared
@@ -882,7 +882,9 @@ async function handleParleyConfigSet(req, res, key: string) {
 // don't set the flag, so the dir only accumulates real interactive
 // sessions either way.
 
-const DEBUG_LOG_DIR = path.join(os.tmpdir(), 'parley-debug');
+// Per-user: two tenants on one box share /tmp, and the second one's relay
+// POSTs 500'd against a directory the first had created (2026-10-10).
+const DEBUG_LOG_DIR = path.join(os.tmpdir(), `parley-debug-${os.userInfo().username}`);
 const DEBUG_LOG_KEEP = 20;
 const DEBUG_LOG_MAX_BODY = 256 * 1024;       // 256 KB per POST
 const DEBUG_LOG_SID_RE = /^[A-Za-z0-9._-]{1,80}$/;
