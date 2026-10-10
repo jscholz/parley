@@ -327,3 +327,37 @@ def test_adapter_shims_delegate(plugin, ps, state_db):
         assert plugin.ParleyAdapter._session_id_matches(conn, "zzzz") == []
     finally:
         conn.close()
+
+
+# ── hits carry the id the PWA keys bubbles by ─────────────────────────
+
+def _link(db, state_db_id, parley_id, kind=None):
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO parley_msg_links (state_db_id, parley_id, kind) VALUES (?, ?, ?)",
+                 (state_db_id, parley_id, kind))
+    conn.commit()
+    conn.close()
+
+
+def test_hit_message_id_is_the_parley_id_when_the_row_is_linked(plugin, ps, state_db):
+    """Field 2026-10-10: the PWA keys a bubble by ``parley_id || id``
+    (projection.ts) and drills by the id the hit carries. A linked row
+    surfaced as its bare rowid could be fetched (``around=`` accepts
+    both) but never FOUND in the DOM — the "raptor" hit opened the
+    pitch-deck session and the chat never centred."""
+    _session(state_db, "s1", "chat-a", 1000.0, title="Ops")
+    linked = _msg(state_db, "s1", "assistant", "the Super Heavy booster has 33 Raptors", 1001.0)
+    _link(state_db, linked, "msg_11ae30a9b2902d3238aa")
+    legacy = _msg(state_db, "s1", "user", "raptors are the engines", 1002.0)
+    _, hits = _search(plugin, ps, state_db, "raptors")
+    by_row = {h["row_id"]: h for h in hits}
+    assert by_row[linked]["message_id"] == "msg_11ae30a9b2902d3238aa"
+    assert by_row[legacy]["message_id"] == legacy          # no link → rowid, as before
+    assert isinstance(by_row[legacy]["message_id"], int)
+
+
+def test_build_hits_accepts_the_older_seven_tuple_shape(plugin, ps):
+    hits = ps.build_hits(
+        [(7, "user", "fix cron tonight", 1001.0, "chat-a", "parley", "Ops")],
+        ["fix", "cron"], 10, {})
+    assert hits[0]["message_id"] == 7 and hits[0]["row_id"] == 7

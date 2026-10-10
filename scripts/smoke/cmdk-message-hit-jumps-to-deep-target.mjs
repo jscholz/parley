@@ -28,6 +28,15 @@
 // We also assert the target is in viewport, not just in DOM, to
 // catch the case where the around-window paints but scroll never
 // fires.
+//
+// 2026-10-10 ("raptor" → pitch-deck session, chat never centred): the
+// hit carries the state.db ROW id (what the plugin's search handed out
+// for every row) while the bubble is keyed by the row's parley_id. The
+// around window held the row; the DOM lookup by the row id found
+// nothing; the client crawled ten tail pages with no spinner and gave
+// up silently. The hit below therefore carries the INTEGER row id of a
+// row that HAS a parley_id — the client must resolve either. The
+// around fetch is slowed so the spinner has to show while it loads.
 
 import {
   waitForReady, openSidebar, assert,
@@ -43,6 +52,9 @@ const TAIL_LIMIT = 40; // matches the proxy default for /messages
 // Total messages = TAIL + DEEP_GAP, so target sits below the tail's
 // reach. The around-window fetch is required to surface it.
 const DEEP_GAP = 60;
+// Mock rows get integer ids 1000+index; the target is index 0.
+const TARGET_ROW_ID = 1000;
+const AROUND_DELAY_MS = 1200;   // slow link: the drill's load must be visible
 
 export function MOCK_SETUP(mock) {
   const now = Date.now() / 1000;
@@ -72,10 +84,26 @@ export function MOCK_SETUP(mock) {
     lastActiveAt: Date.now(),
     messages,
   });
+  // Boot lands on the NEWEST chat: make that a different one, so the hit
+  // is a cross-session drill (the field shape — searching from another
+  // chat), not a same-session jump.
+  mock.addChat('parley:mock-cmdk-decoy', {
+    title: 'Somewhere else', source: 'parley', lastActiveAt: Date.now() + 1000,
+    messages: [{ role: 'user', content: 'nothing to see here', parley_id: 'msg_decoy', timestamp: now }],
+  });
   mock.setAutoReplyEnabled(false);
+  // Only the tail loads on open (the mock otherwise serves the whole
+  // chat and the target is already in the DOM — a vacuous drill).
+  mock.setHistoryFirstPageLimit(TAIL_LIMIT);
+  mock.setMessageDelay(CHAT_ID, AROUND_DELAY_MS);
 }
 
 export default async function run({ page, log }) {
+  // Diagnostics for a failed spinner/drill assertion: the runner only
+  // prints the last 30 console lines, which is after the drill's own.
+  const trace = [];
+  page.on('console', (m) => { const t = m.text(); if (/\[cmdk\]|\[drill|chat-resume\] enter|resumed |transcript-loading|windowCache|around/.test(t)) trace.push(t.slice(0, 200)); });
+  const dumpTrace = () => { for (const l of trace.slice(-25)) log(`trace: ${l}`); };
   await waitForReady(page);
 
   // Mock the search endpoint to return a single hit pointing at the
@@ -88,7 +116,7 @@ export default async function run({ page, log }) {
         sessions: [],
         hits: [{
           session_id: CHAT_ID,
-          message_id: 'msg_deep_target',
+          message_id: TARGET_ROW_ID,          // row id, NOT the parley_id the bubble is keyed by
           role: 'user',
           snippet: 'pareto frontier',
           timestamp: Math.floor(Date.now() / 1000) - 86_400,
@@ -106,7 +134,7 @@ export default async function run({ page, log }) {
 
   // The hit row appears after the 300ms debounce + mocked search.
   await page.waitForSelector(
-    '.cmdk-row[data-kind="message"][data-id="msg_deep_target"]',
+    `.cmdk-row[data-kind="message"][data-id="${TARGET_ROW_ID}"]`,
     { timeout: 5_000 },
   );
 
@@ -115,8 +143,15 @@ export default async function run({ page, log }) {
   // the second click races the first's resume pipeline and can wipe
   // the drill state; post-fix the switchCtl dedup absorbs it.
   await page.click(
-    '.cmdk-row[data-kind="message"][data-id="msg_deep_target"]',
+    `.cmdk-row[data-kind="message"][data-id="${TARGET_ROW_ID}"]`,
   );
+  // "If there's a load required, the wheel should come up immediately":
+  // the target is not in the tail, the around fetch is slow — the
+  // transcript must show its loading state within a beat of the click.
+  const spinnerAt = Date.now();
+  await page.waitForSelector('#transcript.transcript-loading', { timeout: 400 })
+    .catch(() => { dumpTrace(); throw new Error('no loading spinner within 400ms of clicking a deep hit that needs a fetch'); });
+  log(`loading spinner up ${Date.now() - spinnerAt}ms after the click ✓`);
   // Second click — fire while the first is still in flight. The
   // palette closes on the first click, so we hit the row in the
   // drawer that's now visible (drillTo paints the active highlight
@@ -129,11 +164,11 @@ export default async function run({ page, log }) {
     await page.locator('#sb-search:visible').first().click({ timeout: 1_000 });
     await page.fill('.cmdk-input', 'pareto');
     await page.waitForSelector(
-      '.cmdk-row[data-kind="message"][data-id="msg_deep_target"]',
+      `.cmdk-row[data-kind="message"][data-id="${TARGET_ROW_ID}"]`,
       { timeout: 3_000 },
     );
     await page.click(
-      '.cmdk-row[data-kind="message"][data-id="msg_deep_target"]',
+      `.cmdk-row[data-kind="message"][data-id="${TARGET_ROW_ID}"]`,
     );
   } catch { /* dialog may already be closed / mid-transition — fine */ }
 

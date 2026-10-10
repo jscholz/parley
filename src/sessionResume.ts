@@ -45,6 +45,7 @@ import { listActivity } from './notifications/activityStore.ts';
 import { rerenderActive, requestWindowedReplay, cancelWindowedReplay } from './transcript/index.ts';
 import { getScrollPosition } from './chatScrollPositions.ts';
 import { isDurableMessageKey } from './transcript/keys.ts';
+import * as status from './status.ts';
 
 /** Persist the chat's now-grown in-memory transcript back to IDB so a
  *  later resume/drill reads the deeper history from cache instead of
@@ -430,7 +431,7 @@ export function replaySessionMessages(
     // matches activity-tray's stored messageId 1:1 with no prefix
     // gymnastics. Plain querySelector lookup.
     const target: HTMLElement | null =
-      transcriptEl?.querySelector(`[data-key="${CSS.escape(targetMessageId)}"]`) as HTMLElement | null;
+      transcriptEl?.querySelector(targetSelector(id, targetMessageId)) as HTMLElement | null;
     if (target) {
       chat.suppressLazyLoadFor(1200);
       drillScrollTo(target);
@@ -830,6 +831,27 @@ const DRILL_SETTLE_MS = 1500;
  *  jump path (and any cmdk hit on a message OLDER than the resume
  *  window). Caps at 10 pages (~500 msgs) so a stale msgId can't drive
  *  an unbounded backfill. Field bug 2026-05-13. */
+/** The DOM selector for a drill target. Bubbles are keyed by
+ *  `parley_id || id` (projection.ts), but a target can arrive as EITHER
+ *  of those — the plugin's search used to hand out the bare state.db
+ *  rowid (field 2026-10-10: "raptor" → pitch-deck session, the around
+ *  window held the row under `msg_…` and the lookup by "41808" found
+ *  nothing, so the drill crawled ten tail pages and gave up with no
+ *  spinner and no message). Resolve through the store: whichever id the
+ *  caller has, the row it names has exactly one key. Falls back to the
+ *  raw id when the store holds no such row (not loaded yet). */
+export function targetSelector(chatId: string, targetMessageId: string): string {
+  let key = targetMessageId;
+  try {
+    const row = transcriptStore.getState(chatId).durable.find((it: any) =>
+      it && (String(it.id) === targetMessageId
+        || it.parley_id === targetMessageId
+        || it.message_id === targetMessageId));
+    if (row) key = (row as any).parley_id || String((row as any).id);
+  } catch { /* store unavailable (tests) → raw id */ }
+  return `[data-key="${CSS.escape(key)}"]`;
+}
+
 const DRILL_PAGE_CAP = 10;
 async function drillToOlderMessage(
   chatId: string,
@@ -862,9 +884,7 @@ export async function drillToMessageInViewedSession(
   targetMessageId: string,
 ): Promise<void> {
   const transcriptEl = document.getElementById('transcript');
-  const existing = transcriptEl?.querySelector(
-    `[data-key="${CSS.escape(targetMessageId)}"]`,
-  ) as HTMLElement | null;
+  const existing = transcriptEl?.querySelector(targetSelector(chatId, targetMessageId)) as HTMLElement | null;
   if (existing) {
     chat.suppressLazyLoadFor(1200);
     existing.classList.add('search-target-flash');
@@ -1154,9 +1174,7 @@ async function renderAroundWindow(
   // only writes once loadLater connects the run to the tail.
   persistGrownTranscript(chatId);
   await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-  const found = transcriptEl.querySelector(
-    `[data-key="${CSS.escape(targetMessageId)}"]`,
-  ) as HTMLElement | null;
+  const found = transcriptEl.querySelector(targetSelector(chatId, targetMessageId)) as HTMLElement | null;
   if (!found) return null;
   if (!opts.skipScroll) {
     found.classList.add('search-target-flash');
@@ -1312,6 +1330,14 @@ async function drillViaSerialOlderPages(
   if (!transcriptEl) return;
   let cursor = initialFirstId;
   let hasMore = initialHasMore;
+  // A load is in progress for the whole crawl — say so (his 2026-10-10
+  // rule: "if there's a load required, the wheel should come up
+  // immediately"). The around-drill's own spinner was removed in its
+  // finally before this fallback started, so without this the user
+  // watched a static tail for 4–5s of silent paging.
+  transcriptEl.classList.add('transcript-loading');
+  let found = false;
+  try {
   for (let i = 0; i < DRILL_PAGE_CAP && hasMore && cursor != null; i++) {
     if (switchCtl.viewedId() !== chatId) {
       log(`[cmdk] drill aborted — session changed mid-fetch`);
@@ -1340,11 +1366,10 @@ async function drillViaSerialOlderPages(
       diag(`[cmdk] drill page ${i + 1} fetch failed: ${e?.message || e}`);
       return;
     }
-    const target = transcriptEl.querySelector(
-      `[data-key="${CSS.escape(targetMessageId)}"]`,
-    ) as HTMLElement | null;
+    const target = transcriptEl.querySelector(targetSelector(chatId, targetMessageId)) as HTMLElement | null;
     if (target) {
       log(`[cmdk] drill found ${targetMessageId} after ${i + 1} page(s)`);
+      found = true;
       chat.suppressLazyLoadFor(1200);
       drillScrollTo(target);
       setTimeout(() => target.classList.remove('search-target-flash'), 1500);
@@ -1352,6 +1377,16 @@ async function drillViaSerialOlderPages(
     }
   }
   log(`[cmdk] drill exhausted — target ${targetMessageId} not found within ${DRILL_PAGE_CAP} pages`);
+  // Never end a drill silently: the chat is open but the message the
+  // user asked for is not on screen, and they cannot tell that from a
+  // slow load unless we say so.
+  if (switchCtl.viewedId() === chatId) {
+    status.setStatus('Couldn\'t find that message in this chat — it may be older than the loaded history', 'err');
+  }
+  } finally {
+    if (!found || switchCtl.viewedId() !== chatId) transcriptEl.classList.remove('transcript-loading');
+    else transcriptEl.classList.remove('transcript-loading');
+  }
 }
 
 /** Scroll-to-top lazy-load. Fetches messages older than `beforeId`

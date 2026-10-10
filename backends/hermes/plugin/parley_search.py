@@ -331,7 +331,15 @@ def fetch_candidates(conn: sqlite3.Connection, q: str, sources: Sequence[str],
     """FTS-ranked candidate rows resolved to their root chat.
 
     Returns ``[(message_id, role, content, timestamp, root_chat_id,
-    root_source, root_title)]`` in rank order. Rows are pre-filtered in
+    root_source, root_title, parley_id)]`` in rank order. ``parley_id``
+    is the SSE-shape id (``umsg_*``/``msg_*``/``notif_*``) recorded in
+    ``parley_msg_links`` for rows a parley turn persisted, else None —
+    the PWA keys its bubbles by ``parley_id || id`` (projection.ts), so
+    a hit must carry the same id the transcript route surfaces or the
+    drill lands in a session it cannot find the message in (field
+    2026-10-10: "raptor" hit → pitch-deck session, chat never centred;
+    the client crawled ten older pages from the tail for a row 150k ids
+    away). Rows are pre-filtered in
     SQL to user/assistant roles with non-empty content (drops the tens
     of thousands of tool-call-only assistant rows) and, when the
     schema has them, to live-or-compacted rows (``active=1 OR
@@ -348,10 +356,14 @@ def fetch_candidates(conn: sqlite3.Connection, q: str, sources: Sequence[str],
     visibility = ""
     if "active" in cols and "compacted" in cols:
         visibility = "AND (m.active = 1 OR m.compacted = 1)"
+    link_col = "sml.parley_id" if _has_table(conn, "parley_msg_links") else "NULL"
+    link_join = ("LEFT JOIN parley_msg_links sml ON sml.state_db_id = m.id"
+                 if _has_table(conn, "parley_msg_links") else "")
     sql = f"""
-        SELECT m.id, m.role, m.content, m.timestamp, m.session_id
+        SELECT m.id, m.role, m.content, m.timestamp, m.session_id, {link_col}
           FROM messages_fts
           JOIN messages m ON m.id = messages_fts.rowid
+          {link_join}
          WHERE messages_fts MATCH ?
            AND m.role IN ('user', 'assistant')
            AND m.content IS NOT NULL AND m.content != ''
@@ -372,11 +384,12 @@ def fetch_candidates(conn: sqlite3.Connection, q: str, sources: Sequence[str],
     roots = resolve_roots(conn, {r[4] for r in rows})
     allowed = set(sources)
     out: List[Tuple[Any, ...]] = []
-    for (message_id, role, content, timestamp, session_id) in rows:
+    for (message_id, role, content, timestamp, session_id, parley_id) in rows:
         root = roots.get(session_id)
         if root is None or root[1] not in allowed:
             continue
-        out.append((message_id, role, content, timestamp, root[0], root[1], root[2]))
+        out.append((message_id, role, content, timestamp, root[0], root[1], root[2],
+                    parley_id or None))
     return out
 
 
@@ -428,7 +441,11 @@ def build_hits(candidates: Iterable[Tuple[Any, ...]], terms: Sequence[str],
     overflow: Dict[Tuple[str, str], int] = {}
     first_index: Dict[Tuple[str, str], int] = {}
     seen_text: set = set()
-    for (message_id, role, content, timestamp, chat_id, source, title) in candidates:
+    for cand in candidates:
+        # 8-tuple from fetch_candidates; a 7-tuple (no parley_id) is
+        # accepted so older callers/tests keep working.
+        (message_id, role, content, timestamp, chat_id, source, title) = cand[:7]
+        parley_id = cand[7] if len(cand) > 7 else None
         if not chat_id:
             continue
         text = strip_envelope(content)
@@ -453,7 +470,12 @@ def build_hits(candidates: Iterable[Tuple[Any, ...]], terms: Sequence[str],
             first_index[key] = len(hits)
         hits.append({
             "session_id": _format_gateway_id(source, chat_id),
-            "message_id": int(message_id),
+            # The id the PWA can FIND: the transcript route surfaces
+            # `parley_id` on linked rows and the bubble is keyed by it;
+            # the bare state.db rowid only matches rows that have no
+            # link (legacy / other channels). `around=` accepts both.
+            "message_id": str(parley_id) if parley_id else int(message_id),
+            "row_id": int(message_id),
             "role": role or "",
             "snippet": snippet,
             "highlights": ranges,
