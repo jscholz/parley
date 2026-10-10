@@ -37,6 +37,10 @@ provides_tools: []
 pip_dependencies:
   - "pywebpush>=2.0.0"
   - "py-vapid>=1.9.0"
+  # parley_route_settings reads hermes config.yaml with PyYAML; the owner's
+  # generation had it transitively, a fresh tenant install did not
+  # (2026-10-10: "read hermes config failed: No module named 'yaml'").
+  - "pyyaml>=6.0"
 requires_env:
   - name: PARLEY_PLATFORM_TOKEN
     description: "Bearer token the parley proxy uses on every WS message + HTTP call to this plugin"
