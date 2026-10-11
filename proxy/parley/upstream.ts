@@ -192,6 +192,8 @@ export interface ConversationItem {
   // IDB cache stored. Absent for legacy rows, other-channel rows,
   // and tool / system rows.
   parley_id?: string;
+  /** User-upload lane (2026-10-11): durable copies of what the user attached. */
+  attachments?: Array<{ idx: number; fileName: string; mimeType: string; size: number; url: string }>;
   /** Parley extension: notification kind ('cron', 'reminder',
    *  'approval', etc.) when the row was persisted by the cron
    *  scheduler / background-task path. Plumbed through from

@@ -99,6 +99,10 @@ async function handleSessionMessagesViaUpstream(
       // bubbles match the IDB-cached SSE-shape ones. Absent for
       // legacy rows / other-channel rows / tool+system rows.
       ...(it.parley_id ? { parley_id: it.parley_id } : {}),
+      // Durable user attachments (user-upload lane, 2026-10-11): the plugin
+      // joins {idx, fileName, mimeType, size, url} onto user rows; without
+      // this passthrough the field died here and the bubble stayed bare.
+      ...(Array.isArray(it.attachments) && it.attachments.length ? { attachments: it.attachments } : {}),
       // Notification kind ('cron', 'reminder', etc.) — plumbed
       // through for role='notification' rows so the PWA's renderer
       // can show the appropriate emoji + label.
