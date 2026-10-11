@@ -32,6 +32,7 @@
  */
 
 import { log } from './util/log.ts';
+import { notePlaybackStart } from './playbackAudit.ts';
 import * as ttsModule from './audio/turn-based/tts.ts';
 import * as webrtcControls from './audio/realtime/controls.ts';
 
@@ -61,6 +62,7 @@ function dispatch(action: RemoteAction | string): void {
     const d = ttsModule.remoteResumeDecision();
     if (d.ok) {
       log(`[remote-control] action=${action} → resume (${d.why})`);
+      notePlaybackStart('remote-play', { reason: `${action}: ${d.why}`, replyId: ttsModule.getActiveReplyId(), ttsState, callOpen: webrtcControls.isOpen() });
       void ttsModule.resumeReplyTts();
     } else {
       log(`[remote-control] action=${action} ignored — ${d.why}`);

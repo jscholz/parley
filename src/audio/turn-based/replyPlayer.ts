@@ -32,6 +32,7 @@
  */
 
 import { log, diag } from '../../util/log.ts';
+import { lastStart, isUserTrigger, notePlaybackStart } from '../../playbackAudit.ts';
 import * as tts from './tts.ts';
 import * as replyCache from './replyCache.ts';
 
@@ -262,6 +263,18 @@ function onPlayStart({ replyId }: { replyId: string }) {
   clearAllStateClassesExcept(bubble);
   bubble.classList.remove('tts-streaming', 'tts-paused', 'tts-played');
   bubble.classList.add('tts-active', 'tts-playing');
+  // Name the trigger on the bar when the user did NOT tap this bubble —
+  // "auto · media-skip" tells the user (and the next bug report) why it
+  // is talking. A user tap clears any earlier badge.
+  const bar = bubble.querySelector<HTMLElement>('.play-bar');
+  const st = lastStart();
+  if (bar) {
+    if (st && st.replyId === replyId && !isUserTrigger(st.trigger) && Date.now() - st.at < 10_000) {
+      bar.dataset.ttsTrigger = st.trigger;
+    } else {
+      delete bar.dataset.ttsTrigger;
+    }
+  }
 }
 
 function onProgress({ replyId, position, duration }: { replyId: string; position: number; duration: number }) {
@@ -366,6 +379,7 @@ async function onBarPointerDown(e: PointerEvent, bar: HTMLElement): Promise<void
     tts.seekTo(ratio);
   } else {
     const voice = await resolveVoiceAsync();
+    notePlaybackStart('user-tap', { reason: 'scrub', replyId, ttsState: tts.getState() });
     // playReplyTts internally cancels any prior session before starting.
     await tts.playReplyTts(text, voice, replyId);
     // Wait a tick for duration to be known, then seek. Subscribe once.
@@ -440,12 +454,13 @@ async function onPlayClick(e: Event, btn: HTMLElement): Promise<void> {
     const state = tts.getState();
     if (state === 'playing') { tts.pauseReplyTts(); return; }
     if (state === 'paused')  { void tts.resumeReplyTts(); return; }
-    if (state === 'ended')   { if (await tts.replay()) return; }
+    if (state === 'ended')   { notePlaybackStart('user-replay', { replyId, ttsState: state }); if (await tts.replay()) return; }
     // Fall through to fresh playback if state unexpectedly idle.
   }
 
   // Different bubble or nothing active: cancel + start fresh. Cache hits
   // get instant replay; misses re-`/tts`. Same code path either way.
   const voice = await resolveVoiceAsync();
+  notePlaybackStart('user-tap', { reason: 'play-btn', replyId, ttsState: tts.getState() });
   await tts.playReplyTts(text, voice, replyId);
 }

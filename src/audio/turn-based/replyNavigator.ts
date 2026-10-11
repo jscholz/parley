@@ -36,6 +36,7 @@
 
 import { log } from '../../util/log.ts';
 import * as tts from './tts.ts';
+import { notePlaybackStart } from '../../playbackAudit.ts';
 import * as webrtcControls from '../realtime/controls.ts';
 import * as fakeLock from '../../ios/fakeLock.ts';
 
@@ -46,7 +47,17 @@ let subscribed = false;
  *  Lets someone who just finished listening keep walking between
  *  replies for a while after the audio itself stopped, without leaving
  *  skip "live" forever once they've put the phone down. */
-export const RECENT_TTS_GRACE_MS = 5 * 60 * 1000;
+/** How long after a reply finishes a headset / media-key skip may still
+ *  start the NEXT reply. Was 5 minutes: on a desktop with a Bluetooth
+ *  headset or media keys, that window turned any stray next-track event
+ *  (AirPods double-press, a keyboard media key) into "it spoke by itself"
+ *  — the fourth such report (2026-10-11, the reply was the newest, never
+ *  played, started with no tap). 15 s is "I just listened, keep going";
+ *  hands-free beyond that is the call or the pocket-lock, both explicit. */
+export let RECENT_TTS_GRACE_MS = 15 * 1000;
+export function __setRecentTtsGraceForTests(ms: number): void { RECENT_TTS_GRACE_MS = ms; }
+/** Test seam: pretend a reply ended at `at` (drives the grace window). */
+export function __noteTtsEndedForTests(at: number): void { lastTtsEndAt = at; }
 
 /** Wall-clock ms timestamp of the last TTS playback session ending, or
  *  null if none has ended yet (or the window was explicitly cleared —
@@ -216,7 +227,7 @@ export async function playPrev(): Promise<void> {
     log('[reply-nav] already at first reply');
     return;
   }
-  await playBubble(target);
+  await playBubble(target, gate.reason);
 }
 
 /** Public: play the agent bubble AFTER the current pointer. */
@@ -238,15 +249,16 @@ export async function playNext(): Promise<void> {
     log('[reply-nav] already at most-recent reply');
     return;
   }
-  await playBubble(target);
+  await playBubble(target, gate.reason);
 }
 
-async function playBubble(bubble: HTMLElement): Promise<void> {
+async function playBubble(bubble: HTMLElement, reason = ''): Promise<void> {
   const replyId = bubble.dataset.replyId || '';
   const text = (bubble.dataset.text || bubble.textContent || '').trim();
   if (!text) return;
   currentBubble = bubble;
   const voice = await resolveVoice();
+  notePlaybackStart('media-skip', { reason, replyId, ttsState: tts.getState(), callOpen: webrtcControls.isOpen() });
   // playReplyTts internally cancels any prior session before starting.
   // The 'play-start' event will land in replyPlayer, which paints the
   // bubble's tts-active / tts-playing classes.

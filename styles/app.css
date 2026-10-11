@@ -6449,3 +6449,15 @@
   display: block; font-size: calc(var(--content-size) - 2px); color: var(--muted);
   text-transform: uppercase; letter-spacing: .06em; margin: 4px 0 2px;
 }
+
+/* Playback audit badge (2026-10-11): a play bar that started without a tap
+   names its trigger (listen-autoplay, media-skip, remote-play) so the user
+   can tell WHY the agent is talking. User taps carry no badge. */
+.play-bar[data-tts-trigger]::after {
+  content: 'auto · ' attr(data-tts-trigger);
+  margin-left: 8px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #8a8f98);
+  white-space: nowrap;
+}

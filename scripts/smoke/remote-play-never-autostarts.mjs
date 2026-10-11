@@ -123,4 +123,35 @@ export default async function run({ page, log, fail, url, mock }) {
   s = await snapshot();
   if (s.state !== 'paused' || !s.paused) fail(`remote play resumed an AGED user pause: ${JSON.stringify(s)}`);
   log('aged user pause: remote play ignored ✓');
+
+  // 5. a headset / media-key SKIP after a reply ended and the short grace
+  //    window has lapsed must not start the newest reply (2026-10-11: the
+  //    fourth "it spoke by itself" — desktop, Speak-replies on, no call;
+  //    the 5-minute grace let a stray next-track event start a reply the
+  //    user had never played). Within the grace it still works (hands-free
+  //    "keep skipping" right after a reply ends).
+  await page.evaluate(async () => {
+    const tts = await import('/build/audio/turn-based/tts.mjs');
+    tts.cancelReplyTts?.();
+  });
+  mock.addChat('chat-remote-play', {
+    title: 'Remote play',
+    messages: [
+      { role: 'user', content: 'question' },
+      { role: 'assistant', content: 'a reply worth hearing twice', message_id: 'm-rp1' },
+      { role: 'assistant', content: 'a newer reply nobody asked to hear', message_id: 'm-rp2' },
+    ],
+  });
+  await page.evaluate(async () => {
+    const nav = await import('/build/audio/turn-based/replyNavigator.mjs');
+    nav.__setRecentTtsGraceForTests(1);          // grace lapses immediately
+    nav.__noteTtsEndedForTests?.(Date.now() - 50); // "a reply ended just now"
+  });
+  await page.waitForTimeout(100);
+  const ttsBefore = ttsCalls.length;
+  await page.evaluate(() => window.__audioSessionTest?.fireAction('nexttrack'));
+  await page.waitForTimeout(600);
+  s = await snapshot();
+  if (ttsCalls.length !== ttsBefore || s.state === 'playing') fail(`media skip after the grace window started a reply: ${JSON.stringify(s)} tts=${ttsCalls.length - ttsBefore}`);
+  log('media skip after grace: inert ✓');
 }

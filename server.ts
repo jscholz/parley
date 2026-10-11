@@ -26,6 +26,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
 import { isLiveDataHome } from './proxy/dataHome.mjs';
+import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/parley/setup.ts';
@@ -1570,6 +1571,15 @@ const requestHandler: http.RequestListener = async (req, res) => {
     }
   }
   if (req.method === 'POST' && req.url === '/api/debug/logs') return handleDebugLogs(req, res);
+  // Playback audit (2026-10-11): every reply-audio start the client makes,
+  // with its trigger — always on, per data home. GET returns the newest.
+  if (req.url === '/api/parley/diag/playback' && req.method === 'POST') return playbackAudit.handlePlaybackAudit(req, res);
+  if (req.url?.startsWith('/api/parley/diag/playback') && req.method === 'GET') {
+    const n = Number(new URL(req.url, 'http://x').searchParams.get('limit') || 50);
+    return playbackAudit.readPlaybackAudit(Number.isFinite(n) ? n : 50).then((rows) => {
+      res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ entries: rows }));
+    });
+  }
   // /dev: convenience redirect that flips on the dev-mode URL flags.
   // Bookmark `…/dev` instead of typing the full ?-string. URL is the
   // transparent source of truth; dev-mode flags are intentionally not

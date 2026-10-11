@@ -13,6 +13,7 @@
  */
 
 import { log, diag } from './util/log.ts';
+import { notePlaybackStart } from './playbackAudit.ts';
 import { isProgressHeartbeatText } from './util/progressHeartbeat.ts';
 import { replaySessionMessages, persistGrownTranscript, NO_REPLY_RE } from './sessionResume.ts';
 import * as backend from './backend.ts';
@@ -397,6 +398,7 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
       // Per-session voice: this reply belongs to `conversation`, so prefer
       // its assigned voice (sessionIdentity) over the global default.
       const replyVoice = sessionIdentity.voiceFor(conversation as string) ?? settings.get().voice;
+      notePlaybackStart('listen-autoplay', { reason: `turnbased=${turnbased.getState()}`, replyId: ttsReplyId, chatId: conversation as string, ttsState: 'idle', callOpen: webrtcOpen });
       void playReplyTts(finalText, replyVoice, ttsReplyId).catch(() => {
         listenReply.releaseOwnership();
         try { turnbased.notifyReplyPlayback(false); } catch {}
