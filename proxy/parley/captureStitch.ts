@@ -11,6 +11,10 @@ import { promises as fs } from 'node:fs';
 
 export type StitchFormat = 'wav16k' | 'm4a';
 
+/** ffmpeg speechnorm filter (expansion 12.5, slow raise, channels
+ *  linked) — see the note at the call site. Exported for the tests. */
+export const SPEECH_NORMALISE = 'speechnorm=e=12.5:r=0.0001:l=1';
+
 /** Concat + transcode `segmentFiles` (in order) into `outFile`.
  *  Returns outFile. Throws with ffmpeg's stderr tail on failure. */
 export async function ffmpegStitch(
@@ -25,6 +29,15 @@ export async function ffmpegStitch(
     segmentFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'),
   );
   const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile];
+  // Speech-level normalisation BEFORE encoding (field 2026-10-09/10): a
+  // phone on a meeting-room table records at -50 dB mean, and Deepgram's
+  // v2 diarizer collapses such audio to a single speaker (a 63-minute
+  // four-person meeting rendered as one "Speaker 0" turn; reproduced
+  // deterministically on the raw stitch, four speakers again on the
+  // same audio normalised). speechnorm is the purpose-built speech
+  // filter: ~1 s/hour of CPU, no look-ahead pass. Applied to BOTH
+  // outputs so playback of a quiet meeting is audible too.
+  args.push('-af', SPEECH_NORMALISE);
   if (format === 'wav16k') args.push('-ac', '1', '-ar', '16000');
   // +faststart moves the moov index to the FRONT of the file. ffmpeg's
   // default writes it last; Chrome copes by range-reading the tail

@@ -708,6 +708,11 @@ test('markCapture stamps and clears diarized_at / ingested_at', async () => {
   assert.equal(m.diarized_at, 123); assert.equal(m.ingested_at, 456);
   m = await markCapture(a.id, { diarized_at: null });
   assert.equal(m.diarized_at, undefined); assert.equal(m.ingested_at, 456);
+  // Ingest coverage stamps (2026-10-09 re-ingest after an offline reopen).
+  m = await markCapture(a.id, { ingested_segments: 33, ingested_duration_ms: 1_485_000 });
+  assert.equal(m.ingested_segments, 33); assert.equal(m.ingested_duration_ms, 1_485_000);
+  m = await markCapture(a.id, { ingested_segments: null });
+  assert.equal(m.ingested_segments, undefined); assert.equal(m.ingested_duration_ms, 1_485_000);
 });
 
 test('endedAtFor: a stalled capture ends at its last AUDIO (t0-based), a normal stop ends now', async () => {

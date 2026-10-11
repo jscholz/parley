@@ -124,6 +124,8 @@ function segTextPath(m: CaptureManifest, seq: number): string {
   return path.join(captureDirPath(m.id), 'seg', `${seq}.txt`);
 }
 
+function segs(n: number): string { return `${n} segment${n === 1 ? '' : 's'}`; }
+
 function fmtOffset(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   const h = Math.floor(s / 3600);
@@ -373,14 +375,27 @@ async function drain(id: string): Promise<void> {
 // transcript: a meeting must never be lost to diarization, and raw
 // segments keep it retro-diarizable (plan §Phase 4g).
 
+export function distinctSpeakers(utterances: { speaker: number }[]): number {
+  return new Set(utterances.map((u) => u.speaker)).size;
+}
+
+/** A single speaker over this much audio is the diarizer failing, not a
+ *  monologue — logged loudly so the next report is a grep. */
+const SINGLE_SPEAKER_SUSPECT_MS = 3 * 60 * 1000;
+
 function renderDiarized(
   m: CaptureManifest,
   utterances: { speaker: number; start: number; text: string }[],
 ): string {
+  // The speaker COUNT rides in the meta line: a one-speaker render of an
+  // hour-long meeting is the diarizer's failure mode (2026-10-09), and
+  // the reader subtitle + the agent's first read should say so instead
+  // of leaving him to discover one giant Speaker 0 paragraph.
+  const n = distinctSpeakers(utterances);
   const lines: string[] = [
     `# ${m.title}`,
     '',
-    `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized_`,
+    `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized (${n} speaker${n === 1 ? '' : 's'})_`,
     '',
   ];
   const marks = [...m.marks].sort((a, b) => a.t_ms - b.t_ms);
@@ -443,6 +458,15 @@ async function runDiarizePass(id: string): Promise<boolean> {
     if (!res.ok) throw new Error(data?.error?.message || data?.error || `bridge ${res.status}`);
     const utterances = Array.isArray(data?.utterances) ? data.utterances : [];
     if (!utterances.length) throw new Error('diarize pass returned no utterances');
+    const speakers = distinctSpeakers(utterances);
+    const durationMs = captureDurationMs(m);
+    console.log(`[capture-transcribe] ${id}: diarize pass ${utterances.length} utterances, ${speakers} speaker(s), `
+      + `${fmtOffset(durationMs)} audio, ${m.segments.length} segments${data?.diarizer ? `, diarizer=${data.diarizer}` : ''}`);
+    if (speakers <= 1 && durationMs >= SINGLE_SPEAKER_SUSPECT_MS) {
+      console.warn(`[capture-transcribe] ${id}: diarize pass found ONE speaker over ${fmtOffset(durationMs)} — `
+        + 'suspect (quiet audio collapses the v2 diarizer); transcript.plain.md keeps the stitched text; '
+        + `retro-diarize with POST /api/parley/captures/${id}/diarize`);
+    }
     // Preserve the stitched plain version, then make the diarized
     // render THE transcript (same path = same shelf entry, same path
     // the start-message promised the agent).
@@ -493,6 +517,11 @@ async function finalizeInner(id: string): Promise<void> {
   if (done.ingested_at) {
     // Second finalize (reopen → heal/stop): transcript + speakers were
     // refreshed above; the chat already has its summary and title.
+    // But if the capture GREW since that summary — the stale heal fired
+    // while an offline phone still held the rest of the meeting, and
+    // the flush reopened it — the summary covers a fraction of the
+    // meeting and nobody told the agent (2026-10-09: 25 of 63 minutes).
+    await reingestIfGrown(done);
     jobs.delete(id);
     return;
   }
@@ -502,11 +531,13 @@ async function finalizeInner(id: string): Promise<void> {
   await retitleFromTranscript(done);
   const wantIngest = done.auto_ingest ?? cfg?.autoIngest ?? true;   // per-capture setting wins
   if (wantIngest && done.linked_chat && done.segments.length > 0) {
-    await markCapture(id, { ingested_at: Date.now() }).catch(() => { /* bookkeeping only */ });
+    await markCapture(id, {
+      ingested_at: Date.now(), ingested_segments: done.segments.length, ingested_duration_ms: captureDurationMs(done),
+    }).catch(() => { /* bookkeeping only */ });
     const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
       done.linked_chat,
       `📼 Recording "${done.title}" finished (${fmtOffset((done.ended_at ?? done.started_at) - done.started_at)}, `
-      + `${done.segments.length} segments). Transcript: ${transcriptPath(done)}\n\n`
+      + `${segs(done.segments.length)}). Transcript: ${transcriptPath(done)}\n\n`
       + 'Ingest it now following the meeting-transcript-ingest skill if available; '
       + 'otherwise read it and give me a tight summary with decisions and action items.\n\n'
       + 'Then name the meeting: if the transcript (and my calendar for that time, if you have a calendar tool) '
@@ -518,6 +549,33 @@ async function finalizeInner(id: string): Promise<void> {
     if (!sent) console.warn(`[capture-transcribe] ${id}: ingest turn not dispatched (no upstream)`);
   }
   jobs.delete(id);
+}
+
+/** The re-ingest turn for a capture that finished AGAIN with more audio
+ *  than its first ingest covered. Silent when nothing grew (a plain
+ *  heal→stop pair over the same segments) or for captures ingested
+ *  before the coverage stamps existed (no baseline → no claim). */
+async function reingestIfGrown(done: CaptureManifest): Promise<void> {
+  const wantIngest = done.auto_ingest ?? cfg?.autoIngest ?? true;
+  if (!wantIngest || !done.linked_chat) return;
+  const before = done.ingested_segments;
+  if (before == null || done.segments.length <= before) return;
+  const beforeDur = done.ingested_duration_ms ?? 0;
+  const nowDur = captureDurationMs(done);
+  await markCapture(done.id, {
+    ingested_at: Date.now(), ingested_segments: done.segments.length, ingested_duration_ms: nowDur,
+  }).catch(() => { /* bookkeeping only */ });
+  const sent = (cfg?.dispatchFn ?? dispatchInternalMessage)(
+    done.linked_chat,
+    `📼 Recording "${done.title}" has now finished for real (${fmtOffset(nowDur)}, ${segs(done.segments.length)}). `
+    + `The earlier "finished" at ${fmtOffset(beforeDur)} / ${segs(before)} was partial — my phone was offline and `
+    + 'uploaded the rest of the meeting afterwards. The transcript was rebuilt over the whole meeting with speaker '
+    + `labels: ${transcriptPath(done)}\n\n`
+    + 'Re-ingest it following the meeting-transcript-ingest skill if available; otherwise read it and update your '
+    + 'summary, decisions and action items for the full meeting. Keep the current title unless the rest of the '
+    + 'meeting changes the subject.',
+  );
+  if (!sent) console.warn(`[capture-transcribe] ${done.id}: re-ingest turn not dispatched (no upstream)`);
 }
 
 // ── Wiring (server boot) ───────────────────────────────────────────────

@@ -49,6 +49,9 @@ class DeepgramSTT(STTProvider):
         self._endpointing = int(spec.options.get("endpointing", 300))
         self._utterance_end_ms = int(spec.options.get("utterance_end_ms", 1500))
         self._keyterms = list(spec.options.get("keyterms", []) or [])
+        # Which batch diarizer produced the last transcribe_diarized result
+        # ("v2" or "default") — surfaced on /v1/transcribe-diarized.
+        self.last_diarizer: Optional[str] = None
         self._ws = None  # type: ignore[assignment]
         self._closed = False
         # ── Liveness telemetry for the STT-hole diagnostics ───────────
@@ -317,18 +320,54 @@ class DeepgramSTT(STTProvider):
                 "aiohttp not installed; install hermes-agent[messaging] or [webrtc]"
             ) from exc
 
-        params = {
-            "model": self._model,
-            "language": self._language,
-            "smart_format": "true",
-            # diarize_model=v2 IMPLIES diarization — combining it with
-            # diarize=true is an INVALID_QUERY_PARAMETER 400 (verified
-            # live 2026-07-08; Deepgram tightened this after the plan's
-            # research pass).
-            "diarize_model": "v2",
-            "utterances": "true",
-        }
-        qs = urllib.parse.urlencode(params)
+        # diarize_model=v2 IMPLIES diarization — combining it with
+        # diarize=true is an INVALID_QUERY_PARAMETER 400 (verified live
+        # 2026-07-08; Deepgram tightened this after the plan's research
+        # pass). It is the better diarizer on normal-level audio (four
+        # speakers where the default finds two, 2026-10-10) but COLLAPSES
+        # quiet recordings to a single speaker — a 63-minute four-person
+        # meeting came back as one Speaker 0 (2026-10-09; reproduced
+        # deterministically). The proxy now normalises speech level
+        # before the call; this fallback covers whatever still slips
+        # through: one speaker over minutes of audio is not a monologue,
+        # so re-run once with the default diarizer and keep whichever
+        # pass heard more people.
+        payload = await self._diarize_request(audio, mime, DIARIZE_PARAMS_V2)
+        utterances = _parse_diarized_utterances(payload)
+        duration = _payload_duration_s(payload)
+        speakers = _distinct_speakers(utterances)
+        logger.info(
+            "[deepgram-stt] diarized batch result: %d utterances, %d speaker(s), %.0fs audio (diarizer=v2)",
+            len(utterances), speakers, duration,
+        )
+        self.last_diarizer = "v2"
+        if speakers <= 1 and duration >= DIARIZE_FALLBACK_MIN_S and utterances:
+            logger.warning(
+                "[deepgram-stt] v2 diarizer found ONE speaker over %.0fs — retrying with the default diarizer",
+                duration,
+            )
+            try:
+                alt_payload = await self._diarize_request(audio, mime, DIARIZE_PARAMS_DEFAULT)
+                alt = _parse_diarized_utterances(alt_payload)
+                alt_speakers = _distinct_speakers(alt)
+                logger.info(
+                    "[deepgram-stt] diarized batch result: %d utterances, %d speaker(s) (diarizer=default)",
+                    len(alt), alt_speakers,
+                )
+                if alt and alt_speakers > speakers:
+                    utterances = alt
+                    self.last_diarizer = "default"
+            except Exception as exc:  # the v2 result is still a transcript — never lose the meeting
+                logger.warning("[deepgram-stt] default-diarizer retry failed: %s", exc)
+        return utterances
+
+    async def _diarize_request(self, audio: bytes, mime: str, params: dict) -> dict:
+        """One Deepgram REST /listen call with ``params`` (+ model,
+        language, keyterms). Seam for the tests."""
+        import aiohttp  # type: ignore
+
+        full = {"model": self._model, "language": self._language, **params}
+        qs = urllib.parse.urlencode(full)
         for kw in self._keyterms:
             qs += "&keyterm=" + urllib.parse.quote(str(kw))
         url = f"{DEEPGRAM_REST_URL}?{qs}"
@@ -337,8 +376,8 @@ class DeepgramSTT(STTProvider):
             "Content-Type": mime or "audio/wav",
         }
         logger.info(
-            "[deepgram-stt] diarized batch bytes=%d mime=%s model=%s",
-            len(audio), mime, self._model,
+            "[deepgram-stt] diarized batch bytes=%d mime=%s model=%s diarizer=%s",
+            len(audio), mime, self._model, params.get("diarize_model") or "default",
         )
         # Long meetings take minutes server-side; generous read timeout.
         timeout = aiohttp.ClientTimeout(total=900)
@@ -349,8 +388,7 @@ class DeepgramSTT(STTProvider):
                     raise RuntimeError(
                         f"deepgram REST returned {resp.status}: {err}"
                     )
-                payload = await resp.json()
-        return _parse_diarized_utterances(payload)
+                return await resp.json()
 
     async def aclose(self) -> None:
         self._closed = True
@@ -359,6 +397,24 @@ class DeepgramSTT(STTProvider):
                 await self._ws.close()
             except Exception:  # pragma: no cover
                 pass
+
+
+# Batch diarize parameter sets — see transcribe_diarized.
+DIARIZE_PARAMS_V2 = {"smart_format": "true", "diarize_model": "v2", "utterances": "true"}
+DIARIZE_PARAMS_DEFAULT = {"smart_format": "true", "diarize": "true", "utterances": "true"}
+# One speaker over this much audio triggers the default-diarizer retry.
+DIARIZE_FALLBACK_MIN_S = 180.0
+
+
+def _distinct_speakers(utterances: list) -> int:
+    return len({u.get("speaker") for u in utterances})
+
+
+def _payload_duration_s(payload: dict) -> float:
+    try:
+        return float((payload.get("metadata") or {}).get("duration") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _parse_diarized_utterances(payload: dict) -> list:

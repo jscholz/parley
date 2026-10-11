@@ -86,8 +86,16 @@ export interface CaptureManifest {
    *  overwrote a diarized transcript with the plain rolling render). */
   diarized_at?: number;
   /** The post-meeting ingest turn was dispatched once; a second finalize
-   *  (reopen → heal) must not summarise the meeting into the chat again. */
+   *  (reopen → heal) must not summarise the meeting into the chat again —
+   *  unless the capture GREW since (an offline phone flushed the rest of
+   *  the meeting after a stale heal), in which case the pipeline sends a
+   *  re-ingest turn naming the earlier partial finish. These two record
+   *  what that first turn covered (2026-10-09: a 63-minute meeting was
+   *  summarised from its first 25 minutes and the agent never heard the
+   *  rest existed). */
   ingested_at?: number;
+  ingested_segments?: number;
+  ingested_duration_ms?: number;
   /** Why the capture ended 'failed' (abort-start reason, pending TTL
    *  expiry, supersede, stale heal). Kept in place — never deleted. */
   failed_reason?: string;
@@ -977,11 +985,20 @@ export function endedAtFor(
 
 /** Pipeline bookkeeping stamps (diarized_at / ingested_at) — locked
  *  read-modify-write so a concurrent segment write can't drop them. */
-export function markCapture(id: string, patch: { diarized_at?: number | null; ingested_at?: number | null }): Promise<CaptureManifest> {
+export interface CaptureMarks {
+  diarized_at?: number | null;
+  ingested_at?: number | null;
+  ingested_segments?: number | null;
+  ingested_duration_ms?: number | null;
+}
+export function markCapture(id: string, patch: CaptureMarks): Promise<CaptureManifest> {
   return withCaptureLock(id, async () => {
     const m = await readManifest(id);
-    if (patch.diarized_at !== undefined) { if (patch.diarized_at === null) delete m.diarized_at; else m.diarized_at = patch.diarized_at; }
-    if (patch.ingested_at !== undefined) { if (patch.ingested_at === null) delete m.ingested_at; else m.ingested_at = patch.ingested_at; }
+    for (const key of ['diarized_at', 'ingested_at', 'ingested_segments', 'ingested_duration_ms'] as const) {
+      const v = patch[key];
+      if (v === undefined) continue;
+      if (v === null) delete m[key]; else m[key] = v;
+    }
     await saveManifest(m);
     return m;
   });

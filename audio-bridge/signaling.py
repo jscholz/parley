@@ -607,7 +607,12 @@ async def handle_transcribe_diarized(request: "web.Request") -> "web.Response":
             await provider.aclose()
         except Exception:  # pragma: no cover
             pass
-    return web.json_response({"ok": True, "utterances": utterances})
+    return web.json_response({
+        "ok": True,
+        "utterances": utterances,
+        "speakers": len({u.get("speaker") for u in utterances}),
+        "diarizer": getattr(provider, "last_diarizer", None),
+    })
 
 
 async def handle_health(request: "web.Request") -> "web.Response":

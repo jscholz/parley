@@ -107,6 +107,13 @@ test('splitLeadingMetaLine: lifts the meta line from under a leading heading', (
   assert.equal(rest, '# Board sync\n\n**[+0:00]** hello', 'the heading stays in the body');
 });
 
+test('splitLeadingMetaLine: speaker-count meta (2026-10-09) lifts cleanly', () => {
+  const body = '# Foundry\n\n_Recorded 2026-10-09 20:05 · 1:03:16 · diarized (4 speakers)_\n\n**Speaker 0** [0:03]: hi';
+  const { meta, rest } = splitLeadingMetaLine(body, 'markdown');
+  assert.equal(meta, 'Recorded 2026-10-09 20:05 · 1:03:16 · diarized (4 speakers)');
+  assert.equal(rest, '# Foundry\n\n**Speaker 0** [0:03]: hi');
+});
+
 test('splitLeadingMetaLine: heading + finished-capture meta', () => {
   const body = '# Board sync\n\n_Recorded 2026-08-18 10:35 · 1:34:39 · diarized_\n\n**Speaker 0** [0:00]: hi';
   const { meta, rest } = splitLeadingMetaLine(body, 'markdown');

@@ -14,7 +14,7 @@ import * as os from 'node:os';
 
 import {
   initCapture, createCapture, activateCapture, putSegment, stopCapture,
-  addMark, getCapture, setCaptureHooks, listCaptures,
+  addMark, getCapture, setCaptureHooks, listCaptures, sweepCaptures,
 } from '../capture.ts';
 import {
   initCaptureTranscription, recoverPendingTranscriptions, rebuildTranscript,
@@ -264,7 +264,7 @@ test('diarize=true: stitched audio → speaker-turn transcript REPLACES transcri
   assert.equal(stitched.length, 1);
   assert.equal(stitched[0].length, 2);         // both segments stitched
   const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
-  assert.match(t, /diarized_/);
+  assert.match(t, /· diarized \(2 speakers\)_/);   // speaker count in the meta line (2026-10-09)
   assert.match(t, /\*\*Speaker 0\*\* \[0:00\]: Morning everyone\. Let us start\./);  // same-speaker turns grouped
   assert.match(t, /\*\*Speaker 1\*\* \[0:06\]: I have the numbers\./);
   assert.ok(t.indexOf('[MARK 0:05]') < t.indexOf('Speaker 1'), 'mark interleaved by time');
@@ -298,6 +298,109 @@ test('diarize failure falls back to the stitched transcript — meeting never lo
   const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
   assert.match(t, /plain 0\./);                // stitched content survived
   assert.doesNotMatch(t, /diarized_/);
+});
+
+test('single-speaker render says so in the meta line', async () => {
+  const { fn } = diarizedBridge([
+    { speaker: 0, start: 0.5, text: 'Just me.' },
+    { speaker: 0, start: 3.0, text: 'Talking to myself.' },
+  ]);
+  wire(fn, {
+    stitchFn: async (_files: string[], out: string) => {
+      const { promises: f } = await import('node:fs');
+      await f.writeFile(out, 'fake-wav');
+      return out;
+    },
+  });
+  const m = await createCapture({ title: 'Memo', diarize: true });
+  await seg(m.id, 0, 0);
+  await stopCapture(m.id);
+  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+  const t = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
+  assert.match(t, /· diarized \(1 speaker\)_/);
+});
+
+// ── Offline meeting: the first "finished" was partial (2026-10-09) ─────
+//
+// Phone on the table, conference-room network gone: the stale sweep
+// healed the capture at 33 segments, the ingest turn summarised 25 of
+// 63 minutes, the phone then flushed 47 more segments and the client's
+// real /stop re-ran the speaker pass — but the second finalize was
+// silent by design, so the agent never learned the rest existed.
+
+async function ageOut(id: string): Promise<void> {
+  const mp = path.join(dir, id, 'manifest.json');
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  const raw = JSON.parse(await fs.readFile(mp, 'utf8'));
+  raw.started_at = Date.now() - 12 * 60 * 1000;
+  await fs.writeFile(mp, JSON.stringify(raw));
+  await fs.utimes(mp, old, old);
+}
+
+test('reopen after a stale heal: the second finalize re-runs the speaker pass over everything and sends a re-ingest turn', async () => {
+  const { fn } = diarizedBridge([
+    { speaker: 0, start: 0.5, text: 'Morning.' },
+    { speaker: 1, start: 50.0, text: 'Afternoon.' },
+  ]);
+  const stitched: number[] = [];
+  const sent = wire(fn, {
+    stitchFn: async (files: string[], out: string) => {
+      stitched.push(files.length);
+      const { promises: f } = await import('node:fs');
+      await f.writeFile(out, 'fake-wav');
+      return out;
+    },
+  });
+  const m = await createCapture({ title: 'Foundry', linkedChat: 'parley:f', diarize: true });
+  await activateCapture(m.id);
+  await seg(m.id, 0, 0);
+  await ageOut(m.id);
+  await sweepCaptures();                           // stale heal → pipeline → finalize #1
+  // sent[0] is the "Recording started" announce from /activate.
+  await waitFor(async () => sent.length === 2 && (await getCapture(m.id)).status === 'complete');
+  assert.match(sent[1].text, /finished \([0-9:]+, 1 segment\)/);
+  let man = await getCapture(m.id);
+  assert.equal(man.ingested_segments, 1);
+  assert.equal(man.healed_by_sweep, true);
+
+  // The phone comes back with the rest of the meeting, then really stops.
+  await seg(m.id, 1, 45_000);
+  assert.equal((await getCapture(m.id)).status, 'recording');   // reopened
+  await waitFor(async () => { try { await fs.access(path.join(dir, m.id, 'seg', '1.txt')); return true; } catch { return false; } });
+  // The diarized transcript stays on the shelf while reopened (no rolling clobber).
+  assert.match(await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'), /diarized \(2 speakers\)/);
+  await stopCapture(m.id);
+  await waitFor(async () => sent.length === 3);
+  await waitFor(async () => (await getCapture(m.id)).status === 'complete');
+
+  assert.deepEqual(stitched, [1, 2]);              // second pass covered BOTH segments
+  assert.match(sent[2].text, /has now finished for real \([0-9:]+, 2 segments\)/);
+  assert.match(sent[2].text, /earlier "finished" at [0-9:]+ \/ 1 segment was partial/);
+  assert.match(sent[2].text, /Re-ingest it/);
+  assert.equal(sent[2].chatId, 'parley:f');
+  man = await getCapture(m.id);
+  assert.equal(man.ingested_segments, 2);
+  assert.match(await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'), /diarized \(2 speakers\)/);
+});
+
+test('heal then stop over the SAME segments is silent (nothing grew, no second summary)', async () => {
+  const { fn } = diarizedBridge([{ speaker: 0, start: 0.5, text: 'Hi.' }]);
+  const sent = wire(fn, {
+    stitchFn: async (_files: string[], out: string) => {
+      const { promises: f } = await import('node:fs');
+      await f.writeFile(out, 'fake-wav');
+      return out;
+    },
+  });
+  const m = await createCapture({ title: 'Quiet', linkedChat: 'parley:q', diarize: true });
+  await activateCapture(m.id);
+  await seg(m.id, 0, 0);
+  await ageOut(m.id);
+  await sweepCaptures();
+  await waitFor(async () => sent.length === 2 && (await getCapture(m.id)).status === 'complete');   // started + finished
+  await stopCapture(m.id);                         // idempotent on a complete capture
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(sent.length, 2);
 });
 
 test('stitch failure (no ffmpeg / bad audio) also falls back cleanly', async () => {
