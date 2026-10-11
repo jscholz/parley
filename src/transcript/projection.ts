@@ -158,6 +158,14 @@ export function project(state: ChatState): BubbleSpec[] {
       if (!userKeys.has(key)) {
         userKeys.add(key);
         const spec: UserBubbleSpec = { kind: 'user', key, text: item.content || '', timestamp: ts };
+        // Durable user attachments (user-upload lane, 2026-10-11): history
+        // rows carry {url, mimeType, fileName, size}; the bubble renders
+        // them like the live echo's dataUrl thumbnails.
+        if (Array.isArray((item as any).attachments) && (item as any).attachments.length) {
+          spec.attachments = (item as any).attachments
+            .filter((a: any) => a && typeof a.url === 'string')
+            .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size }));
+        }
         pushDurableSpec(spec);
         // Track by content for the heal-rekey echo shadow (step 2) —
         // the user twin of durableAssistantContentCounts, except the

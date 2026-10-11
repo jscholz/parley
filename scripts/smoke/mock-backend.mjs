@@ -471,6 +471,8 @@ export async function installMockBackend(page) {
       // Tests can opt in per-message by setting `parley_id` on the
       // mock chat's message dict.
       if (m.parley_id) out.parley_id = m.parley_id;
+      // Durable user attachments (user-upload lane): {url, mimeType, fileName, size}.
+      if (Array.isArray(m.attachments)) out.attachments = m.attachments;
       // Tool-call linkage (hermes plugin /items extension, 2026-05-17).
       // role='tool' rows carry tool_call_id referencing back to the
       // assistant message that issued the call. role='assistant'

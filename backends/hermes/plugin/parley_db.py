@@ -269,6 +269,19 @@ CREATE TABLE IF NOT EXISTS conversation_titles (
 );
 CREATE INDEX IF NOT EXISTS idx_conversation_titles_updated ON conversation_titles(updated_at DESC);
 
+-- Durable copies of what the user attached to a message (2026-10-11;
+-- parley_user_uploads.py). Files live under <data home>/uploads/<umsg>/.
+CREATE TABLE IF NOT EXISTS msg_attachments (
+  user_message_id TEXT NOT NULL,
+  idx             INTEGER NOT NULL,
+  file_name       TEXT NOT NULL,
+  mime            TEXT NOT NULL,
+  size            INTEGER NOT NULL DEFAULT 0,
+  path            TEXT NOT NULL,
+  created_at      REAL NOT NULL,
+  PRIMARY KEY (user_message_id, idx)
+);
+
 CREATE TABLE IF NOT EXISTS unread_state (
   chat_id        TEXT PRIMARY KEY,
   last_read_at   REAL,

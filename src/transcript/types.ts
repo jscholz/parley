@@ -130,7 +130,7 @@ export interface PendingSend {
    *  affordance on the bubble. */
   failed?: boolean;
   /** Attachments threaded through atomic-send (Q1). */
-  attachments?: Array<{ dataUrl: string; mimeType: string; fileName?: string }>;
+  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
 }
 
 /**
@@ -279,7 +279,8 @@ export interface UserBubbleSpec {
   /** `true` if the send POST returned an error. Surfaces Retry. */
   failed?: boolean;
   source?: 'voice' | 'text' | 'sent';
-  attachments?: Array<{ dataUrl: string; mimeType: string; fileName?: string }>;
+  /** Live echo carries dataUrl; a durable row carries url (user-upload lane). */
+  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
   /** hermes' processing mark for this message (👀 / ✓ / ✗). */
   ack?: TurnAck;
   /** Set when the turn this message started ended as a failure or was

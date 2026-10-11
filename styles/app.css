@@ -6461,3 +6461,9 @@
   color: var(--text-muted, #8a8f98);
   white-space: nowrap;
 }
+
+/* Durable user attachments (user-upload lane, 2026-10-11): download links
+   under the thumbnails of a user bubble rebuilt from history. */
+.line-attachment-downloads { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; font-size: 12px; }
+.line-attachment-downloads .attachment-dl { color: var(--text-muted, #8a8f98); text-decoration: none; }
+.line-attachment-downloads .attachment-dl:hover { color: var(--text, #e6e6e6); text-decoration: underline; }

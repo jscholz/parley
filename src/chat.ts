@@ -3,6 +3,8 @@
  */
 
 import { escapeHtml } from './util/dom.ts';
+import { apiUrl } from './apiBase.ts';
+import { isNativeShell, openExternal } from './native/externalLinks.ts';
 import { miniMarkdown, renderUserText, linkifyCaptureDocs } from './util/markdown.ts';
 import { diag, log, isDebugEnabled } from './util/log.ts';
 import {
@@ -1350,7 +1352,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   /** Message timestamp; defaults to now. */
   timestamp?: number | Date | string;
   /** Image / video thumbnails rendered under the line. */
-  attachments?: Array<{ dataUrl: string; mimeType: string; fileName?: string }>;
+  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
   /** TTS reply id for agent lines — links bubble to playback events
    *  (loading bar + play-icon wiring). */
   replyId?: string;
@@ -1601,18 +1603,21 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     const attDiv = document.createElement('div');
     attDiv.className = 'line-attachments';
     for (const att of opts.attachments) {
-      if (!att?.dataUrl) continue;
+      // Live echo: dataUrl. Durable row (user-upload lane): url, resolved
+      // against the API origin (CAP contract) — 2026-10-11.
+      const src = att?.dataUrl || (att?.url ? apiUrl(att.url) : '');
+      if (!src) continue;
       if (att.mimeType?.startsWith('image/')) {
         const img = document.createElement('img');
-        img.src = att.dataUrl;
+        img.src = src;
         img.alt = att.fileName || 'attachment';
         img.title = att.fileName || 'attachment';
         img.loading = 'lazy';
-        img.onclick = () => openLightbox(att.dataUrl);
+        img.onclick = () => openLightbox(src);
         attDiv.appendChild(img);
       } else if (att.mimeType?.startsWith('video/')) {
         const vid = document.createElement('video');
-        vid.src = att.dataUrl;
+        vid.src = src;
         vid.controls = true;
         vid.preload = 'metadata';
         vid.playsInline = true;
@@ -1624,7 +1629,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         // pdf.js bulk. Local-only — the chip lives in DOM memory and
         // disappears on hard refresh (no server-side persistence needed).
         const a = document.createElement('a');
-        a.href = att.dataUrl;
+        a.href = src;
         a.target = '_blank';
         a.rel = 'noopener';
         a.className = 'pdf-chip';
@@ -1632,6 +1637,29 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         a.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h7L13 4.5V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5z"/><path d="M9.5 1.5V4.5H13"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || 'PDF')}</span>`;
         attDiv.appendChild(a);
       }
+    }
+    // Download affordance for durable copies: one small link per file.
+    // (CAP's WKWebView cannot save an <a download>; hand it to the OS.)
+    const durable = opts.attachments.filter((a: any) => a?.url);
+    if (durable.length) {
+      const row = document.createElement('div');
+      row.className = 'line-attachment-downloads';
+      for (const att of durable) {
+        const a = document.createElement('a');
+        a.className = 'attachment-dl';
+        a.href = apiUrl(att.url!);
+        a.setAttribute('download', att.fileName || '');
+        a.textContent = `⤓ ${att.fileName || 'file'}${att.size ? ` (${humanSize(att.size)})` : ''}`;
+        a.title = `Download ${att.fileName || 'attachment'}`;
+        a.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!isNativeShell()) return;
+          e.preventDefault();
+          void openExternal(apiUrl(att.url!));
+        });
+        row.appendChild(a);
+      }
+      attDiv.appendChild(row);
     }
     if (attDiv.children.length > 0) div.appendChild(attDiv);
   }
@@ -1978,4 +2006,10 @@ export function markBubbleFailed(
   }
   div.appendChild(row);
   persist();
+}
+
+function humanSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

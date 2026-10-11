@@ -958,7 +958,7 @@ class ParleyAdapter(BasePlatformAdapter):
         media_types: List[str] = []
         message_type = MessageType.TEXT
         if attachments:
-            paths, mimes, dominant = self._materialize_attachments(attachments)
+            paths, mimes, dominant = self._materialize_attachments(attachments, user_message_id)
             if paths:
                 media_urls = paths
                 media_types = mimes
@@ -1389,7 +1389,7 @@ class ParleyAdapter(BasePlatformAdapter):
         return pages
 
     def _materialize_attachments(
-        self, attachments: list,
+        self, attachments: list, user_message_id: str = "",
     ) -> Tuple[List[str], List[str], "MessageType"]:
         """Decode base64 ``data:`` URL payloads to tempfiles. Returns
         ``(paths, mime_types, dominant_message_type)``.
@@ -1427,10 +1427,23 @@ class ParleyAdapter(BasePlatformAdapter):
         import tempfile
 
         from . import parley_route_upload as _route_upload
+        from . import parley_user_uploads as _uploads
 
         paths: List[str] = []
         mimes: List[str] = []
         kinds: List[str] = []
+        # Durable copies for the transcript (parley_user_uploads): what the
+        # user sent, as sent, indexed by their message id. Independent of
+        # the /tmp copies the agent reads. Best-effort; never fails the turn.
+        keep_idx = 0
+
+        def _keep(**kw: Any) -> None:
+            nonlocal keep_idx
+            if not user_message_id:
+                return
+            _uploads.persist_user_attachment(
+                getattr(self, "_parley_db", None), user_message_id, keep_idx, **kw)
+            keep_idx += 1
         for a in attachments:
             if not isinstance(a, dict):
                 continue
@@ -1447,6 +1460,7 @@ class ParleyAdapter(BasePlatformAdapter):
                     )
                     continue
                 mime = a.get("mimeType") or ""
+                _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
                 if mime.lower() == "application/pdf":
                     pages = self._rasterize_pdf(staged)
                     try:
@@ -1479,6 +1493,7 @@ class ParleyAdapter(BasePlatformAdapter):
                 logger.warning("[parley] base64 decode failed for attachment")
                 continue
             ext = self._ext_for_mime(mime, a.get("fileName"))
+            _keep(file_name=a.get("fileName") or f"attachment{ext}", mime=mime, payload=payload)
             fd, path = tempfile.mkstemp(
                 prefix="parley-attach-", suffix=ext, dir="/tmp",
             )
