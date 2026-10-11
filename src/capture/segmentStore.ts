@@ -83,9 +83,9 @@ function reqP<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-function openDb(): Promise<IDBDatabase> {
+function openDb(idb: IDBFactory): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = idb.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -100,31 +100,66 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-function idbBackend(): SegmentBackend {
+/** The browser took the connection away underneath us. WebKit closes
+ *  IndexedDB connections behind a backgrounded PWA / CAP shell (storage
+ *  pressure, a long sleep) and the cached handle then throws on every
+ *  transaction — field 2026-10-11, "Could not start recording: Failed
+ *  to execute 'transaction' on 'IDBDatabase': The database connection
+ *  is closing", from a handle opened hours earlier. Reopening is the
+ *  whole fix; the error is not about the data. */
+export function isClosedConnectionError(e: unknown): boolean {
+  const name = String((e as { name?: unknown })?.name || '');
+  const msg = String((e as { message?: unknown })?.message || e || '');
+  return name === 'InvalidStateError' || /connection is closing|database is closed|closed database/i.test(msg);
+}
+
+/** IndexedDB backend. `factory` is a seam for the tests (node has no
+ *  IndexedDB); production reads the global lazily on first use. */
+export function idbBackend(factory: () => IDBFactory = () => indexedDB): SegmentBackend {
   let dbP: Promise<IDBDatabase> | null = null;
-  const db = () => (dbP ??= openDb());
+  const db = (): Promise<IDBDatabase> => {
+    if (dbP) return dbP;
+    const p: Promise<IDBDatabase> = openDb(factory()).then(
+      (d) => {
+        // Drop the handle the moment the browser does, so the next call
+        // opens a fresh one instead of tripping over a dead connection.
+        d.onclose = () => { if (dbP === p) dbP = null; };
+        d.onversionchange = () => {
+          try { d.close(); } catch { /* already gone */ }
+          if (dbP === p) dbP = null;
+        };
+        return d;
+      },
+      (err) => { if (dbP === p) dbP = null; throw err; },
+    );
+    dbP = p;
+    return p;
+  };
+  /** One request on one store, reopening the connection ONCE when the
+   *  cached one turns out to be closed (the eviction above fires no
+   *  event on every engine). */
+  const run = async <T>(store: string, mode: IDBTransactionMode, op: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> => {
+    for (let attempt = 0; ; attempt += 1) {
+      const d = await db();
+      try {
+        return await reqP(op(d.transaction(store, mode).objectStore(store)));
+      } catch (e) {
+        if (attempt === 0 && isClosedConnectionError(e)) {
+          if (dbP) dbP = null;
+          continue;
+        }
+        throw e;
+      }
+    }
+  };
   return {
-    async put(seg) {
-      await reqP((await db()).transaction(STORE, 'readwrite').objectStore(STORE).put(seg));
-    },
-    async getAll() {
-      return reqP((await db()).transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    },
-    async remove(key) {
-      await reqP((await db()).transaction(STORE, 'readwrite').objectStore(STORE).delete(key));
-    },
-    async clear() {
-      await reqP((await db()).transaction(STORE, 'readwrite').objectStore(STORE).clear());
-    },
-    async putCapture(entry) {
-      await reqP((await db()).transaction(LEDGER, 'readwrite').objectStore(LEDGER).put(entry));
-    },
-    async getCaptures() {
-      return reqP((await db()).transaction(LEDGER, 'readonly').objectStore(LEDGER).getAll());
-    },
-    async removeCapture(id) {
-      await reqP((await db()).transaction(LEDGER, 'readwrite').objectStore(LEDGER).delete(id));
-    },
+    async put(seg) { await run(STORE, 'readwrite', (s) => s.put(seg)); },
+    async getAll() { return run(STORE, 'readonly', (s) => s.getAll() as IDBRequest<PendingSegment[]>); },
+    async remove(key) { await run(STORE, 'readwrite', (s) => s.delete(key)); },
+    async clear() { await run(STORE, 'readwrite', (s) => s.clear()); },
+    async putCapture(entry) { await run(LEDGER, 'readwrite', (s) => s.put(entry)); },
+    async getCaptures() { return run(LEDGER, 'readonly', (s) => s.getAll() as IDBRequest<CaptureLedgerEntry[]>); },
+    async removeCapture(id) { await run(LEDGER, 'readwrite', (s) => s.delete(id)); },
   };
 }
 
