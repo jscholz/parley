@@ -2611,6 +2611,9 @@ async function boot() {
         dcUserLastInterim = ev.text;
         ensureUserBubble(display);
         setUserBubbleText(display);
+        // Speech continuing inside a sendword candidate's confirm window
+        // cancels it (mid-sentence "over", field 2026-10-12).
+        webrtcDictation.handleUserInterim(ev.text);
         return;
       }
       // Final segment: append to our buffered-finals copy, update the

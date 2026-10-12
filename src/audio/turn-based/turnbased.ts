@@ -43,7 +43,7 @@ import * as audioPlatform from '../shared/platform.ts';
 import * as settings from '../../settings.ts';
 import { playFeedback } from '../shared/feedback.ts';
 import * as sendwordDetector from './sendwordDetector.ts';
-import { SilenceWindow, getHandsfreeConfig } from '../shared/handsfree.ts';
+import { SilenceWindow, getHandsfreeConfig, sendwordConfirmMs } from '../shared/handsfree.ts';
 import { BargeDetector } from '../shared/bargeDetector.ts';
 import { getBargeThreshold, getBargeDetectorTuning } from '../../voiceTuning.ts';
 import * as recorderBar from '../shared/recorderBar.ts';
@@ -165,6 +165,7 @@ function startSendword(phrase: string): void {
   sendwordDetector.start({
     phrase,
     onMatch: () => commitFromSendword(),
+    onUnmatch: () => cancelSendwordCommit(),
     feed: fedFromLocal,
   });
 }
@@ -702,21 +703,34 @@ function clearSendwordCommitTimer(): void {
  *  call only from state==='armed'; otherwise no-op. */
 export function commitFromSendword(): void {
   if (state !== 'armed') return;
-  // Immediate audio feedback the moment the sendword is detected, so a
-  // bike-mode user knows their utterance was captured BEFORE the grace
-  // window + /transcribe round-trip (which can take 10+s). Mirrors the
-  // realtime path's chime in dictation.ts:handleUserFinal.
-  try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
+  // A match is a CANDIDATE (field 2026-10-12: "if I use the word over in
+  // a sentence, it immediately sends"). With commitDelaySec > 0 it
+  // commits when that window elapses unless the detector reports speech
+  // continuing past the phrase (cancelSendwordCommit); 0 = instant. The chime marks the real commit, so it
+  // never plays for a mid-sentence "over"; it still lands before the
+  // /transcribe round-trip, which is what bike mode needs.
   const { commitDelaySec } = getHandsfreeConfig();
-  if (commitDelaySec <= 0) {
+  const waitMs = sendwordConfirmMs(commitDelaySec);
+  clearSendwordCommitTimer();
+  if (waitMs <= 0) {
+    try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
     void commitNow('sendword');
     return;
   }
-  clearSendwordCommitTimer();
   sendwordCommitTimer = setTimeout(() => {
     sendwordCommitTimer = null;
+    if (state !== 'armed') return;
+    try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
     void commitNow('sendword');
-  }, commitDelaySec * 1000);
+  }, waitMs);
+}
+
+/** Speech continued past the sendword — it was mid-sentence. Drop the
+ *  pending commit; the silence window and a later sendword still work. */
+export function cancelSendwordCommit(): void {
+  if (sendwordCommitTimer === null) return;
+  clearSendwordCommitTimer();
+  diag('[turnbased] sendword was mid-sentence — pending commit cancelled');
 }
 
 /** Cancel without committing (trash button, mic-button-off). Releases

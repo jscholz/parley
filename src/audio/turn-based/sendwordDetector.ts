@@ -38,6 +38,7 @@
  */
 
 import { log, diag } from '../../util/log.ts';
+import { continuesPastSendword } from '../shared/handsfree.ts';
 import type { TranscriptEvent } from '../shared/stt-provider.ts';
 
 export type SendwordOpts = {
@@ -46,8 +47,13 @@ export type SendwordOpts = {
    *  looks for whatever string it's given. */
   phrase: string;
   /** Fired when the phrase is detected in an interim or final result.
-   *  Caller (listen.ts) should commit the buffered audio blob. */
+   *  This is a CANDIDATE: the caller arms a confirm window and commits
+   *  when it elapses, unless `onUnmatch` fires first. */
   onMatch: () => void;
+  /** Fired when speech continues past a matched phrase (it was
+   *  mid-sentence — "it fell over because…"). Caller cancels the
+   *  pending commit. Field 2026-10-12. */
+  onUnmatch?: () => void;
   /** When true, this module opens NO SR session — caller will drive
    *  matching by calling `feedTranscript(ev)` on each transcript event
    *  from its own STTProvider. Use when the caller already runs Web
@@ -76,6 +82,39 @@ let restartTimer: ReturnType<typeof setTimeout> | null = null;
 /** True when start() ran in FED mode — feedTranscript() is live, no SR
  *  was constructed, and stop() just clears state. */
 let fedMode = false;
+/** A match is pending confirmation. `pendingSegment` identifies the
+ *  segment that matched (standalone: SR result index; fed: a counter
+ *  bumped on every final) so a later transcript can be told apart as a
+ *  revision of that segment or new speech. */
+let pending = false;
+let pendingSegment = -1;
+let fedSegment = 0;
+
+function clearPending(): void { pending = false; pendingSegment = -1; }
+
+/** Route one transcript through the pending-match state machine.
+ *  Returns true when it produced a (new) match. */
+function consider(transcript: string, segment: number): boolean {
+  if (!opts || !opts.phrase) return false;
+  if (pending) {
+    const same = segment === pendingSegment;
+    if (continuesPastSendword(transcript, opts.phrase, same)) {
+      diag(`[sendword] speech continued past "${opts.phrase}" — cancelling the pending commit: "${transcript.slice(-80)}"`);
+      clearPending();
+      try { opts.onUnmatch?.(); } catch (e: any) { diag(`[sendword] onUnmatch threw: ${e?.message || e}`); }
+      return false;
+    }
+    // A revision of the matched segment that still ends in the phrase,
+    // or a truncated final: the candidate stands. Don't re-fire.
+    if (same) return false;
+  }
+  if (checkTranscript(transcript)) {
+    pending = true;
+    pendingSegment = segment;
+    return true;
+  }
+  return false;
+}
 
 export function isSupported(): boolean {
   if (typeof window === 'undefined') return false;
@@ -118,8 +157,9 @@ function checkTranscript(transcript: string): boolean {
   const phrase = opts.phrase.trim().toLowerCase();
   if (!phrase) return false;
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Same regex shape as test/commit-word.test.ts — match on word
-  // boundary, optional trailing punctuation, anywhere in the segment.
+  // Same regex shape as test/commit-word.test.ts — word boundary,
+  // optional trailing punctuation, END of the segment. A hit is a
+  // candidate only (see consider()).
   const re = new RegExp(`\\b${escaped}\\b[\\s.,!?]*$`, 'i');
   if (!transcript) return false;
   const hit = re.test(transcript);
@@ -149,7 +189,7 @@ function handleResult(ev: any): void {
     for (let i = start; i < total; i++) {
       const result = ev.results[i];
       const transcript = String(result?.[0]?.transcript || '');
-      if (checkTranscript(transcript)) return;
+      if (consider(transcript, i)) return;
     }
   } catch (e: any) {
     diag('[sendword] handleResult threw', e?.message);
@@ -210,6 +250,8 @@ export function start(o: SendwordOpts): boolean {
   }
   opts = o;
   stopRequested = false;
+  clearPending();
+  fedSegment = 0;
   const supported = isSupported();
   diag(`[sendword] start phrase="${o.phrase}" mode=${o.feed ? 'fed' : 'standalone'} supported=${supported}`);
   if (o.feed) {
@@ -246,14 +288,18 @@ export function feedTranscript(ev: TranscriptEvent): void {
     return;
   }
   if (ev.role !== 'user') return;
+  const seg = fedSegment;
+  // A final closes its segment: whatever arrives next is new speech.
+  if (ev.is_final) fedSegment += 1;
   if (!ev.text) return;
-  checkTranscript(ev.text);
+  consider(ev.text, seg);
 }
 
 /** Stop + release. Idempotent. In FED mode just clears state (the
  *  caller's provider lifecycle is unaffected). */
 export function stop(): void {
   stopRequested = true;
+  clearPending();
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   fedMode = false;
   // Clear opts BEFORE sr.stop(): unlike abort(), a graceful stop can

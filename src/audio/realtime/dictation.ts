@@ -37,7 +37,7 @@
 
 import * as conn from './realtime.ts';
 import { playFeedback } from '../shared/feedback.ts';
-import { matchSendword, getHandsfreeConfig, SilenceWindow } from '../shared/handsfree.ts';
+import { matchSendword, getHandsfreeConfig, SilenceWindow, sendwordConfirmMs, continuesPastSendword } from '../shared/handsfree.ts';
 import * as turnGuard from './turnGuard.ts';
 import { log, diag } from '../../util/log.ts';
 
@@ -108,6 +108,8 @@ export function setDispatchFailedHandler(cb: ((text: string) => void) | null): v
  *  `buffer` before it hands the utterance to the bridge, so anything
  *  still in here is by definition text that never left the client. */
 export function takeBufferedText(): string {
+  // A sendword candidate's text lives in pendingCommit, not the buffer.
+  if (pendingCommit) { buffer = pendingCommit.cleaned ? [pendingCommit.cleaned] : []; pendingCommit = null; }
   const text = buffer.join(' ').trim();
   buffer = [];
   if (silenceTimer !== null) {
@@ -120,6 +122,7 @@ export function takeBufferedText(): string {
   }
   commitPendingThroughPause = false;
   voiceWindow = null;
+  pendingCommit = null;
   return text;
 }
 
@@ -145,6 +148,7 @@ export function reset(): void {
   }
   commitPendingThroughPause = false;
   voiceWindow = null;
+  pendingCommit = null;
   // Drop any pause flag too — a 'reconnecting'-paused buffer that's
   // being torn down (call ended, fresh open) should not start the next
   // call already-paused. Pause is strictly a within-call hold.
@@ -185,6 +189,11 @@ export function resumeSilenceTimer(): void {
     // The sendword landed before the gap; its grace window is long
     // since served. Dispatch now that the channel is back.
     commitPendingThroughPause = false;
+    if (pendingCommit) {
+      buffer = pendingCommit.cleaned ? [pendingCommit.cleaned] : [];
+      pendingCommit = null;
+      try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
+    }
     dispatchNow();
     return;
   }
@@ -202,6 +211,7 @@ function dispatchNow(): void {
   }
   commitPendingThroughPause = false;
   voiceWindow = null;
+  pendingCommit = null;
   const utterance = buffer.join(' ').trim();
   buffer = [];
   if (!utterance) return;
@@ -378,20 +388,68 @@ export function handleUserFinal(text: string): void {
     // commitDelaySec the dispatch waits out the grace window (finals
     // arriving inside it append and ride along; a repeated sendword
     // re-arms the window).
-    try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
-    buffer = m.cleaned ? [m.cleaned] : [];
+    // A candidate, not a commit (field 2026-10-12, mid-sentence "over"):
+    // it stands for the confirm window (commitDelaySec; 0 = instant)
+    // and is cancelled by any further
+    // speech (handleUserInterim / a non-matching final below). The
+    // chime plays at the real commit. The phrase is stripped only then:
+    // a cancelled candidate keeps the user's words intact.
     const { commitDelaySec } = getHandsfreeConfig();
-    if (commitDelaySec > 0) {
-      if (commitTimer !== null) clearTimeout(commitTimer);
-      commitTimer = setTimeout(() => {
-        commitTimer = null;
-        dispatchNow();
-      }, commitDelaySec * 1000);
+    const waitMs = sendwordConfirmMs(commitDelaySec);
+    if (commitTimer !== null) clearTimeout(commitTimer);
+    if (waitMs <= 0) {
+      // Instant mode (his choice): no window, nothing to cancel.
+      pendingCommit = null;
+      buffer = m.cleaned ? [m.cleaned] : [];
+      try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
+      dispatchNow();
       return;
     }
-    dispatchNow();
+    pendingCommit = { cleaned: m.cleaned, raw: trimmed };
+    commitTimer = setTimeout(() => {
+      commitTimer = null;
+      const p = pendingCommit;
+      pendingCommit = null;
+      if (!p) return;
+      buffer = p.cleaned ? [p.cleaned] : [];
+      try { playFeedback('commit'); } catch { /* feedback is best-effort */ }
+      dispatchNow();
+    }, sendwordConfirmMs(commitDelaySec));
     return;
   }
+  if (cancelPendingCommit(trimmed)) { /* the candidate's words were restored to the buffer */ }
   buffer.push(trimmed);
   armSilenceTimer();
 }
+
+/** A sendword candidate waiting out its confirm window. `cleaned` is the
+ *  whole joined utterance minus the phrase (what dispatches); `raw` is
+ *  the segment that matched, restored to the buffer on cancel. */
+let pendingCommit: { cleaned: string; raw: string } | null = null;
+
+/** Drop a pending sendword commit because the speaker kept talking. The
+ *  matched segment goes back into the buffer verbatim ("…it fell over")
+ *  so the eventual send keeps every word. Returns true if one was dropped. */
+function cancelPendingCommit(reason: string): boolean {
+  if (!pendingCommit) return false;
+  if (commitTimer !== null) { clearTimeout(commitTimer); commitTimer = null; }
+  buffer.push(pendingCommit.raw);
+  pendingCommit = null;
+  diag(`[dictation] sendword was mid-sentence — pending commit cancelled ("${reason.slice(0, 60)}")`);
+  return true;
+}
+
+/** Interim (partial) user transcript. Interims never move the buffer;
+ *  their only job here is to notice speech continuing inside a sendword
+ *  candidate's confirm window — Deepgram only finalises the next
+ *  segment after its next endpoint, usually seconds later. */
+export function handleUserInterim(text: string): void {
+  const t = (text || '').trim();
+  if (!t || !pendingCommit) return;
+  const { sendwordPhrase } = getHandsfreeConfig();
+  if (!continuesPastSendword(t, sendwordPhrase, false)) return;
+  if (cancelPendingCommit(t)) armSilenceTimer();
+}
+
+/** Test-only: is a sendword candidate pending? */
+export function __hasPendingCommitForTests(): boolean { return pendingCommit !== null; }

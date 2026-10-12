@@ -216,13 +216,37 @@ describe('dictation — sendword commitDelaySec grace window (2026-08-04 audit f
     assert.equal(dictation.__hasCommitTimerForTests(), false);
   });
 
-  it('a final landing inside the window rides the same dispatch', async () => {
-    dictation.handleUserFinal('hello over');
+  it('speech continuing inside the window means "over" was mid-sentence: no send, words kept', async () => {
+    // Field 2026-10-12: "…And it fell over / Because people didn't believe"
+    // sent at "fell over" with a 1.5 s delay set. A later final is
+    // continued speech — the candidate is cancelled, not ridden along.
+    dictation.handleUserFinal('and it fell over');
     assert.deepEqual(bubbles, []);
-    dictation.handleUserFinal('wait also this');
+    dictation.handleUserFinal('because people did not believe');
     await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
-    assert.deepEqual(bubbles, ['hello wait also this'],
-      'correction spoken during the grace window must land in the same turn');
+    assert.deepEqual(bubbles, [], 'a mid-sentence "over" must not send');
+    assert.equal(dictation.__hasPendingCommitForTests(), false);
+    // The real sendword at the end sends everything, the mid-sentence word intact.
+    dictation.handleUserFinal('it was early over');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, ['and it fell over because people did not believe it was early']);
+  });
+
+  it('an interim inside the window cancels too (Deepgram finalises the next segment late)', async () => {
+    dictation.handleUserFinal('I want to go over');
+    dictation.handleUserInterim('the plan');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, []);
+    dictation.handleUserFinal('the plan over');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, ['I want to go over the plan']);
+  });
+
+  it('an empty interim (utterance-end sentinel) does not cancel', async () => {
+    dictation.handleUserFinal('hello over');
+    dictation.handleUserInterim('');
+    await new Promise((r) => setTimeout(r, DELAY_SEC * 1000 + 30));
+    assert.deepEqual(bubbles, ['hello']);
   });
 
   it('pause during the window holds the commit; resume fires it immediately', async () => {

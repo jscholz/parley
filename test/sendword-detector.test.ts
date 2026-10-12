@@ -242,3 +242,66 @@ describe('sendword detector — fed mode (caller-driven matching)', () => {
     assert.equal(matched, false);
   });
 });
+
+// ── mid-sentence "over" (field 2026-10-12) ──────────────────────────────
+// A match is a candidate; speech continuing past the phrase fires
+// onUnmatch so the caller cancels the pending commit.
+describe('sendword detector — continued speech cancels a candidate', () => {
+  const ev = (text: string, is_final = false) => ({ type: 'transcript', text, is_final, role: 'user' } as any);
+  afterEach(() => { sendword.stop(); });
+
+  it('fed: interim "fell over" matches, the next interim "fell over because" un-matches', () => {
+    const log: string[] = [];
+    sendword.start({ phrase: 'over', onMatch: () => log.push('match'), onUnmatch: () => log.push('unmatch'), feed: true });
+    sendword.feedTranscript(ev('and it fell over'));
+    sendword.feedTranscript(ev('and it fell over because'));
+    assert.deepEqual(log, ['match', 'unmatch']);
+  });
+
+  it('fed: a final that only TRUNCATES the matched interim is not continued speech', () => {
+    const log: string[] = [];
+    sendword.start({ phrase: 'over', onMatch: () => log.push('match'), onUnmatch: () => log.push('unmatch'), feed: true });
+    sendword.feedTranscript(ev('thanks that is it over'));
+    sendword.feedTranscript(ev('thanks that is it', true));   // Web Speech final dropped the last word
+    assert.deepEqual(log, ['match']);
+  });
+
+  it('fed: new speech after the matched segment\'s final un-matches', () => {
+    const log: string[] = [];
+    sendword.start({ phrase: 'over', onMatch: () => log.push('match'), onUnmatch: () => log.push('unmatch'), feed: true });
+    sendword.feedTranscript(ev('I want to go over', true));
+    sendword.feedTranscript(ev('', true));                    // utterance-end sentinel: ignored
+    assert.deepEqual(log, ['match']);
+    sendword.feedTranscript(ev('the plan'));
+    assert.deepEqual(log, ['match', 'unmatch']);
+  });
+
+  it('fed: after an un-match, a real sendword later matches again', () => {
+    const log: string[] = [];
+    sendword.start({ phrase: 'over', onMatch: () => log.push('match'), onUnmatch: () => log.push('unmatch'), feed: true });
+    sendword.feedTranscript(ev('go over'));
+    sendword.feedTranscript(ev('go over the plan'));
+    sendword.feedTranscript(ev('go over the plan please over'));
+    assert.deepEqual(log, ['match', 'unmatch', 'match']);
+  });
+
+  it('fed: repeated revisions still ending in the phrase do not re-fire', () => {
+    let n = 0;
+    sendword.start({ phrase: 'over', onMatch: () => { n += 1; }, feed: true });
+    sendword.feedTranscript(ev('done over'));
+    sendword.feedTranscript(ev('done, over.'));
+    sendword.feedTranscript(ev('done over', true));
+    assert.equal(n, 1);
+  });
+
+  it('standalone SR: a later result index with words un-matches', () => {
+    (globalThis as any).window.SpeechRecognition = StubSR;
+    const log: string[] = [];
+    sendword.start({ phrase: 'over', onMatch: () => log.push('match'), onUnmatch: () => log.push('unmatch') });
+    const res = (texts: string[], resultIndex: number) => ({ resultIndex, results: texts.map((t) => [{ transcript: t }]) });
+    lastInstance.onresult(res(['it fell over'], 0));
+    lastInstance.onresult(res(['it fell over', ' because people'], 1));
+    assert.deepEqual(log, ['match', 'unmatch']);
+    delete (globalThis as any).window.SpeechRecognition;
+  });
+});

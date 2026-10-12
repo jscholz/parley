@@ -48,6 +48,40 @@ export function matchSendword(text: string, phrase: string): SendwordMatch {
   return { matched: true, cleaned: (m[1] || '').trim() };
 }
 
+/** How long a sendword match stands before it commits: commitDelaySec.
+ *  0 = commit on the spot (his stated preference — "I like the
+ *  immediate reactivity of the send as soon as I say over"), which
+ *  cannot tell a mid-sentence "over" from a final one. Above 0 the
+ *  window is a real CONFIRM window: speech that continues past the
+ *  phrase inside it cancels the commit (`continuesPastSendword`).
+ *  Field 2026-10-12: with a 1.5 s delay, "it fell over because…" still
+ *  sent — the grace timer only postponed the cut, nothing cancelled it. */
+export function sendwordConfirmMs(commitDelaySec: number): number {
+  return Math.max(0, Number(commitDelaySec) || 0) * 1000;
+}
+
+/** After a sendword match, does a later transcript show the speaker
+ *  kept talking (so the phrase was mid-sentence and the commit must be
+ *  cancelled)?
+ *
+ *  - `sameSegment`: the text is a revision of the segment that matched
+ *    (a longer interim, or that segment's final). It continues only if
+ *    words now FOLLOW the phrase — a final that merely truncates the
+ *    interim ("it fell over" → "it fell") is not continued speech.
+ *  - a new segment: any words at all mean the speaker continued, unless
+ *    that segment itself ends in the phrase (a fresh sendword).
+ *
+ *  Empty text (the utterance-end sentinel) never counts. */
+export function continuesPastSendword(text: string, phrase: string, sameSegment: boolean): boolean {
+  const t = (text || '').trim();
+  const p = (phrase || '').trim();
+  if (!t || !p) return false;
+  if (matchSendword(t, p).matched) return false;
+  if (!sameSegment) return /\w/.test(t);
+  const escaped = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b[\\s.,!?;:'"-]*\\w`, 'i').test(t);
+}
+
 /** Silence-timeout state holder. Just tracks `lastVoiceAt` against a
  *  threshold; the *mechanism* for noticing speech (analyser frame loop
  *  vs. is_final event) and for acting on expiry (poll vs. setTimeout)
