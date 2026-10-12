@@ -317,6 +317,13 @@ export async function hydrateMarkedUnread(): Promise<void> {
 
 export function totalUnreadCount(): number { return totalUnread(); }
 
+/** Snapshot of every chat with unread messages (count) — the unread
+ *  warm-up's input. Marked-unread chats without new messages are not
+ *  included: nothing new to fetch for them. */
+export function unreadChatCounts(): Map<string, number> {
+  return new Map(unreadByChat);
+}
+
 // ── Listeners ─────────────────────────────────────────────────────────
 
 function notifyChange() {

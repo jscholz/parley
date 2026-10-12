@@ -28,6 +28,7 @@ import { readEnv } from './proxy/env.mjs';
 import { isLiveDataHome } from './proxy/dataHome.mjs';
 import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import * as uploads from './proxy/parley/uploads.ts';
+import { installJsonCompression } from './proxy/compressJson.ts';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
 import { initSetup, handleSetupStatus, handleSetupApply } from './proxy/parley/setup.ts';
@@ -1169,6 +1170,9 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse): void {
 
 const requestHandler: http.RequestListener = async (req, res) => {
   applyCors(req, res);
+  // gzip for JSON bodies (newest-page history is 300–700 KB raw and went
+  // over cellular uncompressed — field 2026-10-12). Streams are untouched.
+  installJsonCompression(req, res);
   if (req.method === 'OPTIONS') {
     const origin = req.headers.origin;
     if (origin && CORS_ALLOWED_ORIGINS.has(origin)) {

@@ -163,12 +163,14 @@ export async function fetchSessionMessages(id) {
 /** Background, link-yielding variant of fetchSessionMessages — does NOT
  *  count as foreground and waits for foreground idle first. Used only by
  *  warmPrefetch so the boot prefetch storm never starves a user drill. */
-export async function fetchSessionMessagesBackground(id) {
+export async function fetchSessionMessagesBackground(id, opts: { full?: boolean } = {}) {
   await whenForegroundFetchIdle();
   const a = await loadAdapter();
   // Prefer the tiny prefetch (warms IDB for ~12KB); fall back to the full
-  // page only if the adapter doesn't implement it.
-  if (a.prefetchSessionMessages) return a.prefetchSessionMessages(id);
+  // page only if the adapter doesn't implement it. `full: true` asks for
+  // the delta-aware full newest page instead (unread warm-up, 2026-10-12:
+  // the tap then reconciles with a few-KB delta rather than a full page).
+  if (!opts.full && a.prefetchSessionMessages) return a.prefetchSessionMessages(id);
   if (!a.fetchSessionMessages) return { messages: [], firstId: null, hasMore: false, inflight: [] };
   return a.fetchSessionMessages(id);
 }

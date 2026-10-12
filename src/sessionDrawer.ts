@@ -37,6 +37,7 @@ import { toast } from './toast.ts';
 import { isMuted as isChatMuted, setMuted as setChatMuted } from './notifications/mutes.ts';
 import { reportChatSwitch } from './notifications/visibility.ts';
 import { unreadFor } from './notifications/badge.ts';
+import { createUnreadWarm } from './unreadWarm.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { showTranscriptLoading } from './transcript/index.ts';
 import { clearEdgeLoader } from './chat.ts';
@@ -738,6 +739,21 @@ function repaintUnreadIndicators(): void {
   }
 }
 
+/** Unread-driven transcript warm-up (field 2026-10-12: tapping an unread
+ *  cron session paid a cold full-page fetch). Policy lives in
+ *  unreadWarm.ts; this is the wiring into the drawer's cache + stores. */
+const unreadWarm = createUnreadWarm({
+  unreadChats: () => badge.unreadChatCounts(),
+  viewedId: () => switchCtl.viewedId(),
+  getCache: (id) => sessionCache.getMessagesCache(id),
+  fetchFull: (id) => backend.fetchSessionMessagesBackground(id, { full: true }),
+  putCache: (id, messages, pagination) => sessionCache.putMessagesCache(id, messages, pagination),
+  mergeNewestPage: sessionCache.mergeNewestPage,
+  capTranscript: sessionCache.capTranscript,
+  markMemStale: (id) => { if (transcriptStore.getState(id).durable.length > 0) memStaleChats.add(id); },
+  log: diag,
+});
+
 let unreadListenerWired = false;
 /** Full (fingerprint-gated) list re-render on unread changes — the
  *  in-place chip repaint above CANNOT reorder rows, and unread-first
@@ -760,6 +776,7 @@ function setupUnreadListener(): void {
   window.addEventListener('parley:unread-changed', () => {
     repaintUnreadIndicators();   // instant chip paint (no fetch)
     resortOnUnreadChange();      // ordering catches up (fingerprint-gated)
+    unreadWarm.poke();           // warm the IDB cache for whatever just turned unread
   });
   // Cross-device delete sync — proxyClient already wiped the IDB row
   // and broadcast this event. Schedule a sidebar refresh so the DOM
