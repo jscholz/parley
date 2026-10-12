@@ -31,6 +31,7 @@
  * instead of classic's chunk-decoded WebAudio queue).
  */
 
+import { classifyBarGesture } from './barGesture.ts';
 import { log, diag } from '../../util/log.ts';
 import { lastStart, isUserTrigger, notePlaybackStart } from '../../playbackAudit.ts';
 import * as tts from './tts.ts';
@@ -357,56 +358,69 @@ function onTranscriptPointerDown(e: Event) {
   void onBarPointerDown(e as PointerEvent, bar);
 }
 
+async function seekOrStart(bar: HTMLElement, replyId: string, text: string, ratio: number, how: 'tap' | 'drag'): Promise<void> {
+  if (tts.getActiveReplyId() === replyId) { tts.seekTo(ratio); return; }
+  const voice = await resolveVoiceAsync();
+  notePlaybackStart('user-tap', { reason: how === 'tap' ? 'scrub-tap' : 'scrub-drag', replyId, ttsState: tts.getState() });
+  // playReplyTts internally cancels any prior session before starting.
+  await tts.playReplyTts(text, voice, replyId);
+  const onceDur = (p: any) => {
+    if (p.replyId !== replyId) return;
+    tts.off('duration-known', onceDur);
+    tts.seekTo(ratio);
+  };
+  tts.on('duration-known', onceDur);
+  void bar;
+}
+
+/** Touch on a reply's play bar. NOTHING plays on pointerdown: the touch
+ *  must resolve as a tap (released within the slop) or a horizontal drag
+ *  first. A vertical move is a scroll — the browser takes it (the bar is
+ *  `touch-action: pan-y`) and fires pointercancel; we do nothing. */
 async function onBarPointerDown(e: PointerEvent, bar: HTMLElement): Promise<void> {
-  e.stopPropagation();
-  e.preventDefault();
   const bubble = bar.closest('.line.agent') as HTMLElement | null;
   if (!bubble) return;
   const replyId = bubble.dataset.replyId || '';
   if (!replyId) return;
   const text = (bubble.dataset.text || bubble.textContent || '').trim();
   if (!text) return;
+  if (e.button != null && e.button > 0) return;   // right/middle click
 
   const rect = bar.getBoundingClientRect();
   const ratioAt = (clientX: number) =>
     Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  const ratio = ratioAt(e.clientX);
+  const x0 = e.clientX, y0 = e.clientY;
+  let mode: 'pending' | 'scroll' | 'drag' = 'pending';
 
-  // Drive seek-or-start: if this bubble is already the active one, just
-  // seek. Otherwise start a fresh playback (cache-first via playReplyTts)
-  // and seek once duration-known fires.
-  if (tts.getActiveReplyId() === replyId) {
-    tts.seekTo(ratio);
-  } else {
-    const voice = await resolveVoiceAsync();
-    notePlaybackStart('user-tap', { reason: 'scrub', replyId, ttsState: tts.getState() });
-    // playReplyTts internally cancels any prior session before starting.
-    await tts.playReplyTts(text, voice, replyId);
-    // Wait a tick for duration to be known, then seek. Subscribe once.
-    const onceDur = (p: any) => {
-      if (p.replyId !== replyId) return;
-      tts.off('duration-known', onceDur);
-      tts.seekTo(ratio);
-    };
-    tts.on('duration-known', onceDur);
-  }
-
-  try { bar.setPointerCapture(e.pointerId); } catch { /* noop */ }
-
-  const onMove = (ev: PointerEvent) => {
-    if (tts.getActiveReplyId() === replyId) {
-      tts.seekTo(ratioAt(ev.clientX));
-    }
-  };
-  const onUp = () => {
+  const cleanup = () => {
     bar.removeEventListener('pointermove', onMove);
     bar.removeEventListener('pointerup', onUp);
-    bar.removeEventListener('pointercancel', onUp);
+    bar.removeEventListener('pointercancel', onCancel);
     try { bar.releasePointerCapture(e.pointerId); } catch { /* noop */ }
   };
+  const onMove = (ev: PointerEvent) => {
+    if (mode === 'pending') {
+      mode = classifyBarGesture(ev.clientX - x0, ev.clientY - y0);
+      if (mode === 'scroll') { cleanup(); return; }
+      if (mode === 'drag') {
+        try { bar.setPointerCapture(e.pointerId); } catch { /* noop */ }
+        void seekOrStart(bar, replyId, text, ratioAt(ev.clientX), 'drag');
+      }
+      return;
+    }
+    if (mode === 'drag' && tts.getActiveReplyId() === replyId) tts.seekTo(ratioAt(ev.clientX));
+  };
+  const onUp = (ev: PointerEvent) => {
+    cleanup();
+    if (mode !== 'pending') return;
+    if (classifyBarGesture(ev.clientX - x0, ev.clientY - y0) !== 'pending') return;
+    // A real tap: released where it landed.
+    void seekOrStart(bar, replyId, text, ratioAt(x0), 'tap');
+  };
+  const onCancel = () => { cleanup(); };   // the browser took the touch (scroll)
   bar.addEventListener('pointermove', onMove);
   bar.addEventListener('pointerup', onUp);
-  bar.addEventListener('pointercancel', onUp);
+  bar.addEventListener('pointercancel', onCancel);
 }
 
 // Phantom-click guard. iPhone PWA reload can take seconds to settle;

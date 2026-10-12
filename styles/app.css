@@ -1578,7 +1578,7 @@
      * Fold state persists per section (settings.ts). */
     #settings .settings-group > .group-label {
       cursor: pointer; display: flex; align-items: center; gap: 8px;
-      padding: 10px 0; min-height: 24px;
+      padding: 14px 0; min-height: 48px; box-sizing: border-box;
       -webkit-tap-highlight-color: transparent;
     }
     #settings .settings-group > .group-label::after {
@@ -3429,7 +3429,7 @@
     height: 24px;
     cursor: pointer;
     background: rgba(0,0,0,0.01);
-    touch-action: manipulation;
+    touch-action: pan-y;   /* vertical swipes scroll; only taps and sideways drags scrub (2026-10-12) */
     -webkit-tap-highlight-color: rgba(0,0,0,0);
   }
   .line.agent .play-bar-loaded,
