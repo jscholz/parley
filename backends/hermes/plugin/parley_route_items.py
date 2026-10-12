@@ -745,7 +745,9 @@ async def handle_get_item(adapter, request: "web.Request") -> "web.Response":
     """GET /v1/conversations/{id}/items/{item_id} — one row, full content."""
     if not adapter._check_http_auth(request):
         return web.Response(status=401, text="invalid token")
-    chat_id = request.match_info["id"]
+    # Same id convention as handle_get_items: the path carries the gateway
+    # id ("parley:<uuid>"); msg_links is keyed by the bare chat id.
+    _, chat_id = _parse_gateway_id(request.match_info["id"])
     item_id = request.match_info["item_id"]
     parley_db = getattr(adapter, "_parley_db", None)
     if parley_db is None:
