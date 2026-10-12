@@ -191,6 +191,14 @@ function setDocDot(on: boolean): void {
  *  the drawer content (field nit 2026-07-09: the old in-flow banner
  *  shifted the whole panel down while visible). kind 'info' = neutral
  *  (benign events like closing a doc); 'error' = danger styling. */
+function hidePinStatus(): void {
+  if (statusTimer != null) { window.clearTimeout(statusTimer); statusTimer = null; }
+  if (!statusEl) return;
+  statusEl.classList.remove('visible');
+  statusEl.hidden = true;
+  statusEl.textContent = '';
+}
+
 function showPinStatus(message: string, kind: 'error' | 'info' = 'error'): void {
   if (!statusEl) return;
   statusEl.textContent = message;
@@ -199,13 +207,7 @@ function showPinStatus(message: string, kind: 'error' | 'info' = 'error'): void 
   statusEl.classList.toggle('info', kind === 'info');
   openDrawer();
   if (statusTimer != null) window.clearTimeout(statusTimer);
-  statusTimer = window.setTimeout(() => {
-    statusTimer = null;
-    if (!statusEl) return;
-    statusEl.classList.remove('visible');
-    statusEl.hidden = true;
-    statusEl.textContent = '';
-  }, 5000);
+  statusTimer = window.setTimeout(hidePinStatus, 5000);
 }
 
 export function initPinDrawer(opts: {
@@ -229,6 +231,11 @@ export function initPinDrawer(opts: {
   const docEmptyEl = document.getElementById('doc-drawer-empty');
   const emptyEl = document.getElementById('pin-drawer-empty');
   statusEl = document.getElementById('pin-drawer-status');
+  // Tap to dismiss (field 2026-10-12: "isn't dismissable … I'm hostage
+  // till it times out"). The bubble also sits at the BOTTOM of the
+  // drawer now (styles/app.css) so it never covers a doc's header × .
+  statusEl?.addEventListener('click', () => hidePinStatus());
+  statusEl?.setAttribute('title', 'Tap to dismiss');
   titleEl = document.getElementById('right-drawer-title');
   clearBtn = document.getElementById('pin-drawer-clear');
   countBanners = [document.getElementById('pin-drawer-count'), document.getElementById('pin-drawer-count-rail')]

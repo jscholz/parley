@@ -1315,7 +1315,7 @@
     opacity: 0;
     transition: transform 0.2s ease, opacity 0.2s ease;
   }
-  .toast.visible { transform: translate(-50%, 0); opacity: 1; }
+  .toast.visible { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; cursor: pointer; }
   /* Accent icon carries the "error" semantic; body text stays high-contrast
      (var(--fg)) for readability instead of being dyed the accent colour. */
   .toast-icon { display: inline-flex; flex: 0 0 auto; }
@@ -6061,14 +6061,18 @@
   transform-origin: center;
 }
 /* Floating status bubble (field nit 2026-07-09: the in-flow banner
-   shifted the panel content down). Overlays the top of the drawer
-   content; .info = neutral chrome for benign notices (doc closed),
-   default stays danger-tinted for errors. */
+   shifted the panel content down). Overlays the BOTTOM of the drawer
+   content — never the top, where every panel keeps its controls (the
+   doc reader's title row and ×; field 2026-10-12: closing one doc put
+   the bubble over the next doc's × for 5 s). Tap dismisses it.
+   .info = neutral chrome for benign notices (doc closed), default stays
+   danger-tinted for errors. */
 .pin-drawer-content { position: relative; }
 .pin-drawer-status {
-  position: absolute; top: 8px; left: 10px; right: 10px; z-index: 30;
+  position: absolute; bottom: max(10px, env(safe-area-inset-bottom, 0px)); left: 10px; right: 10px; z-index: 30;
   margin: 0;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
 }
 .pin-drawer-status.info {
   border-color: var(--border, #333);

@@ -42,7 +42,7 @@ export function toast(msg: string, kind?: 'err', durationMs = DEFAULT_MS): void 
   text.textContent = msg;
   toastEl.appendChild(text);
   toastEl.classList.toggle('err', isErr);
-  toastEl.classList.remove('has-action');   // plain toast is not clickable
+  toastEl.classList.remove('has-action');   // no action buttons; a tap dismisses it
   toastEl.classList.add('visible');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl?.classList.remove('visible'), durationMs);
@@ -91,11 +91,26 @@ function ensureToast(): void {
   if (toastEl) return;
   if (typeof document === 'undefined') return;
   toastEl = document.getElementById('app-toast');
-  if (toastEl) return;
+  if (toastEl) { wireDismiss(toastEl); return; }
   toastEl = document.createElement('div');
   toastEl.id = 'app-toast';
   toastEl.className = 'toast';
   toastEl.setAttribute('role', 'status');
   toastEl.setAttribute('aria-live', 'polite');
   document.body.appendChild(toastEl);
+  wireDismiss(toastEl);
+}
+
+/** Tap a visible toast to dismiss it (field 2026-10-12: notices that
+ *  can't be dismissed hold the controls under them hostage). An action
+ *  toast keeps its own buttons: a tap on Undo runs Undo, a tap anywhere
+ *  else on it dismisses. */
+function wireDismiss(el: HTMLElement): void {
+  if ((el as any).__dismissWired) return;
+  (el as any).__dismissWired = true;
+  el.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement | null)?.closest?.('.toast-action')) return;
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    el.classList.remove('visible', 'has-action');
+  });
 }
