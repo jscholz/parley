@@ -518,6 +518,22 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
         await withCaptureLock(row.id, async () => {
           const m = await readManifest(row.id);
           if (m.status !== 'recording') return;
+          // The phone says it is recording and its audio counter is
+          // moving: audio exists, it just has not reached us (slow or
+          // dead uplink; the client's IDB holds it). Neither a "may not
+          // be recording" push nor a heal is true of that — skip both.
+          // The heal still fires once the pings stop or the counter
+          // freezes (a really dead phone), on the usual audio clock.
+          if (await clientProvablyRecording(m.id)) {
+            if (!healDeferredAudited.has(m.id) && Date.now() - lastAudioMs(m) > STALL_WARN_MS) {
+              healDeferredAudited.add(m.id);
+              void audit(m, 'heal-deferred', {
+                actor: { source: 'sweep' },
+                reason: 'no audio arriving, but the client reports it is recording (chunk counter moving) — upload backlog, not a stall',
+              });
+            }
+            return;
+          }
           // Stall WARNING first — it must be able to fire on a capture
           // that the heal below will not touch yet (the whole point is
           // to speak up minutes earlier than the terminal verdict).
@@ -914,7 +930,17 @@ export async function recordHealth(id: string, health: CaptureHealth): Promise<v
   let prior: any = null;
   try { prior = JSON.parse(await fs.readFile(healthPath(id), 'utf8')); } catch { /* first ping */ }
   const now = Date.now();
-  const record = { ...health, at: now };
+  // When the recorder's cumulative chunk counter last MOVED. A moving
+  // counter is proof audio is being captured right now (a stuck or
+  // chatty-but-silent client repeats the same count), which is what
+  // lets the sweep tell "uploads are behind" from "the phone is gone".
+  const advanced = typeof health.chunks === 'number'
+    && (typeof prior?.chunks !== 'number' || health.chunks > prior.chunks);
+  const record = {
+    ...health,
+    at: now,
+    chunks_advanced_at: advanced ? now : (typeof prior?.chunks_advanced_at === 'number' ? prior.chunks_advanced_at : null),
+  };
   await fs.mkdir(captureDir(id), { recursive: true });
   await fs.writeFile(healthPath(id), JSON.stringify(record, null, 1));
   if (!prior || healthSignature(prior) !== healthSignature(health)) {
@@ -929,6 +955,39 @@ export async function recordHealth(id: string, health: CaptureHealth): Promise<v
     });
   }
 }
+
+/** A health ping this recent, with the chunk counter moving this
+ *  recently, proves the client is recording RIGHT NOW. Two missed 30 s
+ *  pings of slack. */
+const CLIENT_PROOF_MS = 90_000;
+
+/** Is the client provably recording at `now`? True only when its latest
+ *  health ping is fresh, MediaRecorder is 'recording' on a live track,
+ *  and the cumulative chunk counter advanced recently — i.e. audio is
+ *  being captured on the phone even though none is reaching us.
+ *
+ *  Field 2026-10-09 (Foundry, 63 min): the conference-room uplink was
+ *  slower than the recording, the upload backlog grew to 12 minutes,
+ *  then a 15-minute dead patch — and the stale sweep, keyed on the
+ *  server's AUDIO clock only, declared the meeting over at 24:45 while
+ *  the phone was still recording, sent the ingest turn on a quarter of
+ *  the meeting, and pushed eight "may not be recording" warnings. Every
+ *  one of the 80 segments arrived in the end. A moving chunk counter is
+ *  not the chatty-but-silent client the audio-only rule guards against:
+ *  a dead recorder cannot move it. */
+export async function clientProvablyRecording(id: string, now: number = Date.now()): Promise<boolean> {
+  let h: any;
+  try { h = JSON.parse(await fs.readFile(healthPath(id), 'utf8')); } catch { return false; }
+  if (!h || typeof h.at !== 'number' || now - h.at > CLIENT_PROOF_MS) return false;
+  if (h.recorder_state !== 'recording') return false;
+  if (h.track_ready_state && h.track_ready_state !== 'live') return false;
+  if (typeof h.chunks_advanced_at !== 'number' || now - h.chunks_advanced_at > CLIENT_PROOF_MS) return false;
+  return true;
+}
+
+/** Captures whose heal the sweep has deferred on client proof — audited
+ *  once per capture, not once per sweep. */
+const healDeferredAudited = new Set<string>();
 
 /** Latest health ping, for diagnosis. Null when the client never sent
  *  one — itself the finding (an old build, or a page that never ran). */

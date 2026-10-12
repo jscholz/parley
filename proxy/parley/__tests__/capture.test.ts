@@ -725,3 +725,88 @@ test('endedAtFor: a stalled capture ends at its last AUDIO (t0-based), a normal 
   assert.equal(endedAtFor({ started_at: 1_000_000, segments: segs(0, 2_700_000) }, now), now);                   // no stall → stop time
   assert.equal(endedAtFor({ started_at: 1_000_000, stalled_since: 2_000_000, segments: [] }, now), now);        // nothing recorded
 });
+
+// ── upload backlog is not a dead phone (Foundry, 2026-10-09) ────────────
+// The phone recorded all 63 minutes; the uplink fell 12 then 26 minutes
+// behind; the sweep, trusting only the server's audio clock, healed the
+// capture at 24:45 and the ingest summarised a quarter of the meeting.
+
+function healthPing(chunks: number, extra: Record<string, unknown> = {}) {
+  return {
+    phase: 'recording', recorder_state: 'recording', track_ready_state: 'live',
+    track_muted: false, track_enabled: true, chunks, last_chunk_age_ms: 200,
+    pending_uploads: 12, sealed_segments: 20, mime: 'audio/mp4', ...extra,
+  };
+}
+
+async function auditActions(id: string): Promise<string[]> {
+  await new Promise((r) => setTimeout(r, 30));   // audit() is fire-and-forget
+  const raw = await fs.readFile(path.join(dir, 'audit.log'), 'utf8').catch(() => '');
+  return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.capture_id === id).map((e) => e.action);
+}
+
+test('backlogged but recording: a fresh ping with a moving chunk counter blocks both the stall warning and the heal', async () => {
+  const { recordHealth } = await import('../capture.ts');
+  const a = await createCapture({ title: 'Foundry' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('first 45s'), { t0Ms: 0, mime: 'audio/mp4' });
+  await ageOut(a.id);                       // no audio reached us for 11 minutes
+  {
+    // …on the AUDIO clock too (ageOut only ages the manifest mtime).
+    const mp = path.join(dir, a.id, 'manifest.json');
+    const raw = JSON.parse(await fs.readFile(mp, 'utf8'));
+    raw.last_segment_at = Date.now() - 11 * 60 * 1000;
+    const old = new Date(Date.now() - 11 * 60 * 1000);
+    await fs.writeFile(mp, JSON.stringify(raw));
+    await fs.utimes(mp, old, old);
+  }
+  await recordHealth(a.id, healthPing(100) as any);
+  await recordHealth(a.id, healthPing(140) as any);   // counter moved: audio is being captured
+  await sweepCaptures();
+  const m = await getCapture(a.id);
+  assert.equal(m.status, 'recording', 'must not heal a phone that is still recording');
+  assert.equal(m.stalled_since, undefined, 'must not warn "may not be recording"');
+  const actions = await auditActions(a.id);
+  assert.ok(actions.includes('heal-deferred'));
+  assert.ok(!actions.includes('stale-heal') && !actions.includes('stall-warn'));
+  // The deferral is audited once, not every sweep.
+  await recordHealth(a.id, healthPing(180) as any);
+  await sweepCaptures();
+  assert.equal((await auditActions(a.id)).filter((x) => x === 'heal-deferred').length, 1);
+});
+
+test('a frozen chunk counter is not proof: a stuck-but-pinging client still heals', async () => {
+  const { recordHealth } = await import('../capture.ts');
+  const a = await createCapture({ title: 'Stuck recorder' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('x'), { t0Ms: 0, mime: 'audio/mp4' });
+  await recordHealth(a.id, healthPing(100) as any);
+  // Backdate "advanced" past the proof window, then ping again with the SAME count.
+  const hp = path.join(dir, a.id, 'health.json');
+  const h = JSON.parse(await fs.readFile(hp, 'utf8'));
+  h.chunks_advanced_at = Date.now() - 5 * 60 * 1000;
+  await fs.writeFile(hp, JSON.stringify(h));
+  await recordHealth(a.id, healthPing(100) as any);
+  await ageOut(a.id);
+  await sweepCaptures();
+  assert.equal((await getCapture(a.id)).status, 'complete', 'a recorder that is not producing audio is the case the heal exists for');
+});
+
+test('no pings, a stale ping, or a stopped recorder all fall back to the audio-clock heal', async () => {
+  const { recordHealth, clientProvablyRecording } = await import('../capture.ts');
+  const a = await createCapture({ title: 'Phone died' });
+  await activateCapture(a.id);
+  await putSegment(a.id, 0, Buffer.from('x'), { t0Ms: 0, mime: 'audio/mp4' });
+  assert.equal(await clientProvablyRecording(a.id), false, 'no health file');
+  await recordHealth(a.id, healthPing(10) as any);
+  await recordHealth(a.id, healthPing(20) as any);
+  assert.equal(await clientProvablyRecording(a.id), true);
+  assert.equal(await clientProvablyRecording(a.id, Date.now() + 120_000), false, 'pings stopped two minutes ago');
+  await recordHealth(a.id, healthPing(30, { recorder_state: 'inactive' }) as any);
+  assert.equal(await clientProvablyRecording(a.id), false, 'recorder not running');
+  await recordHealth(a.id, healthPing(40, { track_ready_state: 'ended' }) as any);
+  assert.equal(await clientProvablyRecording(a.id), false, 'mic track ended');
+  await ageOut(a.id);
+  await sweepCaptures();
+  assert.equal((await getCapture(a.id)).status, 'complete');
+});
