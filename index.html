@@ -344,9 +344,14 @@
 
 <div id="settings">
   <div class="settings-inner">
-  <div class="settings-handle" id="settings-handle" aria-hidden="true"></div>
-  <button class="info-close" id="settings-close" title="Close" aria-label="Close">×</button>
-  <h2 class="settings-title">Settings</h2>
+  <!-- Pinned header (field 2026-10-12: "make it dismissable without
+       scrolling all the way back to the top"): the drag handle, title
+       and × stay at the top of the scrolling sheet. -->
+  <div class="settings-header">
+    <div class="settings-handle" id="settings-handle" aria-hidden="true"></div>
+    <button class="info-close" id="settings-close" title="Close" aria-label="Close">×</button>
+    <h2 class="settings-title">Settings</h2>
+  </div>
   <!--
     Two-column shell: left nav (desktop) shows section names + click
     swaps which group is active; right side holds the groups, only the
@@ -366,11 +371,12 @@
       <button type="button" class="settings-nav-btn active" data-target="notifications">Notifications</button>
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
-      <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
       <button type="button" class="settings-nav-btn" data-target="health">Health</button>
       <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
       <button type="button" class="settings-nav-btn" data-target="interaction">Hotkeys</button>
       <button type="button" class="settings-nav-btn" data-target="meetings">Meetings</button>
+      <!-- Cron last (2026-10-12): long, rarely touched, and it buried everything below it. -->
+      <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
     </nav>
     <div class="settings-content">
   <!-- Notifications + Display moved to top of the group list so the
@@ -515,24 +521,6 @@
          and rendered by agentSettings.ts. -->
   </div>
 
-  <div class="settings-group" id="settings-group-cron" data-section="cron" hidden>
-    <div class="group-label">Cron</div>
-    <!--
-      Scheduled jobs the agent declares over the optional /v1/jobs
-      extension (docs/ABSTRACT_AGENT_PROTOCOL.md). Rendered at runtime
-      by src/cronSettings.ts: one card per job with enable toggle,
-      delivery target, model pin, Run now, and a link to the chat it
-      reports to. The placeholder stays until a successful response.
-
-      cron-bulk-model-host: "Model for all jobs" (POST /v1/jobs/model) —
-      repoints every job at one model and clears per-job pins in one
-      action. Empty until load() has jobs to show; hidden again on 404
-      or an empty job list.
-    -->
-    <div class="row row-wide" data-cron-placeholder><span class="hint">Loading scheduled jobs…</span></div>
-    <div id="cron-bulk-model-host"></div>
-    <div id="cron-jobs-host" class="cron-jobs"></div>
-  </div>
   <div class="settings-group" id="settings-group-health" data-section="health" hidden>
     <div class="group-label">Health</div>
     <!-- Agent health checks over the optional /v1/health extension; rendered by src/healthSettings.ts. -->
@@ -710,6 +698,25 @@
       </select>
       <span class="hint">show what tools the agent runs during a turn</span>
     </div>
+  </div>
+
+  <div class="settings-group" id="settings-group-cron" data-section="cron" hidden>
+    <div class="group-label">Cron</div>
+    <!--
+      Scheduled jobs the agent declares over the optional /v1/jobs
+      extension (docs/ABSTRACT_AGENT_PROTOCOL.md). Rendered at runtime
+      by src/cronSettings.ts: one card per job with enable toggle,
+      delivery target, model pin, Run now, and a link to the chat it
+      reports to. The placeholder stays until a successful response.
+
+      cron-bulk-model-host: "Model for all jobs" (POST /v1/jobs/model) —
+      repoints every job at one model and clears per-job pins in one
+      action. Empty until load() has jobs to show; hidden again on 404
+      or an empty job list.
+    -->
+    <div class="row row-wide" data-cron-placeholder><span class="hint">Loading scheduled jobs…</span></div>
+    <div id="cron-bulk-model-host"></div>
+    <div id="cron-jobs-host" class="cron-jobs"></div>
   </div>
 
     </div><!-- /.settings-content -->

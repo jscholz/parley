@@ -1568,10 +1568,43 @@
     }
     /* group-label visible by default — desktop @media wraps the
      * suppression rule, so we don't need a re-show override here. */
+    #settings .settings-header {
+      top: -14px; margin: -14px -16px 0; padding: 14px 16px 1px;
+      border-bottom: 1px solid var(--border);
+    }
+    #settings .settings-header .settings-title { margin-bottom: 10px; }
+    /* Foldable sections (field 2026-10-12: "massive and tough to
+     * browse"). The section label is the toggle; folded = label only.
+     * Fold state persists per section (settings.ts). */
+    #settings .settings-group > .group-label {
+      cursor: pointer; display: flex; align-items: center; gap: 8px;
+      padding: 10px 0; min-height: 24px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #settings .settings-group > .group-label::after {
+      content: ''; margin-left: auto; width: 7px; height: 7px;
+      border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+      transform: rotate(45deg); transition: transform 0.15s ease;
+      margin-right: 4px;
+    }
+    #settings .settings-group.folded > .group-label::after { transform: rotate(-45deg); }
+    #settings .settings-shell .settings-group.folded {
+      padding-bottom: 0; margin-bottom: 0;
+    }
+    #settings .settings-group.folded > :not(.group-label) { display: none !important; }
   }
   .settings-title {
     margin: 0 0 14px; font-size: 20px; font-weight: 600;
   }
+  /* Pinned header: title + × stay reachable however far the sheet is
+   * scrolled. Negative margins + matching padding let it cover the
+   * scroller's own top padding so content never peeks above it. */
+  #settings .settings-header {
+    position: sticky; top: -22px; z-index: 20;
+    margin: -22px -22px 0; padding: 22px 22px 1px;
+    background: var(--surface);
+  }
+  #settings .settings-header .settings-title { margin-bottom: 12px; }
   #settings .settings-group {
     padding-bottom: 10px; margin-bottom: 10px;
     border-bottom: 1px solid var(--border);
@@ -6457,10 +6490,13 @@
 }
 
 /* Merged "Voice" tab: the three groups stack, so their labels come back as
-   sub-headings (the desktop shell hides group labels elsewhere). */
-#settings .settings-shell .settings-group[data-nav-target] .group-label {
-  display: block; font-size: calc(var(--content-size) - 2px); color: var(--muted);
-  text-transform: uppercase; letter-spacing: .06em; margin: 4px 0 2px;
+   sub-headings (the desktop shell hides group labels elsewhere). Desktop
+   only — on phones every label is a fold toggle and must look like one. */
+@media (min-width: 700px) {
+  #settings .settings-shell .settings-group[data-nav-target] .group-label {
+    display: block; font-size: calc(var(--content-size) - 2px); color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; margin: 4px 0 2px;
+  }
 }
 
 /* Playback audit badge (2026-10-11): a play bar that started without a tap

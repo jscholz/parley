@@ -1507,12 +1507,59 @@ export function hydrate(handlers: {
   // without it are shown by the button whose target equals their data-section.
   const groups = panel ? Array.from(panel.querySelectorAll<HTMLElement>('.settings-group[data-section]')) : [];
   const navTargetOf = (g: HTMLElement) => g.dataset.navTarget || g.dataset.section!;
+  // Phone layout (≤699px): every group is stacked, and each section label
+  // folds its group (field 2026-10-12: "massive and tough to browse").
+  // Folded by default; what the user opens is remembered per section.
+  const isPhone = () => typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 699px)').matches;
+  const OPEN_KEY = 'parley.settings.openSections';
+  const readOpen = (): Set<string> => {
+    try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); }
+  };
+  const writeOpen = (open: Set<string>) => {
+    try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open])); } catch { /* private mode */ }
+  };
+  const setFolded = (group: HTMLElement, folded: boolean, persist = true) => {
+    group.classList.toggle('folded', folded);
+    const label = group.querySelector<HTMLElement>(':scope > .group-label');
+    label?.setAttribute('aria-expanded', folded ? 'false' : 'true');
+    if (!persist) return;
+    const open = readOpen();
+    const key = group.dataset.section!;
+    if (folded) open.delete(key); else open.add(key);
+    writeOpen(open);
+  };
+  {
+    const open = readOpen();
+    for (const group of groups) {
+      const label = group.querySelector<HTMLElement>(':scope > .group-label');
+      if (!label) continue;
+      label.setAttribute('role', 'button');
+      label.tabIndex = 0;
+      setFolded(group, !open.has(group.dataset.section!), false);
+      const toggle = (e: Event) => {
+        if (!isPhone()) return;        // desktop uses the nav; labels are hidden there
+        e.preventDefault();
+        setFolded(group, !group.classList.contains('folded'));
+      };
+      label.addEventListener('click', toggle);
+      label.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') toggle(e);
+      });
+    }
+  }
   const showSection = (target: string) => {
     for (const btn of navBtns) {
       btn.classList.toggle('active', btn.dataset.target === target);
     }
     for (const group of groups) {
       group.hidden = navTargetOf(group) !== target;
+    }
+    // Phone: all groups are stacked, so "go to section" means unfold it
+    // and bring it into view (/cron opens Settings → Cron).
+    if (isPhone()) {
+      const hits = groups.filter((g) => navTargetOf(g) === target);
+      for (const g of hits) setFolded(g, false);
+      hits[0]?.scrollIntoView({ block: 'start' });
     }
   };
   for (const btn of navBtns) {
