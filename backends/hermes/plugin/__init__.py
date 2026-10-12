@@ -661,6 +661,12 @@ class ParleyAdapter(BasePlatformAdapter):
             "/v1/conversations/{id}/items",
             lambda r: _route_items.handle_get_items(self, r),
         )
+        # One row, full content — the transcript page carries tool output
+        # truncated to a preview (2026-10-12); the PWA fetches the rest here.
+        self._app.router.add_get(
+            "/v1/conversations/{id}/items/{item_id}",
+            lambda r: _route_items.handle_get_item(self, r),
+        )
         self._app.router.add_delete(
             "/v1/conversations/{id}",
             lambda r: _route_conv.handle_delete(self, r),

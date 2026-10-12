@@ -63,7 +63,7 @@ export {
   handleParleySessionDelete,
   handleParleySessionRename,
 } from './sessions.ts';
-export { handleParleySessionMessages } from './history.ts';
+export { handleParleySessionMessages, handleParleySessionMessage } from './history.ts';
 export { handleParleyStream } from './stream.ts';
 export {
   handleParleySettingsSchema,

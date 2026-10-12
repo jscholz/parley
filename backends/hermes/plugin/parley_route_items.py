@@ -700,3 +700,73 @@ async def handle_get_items(adapter, request: "web.Request") -> "web.Response":
     response = web.json_response(body)
     _trace("response-built")
     return response
+
+
+# ── single item, full content (2026-10-12) ───────────────────────────────
+#
+# The proxy serves transcript pages with tool-row content TRUNCATED to a
+# short preview (tool output was >90% of a 60-row page's bytes). When the
+# user opens a tool row, the PWA fetches that one row here. Read from
+# parley.db msg_links — the v3 body store — by the id the items endpoint
+# served (state.db row id, parley id, or the envelope-time alias).
+
+def _find_item_row(parley_db, chat_id: str, item_id: str):
+    """Locate one msg_links row for `chat_id` by any id the items read
+    may have served for it. Returns the row or None."""
+    as_int: Optional[int] = None
+    try:
+        as_int = int(item_id)
+    except (TypeError, ValueError):
+        pass
+    cols = "id AS parley_id, role, content, tool_name, tool_call_id, created_at, agent_row_id"
+    if as_int is not None:
+        row = parley_db.fetchone(
+            f"SELECT {cols} FROM msg_links WHERE chat_id = ? AND agent_row_id = ?",
+            (chat_id, as_int),
+        )
+        if row is not None:
+            return row
+        # Envelope-time alias: int(created_at * 1000) for rows served
+        # before they were linked to a state row.
+        row = parley_db.fetchone(
+            f"SELECT {cols} FROM msg_links WHERE chat_id = ? "
+            "AND CAST(created_at * 1000 AS INTEGER) = ? ORDER BY rowid DESC LIMIT 1",
+            (chat_id, as_int),
+        )
+        if row is not None:
+            return row
+    return parley_db.fetchone(
+        f"SELECT {cols} FROM msg_links WHERE chat_id = ? AND id = ?",
+        (chat_id, item_id),
+    )
+
+
+async def handle_get_item(adapter, request: "web.Request") -> "web.Response":
+    """GET /v1/conversations/{id}/items/{item_id} — one row, full content."""
+    if not adapter._check_http_auth(request):
+        return web.Response(status=401, text="invalid token")
+    chat_id = request.match_info["id"]
+    item_id = request.match_info["item_id"]
+    parley_db = getattr(adapter, "_parley_db", None)
+    if parley_db is None:
+        return web.json_response({"error": "no message store"}, status=503)
+    try:
+        row = _find_item_row(parley_db, chat_id, item_id)
+    except Exception as exc:
+        return web.json_response({"error": str(exc)}, status=500)
+    if row is None:
+        return web.json_response({"error": "not found"}, status=404)
+    from .parley_state import _decode_multimodal_content
+    body: Dict[str, Any] = {
+        "id": item_id,
+        "object": "message",
+        "role": row["role"],
+        "content": _decode_multimodal_content(row["content"]),
+        "created_at": int(row["created_at"] or 0),
+        "parley_id": row["parley_id"],
+    }
+    if row["tool_name"]:
+        body["tool_name"] = row["tool_name"]
+    if row["tool_call_id"]:
+        body["tool_call_id"] = row["tool_call_id"]
+    return web.json_response(body)

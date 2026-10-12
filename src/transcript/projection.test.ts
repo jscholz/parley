@@ -33,6 +33,27 @@ function tool(id: string, callId: string, name: string, content: string, ts = T0
   return { id, role: 'tool', content, tool_call_id: callId, tool_name: name, timestamp: ts };
 }
 
+describe('project: tool-output preview flags (2026-10-12)', () => {
+  it('a truncated tool row carries the preview flags + row id onto the activity tool', () => {
+    const t: ConversationItem = { ...tool('42', 'c1', 'terminal', 'preview…', T0 + 500), truncated: true, contentBytes: 50_000 };
+    const s = state({ durable: [u('umsg_1', 'go'), a('msg_1', 'done', T0 + 1000, JSON.stringify([{ id: 'c1', type: 'function', function: { name: 'terminal', arguments: '{}' } }])), t] });
+    const row = project(s).find((b) => b.kind === 'activityRow') as any;
+    assert.ok(row, 'activity row projected');
+    const tl = row.tools.find((x: any) => x.callId === 'c1');
+    assert.equal(tl.result, 'preview…');
+    assert.equal(tl.resultTruncated, true);
+    assert.equal(tl.resultBytes, 50_000);
+    assert.equal(tl.rowId, '42');
+  });
+  it('a whole tool row carries no preview flags but keeps its row id', () => {
+    const s = state({ durable: [u('umsg_1', 'go'), a('msg_1', 'done', T0 + 1000, JSON.stringify([{ id: 'c1', type: 'function', function: { name: 'terminal', arguments: '{}' } }])), tool('43', 'c1', 'terminal', 'short', T0 + 500)] });
+    const row = project(s).find((b) => b.kind === 'activityRow') as any;
+    const tl = row.tools.find((x: any) => x.callId === 'c1');
+    assert.equal(tl.resultTruncated, undefined);
+    assert.equal(tl.rowId, '43');
+  });
+});
+
 describe('project: durable only', () => {
   it('empty state → empty specs', () => {
     assert.deepEqual(project(state({})), []);

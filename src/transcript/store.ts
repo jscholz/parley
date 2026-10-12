@@ -109,6 +109,24 @@ export function setDurable(
   notify(chatId);
 }
 
+/** Replace fields on ONE durable row in place (tool-output lazy load,
+ *  2026-10-12: the page carried a preview; the full content arrived).
+ *  Returns false when no row has that id. Notifies on change. */
+export function patchDurableRow(
+  chatId: string,
+  rowId: string | number,
+  patch: Partial<ConversationItem>,
+): boolean {
+  const s = peekState(chatId);
+  if (!s) return false;
+  const key = String(rowId);
+  const idx = s.durable.findIndex((d) => String(d.id) === key);
+  if (idx < 0) return false;
+  s.durable[idx] = { ...s.durable[idx], ...patch };
+  notify(chatId);
+  return true;
+}
+
 /** Walk an envelope array and drop completed-turn envelopes whose
  *  reply_final's message_id is present in durable as a `parley_id`.
  *  "Completed" = reply_final has fired; "present in durable" = the

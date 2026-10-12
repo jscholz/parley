@@ -5260,6 +5260,19 @@
   font-style: italic;
   color: var(--muted, #888);
 }
+.tool-result-truncated {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted, #888);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.tool-result-truncated:hover { text-decoration: underline; }
 .tool-result-truncated-hint {
   display: block;
   margin-top: 4px;

@@ -115,6 +115,11 @@ export async function installMockBackend(page) {
    *  PWA sends. */
   let historyFirstPageLimit = null;
   const messageDelays = new Map();  // chat_id -> artificial /messages delay in ms
+  // Tool-output preview cap on /messages pages (proxy parity). Rows cut on
+  // a page are recorded so smokes can assert the page really was light.
+  let toolPreviewChars = 2048;
+  const truncatedServed = [];
+  const fullRowFetches = [];
   /** SSE-disconnect simulation (offline-first smokes). While true:
    *   - /api/parley/stream is answered with a 503 → the PWA's
    *     EventSource HARD-fails (readyState CLOSED, no native retry) →
@@ -401,8 +406,32 @@ export async function installMockBackend(page) {
   // (proxy/parley/history.ts maps `id: it.id` and upstream.ts
   // emits the same `it.id` as `message_id` on reply_delta /
   // reply_final). Tests rely on this alignment for cross-path dedup.
+  // One row, full content — the page carries tool output as a preview.
+  await page.route(/\/api\/parley\/sessions\/[^/]+\/messages\/[^/?]+(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const url = new URL(route.request().url());
+    const mm = url.pathname.match(/\/sessions\/([^/]+)\/messages\/([^/]+)$/);
+    const chatId = mm ? decodeURIComponent(mm[1]) : '';
+    const rowId = mm ? decodeURIComponent(mm[2]) : '';
+    const chat = chats.get(chatId);
+    const idx = chat ? chat.messages.findIndex((m, i) => String(m.message_id != null ? m.message_id : 1000 + i) === rowId) : -1;
+    fullRowFetches.push({ chatId, rowId });
+    if (idx < 0) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
+      return;
+    }
+    const m = chat.messages[idx];
+    const body = { id: m.message_id != null ? m.message_id : 1000 + idx, role: m.role, content: m.content,
+      timestamp: m.timestamp != null ? m.timestamp : (chat.lastActiveAt / 1000),
+      ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}), ...(m.tool_name ? { toolName: m.tool_name } : {}) };
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
   await page.route(/.*\/api\/parley\/sessions\/[^/]+\/messages/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
+    // /messages/<row> belongs to the single-row route registered above
+    // (Playwright matches the LAST registered route first).
+    if (/\/messages\/[^/?]+$/.test(new URL(route.request().url()).pathname)) return route.fallback();
     if (streamOutage) return route.abort('connectionfailed');
     const url = new URL(route.request().url());
     const m = url.pathname.match(/\/sessions\/([^/]+)\/messages/);
@@ -482,6 +511,15 @@ export async function installMockBackend(page) {
       // reconstruct the "N tools · done" surface on history replay.
       if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
       if (m.tool_calls) out.tool_calls = m.tool_calls;
+      // Tool-output preview (mirrors proxy/parley/history.ts
+      // TOOL_PREVIEW_CHARS, 2026-10-12): a long tool result is cut on
+      // the page; the full row is served by GET /messages/<id> below.
+      if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > toolPreviewChars) {
+        out.content = m.content.slice(0, toolPreviewChars);
+        out.truncated = true;
+        out.contentBytes = Buffer.byteLength(m.content, 'utf8');
+        truncatedServed.push({ chatId, id: out.id });
+      }
       // Notification kind annotation (approval, cron, reminder). The
       // projection's `isNotificationLikeItem` keys off `kind`; without
       // it, a seeded notification row gets projected as a normal
@@ -1998,6 +2036,10 @@ export async function installMockBackend(page) {
     setHistoryFirstPageLimit(n) {
       historyFirstPageLimit = typeof n === 'number' && n > 0 ? n : null;
     },
+    /** Tool-output preview cap for /messages pages (0 = never cut). */
+    setToolPreviewChars(n) { toolPreviewChars = typeof n === 'number' && n > 0 ? n : Infinity; },
+    /** Rows served cut on a page, and full-row fetches seen. */
+    toolOutputStats() { return { truncatedServed: truncatedServed.slice(), fullRowFetches: fullRowFetches.slice() }; },
     setMessageDelay(chatId, ms) {
       if (!chatId) return;
       if (typeof ms === 'number' && ms > 0) messageDelays.set(chatId, ms);

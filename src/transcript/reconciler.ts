@@ -32,6 +32,7 @@ import { applyBubbleState as applyReplyPlayerState } from '../audio/turn-based/r
 import { rehydrateCards, ensureHistoricalCards } from '../cards/attach.ts';
 import * as memoCardMod from '../memoCard.ts';
 import * as activityStore from '../notifications/activityStore.ts';
+import { ensureFullToolOutput, fetchFailed, fmtBytes, viewedChatForToolOutput } from './toolOutput.ts';
 import { approvalFromEnvelope } from '../notifications/approvalText.ts';
 import {
   APPROVAL_ACTION_LABELS, APPROVAL_RESOLUTION_LABELS, sendApprovalAction,
@@ -977,12 +978,37 @@ function writeToolResultBody(wrap: HTMLElement, t: ActivityTool): void {
     return;
   }
   const raw = typeof t.result === 'string' ? t.result : JSON.stringify(t.result);
-  const pretty = prettifyMaybeJson(raw);
+  // A preview (the page cut this output; toolOutput.ts fetches the rest
+  // the moment the row opens). Don't prettify a cut JSON string.
+  const pretty = t.resultTruncated ? raw : prettifyMaybeJson(raw);
   resultEl.style.display = '';
   resultEl.innerHTML = `
     <div class="tool-result-arrow" aria-hidden="true">→</div>
     <pre class="tool-result-text">${escapeHtml(pretty)}</pre>
   `.trim();
+  if (t.resultTruncated && t.rowId != null) {
+    const note = document.createElement('button');
+    note.type = 'button';
+    note.className = 'tool-result-truncated';
+    const previewKb = fmtBytes(raw.length);
+    const total = fmtBytes(t.resultBytes);
+    const failedBefore = fetchFailed(viewedChatForToolOutput(), t.rowId);
+    note.textContent = failedBefore
+      ? `Showing the first ${previewKb} of ${total} — couldn't load the rest. Tap to retry.`
+      : `Showing the first ${previewKb} of ${total} — loading the rest…`;
+    note.addEventListener('click', () => {
+      note.textContent = `Showing the first ${previewKb} of ${total} — loading the rest…`;
+      void ensureFullToolOutput(t.rowId!, { retry: true }).then((ok) => {
+        if (!ok && note.isConnected) note.textContent = `Showing the first ${previewKb} of ${total} — couldn't load the rest. Tap to retry.`;
+      });
+    });
+    resultEl.appendChild(note);
+    if (!failedBefore) {
+      void ensureFullToolOutput(t.rowId).then((ok) => {
+        if (!ok && note.isConnected) note.textContent = `Showing the first ${previewKb} of ${total} — couldn't load the rest. Tap to retry.`;
+      });
+    }
+  }
 }
 
 function formatArgs(args: unknown): string {

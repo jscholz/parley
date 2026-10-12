@@ -8,6 +8,70 @@
 import { getUpstream } from './index.ts';
 import type { UpstreamAgent } from './upstream.ts';
 
+/** Tool-row content beyond this many characters is cut to a preview on
+ *  transcript pages (2026-10-12): tool output was >90% of a 60-row page
+ *  (688 KB, one row 81 KB) and nobody reads it until they open the row —
+ *  which now fetches the full row from /messages/<id>. 2 KB keeps short
+ *  outputs (file reads, search hits) whole and cuts that page to ~150 KB. */
+export const TOOL_PREVIEW_CHARS = 2048;
+
+/** One upstream item → the wire row the PWA consumes. Pure; exported for
+ *  the tests. */
+export function shapeHistoryItem(it: any): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    id: it.id,
+    role: it.role,
+    content: it.content,
+    timestamp: it.created_at,
+    ...(it.tool_name ? { toolName: it.tool_name } : {}),
+    ...(it.tool_call_id ? { tool_call_id: it.tool_call_id } : {}),
+    ...(it.tool_calls ? { tool_calls: it.tool_calls } : {}),
+    ...(it.parley_id ? { parley_id: it.parley_id } : {}),
+    ...(Array.isArray(it.attachments) && it.attachments.length ? { attachments: it.attachments } : {}),
+    ...(it.kind ? { kind: it.kind } : {}),
+  };
+  if (it.role === 'tool' && typeof it.content === 'string' && it.content.length > TOOL_PREVIEW_CHARS) {
+    row.content = it.content.slice(0, TOOL_PREVIEW_CHARS);
+    row.truncated = true;
+    row.contentBytes = Buffer.byteLength(it.content, 'utf8');
+  }
+  return row;
+}
+
+/** GET /api/parley/sessions/{chat}/messages/{row} — one row, full content
+ *  (the page above carries tool output as a preview). */
+export async function handleParleySessionMessage(req: any, res: any, chatId: string, rowId: string, upstreamOverride?: UpstreamAgent | null): Promise<void> {
+  if (!chatId || !/^[A-Za-z0-9._@:-]{1,128}$/.test(chatId) || !rowId || !/^[A-Za-z0-9._:-]{1,128}$/.test(rowId)) {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'invalid id' }));
+    return;
+  }
+  const upstream = upstreamOverride === undefined ? getUpstream() : upstreamOverride;
+  if (!upstream || typeof upstream.getMessage !== 'function') {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not available' }));
+    return;
+  }
+  try {
+    const it = await upstream.getMessage(chatId, rowId);
+    if (!it) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not found' }));
+      return;
+    }
+    const row = shapeHistoryItem(it);
+    row.content = it.content;          // full content, by definition of this endpoint
+    delete row.truncated;
+    delete row.contentBytes;
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(row));
+  } catch (e: any) {
+    console.error('[parley] session message failed:', e.message);
+    res.writeHead(502, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+}
+
 export async function handleParleySessionMessages(req, res, chatId: string) {
   // Validate chat_id shape. Accepts:
   //   - IDB-minted UUIDs (URL-safe base16+dash) for parley chats
@@ -79,35 +143,7 @@ async function handleSessionMessagesViaUpstream(
       ...(after !== null ? { after } : {}),
     });
     trace('upstream-call-end', `n=${r.items?.length ?? 0}`);
-    const messages = r.items.map((it) => ({
-      id: it.id,
-      role: it.role,
-      content: it.content,
-      timestamp: it.created_at,
-      ...(it.tool_name ? { toolName: it.tool_name } : {}),
-      // tool_call_id (role='tool' rows) + tool_calls JSON (role='assistant'
-      // rows that issued tool calls). The PWA's sessionResume rebuild path
-      // routes tool rows through activityRow.appendToolResult and parses
-      // tool_calls to rebuild the activity row's headers. Without these
-      // fields, post-session-switch reload showed assistant text but no
-      // tool activity ("tool calls disappeared" on session resume).
-      ...(it.tool_call_id ? { tool_call_id: it.tool_call_id } : {}),
-      ...(it.tool_calls ? { tool_calls: it.tool_calls } : {}),
-      // SSE-shape id (umsg_*/msg_*) when the plugin recorded a link
-      // for this row in parley_msg_links. PWA's renderHistoryMessage
-      // prefers this over the integer id as the dedup key so reload
-      // bubbles match the IDB-cached SSE-shape ones. Absent for
-      // legacy rows / other-channel rows / tool+system rows.
-      ...(it.parley_id ? { parley_id: it.parley_id } : {}),
-      // Durable user attachments (user-upload lane, 2026-10-11): the plugin
-      // joins {idx, fileName, mimeType, size, url} onto user rows; without
-      // this passthrough the field died here and the bubble stayed bare.
-      ...(Array.isArray(it.attachments) && it.attachments.length ? { attachments: it.attachments } : {}),
-      // Notification kind ('cron', 'reminder', etc.) — plumbed
-      // through for role='notification' rows so the PWA's renderer
-      // can show the appropriate emoji + label.
-      ...(it.kind ? { kind: it.kind } : {}),
-    }));
+    const messages = r.items.map(shapeHistoryItem);
     // In-flight envelopes carried from the upstream's
     // /v1/conversations/{id}/items response. Plugin (hermes + openclaw)
     // owns the TurnBuffer and now emits live-SSE-shape envelopes under

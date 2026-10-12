@@ -148,6 +148,11 @@ export interface ConversationItem {
   tool_calls?: string;   // JSON array of {id, type:'function', function: {name, arguments}}
   tool_call_id?: string; // on role='tool' rows — links back to the call
   tool_name?: string;
+  /** The proxy cut this tool row's content to a preview (2026-10-12);
+   *  `contentBytes` is the full size. The full row is one fetch away at
+   *  /sessions/<chat>/messages/<id>. */
+  truncated?: boolean;
+  contentBytes?: number;
   /** Notification discriminator (cron / reminder / approval). Surfaces
    *  the appropriate emoji + label in the projection. */
   kind?: string;
@@ -341,4 +346,10 @@ export interface ActivityTool {
   args: unknown;
   result?: unknown;
   durationMs?: number;
+  /** `result` is the proxy's preview of a longer output; the full text
+   *  is fetched when the row opens (toolOutput.ts). `rowId` is the
+   *  durable row to fetch. */
+  resultTruncated?: boolean;
+  resultBytes?: number;
+  rowId?: string | number;
 }

@@ -246,6 +246,7 @@ export interface UpstreamAgent {
    *  above + below), and `after` pages forward (load-newer) from a
    *  cursor — both surface `last_id`/`has_more_newer` so the PWA knows
    *  whether the loaded run reaches the live tail. */
+  getMessage?(chatId: string, itemId: string): Promise<ConversationItem | null>;
   getMessages(
     chatId: string,
     opts?: { limit?: number; before?: number; around?: string; after?: number },
@@ -410,6 +411,18 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     if (!r.ok) throw new Error(`upstream listGatewayConversations: HTTP ${r.status}`);
     const j: any = await r.json();
     return Array.isArray(j?.data) ? j.data : [];
+  }
+
+  /** One row with its FULL content (tool-output lazy load, 2026-10-12).
+   *  null when the plugin has no such row. */
+  async getMessage(chatId: string, itemId: string): Promise<ConversationItem | null> {
+    const r = await fetch(
+      `${this.url}/v1/conversations/${encodeURIComponent(chatId)}/items/${encodeURIComponent(itemId)}`,
+      { headers: this.headers() },
+    );
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`upstream getMessage: HTTP ${r.status}`);
+    return (await r.json()) as ConversationItem;
   }
 
   async getMessages(

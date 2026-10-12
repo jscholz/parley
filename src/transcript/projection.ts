@@ -238,11 +238,15 @@ export function project(state: ChatState): BubbleSpec[] {
       const row = ensureActivityRow(activityByKey, specs, currentTurnKey, currentTurnTs || ts, /*complete*/ true);
       markDurableSpec(row);
       const existing = row.tools.find(t => t.callId === callId);
+      const trunc = item.truncated
+        ? { resultTruncated: true, resultBytes: item.contentBytes, rowId: item.id }
+        : { resultTruncated: undefined, resultBytes: undefined, rowId: item.id };
       if (existing) {
         existing.result = item.content;
         if (item.tool_name) existing.name = item.tool_name;
+        Object.assign(existing, trunc);
       } else {
-        row.tools.push({ callId, name: item.tool_name || inferToolNameFromResult(item.content), args: {}, result: item.content });
+        row.tools.push({ callId, name: item.tool_name || inferToolNameFromResult(item.content), args: {}, result: item.content, ...trunc });
       }
     } else if (item.role === 'notification') {
       const key = String(item.parley_id || item.id);

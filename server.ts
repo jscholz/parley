@@ -1379,6 +1379,12 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (parleyHistory) {
       return parley.handleParleySessionMessages(req, res, decodeURIComponent(parleyHistory[1]));
     }
+    // One row, full content — tool output is a preview on the page above.
+    const parleyHistoryRow = req.method === 'GET'
+      && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)\/messages\/([^/?]+)(?:\?.*)?$/);
+    if (parleyHistoryRow) {
+      return parley.handleParleySessionMessage(req, res, decodeURIComponent(parleyHistoryRow[1]), decodeURIComponent(parleyHistoryRow[2]));
+    }
     const parleyDelete = req.method === 'DELETE'
       && req.url.match(/^\/api\/parley\/sessions\/([^/?]+)(?:\?.*)?$/);
     if (parleyDelete) {
