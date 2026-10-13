@@ -80,6 +80,12 @@ const store = new ServerBackedStore<PinnedItem>({
   serverChangeEvent: 'parley:server-pins-changed',
   // Foreground refresh — iOS PWA can come back after long background.
   refreshOnVisible: true,
+  // …and catch-up on focus / online / stream gap, plus a 60 s safety
+  // poll while visible: the live pins_changed envelope is lost whenever
+  // this device's stream was down (field 2026-10-12, laptop missed a
+  // pin made on the phone until a manual refresh). One small GET a
+  // minute; the diff-aware apply keeps a no-op poll silent.
+  resync: { pollMs: 60_000 },
   // Pin mutations are typically user-initiated singletons, not
   // cron-triggered cascades, so a shorter debounce than badge's is fine.
   debounceMs: 800,

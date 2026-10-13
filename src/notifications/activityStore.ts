@@ -68,6 +68,10 @@ const store = new ServerBackedStore<ActivityItem>({
   idOf: (item) => item.id,
   changeEvent: 'parley:activity-changed',
   serverChangeEvent: 'parley:server-activity-changed',
+  // Same catch-up as pins (2026-10-12): an activity_changed envelope is
+  // lost whenever this device's stream was down.
+  refreshOnVisible: true,
+  resync: { pollMs: 60_000 },
   debounceMs: 150,
   persistCap: 200,
   persistSort: (a, b) => b.createdAt - a.createdAt,

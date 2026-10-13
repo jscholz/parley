@@ -50,6 +50,14 @@ export interface ServerBackedStoreConfig<T> {
   /** Also refresh when the page returns to the foreground (iOS PWA can
    *  come back after a long background). */
   refreshOnVisible?: boolean;
+  /** Catch-up refresh triggers beyond the live change event (field
+   *  2026-10-12: a pin made on the phone never reached a laptop window
+   *  that stayed open — visibility never changed, and the stream event
+   *  had been dropped while it slept). When set, also refresh on window
+   *  focus, on coming back online, after a stream gap
+   *  (`parley:stream-gap`), and every `pollMs` while the page is visible
+   *  (0 = no poll). */
+  resync?: { pollMs?: number };
   /** Debounce window coalescing refresh triggers (ms). Default 200. */
   debounceMs?: number;
   /** Equality for diff-aware notify. Default: size + per-item JSON
@@ -108,6 +116,7 @@ export class ServerBackedStore<T> {
   private writesSettled = 0;
   private hydrateRetries = 0;
   private readonly cfg: ServerBackedStoreConfig<T>;
+  private readonly listeners = new AbortController();
 
   constructor(cfg: ServerBackedStoreConfig<T>) {
     this.cfg = cfg;
@@ -120,7 +129,32 @@ export class ServerBackedStore<T> {
           if (document.visibilityState === 'visible') this.requestRefresh();
         });
       }
+      if (cfg.resync) {
+        const kick = () => this.requestRefresh();
+        const signal = this.listeners.signal;
+        window.addEventListener('focus', kick, { signal });
+        window.addEventListener('online', kick, { signal });
+        window.addEventListener('parley:stream-gap', kick, { signal });
+        const pollMs = cfg.resync.pollMs ?? 0;
+        if (pollMs > 0) {
+          this.pollTimer = setInterval(() => {
+            const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+            if (visible && this.hydrated) this.requestRefresh();
+          }, pollMs);
+          // Never keep a test runner / worker alive on our account.
+          (this.pollTimer as any)?.unref?.();
+        }
+      }
     }
+  }
+
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Stop the safety poll and drop the resync listeners (tests; a
+   *  torn-down store). */
+  dispose(): void {
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+    this.listeners.abort();
   }
 
   /** Idempotent. Loads the localStorage cache for instant paint, runs
