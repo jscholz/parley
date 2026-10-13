@@ -3808,7 +3808,29 @@
     display: flex; align-items: center; justify-content: center;
     z-index: 10000; cursor: zoom-out; padding: 20px;
   }
-  #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  #lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; cursor: default; }
+  #lightbox {
+    background: rgba(0,0,0,0.96);
+    padding: calc(max(12px, env(safe-area-inset-top)) + 56px) 16px max(16px, env(safe-area-inset-bottom));
+  }
+  /* Controls pinned to the top edge, where a close button is expected. */
+  .lightbox-bar {
+    position: absolute; top: max(10px, env(safe-area-inset-top)); right: 12px; left: 12px;
+    display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+    cursor: default; pointer-events: none;
+  }
+  .lightbox-bar > * { pointer-events: auto; }
+  .lightbox-btn {
+    color: #e8ece6; text-decoration: none; font-size: 13px; font-weight: 600;
+    padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.10);
+  }
+  .lightbox-btn:hover { background: rgba(255,255,255,0.18); }
+  .lightbox-close {
+    width: 44px; height: 44px; border: none; border-radius: 50%;
+    background: rgba(255,255,255,0.12); color: #fff; font-size: 26px; line-height: 1;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .lightbox-close:hover { background: rgba(255,255,255,0.22); }
 
   /* ── System line (model switch, new chat, etc.) ── */
   .line.system {

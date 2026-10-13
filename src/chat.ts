@@ -1606,7 +1606,6 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         img.alt = att.fileName || 'attachment';
         img.title = att.fileName || 'attachment';
         img.loading = 'lazy';
-        img.onclick = () => openLightbox(src);
         attDiv.appendChild(img);
       } else if (att.mimeType?.startsWith('video/')) {
         const vid = document.createElement('video');
@@ -1888,18 +1887,6 @@ async function maybeLoadLater() {
     paginationLoadingNewer = false;
     setEdgeLoading(null);
   }
-}
-
-/** Open a full-screen overlay showing the given image. Tap anywhere to dismiss. */
-function openLightbox(src: string): void {
-  document.getElementById('lightbox')?.remove();
-  const overlay = document.createElement('div');
-  overlay.id = 'lightbox';
-  overlay.onclick = () => overlay.remove();
-  const img = document.createElement('img');
-  img.src = src;
-  overlay.appendChild(img);
-  document.body.appendChild(overlay);
 }
 
 /** Render a muted, italic, centered "system" line — for session events
