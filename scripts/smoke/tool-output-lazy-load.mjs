@@ -60,9 +60,14 @@ export default async function run({ page, log, mock }) {
   await pollUntil(page, () => { const d = document.querySelector('#transcript .tool-row-details'); return !!d && getComputedStyle(d.closest('.activity-row-full')).display !== 'none'; }, null,
     { timeout: 4_000, label: 'activity row did not expand' });
   await page.evaluate(() => { const d = document.querySelector('#transcript .tool-row-details'); d.open = true; d.dispatchEvent(new Event('toggle')); });
-  await pollUntil(page, () => !!document.querySelector('#transcript .tool-result-truncated'), null,
-    { timeout: 4_000, label: 'preview note never appeared' });
-  const note = await page.evaluate(() => document.querySelector('#transcript .tool-result-truncated').textContent);
+  // Capture the note in the same tick it is seen: the full-row fetch can
+  // land (and retire the note) before a separate evaluate runs.
+  await pollUntil(page, () => {
+    const n = document.querySelector('#transcript .tool-result-truncated');
+    if (n) window.__lazyNote = n.textContent;
+    return !!window.__lazyNote;
+  }, null, { timeout: 4_000, label: 'preview note never appeared' });
+  const note = await page.evaluate(() => window.__lazyNote);
   assert(/Showing the first 2\.0 KB of \d+ KB/.test(note), `note wording: ${note}`);
   log(`opened tool row: "${note}"`);
 

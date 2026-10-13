@@ -13,6 +13,7 @@
 import { project } from './projection.ts';
 import { reconcile, resetActivityExpandState } from './reconciler.ts';
 import { getState, subscribe } from './store.ts';
+import { noteRender } from '../util/renderLoopGuard.ts';
 import type { BubbleSpec } from './types.ts';
 import {
   scheduleSnapshotPersist, runWithScrollSaveSuppressed, autoScroll,
@@ -73,6 +74,9 @@ export function bindTranscriptPipeline(opts: BindOpts): () => void {
     // chat's reply_delta painted into the on-screen transcript.
     const focused = getFocusedChatId();
     if (focused && chatId !== focused) return;
+    // Loop guard: past 100 renders/s for one chat, report once and drop to
+    // one render per frame so a store↔render cycle can't hang the page.
+    if (noteRender(chatId)) { deferRender(chatId); return; }
     rerenderInto(chatId);
   });
 }
@@ -135,6 +139,14 @@ export function rerenderActive(): void {
   const chatId = getFocusedChatId();
   if (!chatId) return;
   rerenderInto(chatId);
+}
+
+const deferredRenders = new Set<string>();
+function deferRender(chatId: string): void {
+  if (deferredRenders.has(chatId)) return;
+  deferredRenders.add(chatId);
+  const run = () => { deferredRenders.delete(chatId); rerenderInto(chatId); };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run); else setTimeout(run, 16);
 }
 
 function rerenderInto(chatId: string): void {

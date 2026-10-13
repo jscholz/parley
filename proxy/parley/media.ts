@@ -212,17 +212,35 @@ export async function handleMediaGet(
     const entry = (await loadRegistry()).get(id);
     if (!entry) throw new MediaError(404, 'unknown media id');
     let size: number;
+    let mtimeMs: number;
     try {
-      size = (await fs.stat(entry.path)).size;
+      const st = await fs.stat(entry.path);
+      size = st.size;
+      mtimeMs = st.mtimeMs;
     } catch {
       throw new MediaError(410, 'media file no longer exists on disk');
+    }
+    // Validator (field 2026-10-13: a 1.7 MB generated image re-downloaded
+    // on every switch back to its chat). `no-cache` alone, with no ETag or
+    // Last-Modified, gave the browser nothing to revalidate against, so
+    // every re-mounted <img> was a full fetch. The id is stable per PATH
+    // and the agent may rewrite the file, so keep revalidation (no-cache)
+    // but answer it with a 304 while size+mtime are unchanged.
+    const etag = `"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`;
+    const lastModified = new Date(mtimeMs).toUTCString();
+    if (req.headers['if-none-match'] === etag) {
+      res.writeHead(304, { ETag: etag, 'Last-Modified': lastModified, 'Cache-Control': 'private, no-cache' });
+      res.end();
+      return;
     }
     const range = typeof req.headers.range === 'string'
       ? req.headers.range.match(/^bytes=(\d*)-(\d*)$/) : null;
     const headers: Record<string, string | number> = {
       'Content-Type': entry.mime,
       'Accept-Ranges': 'bytes',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'private, no-cache',
+      ETag: etag,
+      'Last-Modified': lastModified,
     };
     if (range && (range[1] || range[2])) {
       const start = range[1] ? parseInt(range[1], 10) : Math.max(0, size - parseInt(range[2], 10));

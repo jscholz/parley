@@ -1589,6 +1589,10 @@ const requestHandler: http.RequestListener = async (req, res) => {
   const upl = (req.method === 'GET' || req.method === 'HEAD') && /^\/api\/parley\/uploads\/([^/?]+)\/(\d+)(?:\?.*)?$/.exec(req.url || '');
   if (upl) return uploads.handleUploadGet(req, res, decodeURIComponent(upl[1]), upl[2]);
   if (req.url === '/api/parley/diag/playback' && req.method === 'POST') return playbackAudit.handlePlaybackAudit(req, res);
+  if (req.url === '/api/parley/diag/client' && (req.method === 'POST' || req.method === 'GET')) {
+    const { handleClientDiag } = await import('./proxy/parley/clientDiag.ts');
+    return handleClientDiag(req, res);
+  }
   if (req.url?.startsWith('/api/parley/diag/playback') && req.method === 'GET') {
     const n = Number(new URL(req.url, 'http://x').searchParams.get('limit') || 50);
     return playbackAudit.readPlaybackAudit(Number.isFinite(n) ? n : 50).then((rows) => {

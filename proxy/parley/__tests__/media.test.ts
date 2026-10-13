@@ -167,3 +167,40 @@ test('rejects unsupported extensions and non-files', async () => {
   await assert.rejects(() => registerMedia(path.join(dir, 'missing.mp4')),
     (e: any) => e instanceof MediaError && e.status === 404);
 });
+
+// Field 2026-10-13: a 1.7 MB generated image re-downloaded on every switch
+// back to its chat — `no-cache` with no validator. Now an ETag lets the
+// browser revalidate to a 304, and a rewritten file gets a new tag.
+test('GET carries an ETag; a matching If-None-Match is a 304 with no body', async () => {
+  const p = await mkVideo('pic.mp4');
+  const { id } = await registerMedia(p);
+  const first = fakeRes();
+  await handleMediaGet({ headers: {} } as any, first, id);
+  await first.finished;
+  const etag = first.hdrs.ETag as string;
+  assert.match(etag, /^"[0-9a-f]+-[0-9a-f]+"$/);
+  assert.ok(first.hdrs['Last-Modified']);
+  assert.match(String(first.hdrs['Cache-Control']), /no-cache/);
+
+  const again = fakeRes();
+  await handleMediaGet({ headers: { 'if-none-match': etag } } as any, again, id);
+  await again.finished;
+  assert.equal(again.status, 304);
+  assert.equal(again.body.length, 0);
+});
+
+test('rewriting the file under the same id changes the ETag (no stale image)', async () => {
+  const p = await mkVideo('pic2.mp4', 'aaaa');
+  const { id } = await registerMedia(p);
+  const a = fakeRes();
+  await handleMediaGet({ headers: {} } as any, a, id);
+  await a.finished;
+  await new Promise((r) => setTimeout(r, 15));
+  await fs.writeFile(p, Buffer.from('bbbbbbbb'));
+  const b = fakeRes();
+  await handleMediaGet({ headers: { 'if-none-match': a.hdrs.ETag } } as any, b, id);
+  await b.finished;
+  assert.equal(b.status, 200);
+  assert.notEqual(b.hdrs.ETag, a.hdrs.ETag);
+  assert.equal(b.body.toString(), 'bbbbbbbb');
+});
