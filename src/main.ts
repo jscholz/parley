@@ -62,6 +62,7 @@ import { initCapturePill, hotkeyToggleMeetingCapture } from './capture/pill.ts';
 import { initMeetingsIndex } from './capture/meetingsIndex.ts';
 import { getCaptureState } from './capture/recorder.ts';
 import { initTranscriptHighlight } from './transcriptHighlight.ts';
+import { installUnreadDividerRetire } from './markUnreadFrom.ts';
 import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as approvalActions from './notifications/approvalActions.ts';
 import { installExternalLinkHandler } from './native/externalLinks.ts';
@@ -2713,6 +2714,11 @@ async function boot() {
     composer: composerInput,
     transcript: document.getElementById('transcript'),
   });
+  // A tap/click in the transcript retires the "New" divider.
+  {
+    const tEl = document.getElementById('transcript');
+    if (tEl) installUnreadDividerRetire(tEl, () => backend.getCurrentSessionId?.() || null);
+  }
 
   /** Shared mount-site for the recorder bar (memo + turn-based both
    *  hide the composer-actions row and drop a recorder bar into the

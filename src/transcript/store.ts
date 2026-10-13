@@ -677,6 +677,10 @@ export function addPendingSend(chatId: string, send: PendingSend): void {
   // here would stick if the turn never started.
   const st = getState(chatId);
   if (!lifecycleBackend && st.turnActive !== true) { st.turnActive = true; }
+  // Replying means you've caught up: retire the "New" divider (2026-10-13)
+  // and tell listeners (markUnreadFrom clears a sticky unread mark).
+  st.unreadFrom = null;
+  try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('parley:user-send', { detail: { chatId } })); } catch { /* non-DOM */ }
   const s = getState(chatId);
   if (s.pendingSends.find(p => p.messageId === send.messageId)) return;
   s.pendingSends.push(send);

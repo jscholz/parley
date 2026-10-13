@@ -11,7 +11,7 @@
  *   - agent replies and notifications also get their Activity-tray
  *     entry, as the menu action always did.
  */
-import { markUnread as markChatUnread } from './notifications/badge.ts';
+import { markUnread as markChatUnread, clearUnread, unreadFor } from './notifications/badge.ts';
 import { markUnreadForMessage } from './notifications/activityStore.ts';
 import * as transcriptStore from './transcript/store.ts';
 
@@ -31,4 +31,28 @@ export function markUnreadFromLine(line: HTMLElement, chatId: string | null): bo
   void markChatUnread(chatId, { fromMs: ts });
   transcriptStore.setUnreadFrom(chatId, ts - 1);
   return true;
+}
+
+/** Retire the "New" divider on the first deliberate interaction with the
+ *  transcript (2026-10-13, field: "I'm reading the message and clicking
+ *  on it, and neither makes it go away"). Slack keeps its line for the
+ *  whole visit because people hop channels; here you stay in one chat,
+ *  so the line marks where you left off until you act: a tap/click in
+ *  the transcript (not on the message menu — its "Mark unread" sets the
+ *  line), sending a message (store.addPendingSend), or leaving the chat.
+ *  Scrolling and reading keep it. */
+export function installUnreadDividerRetire(transcriptEl: HTMLElement, viewedChat: () => string | null): void {
+  // Replying in a chat you'd marked unread means you've read it.
+  window.addEventListener('parley:user-send', (e) => {
+    const chatId = (e as CustomEvent<{ chatId?: string }>).detail?.chatId;
+    if (chatId && unreadFor(chatId) > 0) void clearUnread(chatId);
+  });
+  transcriptEl.addEventListener('pointerdown', (e) => {
+    const t = e.target as HTMLElement | null;
+    if (t?.closest?.('.msg-menu, .msg-caret, .play-bar')) return;
+    const chatId = viewedChat();
+    if (!chatId) return;
+    if (transcriptStore.peekState(chatId)?.unreadFrom == null) return;
+    transcriptStore.setUnreadFrom(chatId, null);
+  });
 }

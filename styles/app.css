@@ -6526,7 +6526,7 @@
 .unread-divider {
   display: flex; align-items: center; gap: 8px;
   margin: 10px 0 6px;
-  color: var(--danger, #e5534b);
+  color: var(--primary);
   font: 600 11px/1 var(--font-mono, monospace);
   letter-spacing: 0.08em; text-transform: uppercase;
   pointer-events: none;
@@ -6534,6 +6534,6 @@
 .unread-divider::before,
 .unread-divider::after {
   content: ''; flex: 1; height: 1px;
-  background: color-mix(in srgb, var(--danger, #e5534b) 70%, transparent);
+  background: color-mix(in srgb, var(--primary) 60%, transparent);
 }
 .unread-divider::after { flex: 0 0 18px; }

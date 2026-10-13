@@ -81,6 +81,33 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(600);
   assert(!mock.getUnreadState().marked.has(A), 'opening the chat marks it read');
   log('returning: divider above the same message, chat now read ✓');
+  // Reading/scrolling keeps it; a tap in the transcript retires it.
+  await page.evaluate(() => { const t = document.getElementById('transcript'); t.scrollTop = 0; });
+  await page.waitForTimeout(200);
+  assert(!!(await dividerAbove(page)), 'scrolling must not remove the divider');
+  const color = await page.evaluate(() => getComputedStyle(document.querySelector('#transcript .unread-divider')).color);
+  const primary = await page.evaluate(() => { const p = document.createElement('span'); p.style.color = 'var(--primary)'; document.body.appendChild(p); const c = getComputedStyle(p).color; p.remove(); return c; });
+  assert(color === primary, `divider uses the sage primary colour: ${color} vs ${primary}`);
+  await page.evaluate(() => {
+    const line = document.querySelector('#transcript .line[data-message-id="msg_uf3"] .text') || document.querySelector('#transcript .line[data-message-id="msg_uf3"]');
+    line.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 }));
+  });
+  await pollUntil(page, () => !document.querySelector('#transcript .unread-divider'), null, { timeout: 2000, label: 'a tap in the transcript should retire the divider' });
+  log('scrolling keeps it, a tap on a message retires it, colour is sage ✓');
+
+  // U again, then send a message → retired too.
+  await page.focus('#composer-input');
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('ArrowUp');
+    if (await page.evaluate(() => document.querySelector('#transcript .transcript-highlight')?.dataset.messageId) === 'msg_uf2') break;
+  }
+  await page.keyboard.press('u');
+  await pollUntil(page, () => !!document.querySelector('#transcript .unread-divider'), null, { timeout: 3000, label: 'U did not set the divider again' });
+  await page.focus('#composer-input');
+  await page.keyboard.type('catching up');
+  await page.keyboard.press('Enter');
+  await pollUntil(page, () => !document.querySelector('#transcript .unread-divider'), null, { timeout: 3000, label: 'sending should retire the divider' });
+  log('sending a message retires it ✓');
 
   // ── 3. leave + return again: read → no divider ──
   await open(page, B);
