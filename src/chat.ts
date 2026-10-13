@@ -20,8 +20,7 @@ import {
   getScrollPosition,
 } from './chatScrollPositions.ts';
 import { isPinned as isPinMsg, pinMessage, unpinMessage, hydrate as hydratePins } from './pins/store.ts';
-import { markUnread as markChatUnread } from './notifications/badge.ts';
-import { markUnreadForMessage } from './notifications/activityStore.ts';
+import { markUnreadFromLine } from './markUnreadFrom.ts';
 import { toast } from './toast.ts';
 import * as backend from './backend.ts';
 import { rerenderActive, isBackfillActive } from './transcript/index.ts';
@@ -1303,14 +1302,8 @@ function openMsgMenu(line: HTMLElement): void {
   if ((isAgent || isNotification) && msgId && isDurableMessageKey(msgId)) {
     addItem('Mark unread', ICON.unread, () => {
       const chatId = viewedSessionIdRef || backend.getCurrentSessionId?.() || null;
-      const liveText = line.dataset.text
-        || (line.querySelector('.text') as HTMLElement | null)?.textContent || '';
-      const ts = Number(line.dataset.ts) || Date.now();
-      const kind = line.classList.contains('notification-cron') ? 'cron'
-        : isNotification ? 'notification' : 'agent_reply';
-      markUnreadForMessage({ chatId, messageId: msgId, text: liveText.slice(0, 500), createdAt: ts, kind });
-      if (chatId) void markChatUnread(chatId);
-      toast('Marked unread');
+      // Unread FROM this message: pointer + "New" divider (markUnreadFrom.ts).
+      if (markUnreadFromLine(line, chatId)) toast('Marked unread from here');
     });
   }
 

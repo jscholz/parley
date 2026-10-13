@@ -575,12 +575,26 @@ let previouslyViewedId: string | null = null;
  *  activity store commit); the server POSTs settle behind. */
 export function noteViewIntent(id: string): void {
   if (!id) return;
+  captureUnreadDivider(id);
   void badge.clearUnread(id);
   activityStore.markChatRead(id);
 }
 
+/** Opening a chat that is unread: remember where its unread run starts
+ *  BEFORE the open clears it, so the transcript can draw the "New"
+ *  divider there (2026-10-13). Only ever sets — the commit-time backstop
+ *  runs after the tap already cleared the badge and must not erase it. */
+function captureUnreadDivider(id: string): void {
+  const from = badge.unreadFromMs(id);
+  if (from != null) transcriptStore.setUnreadFrom(id, from);
+}
+
 function applyViewChangedEffects(prev: string | null, id: string | null): void {
   if (prev && prev !== id) previouslyViewedId = prev;
+  // Leaving a chat retires its "New" divider (it marked what was new
+  // on THIS visit).
+  if (prev && prev !== id) transcriptStore.setUnreadFrom(prev, null);
+  if (id) captureUnreadDivider(id);
   // Header title (UX_DETERMINISM_PLAN Phase 0 #1). setViewed() and
   // commitView() are the only two callers of this function, so this one
   // call covers both view-commit paths — no need to duplicate it at each

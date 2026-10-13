@@ -1369,6 +1369,7 @@ export async function installMockBackend(page) {
   // new state on its next fetch.
   const unreadByChat = new Map();   // chat_id → unread_count
   const markedUnread = new Set();   // chat_ids with sticky-unread
+  const lastReadByChat = new Map(); // chat_id → read pointer (unix s), set by mark from_ts
   // Artificial GET /notifications/unread latency. SNAPSHOT-THEN-DELIVER
   // (unlike sessionsDelayMs, which delays before computing): the body is
   // computed at request time and delivered after the hold, so a mutation
@@ -1383,17 +1384,18 @@ export async function installMockBackend(page) {
   function clearUnreadFor(chatId) {
     unreadByChat.delete(chatId);
     markedUnread.delete(chatId);
+    lastReadByChat.delete(chatId);
   }
   await page.route(/.*\/api\/parley\/notifications\/unread$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     const out = [];
     const seen = new Set();
     for (const [cid, n] of unreadByChat) {
-      out.push({ chat_id: cid, unread_count: n, marked_unread: markedUnread.has(cid) });
+      out.push({ chat_id: cid, unread_count: n, marked_unread: markedUnread.has(cid), last_read_at: lastReadByChat.get(cid) ?? null });
       seen.add(cid);
     }
     for (const cid of markedUnread) {
-      if (!seen.has(cid)) out.push({ chat_id: cid, unread_count: 0, marked_unread: true });
+      if (!seen.has(cid)) out.push({ chat_id: cid, unread_count: 0, marked_unread: true, last_read_at: lastReadByChat.get(cid) ?? null });
     }
     // Body is fully computed above — the hold only delays DELIVERY.
     if (unreadDelayMs > 0) {
@@ -1418,6 +1420,8 @@ export async function installMockBackend(page) {
     if (body.chat_id) {
       if (body.marked === true) markedUnread.add(body.chat_id);
       else markedUnread.delete(body.chat_id);
+      // "Mark unread from here" (plugin parity: pointer = from_ts - 1 ms).
+      if (body.marked === true && typeof body.from_ts === 'number') lastReadByChat.set(body.chat_id, body.from_ts - 0.001);
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
   });
@@ -1928,7 +1932,7 @@ export async function installMockBackend(page) {
     },
     clearUnread(chatId) { clearUnreadFor(chatId); },
     getUnreadState() {
-      return { byChat: new Map(unreadByChat), marked: new Set(markedUnread) };
+      return { byChat: new Map(unreadByChat), marked: new Set(markedUnread), lastRead: new Map(lastReadByChat) };
     },
     /** Hold GET /notifications/unread responses open for `ms`,
      *  snapshot-then-deliver (see unreadDelayMs above) — stages the

@@ -192,7 +192,19 @@ function createForSpec(spec: BubbleSpec, batch: boolean): HTMLElement | null {
     case 'systemLine': return createSystemLine(spec);
     case 'memoCard':   return createMemoCard(spec);
     case 'turnStatus': return createTurnStatus(spec);
+    case 'unreadDivider': return createUnreadDivider();
   }
+}
+
+/** Slack-style "New" rule above the first unread message. Not a `.line`:
+ *  carets, pins, highlight navigation and first-reply logic skip it. */
+function createUnreadDivider(): HTMLElement {
+  const div = document.createElement('div');
+  div.className = 'unread-divider';
+  div.setAttribute('role', 'separator');
+  div.setAttribute('aria-label', 'New messages');
+  div.innerHTML = '<span class="unread-divider-label">New</span>';
+  return div;
 }
 
 /** Bottom-pinned "agent is working" line: three pulsing dots + a label
@@ -574,6 +586,7 @@ function updateForSpec(el: HTMLElement, spec: BubbleSpec): void {
       if (el.textContent !== spec.text) el.textContent = spec.text;
       return;
     case 'turnStatus': return updateTurnStatus(el, spec);
+    case 'unreadDivider': return;
     case 'memoCard':
       // No-op by design: waveform/status/transcript updates flow
       // through the card's own DOM hooks (memoCard.update / find), and

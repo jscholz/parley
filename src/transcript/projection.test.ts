@@ -54,6 +54,25 @@ describe('project: tool-output preview flags (2026-10-12)', () => {
   });
 });
 
+describe('project: "New" divider (2026-10-13)', () => {
+  const rows = () => [u('umsg_1', 'q1', T0), a('msg_1', 'a1', T0 + 1000), u('umsg_2', 'q2', T0 + 2000), a('msg_2', 'a2', T0 + 3000)];
+  it('sits directly above the first row newer than the pointer', () => {
+    const out = project(state({ durable: rows(), unreadFrom: T0 + 1500 }));
+    const i = out.findIndex((s) => s.kind === 'unreadDivider');
+    assert.ok(i > 0);
+    assert.equal(out[i + 1].key, 'umsg_2');
+    assert.equal(out.filter((s) => s.kind === 'unreadDivider').length, 1);
+  });
+  it('no pointer, or a pointer past the last row → no divider', () => {
+    assert.equal(project(state({ durable: rows() })).some((s) => s.kind === 'unreadDivider'), false);
+    assert.equal(project(state({ durable: rows(), unreadFrom: T0 + 9000 })).some((s) => s.kind === 'unreadDivider'), false);
+  });
+  it('a pointer before everything puts it at the top', () => {
+    const out = project(state({ durable: rows(), unreadFrom: T0 - 1 }));
+    assert.equal(out[0].kind, 'unreadDivider');
+  });
+});
+
 describe('project: durable only', () => {
   it('empty state → empty specs', () => {
     assert.deepEqual(project(state({})), []);

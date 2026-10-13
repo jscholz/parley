@@ -400,12 +400,22 @@ async def handle_unread_mark(ctx, request: web.Request) -> web.Response:
     marked = body.get("marked") is True
     if not chat_id:
         return _json({"error": "invalid_request", "message": "chat_id required"}, status=400)
-    state.set_marked(ctx.db, chat_id, marked)
+    # Optional "unread from this message" (unix seconds). Moves the read
+    # pointer back as well as setting the sticky flag.
+    from_ts = body.get("from_ts")
+    pointer = None
+    if marked and isinstance(from_ts, (int, float)) and not isinstance(from_ts, bool) and from_ts > 0:
+        pointer = state.mark_unread_from(ctx.db, chat_id, float(from_ts))
+    else:
+        state.set_marked(ctx.db, chat_id, marked)
     # See note in handle_unread_seen — drop the cache so the next poll
     # reflects this mutation immediately.
     invalidate_unread_cache()
     ctx.emit_envelope({"type": "unread_changed", "chat_id": chat_id, "cause": "mark" if marked else "unmark"})
-    return _json({"ok": True, "chat_id": chat_id, "marked": marked})
+    out = {"ok": True, "chat_id": chat_id, "marked": marked}
+    if pointer is not None:
+        out["last_read_at"] = pointer
+    return _json(out)
 
 
 # ── Pin routes ───────────────────────────────────────────────────────

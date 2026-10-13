@@ -588,6 +588,23 @@ def set_marked(db, chat_id: str, marked: bool) -> None:
     )
 
 
+def mark_unread_from(db, chat_id: str, from_ts: float) -> float:
+    """Mark a chat unread FROM a message (Slack's "mark unread from
+    here", 2026-10-13): the read pointer moves to just before that
+    message, so it and everything after count as unread and the PWA can
+    draw its "New" divider there; the sticky flag keeps the chat unread
+    even if nothing after it is an assistant reply. Returns the pointer."""
+    pointer = float(from_ts) - 0.001
+    db.exec(
+        "INSERT INTO unread_state (chat_id, last_read_at, marked_unread) "
+        "VALUES (?, ?, 1) "
+        "ON CONFLICT(chat_id) DO UPDATE SET "
+        "  last_read_at = excluded.last_read_at, marked_unread = 1",
+        (chat_id, pointer),
+    )
+    return pointer
+
+
 def get_unread_row(db, chat_id: str) -> Optional[Dict[str, Any]]:
     row = db.fetchone(
         "SELECT chat_id AS chatId, last_read_at AS lastReadAt, marked_unread AS markedUnread "

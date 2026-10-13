@@ -6520,3 +6520,20 @@
 .line-attachment-downloads { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; font-size: 12px; }
 .line-attachment-downloads .attachment-dl { color: var(--text-muted, #8a8f98); text-decoration: none; }
 .line-attachment-downloads .attachment-dl:hover { color: var(--text, #e6e6e6); text-decoration: underline; }
+
+/* "New" divider (2026-10-13, Slack-style): above the first unread message
+   of a chat opened unread, or where "Mark unread from here" (U) was set. */
+.unread-divider {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 6px;
+  color: var(--danger, #e5534b);
+  font: 600 11px/1 var(--font-mono, monospace);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  pointer-events: none;
+}
+.unread-divider::before,
+.unread-divider::after {
+  content: ''; flex: 1; height: 1px;
+  background: color-mix(in srgb, var(--danger, #e5534b) 70%, transparent);
+}
+.unread-divider::after { flex: 0 0 18px; }

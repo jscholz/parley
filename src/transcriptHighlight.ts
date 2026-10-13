@@ -9,6 +9,7 @@
  *     focus to the composer.
  *   • Esc → exit highlight mode.
  *   • p — toggle pin on the highlighted message.
+ *   • u — mark the chat unread from the highlighted message ("New" divider).
  *   • c — copy the highlighted message's text to the clipboard.
  *
  * Sole entry point is the composer's `keydown` handler at the start
@@ -27,6 +28,7 @@ import {
   unpinMessage,
 } from './pins/store.ts';
 import * as backend from './backend.ts';
+import { markUnreadFromLine } from './markUnreadFrom.ts';
 
 let composerEl: HTMLTextAreaElement | null = null;
 let transcriptEl: HTMLElement | null = null;
@@ -58,6 +60,7 @@ function ensureHint(): void {
   el.innerHTML =
     '<kbd>↑↓</kbd> navigate'
     + '<span class="thh-sep">·</span><kbd>P</kbd> pin'
+    + '<span class="thh-sep">·</span><kbd>U</kbd> unread'
     + '<span class="thh-sep">·</span><kbd>C</kbd> copy'
     + '<span class="thh-sep">·</span><kbd>Esc</kbd> exit';
   document.body.appendChild(el);
@@ -197,6 +200,17 @@ async function togglePinOnHighlight(): Promise<void> {
   log(`[transcript-highlight] toggle pin on ${msgId}`);
 }
 
+/** U — mark the chat unread from the highlighted message (Slack-style):
+ *  the session list shows it unread and a "New" divider appears above
+ *  this message. Leaves highlight mode so the divider is in plain view. */
+function markUnreadOnHighlight(): void {
+  if (!highlightedEl) return;
+  const chatId = backend.getCurrentSessionId?.() || null;
+  if (!markUnreadFromLine(highlightedEl, chatId)) return;
+  log(`[transcript-highlight] marked unread from ${highlightedEl.dataset.messageId}`);
+  exitHighlight();
+}
+
 async function copyHighlight(): Promise<void> {
   if (!highlightedEl) return;
   const text = highlightedEl.dataset.text
@@ -253,6 +267,7 @@ export function initTranscriptHighlight(opts: {
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1);  return; }
     if (e.key === 'p' || e.key === 'P') { e.preventDefault(); void togglePinOnHighlight(); return; }
     if (e.key === 'c' || e.key === 'C') { e.preventDefault(); void copyHighlight(); return; }
+    if (e.key === 'u' || e.key === 'U') { e.preventDefault(); markUnreadOnHighlight(); return; }
     if (e.key === 'Enter') { e.preventDefault(); exitHighlight(); return; }
   });
 }

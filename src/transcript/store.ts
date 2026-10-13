@@ -109,6 +109,16 @@ export function setDurable(
   notify(chatId);
 }
 
+/** Set / clear the start of the chat's unread run (the "New" divider). */
+export function setUnreadFrom(chatId: string, ms: number | null): void {
+  const s = ms == null ? peekState(chatId) : getState(chatId);
+  if (!s) return;
+  const next = typeof ms === 'number' && ms > 0 ? ms : null;
+  if ((s.unreadFrom ?? null) === next) return;
+  s.unreadFrom = next;
+  notify(chatId);
+}
+
 /** Replace fields on ONE durable row in place (tool-output lazy load,
  *  2026-10-12: the page carried a preview; the full content arrived).
  *  Returns false when no row has that id. Notifies on change. */

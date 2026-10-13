@@ -25,6 +25,9 @@ import { apiUrl } from '../apiBase.ts';
 // locally on push arrival — server has the truth, we just re-fetch.
 const unreadByChat = new Map<string, number>();
 const markedUnread = new Set<string>();
+/** Read pointer (unix SECONDS) per unread chat, from /unread's
+ *  last_read_at — where the transcript's "New" divider goes. */
+const lastReadByChat = new Map<string, number>();
 let refreshDebounce: number | null = null;
 let hydrated = false;
 
@@ -149,8 +152,10 @@ async function refreshFromServer(): Promise<void> {
     }
     const nextCounts = new Map<string, number>();
     const nextMarked = new Set<string>();
+    const nextLastRead = new Map<string, number>();
     for (const c of (data?.chats ?? [])) {
       if (typeof c?.chat_id !== 'string') continue;
+      if (typeof c.last_read_at === 'number' && c.last_read_at > 0) nextLastRead.set(c.chat_id, c.last_read_at);
       if (typeof c.unread_count === 'number' && c.unread_count > 0) {
         nextCounts.set(c.chat_id, c.unread_count);
       }
@@ -163,6 +168,8 @@ async function refreshFromServer(): Promise<void> {
       markedUnread.clear();
       for (const k of nextMarked) markedUnread.add(k);
     }
+    lastReadByChat.clear();
+    for (const [k, v] of nextLastRead) lastReadByChat.set(k, v);
     await syncBadge();
     // (2026-07-20) The auto-markAllRead heuristic that lived here
     // ("totalUnread()===0 → pane must be stale → markAllRead") is gone.
@@ -210,6 +217,14 @@ export function unreadFor(chatId: string): number {
   return Math.max(unreadByChat.get(chatId) ?? 0, markedUnread.has(chatId) ? 1 : 0);
 }
 
+/** Where this chat's unread run starts (epoch MS), or null when the
+ *  chat is read or its pointer is unknown. Drives the "New" divider. */
+export function unreadFromMs(chatId: string): number | null {
+  if (unreadFor(chatId) <= 0) return null;
+  const sec = lastReadByChat.get(chatId);
+  return typeof sec === 'number' && sec > 0 ? sec * 1000 : null;
+}
+
 export function isMarkedUnread(chatId: string): boolean {
   return markedUnread.has(chatId);
 }
@@ -246,6 +261,7 @@ export async function clearUnread(chatId: string): Promise<void> {
     applyLocal(chatId, () => {
       unreadByChat.delete(chatId);
       markedUnread.delete(chatId);
+      lastReadByChat.delete(chatId);
     });
   }
   try {
@@ -258,14 +274,20 @@ export async function clearUnread(chatId: string): Promise<void> {
   void refreshFromServer();
 }
 
-export async function markUnread(chatId: string): Promise<void> {
-  if (!chatId || markedUnread.has(chatId)) return;
-  applyLocal(chatId, () => { markedUnread.add(chatId); });
+export async function markUnread(chatId: string, opts: { fromMs?: number } = {}): Promise<void> {
+  const fromMs = typeof opts.fromMs === 'number' && opts.fromMs > 0 ? opts.fromMs : null;
+  // Already marked and no new "from" point → nothing to do. With a "from"
+  // point the pointer can move even on a marked chat.
+  if (!chatId || (markedUnread.has(chatId) && fromMs == null)) return;
+  applyLocal(chatId, () => {
+    markedUnread.add(chatId);
+    if (fromMs != null) lastReadByChat.set(chatId, fromMs / 1000 - 0.001);
+  });
   try {
     await trackWrite(() => (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/mark'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, marked: true }),
+      body: JSON.stringify({ chat_id: chatId, marked: true, ...(fromMs != null ? { from_ts: fromMs / 1000 } : {}) }),
     }));
   } catch { /* swallow — reconcile heals */ }
   void refreshFromServer();

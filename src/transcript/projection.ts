@@ -590,6 +590,17 @@ export function project(state: ChatState): BubbleSpec[] {
     }
   }
 
+  // ── 4b'. "New" divider (2026-10-13): above the first conversation row
+  // newer than the unread pointer. Status/system/turn rows don't anchor it.
+  if (typeof state.unreadFrom === 'number' && state.unreadFrom > 0) {
+    const anchor = specs.findIndex((s) =>
+      (s.kind === 'user' || s.kind === 'assistant' || s.kind === 'notification' || s.kind === 'activityRow')
+      && s.timestamp > state.unreadFrom!);
+    if (anchor >= 0) {
+      specs.splice(anchor, 0, { kind: 'unreadDivider', key: 'unread-divider', timestamp: specs[anchor].timestamp });
+    }
+  }
+
   // ── 4c. Processing marks (👀 → ✓ / ✗) on the user bubbles hermes has
   // reported on, plus the inline notice for a turn that failed or was
   // stopped without answering: "no reply" = no assistant bubble between
@@ -883,6 +894,8 @@ function kindOrder(s: BubbleSpec): number {
     case 'memoCard': return 5;
     // Always last — appended after the sort anyway.
     case 'turnStatus': return 9;
+    // Inserted after the sort, never sorted.
+    case 'unreadDivider': return 0;
   }
 }
 

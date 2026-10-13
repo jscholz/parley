@@ -513,3 +513,60 @@ def test_read_session_rows_cache_flush_serves_fresh_rows(poller_state_db):
     )
     # The opportunistic sid→chat_id refresh must reflect the new row.
     assert adapter._sid_to_chat_id_cache == {"s2": CHAT_ID}
+
+
+# ── "mark unread from here" (2026-10-13) ────────────────────────────────
+
+def _mark(db, body):
+    import asyncio
+    from types import SimpleNamespace
+    from .. import parley_routes
+    emitted = []
+    ctx = SimpleNamespace(db=db, emit_envelope=emitted.append)
+
+    class _Req:
+        async def json(self):
+            return body
+        async def read(self):
+            return json.dumps(body).encode()
+        async def text(self):
+            return json.dumps(body)
+        can_read_body = True
+        content_type = "application/json"
+
+    resp = asyncio.run(parley_routes.handle_unread_mark(ctx, _Req()))
+    return json.loads(resp.text), emitted
+
+
+def test_mark_from_ts_moves_the_pointer_and_counts_from_that_message(db, state_db):
+    from ..parley_unread import _compute_unread_uncached
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "assistant", "older", ts=1000.0)
+    _add_msg(state_db, "s1", "assistant", "from here", ts=2000.0)
+    _add_msg(state_db, "s1", "assistant", "newer", ts=3000.0)
+    state.mark_seen(db, f"parley:{CHAT_ID}", now=5000.0)       # everything read
+    out, emitted = _mark(db, {"chat_id": f"parley:{CHAT_ID}", "marked": True, "from_ts": 2000.0})
+    assert out["marked"] is True and abs(out["last_read_at"] - 1999.999) < 1e-6
+    assert emitted and emitted[0]["type"] == "unread_changed"
+    row = state.get_unread_row(db, f"parley:{CHAT_ID}")
+    assert row["markedUnread"] == 1 and abs(row["lastReadAt"] - 1999.999) < 1e-6
+    unread = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
+    chat = next(c for c in unread["chats"] if c["chat_id"] == f"parley:{CHAT_ID}")
+    assert chat["marked_unread"] is True
+    assert abs(chat["last_read_at"] - 1999.999) < 1e-6, "the PWA anchors its divider on this"
+
+
+def test_plain_mark_keeps_the_pointer(db, state_db):
+    state.mark_seen(db, f"parley:{CHAT_ID}", now=5000.0)
+    out, _ = _mark(db, {"chat_id": f"parley:{CHAT_ID}", "marked": True})
+    assert "last_read_at" not in out
+    row = state.get_unread_row(db, f"parley:{CHAT_ID}")
+    assert row["markedUnread"] == 1 and row["lastReadAt"] == 5000.0
+
+
+def test_from_ts_is_ignored_on_unmark_and_when_malformed(db, state_db):
+    state.mark_seen(db, f"parley:{CHAT_ID}", now=5000.0)
+    _mark(db, {"chat_id": f"parley:{CHAT_ID}", "marked": False, "from_ts": 10.0})
+    assert state.get_unread_row(db, f"parley:{CHAT_ID}")["lastReadAt"] == 5000.0
+    _mark(db, {"chat_id": f"parley:{CHAT_ID}", "marked": True, "from_ts": "yesterday"})
+    assert state.get_unread_row(db, f"parley:{CHAT_ID}")["lastReadAt"] == 5000.0

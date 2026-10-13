@@ -34,12 +34,25 @@
  *   - Snapshot-able to IDB so a cold-load can hydrate before the first
  *     fetch lands (replacing chat.persist()'s DOM-string snapshot).
  */
+/** "New" divider above the first message of a chat's unread run
+ *  (2026-10-13, Slack-style). Fixed key; at most one per chat. */
+export interface UnreadDividerSpec {
+  kind: 'unreadDivider';
+  key: 'unread-divider';
+  timestamp: number;
+}
+
 export interface ChatState {
   /** Durable rows from state.db. Time-ordered (oldest → newest). The
    *  shape comes straight from the plugin's items handler; consumers
    *  shouldn't assume any specific field set beyond what `BubbleSpec`
    *  inputs need. */
   durable: ConversationItem[];
+  /** Start of the unread run (epoch ms) captured when the chat was
+   *  opened unread, or set by "mark unread from here". The projection
+   *  draws the "New" divider above the first row after it. Cleared when
+   *  the user leaves the chat. */
+  unreadFrom?: number | null;
   /** In-flight envelopes from TurnBuffer. Plugin emits these in the
    *  canonical order user_message → tool_call/result → reply_delta;
    *  this array preserves that order. */
@@ -211,7 +224,8 @@ export type BubbleSpec =
   | GapBubbleSpec
   | SystemLineSpec
   | MemoCardSpec
-  | TurnStatusSpec;
+  | TurnStatusSpec
+  | UnreadDividerSpec;
 
 /** "Agent is working" line pinned to the bottom of the transcript while a
  *  turn is in flight (live send not yet answered, an open activity row, or
