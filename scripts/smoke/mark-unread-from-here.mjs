@@ -88,12 +88,21 @@ export default async function run({ page, log, mock }) {
   const color = await page.evaluate(() => getComputedStyle(document.querySelector('#transcript .unread-divider')).color);
   const primary = await page.evaluate(() => { const p = document.createElement('span'); p.style.color = 'var(--primary)'; document.body.appendChild(p); const c = getComputedStyle(p).color; p.remove(); return c; });
   assert(color === primary, `divider uses the sage primary colour: ${color} vs ${primary}`);
-  await page.evaluate(() => {
-    const line = document.querySelector('#transcript .line[data-message-id="msg_uf3"] .text') || document.querySelector('#transcript .line[data-message-id="msg_uf3"]');
-    line.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 }));
+  // A REAL mouse click on message text (field 2026-10-14: removing the
+  // divider inside the mouse-down while Chrome anchored a text selection
+  // crashed the renderer — synthetic events never reproduced it).
+  const box = await page.evaluate(() => {
+    const t = document.querySelector('#transcript .line[data-message-id="msg_uf3"] .text') || document.querySelector('#transcript .line[data-message-id="msg_uf3"]');
+    t.scrollIntoView({ block: 'center' });
+    const r = t.getBoundingClientRect();
+    return { x: r.left + Math.min(40, r.width / 2), y: r.top + Math.min(10, r.height / 2) };
   });
-  await pollUntil(page, () => !document.querySelector('#transcript .unread-divider'), null, { timeout: 2000, label: 'a tap in the transcript should retire the divider' });
-  log('scrolling keeps it, a tap on a message retires it, colour is sage ✓');
+  const clicked = await Promise.race([page.mouse.click(box.x, box.y).then(() => 'ok'), new Promise((r) => setTimeout(() => r('HUNG'), 8000))]);
+  assert(clicked === 'ok', 'a real click on message text with the divider showing hung the renderer');
+  const alive = await Promise.race([page.evaluate(() => 'alive'), new Promise((r) => setTimeout(() => r('DEAD'), 8000))]);
+  assert(alive === 'alive', 'the page must survive a real click on message text with the divider showing');
+  await pollUntil(page, () => !document.querySelector('#transcript .unread-divider'), null, { timeout: 2000, label: 'a click in the transcript should retire the divider' });
+  log('scrolling keeps it, a real click on message text retires it (page survives), colour is sage ✓');
 
   // U again, then send a message → retired too.
   await page.focus('#composer-input');

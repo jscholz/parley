@@ -37,7 +37,7 @@ export function markUnreadFromLine(line: HTMLElement, chatId: string | null): bo
  *  transcript (2026-10-13, field: "I'm reading the message and clicking
  *  on it, and neither makes it go away"). Slack keeps its line for the
  *  whole visit because people hop channels; here you stay in one chat,
- *  so the line marks where you left off until you act: a tap/click in
+ *  so the line marks where you left off until you act: a completed tap/click in
  *  the transcript (not on the message menu — its "Mark unread" sets the
  *  line), sending a message (store.addPendingSend), or leaving the chat.
  *  Scrolling and reading keep it. */
@@ -47,12 +47,19 @@ export function installUnreadDividerRetire(transcriptEl: HTMLElement, viewedChat
     const chatId = (e as CustomEvent<{ chatId?: string }>).detail?.chatId;
     if (chatId && unreadFor(chatId) > 0) void clearUnread(chatId);
   });
-  transcriptEl.addEventListener('pointerdown', (e) => {
+  // NOT pointerdown, and never synchronously (field 2026-10-14, laptop
+  // "Aw, Snap!" twice): removing the divider row inside a REAL mouse-down
+  // on message text — while Chrome is anchoring a text selection — shifts
+  // the content under the press and kills the renderer (reproduced on the
+  // live chat with a real click; synthetic events, a blocked handler, or a
+  // divider already gone all survive). Retire after the click completes,
+  // on the next task, so no layout change ever lands mid-gesture.
+  transcriptEl.addEventListener('click', (e) => {
     const t = e.target as HTMLElement | null;
     if (t?.closest?.('.msg-menu, .msg-caret, .play-bar')) return;
     const chatId = viewedChat();
     if (!chatId) return;
     if (transcriptStore.peekState(chatId)?.unreadFrom == null) return;
-    transcriptStore.setUnreadFrom(chatId, null);
+    setTimeout(() => transcriptStore.setUnreadFrom(chatId, null), 0);
   });
 }
