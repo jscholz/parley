@@ -73,6 +73,26 @@ describe('project: "New" divider (2026-10-13)', () => {
   });
 });
 
+describe('project: user twins that differ only in attachment notes (2026-10-15)', () => {
+  it('collapse to one bubble — the send that carries the attachments', () => {
+    const words = 'Please audit the attached return.';
+    const withPaths = `${words}\n\n[Image attached at: /tmp/a-01.png]\n[Image attached at: /tmp/a-02.png]\n\n[2 images]`;
+    const withShots = `${words}\n[screenshot]\n[screenshot]`;
+    const send: ConversationItem = { ...u('umsg_17920', withPaths, T0), attachments: [{ idx: 0, url: '/api/parley/uploads/umsg_17920/0', mimeType: 'application/pdf', fileName: 'r.pdf' }] } as any;
+    const twin: ConversationItem = { id: '208279', parley_id: 'legacy:208279', role: 'user', content: withShots, timestamp: T0 };
+    const out = project(state({ durable: [send, twin, a('msg_r', 'On it.', T0 + 5000)] }));
+    const users = out.filter((x) => x.kind === 'user') as any[];
+    assert.equal(users.length, 1);
+    assert.equal(users[0].key, 'umsg_17920');
+    assert.equal(users[0].text, words);
+    assert.equal(users[0].attachments?.length, 1);
+  });
+  it('genuinely different sends still both render', () => {
+    const out = project(state({ durable: [u('umsg_a', 'first\n[screenshot]', T0), u('umsg_b', 'second\n[screenshot]', T0 + 1000)] }));
+    assert.equal(out.filter((x) => x.kind === 'user').length, 2);
+  });
+});
+
 describe('project: durable only', () => {
   it('empty state → empty specs', () => {
     assert.deepEqual(project(state({})), []);

@@ -936,6 +936,15 @@ function compareDurableForDedup(a: ConversationItem, b: ConversationItem): numbe
   const bAnnotated = !!b.parley_id;
   if (aAnnotated && !bAnnotated) return 1;
   if (!aAnnotated && bAnnotated) return -1;
+  // The copy carrying the user's attachments wins (its bubble shows the
+  // chips/thumbnails), then a real client key over a `legacy:` reconcile
+  // copy (2026-10-15 — a stored-twice upload turn).
+  const aAtt = Array.isArray((a as any).attachments) && (a as any).attachments.length > 0;
+  const bAtt = Array.isArray((b as any).attachments) && (b as any).attachments.length > 0;
+  if (aAtt !== bAtt) return aAtt ? 1 : -1;
+  const aLegacy = String(a.parley_id || '').startsWith('legacy:');
+  const bLegacy = String(b.parley_id || '').startsWith('legacy:');
+  if (aLegacy !== bLegacy) return aLegacy ? -1 : 1;
   if (aTs !== bTs) return aTs < bTs ? 1 : -1;
   // Same annotation tier, same timestamp. Tie-break by LOWER id — the
   // original row was persisted first (string compare works for both
@@ -1109,8 +1118,13 @@ function pickDuplicateLosers(
   const byContent = new Map<string, ConversationItem[]>();
   for (const it of items) {
     if (it.role !== role || !it.content) continue;
-    let arr = byContent.get(it.content);
-    if (!arr) { arr = []; byContent.set(it.content, arr); }
+    // User twins can differ only in hermes' model-only attachment notes
+    // (field 2026-10-15: a 94-page PDF turn stored twice — once with the
+    // "[Image attached at: …]" lines, once with "[screenshot]" lines).
+    // Compare what the bubble actually shows.
+    const k = role === 'user' ? stripAttachmentNotes(it.content) : it.content;
+    let arr = byContent.get(k);
+    if (!arr) { arr = []; byContent.set(k, arr); }
     arr.push(it);
   }
   const losers = new Set<string>();
