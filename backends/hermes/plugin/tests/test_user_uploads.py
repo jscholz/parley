@@ -47,3 +47,43 @@ def test_bad_ids_and_missing_db_are_harmless(mods, tmp_path, monkeypatch):
     items = [{"role": "user", "parley_id": "umsg_1_a"}]
     uploads.attach_user_attachments(None, items)
     assert "attachments" not in items[0]
+
+
+def _link(db, pid, chat, created_at):
+    db.exec("INSERT INTO msg_links (id, chat_id, role, content, created_at, updated_at, status) VALUES (?, ?, 'user', 'x', ?, ?, 'final')",
+            (pid, chat, created_at, created_at))
+
+
+def test_second_stored_copy_borrows_the_sends_attachments(mods, tmp_path, monkeypatch):
+    """Field 2026-10-15: the served user row was 'legacy:208279' (hermes
+    stored the turn twice); the PDF was saved under the umsg send 14 s
+    earlier. The chip must still appear after a reload."""
+    uploads, pdb = mods
+    monkeypatch.setenv("PARLEY_HOME", str(tmp_path / "home"))
+    db = pdb.open_parley_db(str(tmp_path / "state"))
+    chat = "e50f5646-26ed-496e-a55e-f250c6a96a67"
+    umsg = "umsg_1792091098520_sicbeu0u"
+    _link(db, umsg, chat, 1792091099.2)
+    uploads.persist_user_attachment(db, umsg, 0, file_name="Tax Return.pdf", mime="application/pdf", payload=b"%PDF")
+    items = [{"role": "user", "parley_id": "legacy:208279", "created_at": 1792091113, "content": "audit"}]
+    uploads.attach_user_attachments(db, items, chat_id=f"parley:{chat}")
+    assert items[0]["attachments"][0]["fileName"] == "Tax Return.pdf"
+
+
+def test_nearby_join_is_scoped_by_chat_window_and_used_once(mods, tmp_path, monkeypatch):
+    uploads, pdb = mods
+    monkeypatch.setenv("PARLEY_HOME", str(tmp_path / "home"))
+    db = pdb.open_parley_db(str(tmp_path / "state"))
+    _link(db, "umsg_a", "chat-a", 1000.0)
+    uploads.persist_user_attachment(db, "umsg_a", 0, file_name="a.pdf", mime="application/pdf", payload=b"%PDF")
+    far = [{"role": "user", "parley_id": "legacy:1", "created_at": 1000 + 600, "content": "x"}]
+    uploads.attach_user_attachments(db, far, chat_id="parley:chat-a")
+    assert "attachments" not in far[0], "outside the window"
+    other = [{"role": "user", "parley_id": "legacy:2", "created_at": 1005, "content": "x"}]
+    uploads.attach_user_attachments(db, other, chat_id="parley:chat-b")
+    assert "attachments" not in other[0], "other chat"
+    # The send itself is served AND a second copy is near it → only the send keeps the chip.
+    both = [{"role": "user", "parley_id": "umsg_a", "created_at": 1000, "content": "x"},
+            {"role": "user", "parley_id": "legacy:3", "created_at": 1010, "content": "x"}]
+    uploads.attach_user_attachments(db, both, chat_id="parley:chat-a")
+    assert both[0].get("attachments") and "attachments" not in both[1]

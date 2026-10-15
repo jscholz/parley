@@ -3820,6 +3820,10 @@
     cursor: default; pointer-events: none;
   }
   .lightbox-bar > * { pointer-events: auto; }
+  .lightbox-pdf {
+    width: min(1100px, 100%); height: 100%; border: 0; border-radius: 6px;
+    background: #fff; cursor: default;
+  }
   .lightbox-btn {
     color: #e8ece6; text-decoration: none; font-size: 13px; font-weight: 600;
     padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.10);

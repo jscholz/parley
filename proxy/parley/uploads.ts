@@ -25,6 +25,9 @@ const INLINE_MIME: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
   '.heic': 'image/heic', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
   '.m4a': 'audio/mp4', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+  // Inline so the in-app viewer can frame it (2026-10-15); the viewer's
+  // Download button still saves it (<a download>).
+  '.pdf': 'application/pdf',
 };
 
 let rootResolver: () => string = () => path.join(dataHome(), 'uploads');

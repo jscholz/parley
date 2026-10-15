@@ -1616,14 +1616,14 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         vid.title = att.fileName || 'attachment';
         attDiv.appendChild(vid);
       } else if (att.mimeType === 'application/pdf') {
-        // PDF preview: minimal label chip. Click opens the data: URL in
-        // a new tab so the user can sanity-check what they sent without
-        // pdf.js bulk. Local-only — the chip lives in DOM memory and
-        // disappears on hard refresh (no server-side persistence needed).
+        // PDF chip → the in-app viewer (imageViewer.ts, via the
+        // transcript's capture-phase link handler). Prefers the durable
+        // copy (user-upload lane) so it works after a reload; a fresh
+        // send's data: URL is turned into a blob: URL by the viewer —
+        // Chrome refuses to show data: PDFs (field 2026-10-15).
         const a = document.createElement('a');
-        a.href = src;
-        a.target = '_blank';
-        a.rel = 'noopener';
+        a.href = att?.url ? apiUrl(att.url) : src;
+        a.dataset.fileName = att.fileName || 'document.pdf';
         a.className = 'pdf-chip';
         a.title = att.fileName || 'PDF attachment';
         a.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h7L13 4.5V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5z"/><path d="M9.5 1.5V4.5H13"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || 'PDF')}</span>`;

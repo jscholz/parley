@@ -122,17 +122,60 @@ def attachments_for(parley_db: Any, user_message_ids: Iterable[str]) -> Dict[str
     return out
 
 
-def attach_user_attachments(parley_db: Any, items: List[Dict[str, Any]]) -> None:
-    """Mutates `items`: user rows with a parley_id gain `attachments` when any exist."""
+# A served user row whose parley_id isn't the send's umsg id (hermes stored
+# the turn under a second state row — "legacy:<id>" — e.g. after image
+# routing expanded it; field 2026-10-15, a 94-page PDF upload lost its chip)
+# is matched to the umsg send of the same chat within this many seconds.
+_NEARBY_SEND_S = 120.0
+
+
+def _nearby_send_attachments(parley_db: Any, chat_id: str, created_at: float, taken: set) -> Optional[List[Dict[str, Any]]]:
+    bare = chat_id.split(":", 1)[1] if chat_id.startswith("parley:") else chat_id
+    rows = parley_db.fetchall(
+        "SELECT l.id AS umsg, ABS(l.created_at - ?) AS gap FROM msg_links l "
+        "WHERE l.chat_id IN (?, ?) AND l.role = 'user' AND l.id LIKE 'umsg_%' "
+        "AND ABS(l.created_at - ?) <= ? "
+        "AND EXISTS (SELECT 1 FROM msg_attachments a WHERE a.user_message_id = l.id) "
+        "ORDER BY gap ASC LIMIT 3",
+        (created_at, bare, chat_id, created_at, _NEARBY_SEND_S),
+    )
+    for r in rows:
+        umsg = str(r[0])
+        if umsg in taken:
+            continue
+        found = attachments_for(parley_db, [umsg]).get(umsg)
+        if found:
+            taken.add(umsg)
+            return found
+    return None
+
+
+def attach_user_attachments(parley_db: Any, items: List[Dict[str, Any]], chat_id: Optional[str] = None) -> None:
+    """Mutates `items`: user rows with a parley_id gain `attachments` when any
+    exist. With `chat_id`, a user row whose parley_id is not a umsg send
+    (a second stored copy of the turn) borrows the attachments of the
+    nearest umsg send in the same chat, once per send."""
     try:
         ids = [it.get("parley_id") for it in items if it.get("role") == "user" and it.get("parley_id")]
-        if not ids:
-            return
-        by = attachments_for(parley_db, ids)
-        if not by:
-            return
+        by = attachments_for(parley_db, ids) if ids else {}
+        taken: set = set()
         for it in items:
             a = by.get(str(it.get("parley_id") or ""))
+            if a:
+                it["attachments"] = a
+                taken.add(str(it.get("parley_id")))
+        if not chat_id:
+            return
+        for it in items:
+            if it.get("role") != "user" or it.get("attachments"):
+                continue
+            pid = str(it.get("parley_id") or "")
+            if pid.startswith("umsg_"):
+                continue
+            ts = it.get("created_at")
+            if not isinstance(ts, (int, float)) or ts <= 0:
+                continue
+            a = _nearby_send_attachments(parley_db, chat_id, float(ts), taken)
             if a:
                 it["attachments"] = a
     except Exception as exc:

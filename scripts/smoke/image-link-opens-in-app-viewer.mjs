@@ -5,7 +5,7 @@
 import { waitForReady, pollUntil, assert } from './lib.mjs';
 
 export const NAME = 'image-link-opens-in-app-viewer';
-export const DESCRIPTION = 'Image links and inline images open an in-app viewer (×, Esc, backdrop close; Download + Open original), never a new window';
+export const DESCRIPTION = 'Image links, inline images and PDF links open an in-app viewer (×, Esc, backdrop close; Download + Open original), never a new window';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = 'both';
@@ -71,15 +71,16 @@ export default async function run({ page, log }) {
   assert(!(await viewer()), 'a backdrop tap must close it');
   log('backdrop closes, image tap does not ✓');
 
-  // 4. Non-image links are untouched (still a normal link).
-  const pdf = await page.evaluate(() => {
-    const a = [...document.querySelectorAll('#transcript .line[data-message-id="msg_iv2"] a')].find((x) => /\.pdf$/.test(x.getAttribute('href') || ''));
-    let prevented = null;
-    const probe = (e) => { prevented = e.defaultPrevented; e.preventDefault(); };
-    document.addEventListener('click', probe, { once: true });
-    a.click();
-    return { prevented, viewer: !!document.getElementById('lightbox') };
+  // 4. A PDF link opens the same viewer with the PDF framed (2026-10-15),
+  //    never a new window.
+  await page.evaluate(() => [...document.querySelectorAll('#transcript .line[data-message-id="msg_iv2"] a')].find((x) => /\.pdf$/.test(x.getAttribute('href') || '')).click());
+  const pdfView = await page.evaluate(() => {
+    const lb = document.getElementById('lightbox');
+    return lb ? { frame: lb.querySelector('iframe.lightbox-pdf')?.getAttribute('src') || '' } : null;
   });
-  assert(pdf.prevented === false && !pdf.viewer, `pdf link must not be hijacked: ${JSON.stringify(pdf)}`);
-  log('non-image links are left alone ✓');
+  assert(pdfView && /eeeeffff00001111\.pdf$/.test(pdfView.frame), `pdf link should open the viewer with a frame: ${JSON.stringify(pdfView)}`);
+  assert(popups === 0, 'no new window for the pdf either');
+  await page.evaluate(() => document.querySelector('#lightbox .lightbox-close').click());
+  assert(!(await page.evaluate(() => !!document.getElementById('lightbox'))), '× closes the pdf view');
+  log('pdf link → in-app viewer (framed PDF), × closes ✓');
 }

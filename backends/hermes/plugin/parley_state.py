@@ -1583,7 +1583,7 @@ def _build_chronological_items(
     # Durable user attachments (user-upload lane, 2026-10-11) ride the user
     # rows so a rebuilt transcript keeps the thumbnails + download links.
     from .parley_user_uploads import attach_user_attachments as _att
-    _att(parley_db, items)
+    _att(parley_db, items, chat_id=chat_id)
     return items
 
 
@@ -1826,7 +1826,7 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
     # Durable user attachments (user-upload lane, 2026-10-11) ride the user
     # rows so a rebuilt transcript keeps the thumbnails + download links.
     from .parley_user_uploads import attach_user_attachments as _att
-    _att(parley_db, items)
+    _att(parley_db, items, chat_id=chat_id)
     return items, cursor_index
 
 
