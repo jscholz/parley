@@ -26,6 +26,9 @@ const CACHE_NAME = 'v0.630';
 // the old VAD cache and the next call re-fetches. This is rare;
 // ~once per quarter at most.
 const VAD_CACHE = 'vad-assets-v4';
+// How long a navigation waits for the network before booting the cached
+// shell (offline, or a link so slow the cached app is the better start).
+const NAV_NETWORK_TIMEOUT_MS = 3000;
 
 // Dedicated cache for the Temml (LaTeX → MathML) vendor bundle. Same
 // reasoning as VAD_CACHE, smaller numbers: ~208 KB that changes only when
@@ -347,9 +350,45 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // App shell (HTML, icons, manifest) — cache-first, fall back to
-  // network. These rarely change relative to JS modules so the offline
-  // benefit outweighs staleness risk.
+  // The navigation document (index.html) — NETWORK-FIRST with a short
+  // timeout, cached copy as the offline / slow-link fallback.
+  //
+  // Field 2026-10-15: fixes "kept not taking" on the laptop app. The
+  // index was served cache-first (stale-while-revalidate), so every
+  // reload booted the PREVIOUS deploy's index — whose import map pins the
+  // previous hashed modules — and only the reload after that caught up.
+  // A crash-and-reload this morning brought back a pre-viewer build and
+  // an image click escaped into a bare window again. The index is tiny
+  // and the hashed modules it points at stay cache-first in BUILD_CACHE,
+  // so going to the network for it costs one small round trip per boot.
+  if (e.request.mode === 'navigate') {
+    e.respondWith((async () => {
+      const cached = await caches.match(e.request);
+      const network = fetch(e.request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone));
+        }
+        return response;
+      });
+      if (!cached) return network;
+      try {
+        const winner = await Promise.race([
+          network,
+          new Promise((resolve) => setTimeout(() => resolve(null), NAV_NETWORK_TIMEOUT_MS)),
+        ]);
+        if (winner && winner.ok) return winner;
+      } catch { /* offline — fall through to the cached shell */ }
+      lastCachedNavServedAt = Date.now();
+      network.catch(() => {});   // keep the background refresh alive, swallow its error
+      return cached;
+    })());
+    return;
+  }
+
+  // App shell (icons, manifest, …) — cache-first, fall back to network.
+  // These rarely change relative to JS modules so the offline benefit
+  // outweighs staleness risk.
   e.respondWith(
     caches.match(e.request).then(cached => {
       // Record cache-first navigation serves: a hashed-module 404 right
