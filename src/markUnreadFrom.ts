@@ -62,4 +62,60 @@ export function installUnreadDividerRetire(transcriptEl: HTMLElement, viewedChat
     if (transcriptStore.peekState(chatId)?.unreadFrom == null) return;
     setTimeout(() => transcriptStore.setUnreadFrom(chatId, null), 0);
   });
+  installSeenRetire(transcriptEl, viewedChat);
+}
+
+/** How long the "New" line must be on screen, with the window focused,
+ *  before it counts as seen and retires on its own. */
+export const DIVIDER_SEEN_MS = 4000;
+
+/** Retire the "New" line once it has actually been seen (field
+ *  2026-10-16: "the 'new' marker here is stale — the thread was already
+ *  read, and the badge is gone"). Seen = the line on screen, the page
+ *  visible and focused, for DIVIDER_SEEN_MS. Never removes it while a
+ *  pointer is pressed — removing it mid-press crashed Chrome (2026-10-14);
+ *  a retirement that comes due during a press waits for the release. */
+function installSeenRetire(transcriptEl: HTMLElement, viewedChat: () => string | null): void {
+  if (typeof IntersectionObserver === 'undefined') return;
+  let pressed = false;
+  let pendingRetire = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let onScreen = false;
+  const retire = () => {
+    const chatId = viewedChat();
+    if (!chatId || transcriptStore.peekState(chatId)?.unreadFrom == null) return;
+    if (pressed) { pendingRetire = true; return; }
+    transcriptStore.setUnreadFrom(chatId, null);
+  };
+  const focused = () => (typeof document === 'undefined')
+    || (document.visibilityState === 'visible' && (typeof document.hasFocus !== 'function' || document.hasFocus()));
+  const arm = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (onScreen && focused()) timer = setTimeout(() => { timer = null; if (onScreen && focused()) retire(); else arm(); }, DIVIDER_SEEN_MS);
+  };
+  const io = new IntersectionObserver((entries) => {
+    onScreen = entries.some((e) => e.isIntersecting);
+    arm();
+  }, { root: transcriptEl, threshold: 0.5 });
+  let watched: Element | null = null;
+  const rewatch = () => {
+    const d = transcriptEl.querySelector('.unread-divider');
+    if (d === watched) return;
+    if (watched) io.unobserve(watched);
+    watched = d;
+    onScreen = false;
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (d) io.observe(d);
+  };
+  new MutationObserver(rewatch).observe(transcriptEl, { childList: true });
+  document.addEventListener('pointerdown', () => { pressed = true; }, true);
+  const release = () => {
+    pressed = false;
+    if (pendingRetire) { pendingRetire = false; setTimeout(retire, 0); }
+  };
+  document.addEventListener('pointerup', release, true);
+  document.addEventListener('pointercancel', release, true);
+  window.addEventListener('focus', arm);
+  window.addEventListener('blur', arm);
+  document.addEventListener('visibilitychange', arm);
 }

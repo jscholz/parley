@@ -126,4 +126,18 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(400);
   assert(!(await dividerAbove(page)), 'a read chat must not keep the divider');
   log('next visit (read): no divider ✓');
+
+  // Seen-retire (field 2026-10-16: a line left showing after he had read
+  // the thread looked stale): on screen + focused for 4 s → gone, no click.
+  await page.focus('#composer-input');
+  for (let i = 0; i < 6; i++) {
+    await page.keyboard.press('ArrowUp');
+    if (await page.evaluate(() => document.querySelector('#transcript .transcript-highlight')?.dataset.messageId) === 'msg_uf3') break;
+  }
+  await page.keyboard.press('u');
+  await pollUntil(page, () => !!document.querySelector('#transcript .unread-divider'), null, { timeout: 3000, label: 'U did not set the divider (seen-retire)' });
+  await page.waitForTimeout(1500);
+  assert(!!(await dividerAbove(page)), 'the line must still be there before it has been seen long enough');
+  await pollUntil(page, () => !document.querySelector('#transcript .unread-divider'), null, { timeout: 8000, label: 'the line should retire on its own once seen' });
+  log('line on screen for ~4 s with the window focused retires on its own ✓');
 }

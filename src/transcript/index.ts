@@ -174,7 +174,14 @@ function rerenderInto(chatId: string): void {
       replayWindow = null;
     }
   }
-  reconcile(el, renderSpecs);
+  // batchBubbles: never run chat.addLine's per-bubble autoScroll +
+  // whole-transcript snapshot persist here — this function already does
+  // ONE autoScroll and ONE debounced persist after the reconcile (below).
+  // Per-bubble, they made a render O(n²): each new bubble forced a layout
+  // and cloned + serialized the entire transcript so far. Field 2026-10-16
+  // (laptop dev-mode log): boot resume of a chat with 2,879 cached rows
+  // froze the page for 10.7 s and every click queued behind it.
+  reconcile(el, renderSpecs, { batchBubbles: true });
   // Switch-then-load: the row-click handler sets .transcript-loading
   // synchronously when flipping focus to a new chat. Clear it as soon
   // as the first non-empty render lands so the spinner disappears
@@ -228,6 +235,8 @@ function rerenderInto(chatId: string): void {
 // don't exist until the store mutation lands.
 
 interface ReplayWindowState {
+  /** First paint after page load over a (partial) boot snapshot — see resolveWindow. */
+  overPartialSnapshot?: boolean;
   chatId: string;
   /** Saved-scroll anchor the initial window must contain (mid-history
    *  restore); null → tail window. */
@@ -282,10 +291,11 @@ const BACKFILL_MAX_BATCH = 120;
  *  window contains that bubble so restoreDomAnchor can seat it. */
 export function requestWindowedReplay(
   chatId: string,
-  opts: { anchorKey?: string | null; anchorOffsetPx?: number | null } = {},
+  opts: { anchorKey?: string | null; anchorOffsetPx?: number | null; overPartialSnapshot?: boolean } = {},
 ): void {
   replayWindow = {
     chatId,
+    overPartialSnapshot: !!opts.overPartialSnapshot,
     anchorKey: opts.anchorKey ?? null,
     anchorOffsetPx: opts.anchorOffsetPx ?? null,
     armedAt: Date.now(),
@@ -320,8 +330,23 @@ function resolveWindow(el: HTMLElement, w: ReplayWindowState, specs: BubbleSpec[
   // hydrated the full transcript, or a re-replay of a rendered chat),
   // windowing would REMOVE rows above the window only to re-add them —
   // strictly worse than a full reconcile that reuses every node.
+  //
+  // Only when the DOM really holds (nearly) all of it, though: a boot
+  // snapshot is a PARTIAL render, and a local cache can hold thousands of
+  // rows. Field 2026-10-16: snapshot had the tail, cache had 2,879 rows,
+  // the bail rendered the ~535 missing bubbles in one 10.7 s block. When
+  // most rows are missing, window anyway — a few tail nodes get re-made,
+  // nothing blocks.
+  //
+  // Scoped to the boot first paint (w.overPartialSnapshot): elsewhere a
+  // DOM that holds the tail can hold rows a window would wrongly drop —
+  // a deep drill target spliced next to the tail, for one.
   const tailKey = specs[n - 1]?.key;
-  if (tailKey && el.querySelector(`[data-key="${cssEscape(tailKey)}"]`)) return false;
+  if (tailKey && el.querySelector(`[data-key="${cssEscape(tailKey)}"]`)) {
+    if (!w.overPartialSnapshot) return false;
+    const present = el.querySelectorAll(':scope > [data-key]').length;
+    if (present >= n * 0.9) return false;
+  }
   let start: number;
   let end: number | null = null;
   if (w.anchorKey) {

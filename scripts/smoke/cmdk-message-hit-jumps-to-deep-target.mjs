@@ -186,13 +186,24 @@ export default async function run({ page, log }) {
 
   // And the target must actually be in the viewport, not just in the
   // DOM. drillScrollTo centers it on screen with a flash.
-  const inView = await page.evaluate((sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    return r.top >= 0 && r.bottom <= window.innerHeight + 100;
-  }, targetSel);
-  assert(inView, 'target row must be in view after cmd+K click — drillScrollTo should have centered it');
+  // Poll: the row lands in the DOM one step before drillScrollTo seats it
+  // (rendering got faster on 2026-10-16 — batched — so a single
+  // immediate check raced the scroll). The contract is "it ends up
+  // centered", within a couple of frames, not "in view the instant it
+  // exists".
+  let inView = false;
+  let last = null;
+  for (let i = 0; i < 60 && !inView; i++) {
+    last = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), vh: window.innerHeight };
+    }, targetSel);
+    inView = !!last && last.top >= 0 && last.bottom <= last.vh + 100;
+    if (!inView) await page.waitForTimeout(50);
+  }
+  assert(inView, `target row must be in view after cmd+K click — drillScrollTo should have centered it (last ${JSON.stringify(last)})`);
 
   log('cmd+K deep message hit drilled to the target — around-window fetch + scroll ✓');
 }

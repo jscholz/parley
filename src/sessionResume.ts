@@ -144,6 +144,11 @@ function findNearestSurvivingAnchor(
   return null;
 }
 
+/** Chats rendered at least once since this page loaded. The first paint
+ *  of each is windowed like a switch (see the policy in
+ *  replaySessionMessages). */
+const paintedThisLoad = new Set<string>();
+
 /** Render a full set of session messages, replacing the current
  *  transcript. Same-session resumes (visibility flip, SSE reconnect,
  *  post-turn drawer refresh) skip the clear so renderedMessages.upsert
@@ -285,9 +290,16 @@ export function replaySessionMessages(
   //   - same-session re-render: leave any active window alone (its
   //     backfill continues; the slice is a superset of what's on
   //     screen).
+  //   - FIRST paint of this chat since page load (boot resume) counts as
+  //     a switch even though the view pointer already says "same
+  //     session": the DOM holds at most a stale snapshot, and the local
+  //     cache can hold thousands of rows (field 2026-10-16: boot resume
+  //     of a 2,879-row cache built every bubble in one go).
+  const firstPaintThisLoad = !paintedThisLoad.has(id);
+  paintedThisLoad.add(id);
   if (targetMessageId) {
     cancelWindowedReplay();
-  } else if (!sameSession) {
+  } else if (!sameSession || firstPaintThisLoad) {
     // isDurableMessageKey guards a LEGACY saved anchor from before this
     // check existed (getDomAnchor now refuses to save a synthetic key —
     // src/chat.ts, src/transcript/keys.ts). Without it a stale
@@ -303,6 +315,9 @@ export function replaySessionMessages(
     if (legacyMidChat) cancelWindowedReplay();
     else {
       requestWindowedReplay(id, {
+        // Boot first paint: the DOM may hold a partial snapshot that
+        // includes the tail; window anyway unless it holds nearly all.
+        overPartialSnapshot: sameSession && firstPaintThisLoad,
         anchorKey,
         // The saved offset rides along so backfill prepends keep
         // re-seating the SAVED anchor (not the drifting first-visible
