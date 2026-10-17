@@ -1084,3 +1084,62 @@ def test_session_title_max_len_constant(plugin):
     consumers (the rename + delete sync paths) in the 2026-05-17
     refactor; the package-root re-export is gone."""
     assert plugin.parley_route_conversations.SESSION_TITLE_MAX_LEN == 200
+
+
+# ── chat title across a compression rotation (2026-10-17) ───────────────
+
+def _with_title_source(state_db):
+    import sqlite3 as _sq
+    conn = _sq.connect(str(state_db))
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN title_source TEXT")
+    except _sq.OperationalError:
+        pass
+    conn.commit(); conn.close()
+
+
+def _set_src(state_db, sid, src):
+    import sqlite3 as _sq
+    conn = _sq.connect(str(state_db))
+    conn.execute("UPDATE sessions SET title_source = ? WHERE id = ?", (src, sid))
+    conn.commit(); conn.close()
+
+
+def _chain(state_db, chat, root_title, child_title):
+    prompt = "Parley prompt " * 30
+    _insert_session(state_db, "root", "parley", chat, 1000.0, title=root_title, system_prompt=prompt)
+    _insert_message(state_db, "root", "user", "hi", 1001.0)
+    _insert_session(state_db, "child", "parley", None, 2000.0, title=child_title, parent="root", system_prompt=prompt)
+    _insert_message(state_db, "child", "user", "follow-up", 2001.0)
+
+
+def test_untitled_compression_child_keeps_the_chat_title(plugin, state_db):
+    """Field: a rotation left the newest row untitled and the drawer lost
+    'Tax Return Project Support'."""
+    _with_title_source(state_db)
+    _chain(state_db, "chat-untitled-child", "Tax Return Project Support", None)
+    drawer = _make_adapter(plugin, state_db)._summaries_by_user_id(("parley",), 50)
+    assert drawer[0][3] == "Tax Return Project Support"
+
+
+def test_auto_title_on_the_child_does_not_replace_a_user_title(plugin, state_db):
+    _with_title_source(state_db)
+    _chain(state_db, "chat-llm-child", "My Name", "Financial Advice Question")
+    _set_src(state_db, "child", "llm")          # root: NULL provenance = user authority
+    drawer = _make_adapter(plugin, state_db)._summaries_by_user_id(("parley",), 50)
+    assert drawer[0][3] == "My Name"
+
+
+def test_a_newer_user_rename_wins(plugin, state_db):
+    _with_title_source(state_db)
+    _chain(state_db, "chat-renamed", "Old Auto", "Renamed By Hand")
+    _set_src(state_db, "root", "llm")
+    _set_src(state_db, "child", "user")
+    drawer = _make_adapter(plugin, state_db)._summaries_by_user_id(("parley",), 50)
+    assert drawer[0][3] == "Renamed By Hand"
+
+
+def test_legacy_schema_without_title_source_falls_back_to_newest_non_empty(plugin, state_db):
+    _chain(state_db, "chat-legacy", "Root Title", None)
+    drawer = _make_adapter(plugin, state_db)._summaries_by_user_id(("parley",), 50)
+    assert drawer[0][3] == "Root Title"

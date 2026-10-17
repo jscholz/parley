@@ -250,9 +250,24 @@ def _summaries_by_user_id(
     # uses, which every 30s health probe (limit=1) triggered, timing the
     # probe out. Now: aggregate + sort + LIMIT first (57ms at 200), then
     # two indexed lookups over each surviving row's own session ids.
+    # A chat's title comes from ALL its session rows, not just the newest
+    # (field 2026-10-17: a compression rotation started an untitled child
+    # row, so "Tax Return Project Support" vanished from the drawer, and
+    # hermes' auto-titler is free to name that child from the latest
+    # question — which would then have replaced his name). Highest
+    # authority wins — user (incl. NULL provenance, which hermes ranks as
+    # user) > llm > derived — newest first within the same authority;
+    # empty titles never win.
     title_sql = (
-        "SELECT COALESCE(title, '') FROM sessions WHERE id IN ({ids}) "
-        "ORDER BY started_at DESC LIMIT 1"
+        "SELECT title FROM sessions WHERE id IN ({ids}) "
+        "AND COALESCE(title, '') <> '' "
+        "ORDER BY CASE WHEN title_source IS NULL OR title_source = 'user' THEN 0 "
+        "WHEN title_source = 'llm' THEN 1 ELSE 2 END, started_at DESC LIMIT 1"
+    )
+    # Older state.db schemas lack title_source: newest non-empty title.
+    title_sql_legacy = (
+        "SELECT title FROM sessions WHERE id IN ({ids}) "
+        "AND COALESCE(title, '') <> '' ORDER BY started_at DESC LIMIT 1"
     )
     first_sql = (
         "SELECT content FROM messages WHERE session_id IN ({ids}) "
@@ -271,7 +286,10 @@ def _summaries_by_user_id(
             title = first_user = None
             if ids:
                 marks = ",".join(["?"] * len(ids))
-                hit = conn.execute(title_sql.format(ids=marks), ids).fetchone()
+                try:
+                    hit = conn.execute(title_sql.format(ids=marks), ids).fetchone()
+                except sqlite3.OperationalError:
+                    hit = conn.execute(title_sql_legacy.format(ids=marks), ids).fetchone()
                 title = hit[0] if hit else ""
                 hit = conn.execute(first_sql.format(ids=marks), ids).fetchone()
                 first_user = hit[0] if hit else None
