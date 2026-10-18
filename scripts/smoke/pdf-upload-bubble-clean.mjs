@@ -20,8 +20,12 @@ export function MOCK_SETUP(mock) {
   const t0 = Date.now() / 1000 - 300;
   const pages = Array.from({ length: 94 }, (_, i) => `[Image attached at: /tmp/parley-attach-oaixlbx5-${String(i + 1).padStart(2, '0')}.png]`).join('\n');
   const shots = Array.from({ length: 94 }, () => '[screenshot]').join('\n');
+  // The 2026-10-18 ingest: the PDF's text rides in the turn, fenced.
+  const pdfBlock = '[PDF attached: Jon Scholz US 2025 Tax Return.pdf — 94 pages. Page images included for page(s) 1-2. Saved at: /x/0-return.pdf.]\n'
+    + Array.from({ length: 30 }, (_, i) => `--- page ${i + 1} ---\nForm 1040 line ${i}: wages  12,345.00`).join('\n')
+    + '\n[end of PDF: Jon Scholz US 2025 Tax Return.pdf]';
   mock.addChat(CHAT, { title: 'Tax return', lastActiveAt: Date.now() - 1000, messages: [
-    { role: 'user', content: `Please audit the attached return.\n\n${pages}\n\n[94 images]\n${shots}`, parley_id: UMSG, timestamp: t0,
+    { role: 'user', content: `Please audit the attached return.\n\n${pdfBlock}\n\n${pages}\n\n[94 images]\n${shots}`, parley_id: UMSG, timestamp: t0,
       attachments: [{ idx: 0, url: URL0, mimeType: 'application/pdf', fileName: 'Jon Scholz US 2025 Tax Return.pdf', size: 568417 }] },
     { role: 'assistant', content: 'On it.', message_id: 'msg_pdf1', timestamp: t0 + 5 },
   ]});
@@ -42,7 +46,7 @@ export default async function run({ page, log }) {
     return { text, height: line.getBoundingClientRect().height, chip: line.querySelector('a.pdf-chip')?.getAttribute('href') || '' };
   }, UMSG);
   assert(/Please audit the attached return\./.test(bubble.text), `user words missing: ${bubble.text.slice(0, 80)}`);
-  assert(!/screenshot|Image attached|94 images/.test(bubble.text), `model-only notes leaked into the bubble: ${bubble.text.slice(0, 200)}`);
+  assert(!/screenshot|Image attached|94 images|PDF attached|Form 1040 line|end of PDF/.test(bubble.text), `model-only notes or PDF text leaked into the bubble: ${bubble.text.slice(0, 200)}`);
   assert(bubble.height < 400, `bubble should be compact, got ${bubble.height}px`);
   assert(/\/api\/parley\/uploads\//.test(bubble.chip) && !bubble.chip.startsWith('data:'), `chip must point at the saved copy: ${bubble.chip}`);
   log(`bubble: words only, ${Math.round(bubble.height)}px, chip → saved copy ✓`);

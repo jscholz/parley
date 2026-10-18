@@ -19,3 +19,12 @@ test('no-op fast path', () => {
   assert.equal(stripAttachmentNotes('plain'), 'plain');
   assert.equal(stripAttachmentNotes(''), '');
 });
+
+test('a fenced PDF text block (text + few pages ingest) is hidden', () => {
+  const block = '[PDF attached: return.pdf — 94 pages. Page images included for page(s) 1-2, 47. Saved at: /x.]\n--- page 1 ---\nForm 1040 …\n--- page 2 ---\nmore\n[end of PDF: return.pdf]';
+  assert.equal(stripAttachmentNotes(`Please check this.\n\n${block}\n[Image attached at: /tmp/a-p001.png]\n[3 images]`), 'Please check this.');
+});
+test('two PDFs and text after them', () => {
+  const b = (n: string) => `[PDF attached: ${n} — 2 pages. Page images included for page(s) 1-2.]\n--- page 1 ---\nx\n[end of PDF: ${n}]`;
+  assert.equal(stripAttachmentNotes(`Compare these.\n\n${b('a.pdf')}\n\n${b('b.pdf')}`), 'Compare these.');
+});

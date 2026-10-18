@@ -964,7 +964,12 @@ class ParleyAdapter(BasePlatformAdapter):
         media_types: List[str] = []
         message_type = MessageType.TEXT
         if attachments:
-            paths, mimes, dominant = self._materialize_attachments(attachments, user_message_id)
+            pdf_text: List[str] = []
+            paths, mimes, dominant = self._materialize_attachments(attachments, user_message_id, text_out=pdf_text)
+            if pdf_text:
+                # The document's text rides in the turn (fenced; the
+                # Parley bubble hides it). Page images are only a few.
+                text = ((text or "").rstrip() + "\n\n" + "\n\n".join(pdf_text)).strip()
             if paths:
                 media_urls = paths
                 media_types = mimes
@@ -1396,6 +1401,7 @@ class ParleyAdapter(BasePlatformAdapter):
 
     def _materialize_attachments(
         self, attachments: list, user_message_id: str = "",
+        text_out: Optional[List[str]] = None,
     ) -> Tuple[List[str], List[str], "MessageType"]:
         """Decode base64 ``data:`` URL payloads to tempfiles. Returns
         ``(paths, mime_types, dominant_message_type)``.
@@ -1443,13 +1449,31 @@ class ParleyAdapter(BasePlatformAdapter):
         # the /tmp copies the agent reads. Best-effort; never fails the turn.
         keep_idx = 0
 
-        def _keep(**kw: Any) -> None:
+        def _keep(**kw: Any) -> Optional[str]:
+            """Persist the durable copy; returns its path (or None)."""
             nonlocal keep_idx
             if not user_message_id:
-                return
-            _uploads.persist_user_attachment(
+                return None
+            row = _uploads.persist_user_attachment(
                 getattr(self, "_parley_db", None), user_message_id, keep_idx, **kw)
             keep_idx += 1
+            return (row or {}).get("path")
+
+        def _pdf_pages(pdf: Path, name: str, saved: Optional[str]) -> List[Path]:
+            """PDF → text (into text_out) + a few page images (2026-10-18:
+            a 94-page PDF as 94 inlined images made the session unable to
+            ever fit the window again). Falls back to full rasterization."""
+            from . import parley_pdf_ingest as _pdf
+            if text_out is not None:
+                try:
+                    plan = _pdf.prepare_pdf(pdf, name, saved or str(pdf), str(pdf.with_suffix("")))
+                except Exception:
+                    logger.exception("[parley] PDF ingest failed for %s — rasterizing all pages", name)
+                    plan = None
+                if plan is not None:
+                    text_out.append(plan.text_block)
+                    return list(plan.images)
+            return self._rasterize_pdf(pdf)
         for a in attachments:
             if not isinstance(a, dict):
                 continue
@@ -1466,13 +1490,16 @@ class ParleyAdapter(BasePlatformAdapter):
                     )
                     continue
                 mime = a.get("mimeType") or ""
-                _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
+                saved = _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
                 if mime.lower() == "application/pdf":
-                    pages = self._rasterize_pdf(staged)
-                    try:
-                        staged.unlink()
-                    except OSError:
-                        pass
+                    pages = _pdf_pages(staged, a.get("fileName") or "document.pdf", saved)
+                    # Keep the staged PDF when no durable copy exists — the
+                    # agent's note points at it for on-demand pages.
+                    if saved or text_out is None:
+                        try:
+                            staged.unlink()
+                        except OSError:
+                            pass
                     for page in pages:
                         paths.append(str(page))
                         mimes.append("image/png")
@@ -1499,7 +1526,7 @@ class ParleyAdapter(BasePlatformAdapter):
                 logger.warning("[parley] base64 decode failed for attachment")
                 continue
             ext = self._ext_for_mime(mime, a.get("fileName"))
-            _keep(file_name=a.get("fileName") or f"attachment{ext}", mime=mime, payload=payload)
+            saved = _keep(file_name=a.get("fileName") or f"attachment{ext}", mime=mime, payload=payload)
             fd, path = tempfile.mkstemp(
                 prefix="parley-attach-", suffix=ext, dir="/tmp",
             )
@@ -1517,11 +1544,12 @@ class ParleyAdapter(BasePlatformAdapter):
             # turn proceeds normally.
             if mime.lower() == "application/pdf":
                 pdf_path = Path(path)
-                pages = self._rasterize_pdf(pdf_path)
-                try:
-                    pdf_path.unlink()
-                except OSError:
-                    pass
+                pages = _pdf_pages(pdf_path, a.get("fileName") or "document.pdf", saved)
+                if saved or text_out is None:
+                    try:
+                        pdf_path.unlink()
+                    except OSError:
+                        pass
                 for page in pages:
                     paths.append(str(page))
                     mimes.append("image/png")

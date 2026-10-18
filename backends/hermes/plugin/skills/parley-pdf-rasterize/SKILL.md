@@ -1,12 +1,29 @@
 ---
 name: parley-pdf-rasterize
-description: Rasterize PDFs to PNG images using the Parley plugin pipeline (pdftoppm).
+description: Read PDFs text-first and render only the pages you need to see (pdftotext / pdftoppm -f P -l P).
 tags: [PDF, vision, parley, attachments]
 ---
 
 # Parley PDF Rasterization
 
-When you need to read a PDF (an attachment, a download, a scanned document, a contract), rasterize it to page images and read them with vision instead of trying to extract text directly.
+Read a PDF's TEXT first (`pdftotext -layout file.pdf -`; Parley uploads already
+arrive with their text inline). Rasterize only the specific pages where the
+image matters — a figure, a table's layout, a signature, a scanned page with
+no text layer — and look at those. Never rasterize a long document wholesale
+into one turn: every page image costs far more context than its text, and a
+turn that exceeds the model's window cannot be compressed (2026-10-17: a
+94-page PDF as 94 images made a chat unusable).
+
+### Render one page (the usual case)
+
+```bash
+# Page 47 only → /tmp/page.png
+pdftoppm -png -r 150 -f 47 -l 47 -singlefile /path/to/doc.pdf /tmp/page
+# A short range (pages 3-5) → /tmp/pages-3.png … /tmp/pages-5.png
+pdftoppm -png -r 150 -f 3 -l 5 /path/to/doc.pdf /tmp/pages
+# Text of a page range
+pdftotext -layout -f 30 -l 40 /path/to/doc.pdf -
+```
 
 ## Why This
 
