@@ -415,6 +415,10 @@
     color: var(--muted);
   }
   .header .header-title:empty { display: none; }
+  /* Click the chat title → show it in the sidebar (2026-10-20). */
+  .header .header-title[role="button"] { cursor: pointer; border-radius: 4px; }
+  .header .header-title[role="button"]:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--fg) 35%, transparent); }
+  .header .header-title[role="button"]:focus-visible { outline: 1px solid var(--primary); outline-offset: 2px; }
   /* Transcript control (2026-10-09): in the TOOLBAR row (an action, not
    * part of the session name), same vocabulary as the reader's "Open
    * chat" link (.doc-drawer-openchat): icon + muted text, underline on
@@ -6581,3 +6585,10 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
   background: transparent; border: none; cursor: pointer;
 }
 .phone-menu-item:hover, .phone-menu-item:focus-visible { background: color-mix(in srgb, var(--fg, #eee) 9%, transparent); }
+
+/* Revealed row (header title click): a brief sage pulse. */
+@keyframes sess-reveal-pulse {
+  0%, 35% { background: color-mix(in srgb, var(--primary, #8fbc8f) 26%, transparent); }
+  100% { background: transparent; }
+}
+#sessions-list li.sess-reveal { animation: sess-reveal-pulse 1.3s ease-out; }

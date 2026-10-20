@@ -681,6 +681,41 @@ function bucketFor(epochSec: number): string {
   return 'Older';
 }
 
+/** Bring the viewed chat's row into view and flash it (2026-10-20: "a
+ *  way to scroll to the session my transcript is viewing"). Called when
+ *  the sidebar opens and when the header title is clicked. If the row is
+ *  hidden by a lens chip, `force` switches back to All first. Returns
+ *  whether a row was revealed. */
+export function revealActiveRow(opts: { flash?: boolean; force?: boolean } = {}): boolean {
+  const listEl = document.getElementById('sessions-list');
+  const id = activeRowId();
+  if (!listEl || !id) return false;
+  const find = () => {
+    try { return listEl.querySelector<HTMLElement>(`li[data-chat-id="${CSS.escape(id)}"]`); } catch { return null; }
+  };
+  let li = find();
+  if (!li && opts.force && drawerLens !== 'all') {
+    drawerLens = 'all';
+    unreadLensKeep.clear();
+    syncLensUi();
+    renderListFiltered(listEl, id);
+    li = find();
+  }
+  if (!li) return false;
+  // Only scroll when it isn't already comfortably visible — no jolt for
+  // a row you can already see.
+  const box = li.getBoundingClientRect();
+  const view = (listEl.closest('.sidebar-content') as HTMLElement | null || listEl).getBoundingClientRect();
+  if (box.top < view.top || box.bottom > view.bottom) li.scrollIntoView({ block: 'center' });
+  if (opts.flash) {
+    li.classList.remove('sess-reveal');
+    void li.offsetWidth;   // restart the animation
+    li.classList.add('sess-reveal');
+    window.setTimeout(() => li!.classList.remove('sess-reveal'), 1400);
+  }
+  return true;
+}
+
 /** Pressed state of the lens chips. */
 function syncLensUi(): void {
   document.querySelectorAll<HTMLButtonElement>('#sess-lens .sess-lens-chip').forEach((b) => {

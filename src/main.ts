@@ -812,9 +812,35 @@ async function boot() {
       minWidthPx: 260,
       maxWidthPx: maxDrawerWidthPx,  // getter: tracks the setting live
     },
-    onOpen: () => sessionDrawer.refresh(),  // fresh data on open
+    // Fresh data on open, and the viewed chat's row is brought into view
+    // (2026-10-20). Reveal from the painted list at once (after layout),
+    // and again once the refresh lands in case the row only arrived then.
+    onOpen: () => {
+      requestAnimationFrame(() => sessionDrawer.revealActiveRow());
+      void sessionDrawer.refresh().then(() => sessionDrawer.revealActiveRow()).catch(() => {});
+    },
   });
-  void sidebarHandle;  // currently no caller needs the handle externally
+  // Header chat title → show this chat in the sidebar: open it, scroll to
+  // the row, flash it (2026-10-20). Discoverable via hover underline +
+  // "Show in sidebar" tooltip.
+  {
+    const titleEl = document.getElementById('header-title');
+    if (titleEl && sidebarHandle) {
+      titleEl.setAttribute('role', 'button');
+      titleEl.tabIndex = 0;
+      titleEl.title = 'Show in sidebar';
+      const reveal = () => {
+        const wasOpen = sidebarHandle.isOpen();
+        if (!wasOpen) sidebarHandle.open();
+        requestAnimationFrame(() => sessionDrawer.revealActiveRow({ flash: true, force: true }));
+        if (!wasOpen) setTimeout(() => sessionDrawer.revealActiveRow({ force: true }), 400);
+      };
+      titleEl.addEventListener('click', reveal);
+      titleEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(); }
+      });
+    }
+  }
 
   // Capture-phase pointerdown logger for click-freeze diagnosis. Pure
   // observation, but it installs timers/listeners, so keep it strictly
