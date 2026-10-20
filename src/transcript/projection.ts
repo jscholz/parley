@@ -29,7 +29,7 @@
  *     pendingSend's `messageId`. The dedup happens here, before the
  *     reconciler sees the list.
  */
-import { stripAttachmentNotes } from './attachmentNotes.ts';
+import { stripAttachmentNotes, pdfNotices } from './attachmentNotes.ts';
 import type {
   ActivityRowSpec,
   ActivityTool,
@@ -161,6 +161,8 @@ export function project(state: ChatState): BubbleSpec[] {
         // Machine-written attachment notes ("[Image attached at: …]",
         // "[screenshot]", "[94 images]") are for the model, not the bubble.
         const spec: UserBubbleSpec = { kind: 'user', key, text: stripAttachmentNotes(item.content || ''), timestamp: ts };
+        const notices = pdfNotices(item.content || '');
+        if (notices.length) spec.notices = notices;
         // Durable user attachments (user-upload lane, 2026-10-11): history
         // rows carry {url, mimeType, fileName, size}; the bubble renders
         // them like the live echo's dataUrl thumbnails.

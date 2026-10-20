@@ -2166,6 +2166,12 @@
     margin-top: 6px; font-size: 12px; color: var(--muted);
   }
   .line .turn-notice[data-kind="failure"] { color: #c44; }
+  /* A long PDF the agent got as text + some page images (2026-10-20). */
+  .line .attachment-notice {
+    margin-top: 6px; font-size: 12px; line-height: 1.4; color: var(--muted);
+    white-space: pre-line;
+  }
+  .line .attachment-notice::before { content: 'ⓘ '; }
 
   /* Wrap long URLs / unspaced tokens so a single line can't overflow
      the chat and summon a horizontal scrollbar. Wide inline content

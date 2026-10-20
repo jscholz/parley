@@ -29,3 +29,14 @@ export function stripAttachmentNotes(text: string): string {
   if (kept.length === lines.length) return text;
   return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
+
+/** The user-facing summary the plugin writes inside a REDUCED PDF's block
+ *  ("[PDF note: tax.pdf (94 pages) was reduced for the agent — …]",
+ *  2026-10-20). The bubble hides the block but shows these as a caption,
+ *  so he knows when the agent didn't see every page as an image. */
+const PDF_NOTE = /^\[PDF note: ([^\n]*)\]$/gm;
+
+export function pdfNotices(text: string): string[] {
+  if (!text || text.indexOf('[PDF note: ') < 0) return [];
+  return [...text.matchAll(PDF_NOTE)].map((m) => m[1].trim()).filter(Boolean);
+}

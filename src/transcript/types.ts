@@ -305,6 +305,9 @@ export interface UserBubbleSpec {
   /** Set when the turn this message started ended as a failure or was
    *  stopped AND no reply followed — the inline "no reply" notice. */
   turnNotice?: 'failure' | 'cancelled';
+  /** Captions for attachments the agent got in reduced form (a long PDF
+   *  sent as text + some page images — parley_pdf_ingest, 2026-10-20). */
+  notices?: string[];
 }
 
 export interface AssistantBubbleSpec {

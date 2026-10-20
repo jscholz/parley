@@ -1470,6 +1470,9 @@ let lastActiveId: string | null = null;
 function renderListFingerprint(sessions: any[], placeholderIds: string[], pinnedOrder: string[]): string {
   const rows = sessions.map(s =>
     `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`
+    // Unread flips the row between the "Unread" header and its date
+    // bucket even when the order doesn't change.
+    + `|${unreadFor(s.id) > 0 ? 'u' : ''}`
     // Draft snippet state: appearance/disappearance/edit of a row's
     // "Draft:" line must defeat the diff-bypass (bound chat contributes
     // '' — its row hides the snippet).
@@ -1579,9 +1582,12 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   // Recency rows carry time-bucket headers. Pinned rows deliberately
   // don't: that region is ordered by the user's pin order and is exempt
   // from recency, so dating it would imply an ordering it doesn't have.
+  // Unread rows are hoisted to the top (unread-first, above) — so they
+  // get their OWN "Unread" header. Dating them produced "Today",
+  // "Yesterday", "Today" again (his report 2026-10-20).
   let lastBucket = '';
   for (const s of restRows) {
-    const bucket = bucketFor(s.lastMessageAt);
+    const bucket = unreadFor(s.id) > 0 ? 'Unread' : bucketFor(s.lastMessageAt);
     if (bucket !== lastBucket) {
       listEl.appendChild(renderBucketHeader(bucket));
       lastBucket = bucket;

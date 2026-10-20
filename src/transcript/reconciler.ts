@@ -270,7 +270,7 @@ function createUser(spec: UserBubbleSpec, batch: boolean): HTMLElement | null {
     pending: spec.pending,
     batch,
   });
-  if (el) applyTurnAck(el, spec);
+  if (el) { applyTurnAck(el, spec); applyUserNotices(el, spec); }
   return el || null;
 }
 
@@ -316,6 +316,20 @@ function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
   const text = spec.turnNotice === 'cancelled' ? 'Stopped — no reply.' : 'Turn failed — no reply.';
   if (notice.textContent !== text) notice.textContent = text;
   notice.dataset.kind = spec.turnNotice;
+}
+
+/** "Reduced for the agent" captions under the attachment chips. */
+function applyUserNotices(el: HTMLElement, spec: UserBubbleSpec): void {
+  const want = (spec.notices || []).join('\n');
+  let box = el.querySelector(':scope > .attachment-notice') as HTMLElement | null;
+  if (!want) { box?.remove(); return; }
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'attachment-notice';
+    const anchor = el.querySelector(':scope > .line-attachment-downloads') || el.querySelector(':scope > .line-attachments');
+    if (anchor) anchor.after(box); else el.appendChild(box);
+  }
+  if (box.textContent !== want) box.textContent = want;
 }
 
 function createAssistant(spec: AssistantBubbleSpec, batch: boolean): HTMLElement | null {
@@ -665,6 +679,7 @@ function updateUser(el: HTMLElement, spec: UserBubbleSpec): void {
   }
   updateTimestamp(el, spec.timestamp);
   applyTurnAck(el, spec);
+  applyUserNotices(el, spec);
 }
 
 function ensureRetryRow(el: HTMLElement, spec: UserBubbleSpec): void {

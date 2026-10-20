@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { stripAttachmentNotes } from './attachmentNotes.ts';
+import { stripAttachmentNotes, pdfNotices } from './attachmentNotes.ts';
 
 test('a 94-page upload bubble keeps only the words', () => {
   const pages = Array.from({ length: 94 }, (_, i) => `[Image attached at: /tmp/parley-attach-oaixlbx5-${String(i + 1).padStart(2, '0')}.png]`).join('\n');
@@ -27,4 +27,14 @@ test('a fenced PDF text block (text + few pages ingest) is hidden', () => {
 test('two PDFs and text after them', () => {
   const b = (n: string) => `[PDF attached: ${n} — 2 pages. Page images included for page(s) 1-2.]\n--- page 1 ---\nx\n[end of PDF: ${n}]`;
   assert.equal(stripAttachmentNotes(`Compare these.\n\n${b('a.pdf')}\n\n${b('b.pdf')}`), 'Compare these.');
+});
+
+test('a reduced PDF block yields its user-facing note; the bubble text still hides it', () => {
+  const block = '[PDF attached: tax.pdf — 94 pages. REDUCED to fit the context window: page images for page(s) 1-2 only; extracted text of ALL pages below.]\n'
+    + '[PDF note: tax.pdf (94 pages) was reduced for the agent — full text of every page, page images for 1-2 only. Ask about specific pages if layout or signatures matter.]\n'
+    + '--- page 1 ---\nWages 1\n[end of PDF: tax.pdf]';
+  const msg = `Check this.\n\n${block}`;
+  assert.deepEqual(pdfNotices(msg), ['tax.pdf (94 pages) was reduced for the agent — full text of every page, page images for 1-2 only. Ask about specific pages if layout or signatures matter.']);
+  assert.equal(stripAttachmentNotes(msg), 'Check this.');
+  assert.deepEqual(pdfNotices('Complete PDF, no note'), []);
 });

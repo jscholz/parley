@@ -24,6 +24,11 @@ from typing import AsyncIterator, Optional
 from config import ProviderSpec
 from .stt import STTProvider, Transcript, register_stt_provider
 
+# Deepgram drops a streaming socket after ~10s with neither audio nor a
+# text message; send KeepAlive after this much silence on our side.
+KEEPALIVE_IDLE_S = 4.0
+KEEPALIVE_CHECK_S = 1.0
+
 logger = logging.getLogger(__name__)
 
 DEEPGRAM_WS_URL = "wss://api.deepgram.com/v1/listen"
@@ -153,7 +158,29 @@ class DeepgramSTT(STTProvider):
 
         send_task: Optional[asyncio.Task] = None
 
+        # KeepAlive while no audio flows (field 2026-10-18): when the
+        # phone's uplink stalls, the mic track delivers nothing, Deepgram
+        # closes the socket after ~10s ("did not receive audio data …",
+        # 1011) and the bridge reopened it every ~20s for minutes — 23
+        # closes in one evening, read by the health digest as a Deepgram
+        # failure. A KeepAlive text frame holds the one socket open until
+        # audio resumes (no audio is billed for it).
+        last_sent = [time.monotonic()]
+
+        async def _keepalive() -> None:
+            try:
+                while not self._closed:
+                    await asyncio.sleep(KEEPALIVE_CHECK_S)
+                    if time.monotonic() - last_sent[0] >= KEEPALIVE_IDLE_S:
+                        await ws.send(json.dumps({"type": "KeepAlive"}))
+                        last_sent[0] = time.monotonic()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # socket gone — the reader loop reports it
+                pass
+
         async def _pump_pcm() -> None:
+            ka = asyncio.create_task(_keepalive(), name="deepgram-stt-keepalive")
             try:
                 async for chunk in pcm_iter:
                     if self._closed:
@@ -161,9 +188,11 @@ class DeepgramSTT(STTProvider):
                     if not chunk:
                         continue
                     await ws.send(chunk)
+                    last_sent[0] = time.monotonic()
             except Exception as e:  # pragma: no cover
                 logger.warning("[deepgram-stt] pcm pump stopped: %s", e)
             finally:
+                ka.cancel()
                 # Tell Deepgram we're done so it flushes the final hypothesis.
                 try:
                     await ws.send(json.dumps({"type": "CloseStream"}))

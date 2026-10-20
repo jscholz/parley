@@ -5,7 +5,13 @@ inlined in ONE user turn. Compression can't shrink the turn being
 answered, so the session could never fit the model's window again
 ("Start a new session with /new") — and every later turn failed too.
 
-Now a PDF becomes:
+2026-10-20 rule — full fidelity whenever it fits:
+  * up to FULL_FIDELITY_MAX_PAGES pages (≈3k tokens per page image on the
+    live model), EVERY page goes in as an image, plus its text;
+  * longer PDFs are REDUCED as below, and both the agent and the user are
+    told so (a "[PDF note: …]" line the bubble shows as a caption).
+
+A reduced PDF becomes:
   * its extracted TEXT (pdftotext -layout, per page) inline in the turn,
     under a size budget — a fraction of the tokens page images cost;
   * page IMAGES for only a few pages: the first PREVIEW pages plus any
@@ -36,7 +42,12 @@ logger = logging.getLogger("hermes_plugins.parley.pdf")
 PREVIEW_PAGES = int(env_get("PARLEY_PDF_PREVIEW_PAGES", "") or "2")
 MAX_IMAGE_PAGES = int(env_get("PARLEY_PDF_MAX_IMAGE_PAGES", "") or "6")
 SPARSE_PAGE_CHARS = int(env_get("PARLEY_PDF_SPARSE_PAGE_CHARS", "") or "200")
-INLINE_TEXT_MAX_CHARS = int(env_get("PARLEY_PDF_INLINE_TEXT_MAX_CHARS", "") or "160000")   # ≈40k tokens
+# Whole text of a 94-page tax return compacts to ~258k chars (≈65k tokens):
+# fits, so a long PDF's text normally rides in complete.
+INLINE_TEXT_MAX_CHARS = int(env_get("PARLEY_PDF_INLINE_TEXT_MAX_CHARS", "") or "320000")   # ≈80k tokens
+# Every page as an image up to this many pages (≈3.1k tokens each on
+# gpt-6-astra per hermes' learned image cost → ≤ ~62k tokens).
+FULL_FIDELITY_MAX_PAGES = int(env_get("PARLEY_PDF_FULL_FIDELITY_PAGES", "") or "20")
 TIMEOUT_S = int(env_get("PARLEY_PDF_RASTERIZE_TIMEOUT_S", "") or "30")
 DPI = int(env_get("PARLEY_PDF_DPI", "") or "150")
 
@@ -88,13 +99,17 @@ def compact_layout(text: str) -> str:
 
 
 def choose_image_pages(texts: List[str], total: int, *, preview: int = PREVIEW_PAGES,
-                       cap: int = MAX_IMAGE_PAGES, sparse_chars: int = SPARSE_PAGE_CHARS) -> tuple:
-    """Which pages to show as images. Returns (pages, scanned). Pure; tested."""
+                       cap: int = MAX_IMAGE_PAGES, sparse_chars: int = SPARSE_PAGE_CHARS,
+                       full_pages: int = FULL_FIDELITY_MAX_PAGES) -> tuple:
+    """Which pages to show as images. Returns (pages, scanned). Every page
+    when the PDF is short enough (full fidelity). Pure; tested."""
     if total <= 0:
         return [], False
     lengths = [len((texts[i] if i < len(texts) else "").strip()) for i in range(total)]
     sparse = [i + 1 for i, n in enumerate(lengths) if n < sparse_chars]
     scanned = len(sparse) >= max(1, int(total * 0.6))
+    if total <= full_pages:
+        return list(range(1, total + 1)), scanned
     if scanned:
         return list(range(1, min(total, cap) + 1)), True
     chosen: List[int] = []
@@ -139,31 +154,54 @@ def _ranges(pages: List[int]) -> str:
 def build_text_block(name: str, total: int, texts: List[str], image_pages: List[int],
                      saved_path: Optional[str], *, scanned: bool,
                      max_chars: int = INLINE_TEXT_MAX_CHARS) -> str:
-    """The fenced block appended to the user's turn. Pure; tested."""
-    where = f" Saved at: {saved_path}." if saved_path else ""
-    render = (f" To see any other page, render it: pdftoppm -png -r 150 -f P -l P '{saved_path}' /tmp/page"
-              " (or use the parley-pdf-rasterize skill)." if saved_path else "")
-    head = (f"[PDF attached: {name} — {total} page{'s' if total != 1 else ''}. "
-            f"Page images included for page(s) {_ranges(image_pages)}.{where}{render}]")
-    if scanned:
-        body = ("(This PDF has little or no text layer — it looks scanned. Read it from the page images; "
-                f"pages beyond {_ranges(image_pages)} need rendering on request.)")
-        return f"{head}\n{body}\n[end of PDF: {name}]"
+    """The fenced block appended to the user's turn. Pure; tested.
+
+    Complete (every page an image): the head says so, no note.
+    Reduced: the head tells the agent exactly what is missing, and a
+    "[PDF note: …]" line carries the user-facing summary — the Parley
+    bubble hides the block but shows that line as a caption."""
+    pages_word = f"{total} page{'s' if total != 1 else ''}"
     parts: List[str] = []
-    used = 0
     cut_at = None
-    for i, t in enumerate(texts, start=1):
-        chunk = f"--- page {i} ---\n{t.rstrip()}\n"
-        if used + len(chunk) > max_chars:
-            cut_at = i
-            break
-        parts.append(chunk)
-        used += len(chunk)
-    if cut_at is not None:
-        parts.append(f"(Text budget reached — pages {cut_at}-{total} are not included here. "
-                     "Render or extract them from the saved PDF when needed: "
+    if not scanned:
+        used = 0
+        for i, t in enumerate(texts[:total], start=1):
+            chunk = f"--- page {i} ---\n{t.rstrip()}\n"
+            if used + len(chunk) > max_chars:
+                cut_at = i
+                break
+            parts.append(chunk)
+            used += len(chunk)
+    complete = len(set(image_pages)) >= total
+    where = f" Saved at: {saved_path}." if saved_path else ""
+    render = (f" Render any page: pdftoppm -png -r 150 -f P -l P '{saved_path}' /tmp/page"
+              " (or use the parley-pdf-rasterize skill)." if saved_path else "")
+    if scanned:
+        text_agent, text_user = "no usable text layer (looks scanned)", "no text layer (scanned)"
+    elif cut_at is None:
+        text_agent, text_user = "extracted text of ALL pages below", "full text of every page"
+    else:
+        text_agent = f"extracted text of pages 1-{cut_at - 1} only (pages {cut_at}-{total} omitted)"
+        text_user = f"text of pages 1–{cut_at - 1} only"
+    if complete:
+        head = (f"[PDF attached: {name} — {pages_word}. Complete: every page is attached as an image"
+                f"{'; ' + text_agent if not scanned else ' (no usable text layer — read the images)'}.{where}]")
+        note = ""
+    else:
+        head = (f"[PDF attached: {name} — {pages_word}. REDUCED to fit the context window: page images for "
+                f"page(s) {_ranges(image_pages)} only; {text_agent}. The user has been told it was reduced. "
+                "Before answering from a page that has no image, render it if layout, checkboxes, "
+                f"signatures, handwriting or figures could matter.{where}{render}]")
+        note = (f"[PDF note: {name} ({pages_word}) was reduced for the agent — {text_user}, "
+                f"page images for {_ranges(image_pages)} only. Ask about specific pages if layout or signatures matter.]\n")
+    if scanned:
+        body = "" if complete else f"(Pages beyond {_ranges(image_pages)} need rendering on request.)\n"
+    else:
+        body = "".join(parts)
+        if cut_at is not None:
+            body += (f"(Text budget reached — pages {cut_at}-{total} are not included here. Extract them when needed: "
                      f"pdftotext -layout -f {cut_at} -l {total} '{saved_path or name}' -)\n")
-    return f"{head}\n{''.join(parts)}[end of PDF: {name}]"
+    return f"{head}\n{note}{body}[end of PDF: {name}]"
 
 
 def prepare_pdf(path: Path, name: str, saved_path: Optional[str], out_prefix: str) -> Optional[PdfPlan]:
@@ -178,6 +216,7 @@ def prepare_pdf(path: Path, name: str, saved_path: Optional[str], out_prefix: st
     pages, scanned = choose_image_pages(texts, total)
     images = render_pages(path, pages, out_prefix)
     block = build_text_block(name, total, texts, pages, saved_path, scanned=scanned)
-    logger.info("[parley] PDF %s: %d pages → text %d chars, images for %s%s",
-                name, total, sum(len(t) for t in texts), _ranges(pages), " (scanned)" if scanned else "")
+    logger.info("[parley] PDF %s: %d pages → text %d chars, images for %s%s%s",
+                name, total, sum(len(t) for t in texts), _ranges(pages), " (scanned)" if scanned else "",
+                "" if len(pages) >= total else " — REDUCED")
     return PdfPlan(total_pages=total, image_pages=pages, images=images, text_block=block, scanned=scanned)

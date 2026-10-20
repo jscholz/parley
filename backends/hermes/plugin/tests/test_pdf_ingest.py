@@ -87,8 +87,11 @@ def test_text_block_is_fenced_and_budgeted(pdf):
     _, ing = pdf
     texts = [f"page {i} body " * 50 for i in range(1, 11)]
     b = ing.build_text_block("return.pdf", 10, texts, [1, 2], "/home/x/uploads/u/0-return.pdf", scanned=False, max_chars=2000)
-    assert b.startswith("[PDF attached: return.pdf — 10 pages. Page images included for page(s) 1-2.")
+    assert b.startswith("[PDF attached: return.pdf — 10 pages. REDUCED to fit the context window: page images for page(s) 1-2 only;")
     assert "/home/x/uploads/u/0-return.pdf" in b and "pdftoppm" in b
+    # the user-facing caption line, and it says the text was cut too
+    note = [l for l in b.splitlines() if l.startswith("[PDF note: ")]
+    assert len(note) == 1 and "text of pages 1–" in note[0] and "images for 1-2 only" in note[0]
     assert b.rstrip().endswith("[end of PDF: return.pdf]")
     assert "--- page 1 ---" in b and "Text budget reached" in b and "-f " in b
     assert len(b) < 3000
@@ -102,9 +105,11 @@ def test_prepare_pdf_real_file(pdf, tmp_path):
     p = tmp_path / "doc.pdf"; p.write_bytes(_text_pdf(pages))
     plan = ing.prepare_pdf(p, "doc.pdf", str(p), str(tmp_path / "doc"))
     assert plan.total_pages == 12
-    assert plan.image_pages == [1, 2, 8]
-    assert len(plan.images) == 3 and all(i.exists() and i.suffix == ".png" for i in plan.images)
+    # short PDF → full fidelity: every page as an image, plus the text
+    assert plan.image_pages == list(range(1, 13))
+    assert len(plan.images) == 12 and all(i.exists() and i.suffix == ".png" for i in plan.images)
     assert "taxable income schedule" in plan.text_block and "--- page 12 ---" in plan.text_block
+    assert "Complete: every page" in plan.text_block and "[PDF note: " not in plan.text_block
 
 
 @needs_poppler
@@ -131,3 +136,29 @@ def test_compact_layout_keeps_columns_readable(pdf):
     _, ing = pdf
     raw = "Wages            12,345.00      \nTax              1,234.00\n\n\n\nTotal    13,579.00   "
     assert ing.compact_layout(raw) == "Wages  12,345.00\nTax  1,234.00\n\nTotal  13,579.00"
+
+
+def test_short_pdf_is_full_fidelity(pdf):
+    _, ing = pdf
+    pages, scanned = ing.choose_image_pages(["x" * 900] * 20, 20, full_pages=20)
+    assert pages == list(range(1, 21)) and not scanned
+    pages, _ = ing.choose_image_pages(["x" * 900] * 21, 21, full_pages=20, preview=2, cap=6)
+    assert pages == [1, 2]
+
+
+def test_long_pdf_full_text_reduced_images_says_so(pdf):
+    """The tax-return shape: all text fits, only a few images — the agent
+    and the user are both told it was reduced."""
+    _, ing = pdf
+    texts = ["x" * 900] * 94
+    b = ing.build_text_block("tax.pdf", 94, texts, [1, 2, 47], "/u/0-tax.pdf", scanned=False)
+    assert "REDUCED" in b and "extracted text of ALL pages" in b and "The user has been told" in b
+    assert "[PDF note: tax.pdf (94 pages) was reduced for the agent — full text of every page, page images for 1-2, 47 only." in b
+    assert "--- page 94 ---" in b and "Text budget reached" not in b
+
+
+def test_complete_scanned_pdf_has_no_note(pdf):
+    _, ing = pdf
+    b = ing.build_text_block("scan.pdf", 3, ["", "", ""], [1, 2, 3], "/u/0-scan.pdf", scanned=True)
+    assert "Complete: every page" in b and "[PDF note: " not in b
+    assert b.endswith("[end of PDF: scan.pdf]")
