@@ -1468,3 +1468,28 @@ describe('projection: lifecycle backend (hermes turn_start/turn_end, 2026-09-23)
     assert.equal(user('umsg_3').turnNotice, undefined);
   });
 });
+
+describe('project: /steer sent to an idle agent (field 2026-10-20)', () => {
+  // The client sent "/steer X" under umsg K; hermes ran it as a plain
+  // message and stored "X". Mid-turn the read served the envelope row
+  // (K, "/steer X") AND hermes' not-yet-linked row ("X", no parley_id).
+  const K = 'umsg_1792520610599_rwd8m5ed';
+  const steer = '/steer include links to suppliers';
+  const plain = 'include links to suppliers';
+  it('collapses the two into ONE bubble, keeping the client key', () => {
+    const s = state({
+      durable: [
+        { id: '1792520610599', parley_id: K, role: 'user', content: steer, timestamp: T0 },
+        { id: '211693', role: 'user', content: plain, timestamp: T0 + 300 },
+      ],
+      pendingSends: [{ messageId: K, text: steer, sentAt: T0 } as PendingSend],
+    });
+    const users = project(s).filter((x) => x.kind === 'user');
+    assert.equal(users.length, 1, `expected 1 user bubble, got ${JSON.stringify(users.map((x: any) => [x.key, x.text]))}`);
+    assert.equal((users[0] as any).key, K);
+  });
+  it('a real later repeat of the same words still renders', () => {
+    const s = state({ durable: [u('m1', steer, T0), u('m2', plain, T0 + 300_000)] });
+    assert.equal(project(s).filter((x) => x.kind === 'user').length, 2);
+  });
+});

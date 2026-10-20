@@ -30,6 +30,16 @@
  *     reconciler sees the list.
  */
 import { stripAttachmentNotes, pdfNotices } from './attachmentNotes.ts';
+
+/** The text that identifies a USER message for twin matching. hermes runs
+ *  "/steer X" / "/queue X" sent to an idle agent as a plain message and
+ *  stores "X" — so mid-turn the client held "/steer X" under its own key
+ *  and hermes' not-yet-linked row "X" under another, and the content
+ *  match that collapses such twins missed: two bubbles (field 2026-10-20).
+ *  Display text is untouched; only matching ignores the prefix. */
+export function userIdentityText(text: string): string {
+  return stripAttachmentNotes(text || '').replace(/^\/(?:steer|queue)\s+/i, '').trim();
+}
 import type {
   ActivityRowSpec,
   ActivityTool,
@@ -176,8 +186,9 @@ export function project(state: ChatState): BubbleSpec[] {
         // the user twin of durableAssistantContentCounts, except the
         // matcher needs key + timestamp, so keep the specs themselves.
         if (item.content) {
-          let arr = durableUserSpecsByContent.get(item.content);
-          if (!arr) { arr = []; durableUserSpecsByContent.set(item.content, arr); }
+          const ck = userIdentityText(item.content);
+          let arr = durableUserSpecsByContent.get(ck);
+          if (!arr) { arr = []; durableUserSpecsByContent.set(ck, arr); }
           arr.push(spec);
         }
       }
@@ -332,7 +343,7 @@ export function project(state: ChatState): BubbleSpec[] {
           // identical send must render.
           const shadow = inflightReplayFinalizedUserKeys.has(key)
             ? takeContentShadowedUserSpec(
-                durableUserSpecsByContent, liveUserKeys, env.text || pend?.text || '', key)
+                durableUserSpecsByContent, liveUserKeys, userIdentityText(env.text || pend?.text || ''), key)
             : null;
           if (shadow) {
             userKeys.add(key);
@@ -1124,7 +1135,7 @@ function pickDuplicateLosers(
     // (field 2026-10-15: a 94-page PDF turn stored twice — once with the
     // "[Image attached at: …]" lines, once with "[screenshot]" lines).
     // Compare what the bubble actually shows.
-    const k = role === 'user' ? stripAttachmentNotes(it.content) : it.content;
+    const k = role === 'user' ? userIdentityText(it.content) : it.content;
     let arr = byContent.get(k);
     if (!arr) { arr = []; byContent.set(k, arr); }
     arr.push(it);
