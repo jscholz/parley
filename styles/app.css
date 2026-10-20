@@ -6566,3 +6566,18 @@
   background: color-mix(in srgb, var(--primary) 60%, transparent);
 }
 .unread-divider::after { flex: 0 0 18px; }
+
+/* Phone links (2026-10-20): tap → Call / Copy menu (phoneLinks.ts). */
+a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.phone-menu {
+  z-index: 10000; min-width: 190px; padding: 4px;
+  background: var(--panel, #1c1c1c); border: 1px solid color-mix(in srgb, var(--fg, #eee) 16%, transparent);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex; flex-direction: column;
+}
+.phone-menu-item {
+  display: block; text-align: left; padding: 9px 12px; border-radius: 7px;
+  font: inherit; font-size: 14px; color: var(--fg, #eee); text-decoration: none;
+  background: transparent; border: none; cursor: pointer;
+}
+.phone-menu-item:hover, .phone-menu-item:focus-visible { background: color-mix(in srgb, var(--fg, #eee) 9%, transparent); }

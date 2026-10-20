@@ -385,3 +385,24 @@ describe('miniMarkdown — math', () => {
     });
   });
 });
+
+describe('miniMarkdown — link targets and phone links (field 2026-10-20)', () => {
+  it('a masked tel: target is rebuilt from the label; no <strong> leaks into the href', () => {
+    const h = miniMarkdown('- **Landline:** [020 3974 6690](tel:+442****6690)');
+    assert.match(h, /<a class="phone-link" href="tel:02039746690" data-phone="020 3974 6690">020 3974 6690<\/a>/);
+    assert.ok(!/href="[^"]*strong/.test(h), h);
+    assert.match(h, /<strong>Landline:<\/strong>/);
+  });
+  it('an intact tel: target is kept (digits and + only)', () => {
+    const h = miniMarkdown('[call me](tel:+44 20 3974 6690)');
+    assert.match(h, /href="tel:\+442039746690"/);
+  });
+  it('asterisks and underscores inside ordinary URLs are not formatting', () => {
+    const h = miniMarkdown('see [docs](https://x.test/a_b_c/**/d) and **bold**');
+    assert.match(h, /<a href="https:\/\/x\.test\/a_b_c\/\*\*\/d">docs<\/a>/);
+    assert.match(h, /<strong>bold<\/strong>/);
+  });
+  it('a masked tel: target whose label is not a number renders as plain text', () => {
+    assert.ok(!/<a /.test(miniMarkdown('[the concierge](tel:+442****6690)')));
+  });
+});

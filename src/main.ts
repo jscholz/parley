@@ -64,6 +64,7 @@ import { getCaptureState } from './capture/recorder.ts';
 import { initTranscriptHighlight } from './transcriptHighlight.ts';
 import { installUnreadDividerRetire } from './markUnreadFrom.ts';
 import { installImageViewer } from './imageViewer.ts';
+import { installPhoneLinks } from './phoneLinks.ts';
 import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as approvalActions from './notifications/approvalActions.ts';
 import { installExternalLinkHandler } from './native/externalLinks.ts';
@@ -2721,6 +2722,7 @@ async function boot() {
     if (tEl) installUnreadDividerRetire(tEl, () => backend.getCurrentSessionId?.() || null);
     // Images and image links open in the in-app viewer, not a new window.
     if (tEl) installImageViewer(tEl);
+    installPhoneLinks(document);   // transcript + docs pane
   }
 
   /** Shared mount-site for the recorder bar (memo + turn-based both

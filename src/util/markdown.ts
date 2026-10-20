@@ -17,6 +17,31 @@ const COPY_ICON =
   '<path d="M3.2 10.2A1.3 1.3 0 0 1 2.5 9V3.8a1.3 1.3 0 0 1 1.3-1.3H9a1.3 1.3 0 0 1 1.2.8"/>' +
   '</svg>';
 
+/** Digits of a phone-number-looking label ("020 3974 6690", "+44 20 3974
+ *  6690", "(415) 555-0100"), or null. Pure; tested. */
+export function phoneFromLabel(label: string): string | null {
+  const plain = String(label).replace(/<[^>]+>/g, '').trim();
+  if (!/^\+?[\d\s().-]{7,24}$/.test(plain)) return null;
+  const digits = plain.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 15) return null;
+  return (plain.startsWith('+') ? '+' : '') + digits;
+}
+
+/** One markdown link. tel: links become phone links (tap → Call / Copy,
+ *  phoneLinks.ts); a tel: target hermes masked ("+442****6690") is
+ *  rebuilt from the label's digits, which the masker leaves alone. */
+function renderLink(label: string, href: string): string {
+  if (/^tel:/i.test(href)) {
+    const fromLabel = phoneFromLabel(label);
+    const target = href.slice(4).replace(/[^\d+]/g, '');
+    const masked = /\*/.test(href);
+    const number = masked || !target ? fromLabel : target;
+    if (!number) return label;   // unusable target and no number in the label: plain text, not a broken link
+    return `<a class="phone-link" href="tel:${number}" data-phone="${escapeHtml(fromLabel ? String(label).replace(/<[^>]+>/g, '').trim() : number)}">${label}</a>`;
+  }
+  return `<a href="${href}">${label}</a>`;
+}
+
 export function miniMarkdown(s) {
   // Math. Extracted from the RAW source, before escaping and before every
   // formatting rule, for the same reason fenced code blocks are extracted
@@ -58,6 +83,12 @@ export function miniMarkdown(s) {
   t = renderTables(t);
   // Inline code
   t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Link TARGETS are lifted out before the emphasis rules: a `*` or `_`
+  // inside a URL is not formatting. Field 2026-10-20: hermes' redaction
+  // masked a number to `tel:+442****6690` and the bold rule turned the
+  // href into "+44 2<strong><strong>6690" on the iPhone dial sheet.
+  const hrefs = [];
+  t = t.replace(/\]\(([^)]+)\)/g, (_, href) => { hrefs.push(href); return `](\u0000h${hrefs.length - 1}\u0000)`; });
   // Bold
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   // Italics (don't collide with bullet *)
@@ -82,8 +113,9 @@ export function miniMarkdown(s) {
   // after lists/inline rules so quoted text keeps its inline formatting,
   // and before paragraph wrapping (BLOCK_OPENER leaves <blockquote> alone).
   t = renderBlockquotes(t);
-  // Markdown links
-  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  // Markdown links (targets restored from the lift above).
+  t = t.replace(/\[([^\]]+)\]\(\u0000h(\d+)\u0000\)/g, (_, label, i) => renderLink(label, hrefs[Number(i)]));
+  t = t.replace(/\u0000h(\d+)\u0000/g, (_, i) => hrefs[Number(i)]);   // a lifted target outside a link
   // Angle-bracketed URLs: <url> → escaped as &lt;url&gt; by escapeHtml
   t = t.replace(/&lt;(https?:\/\/[^\s&]+?)&gt;/g, '<a href="$1">$1</a>');
   // Bare URLs
