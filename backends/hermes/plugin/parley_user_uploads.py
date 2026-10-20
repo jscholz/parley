@@ -150,6 +150,28 @@ def _nearby_send_attachments(parley_db: Any, chat_id: str, created_at: float, ta
     return None
 
 
+# hermes keeps a turn's recalled-memory block INSIDE the stored user row
+# when the turn is multimodal (an image/PDF attached): the injected text
+# part is durable for prompt-cache parity (hermes #71998). hermes strips it
+# on replay; the transcript read must too, or the bubble shows a 20k-char
+# "<memory-context>" dump instead of the user's words (field 2026-10-20,
+# a CAP photo upload; also 10-11 and 10-15 — every leak was an upload).
+_MEMORY_CONTEXT_RE = re.compile(r"\s*<\s*memory-context\s*>[\s\S]*?</\s*memory-context\s*>\s*", re.IGNORECASE)
+
+
+def strip_memory_context(text: str) -> str:
+    if not isinstance(text, str) or "memory-context" not in text:
+        return text
+    return _MEMORY_CONTEXT_RE.sub("\n\n", text).strip()
+
+
+def clean_user_rows(items: List[Dict[str, Any]]) -> None:
+    """Mutates `items`: user rows lose hermes' injected memory block."""
+    for it in items:
+        if it.get("role") == "user" and isinstance(it.get("content"), str):
+            it["content"] = strip_memory_context(it["content"])
+
+
 def attach_user_attachments(parley_db: Any, items: List[Dict[str, Any]], chat_id: Optional[str] = None) -> None:
     """Mutates `items`: user rows with a parley_id gain `attachments` when any
     exist. With `chat_id`, a user row whose parley_id is not a umsg send

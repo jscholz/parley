@@ -87,10 +87,22 @@ export default async function run({ page, log }) {
   }
   log(`badge total == Σ chips == Σ accessor == ${state.total}`);
 
-  // No below-the-fold unreads: both unread rows lead the unpinned region.
-  const leaders = new Set(state.firstUnpinnedIds);
-  if (!leaders.has('mock-unread-old') || !leaders.has('mock-marked')) {
-    throw new Error(`unread rows must sort to the top of the unpinned region, got leaders: ${state.firstUnpinnedIds.join(', ')}`);
+  // Recency order is kept (2026-10-20: no unread-first hoisting) — the
+  // deep unread rows sit at the bottom. Nothing counted is unreachable:
+  // the Unread chip shows the count and lists exactly those rows.
+  const ids = state.chips.map((c) => c.id);
+  if (state.firstUnpinnedIds.some((id) => ids.includes(id))) {
+    throw new Error(`unread rows must keep their recency position, got leaders: ${state.firstUnpinnedIds.join(', ')}`);
   }
-  log('unread rows (deep-recency + marked-only) lead the list — nothing counted is invisible');
+  const chipCount = await page.evaluate(() => document.querySelector('#sess-lens .sess-lens-chip[data-lens="unread"] .sess-lens-count')?.textContent);
+  if (chipCount !== '2') throw new Error(`Unread chip should count 2 chats, got ${chipCount}`);
+  await page.evaluate(() => {
+    document.body.classList.add('sidebar-expanded');
+    document.querySelector('#sess-lens .sess-lens-chip[data-lens="unread"]').click();
+  });
+  await pollUntil(page, () => {
+    const rows = [...document.querySelectorAll('#sessions-list li[data-chat-id]')].map((li) => li.dataset.chatId);
+    return rows.length === 2 && rows.includes('mock-unread-old') && rows.includes('mock-marked');
+  }, null, { timeout: 5_000, label: 'Unread chip did not list exactly the two unread chats' });
+  log('recency order kept; Unread chip (2) lists the deep-recency + marked-only rows');
 }

@@ -18,7 +18,16 @@ const NOTE_LINE = [
  *  2026-10-18): "[PDF attached: …]" … "[end of PDF: …]". */
 const PDF_BLOCK = /^\[PDF attached: [^\n]*\]\n[\s\S]*?\n\[end of PDF: [^\n]*\]$/gm;
 
+/** hermes' recalled-memory block, stored INSIDE a multimodal user row
+ *  (hermes keeps it durable for prompt-cache parity). The plugin strips it
+ *  on read (2026-10-20); this covers rows already cached in IDB. */
+const MEMORY_CONTEXT = /\s*<\s*memory-context\s*>[\s\S]*?<\/\s*memory-context\s*>\s*/gi;
+
 export function stripAttachmentNotes(text: string): string {
+  if (text && text.indexOf('memory-context') >= 0) {
+    const without = text.replace(MEMORY_CONTEXT, '\n\n').trim();
+    if (without !== text) return stripAttachmentNotes(without);
+  }
   if (!text || text.indexOf('[') < 0) return text;
   if (text.indexOf('[PDF attached: ') >= 0) {
     const without = text.replace(PDF_BLOCK, '');

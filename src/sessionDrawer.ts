@@ -24,7 +24,7 @@ import * as conversations from './conversations.ts';
 import * as sessionCache from './sessionCache.ts';
 import { log, diag } from './util/log.ts';
 import * as status from './status.ts';
-import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter } from './sessionFilter.ts';
+import { parseQuery, applyFilter, applyLens, DRAWER_LENSES, type DrawerLens } from './sessionFilter.ts';
 import { meetingCountFor, hasMeetings } from './capture/meetingsIndex.ts';
 import { getFilter as getStoredFilter, putFilter as putStoredFilter, clearFilter as clearStoredFilter } from './util/filterStore.ts';
 import { deleteSelected as bulkDeleteSelected } from './multiSelect.ts';
@@ -479,14 +479,15 @@ function mergePending(base: any[]): any[] {
  *  page reload restores the same filter. */
 let currentFilter: string = '';
 
-/** Canonical option-filter state (meeting-polish #25; grew out of the
- *  2026-07-09 ◉ meetings lens). The funnel button beside the filter
- *  input ENGAGES it; the "Has recording" option defaults to on, so
- *  engaging narrows the list to sessions with recordings attached.
- *  Deliberately session-local + per-device (module state, never
- *  persisted/synced) — it's a lens, not a mode, and the drawer must
- *  never BOOT filtered. */
-const recordingFilter = defaultRecordingFilter();
+/** Lens chips under the filter input — All · Meetings · Unread · Drafts
+ *  (2026-10-20, his call: "session sorting should be by recency, always";
+ *  WhatsApp-style chips instead of hoisting unread rows). Session-local +
+ *  per-device; the drawer always boots on All. */
+let drawerLens: DrawerLens = 'all';
+/** Unread lens: chats seen unread while the lens is on stay listed after
+ *  being read, until the lens changes (else opening one makes it vanish). */
+const unreadLensKeep = new Set<string>();
+function hasDraftFor(id: string): boolean { return !!composerDrafts.getDraft(id).trim(); }
 
 /** Debounce handles for the filter input. Render: 100ms (instant client-side
  *  re-render over the cached list). Persist: 500ms (IDB). Server: 250ms
@@ -678,6 +679,33 @@ function bucketFor(epochSec: number): string {
   if (t >= startOfToday - 7 * DAY) return 'This week';
   if (t >= startOfToday - 14 * DAY) return 'Last week';
   return 'Older';
+}
+
+/** Pressed state of the lens chips. */
+function syncLensUi(): void {
+  document.querySelectorAll<HTMLButtonElement>('#sess-lens .sess-lens-chip').forEach((b) => {
+    const on = b.dataset.lens === drawerLens;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+/** Counts on the Unread and Drafts chips (WhatsApp shows "Unread 9"). */
+function updateLensCounts(rows: any[]): void {
+  const row = document.getElementById('sess-lens');
+  if (!row) return;
+  let unread = 0;
+  for (const r of rows) if (r?.id && unreadFor(r.id) > 0) unread++;
+  const drafts = composerDrafts.draftChatIds().length;
+  const set = (lens: string, n: number) => {
+    const el = row.querySelector<HTMLElement>(`.sess-lens-chip[data-lens="${lens}"] .sess-lens-count`);
+    if (!el) return;
+    el.hidden = n <= 0;
+    const t = n > 99 ? '99+' : String(n);
+    if (el.textContent !== t) el.textContent = t;
+  };
+  set('unread', unread);
+  set('drafts', drafts);
 }
 
 function renderBucketHeader(label: string): HTMLLIElement {
@@ -1407,14 +1435,21 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   const textFiltered = currentFilter
     ? [...applyFilter(merged, parseQuery(currentFilter)), ...extras]
     : merged;
-  // Option filter (has-recording) stacks on top of the text filter.
-  const filtered = applyRecordingFilter(textFiltered, recordingFilter, hasMeetings);
-  // Empty list under a non-empty filter shows "No matches." instead of
-  // the generic "No past sessions yet." so the user knows it's the filter
-  // (not an empty server) hiding everything.
-  if (filtered.length === 0 && recordingFilter.engaged && recordingFilter.hasRecording && merged.length > 0) {
+  // Lens chip stacks on top of the text filter.
+  if (drawerLens === 'unread') for (const s of textFiltered) if (s?.id && unreadFor(s.id) > 0) unreadLensKeep.add(String(s.id));
+  const filtered = applyLens(textFiltered, drawerLens, {
+    hasRec: hasMeetings,
+    isUnread: (id) => unreadFor(id) > 0,
+    hasDraft: hasDraftFor,
+    keep: (id) => unreadLensKeep.has(id),
+  });
+  updateLensCounts(merged);
+  // Empty list under a lens says which lens is hiding everything.
+  if (filtered.length === 0 && drawerLens !== 'all' && merged.length > 0) {
     if (deferRebuildDuringTapGesture()) return;
-    listEl.innerHTML = '<li class="sess-empty">No sessions with recordings yet.</li>';
+    const empty: Record<string, string> = { meetings: 'No sessions with recordings yet.', unread: 'No unread chats.', drafts: 'No drafts.' };
+    listEl.innerHTML = `<li class="sess-empty">${empty[drawerLens]}</li>`;
+    lastRowsPrint = null;
     return;
   }
   if (filtered.length === 0 && currentFilter && merged.length > 0) {
@@ -1431,16 +1466,11 @@ function renderListFiltered(listEl: HTMLElement, activeId: string) {
   const isFresh = !!activeId
     && !merged.some(s => s.id === activeId)
     && !isRecentlyDeleted(activeId);
-  // UNREAD-FIRST ordering (field bug 2026-07-09, by-construction leg 2):
-  // the server force-includes unread chats in the window, but a chat at
-  // recency position ~70 rendered below the fold — the OS badge counted
-  // it while nothing visible showed it. Unread rows now bubble to the
-  // top of the unpinned region (stable within each group), so every
-  // badge unit has a visible chip. Same accessor as the badge
-  // (unreadFor), so the invariant holds for marked-unread too.
-  const ordered = [...filtered].sort((a: any, b: any) =>
-    (unreadFor(b.id) > 0 ? 1 : 0) - (unreadFor(a.id) > 0 ? 1 : 0));
-  renderList(listEl, ordered, activeId, isFresh);
+  // Recency order, always (2026-10-20 — rows used to hoist unread-first,
+  // which reshuffled the list on every read/unread). An unread chat deep
+  // in the list is still in it (the server force-includes unread chats),
+  // and the Unread chip — with its count — is how you get to them.
+  renderList(listEl, filtered, activeId, isFresh);
 }
 
 /** Fingerprint of the last successful renderList. Compared on every
@@ -1470,9 +1500,6 @@ let lastActiveId: string | null = null;
 function renderListFingerprint(sessions: any[], placeholderIds: string[], pinnedOrder: string[]): string {
   const rows = sessions.map(s =>
     `${s.id}|${s.title || ''}|${s.snippet || ''}|${s.messageCount || 0}|${s.lastMessageAt || ''}|${s.source || ''}|${sessionIdentity.nicknameFor(s.id) || ''}`
-    // Unread flips the row between the "Unread" header and its date
-    // bucket even when the order doesn't change.
-    + `|${unreadFor(s.id) > 0 ? 'u' : ''}`
     // Draft snippet state: appearance/disappearance/edit of a row's
     // "Draft:" line must defeat the diff-bypass (bound chat contributes
     // '' — its row hides the snippet).
@@ -1582,12 +1609,9 @@ function renderList(listEl: HTMLElement, sessions: any[], activeId: string, isFr
   // Recency rows carry time-bucket headers. Pinned rows deliberately
   // don't: that region is ordered by the user's pin order and is exempt
   // from recency, so dating it would imply an ordering it doesn't have.
-  // Unread rows are hoisted to the top (unread-first, above) — so they
-  // get their OWN "Unread" header. Dating them produced "Today",
-  // "Yesterday", "Today" again (his report 2026-10-20).
   let lastBucket = '';
   for (const s of restRows) {
-    const bucket = unreadFor(s.id) > 0 ? 'Unread' : bucketFor(s.lastMessageAt);
+    const bucket = bucketFor(s.lastMessageAt);
     if (bucket !== lastBucket) {
       listEl.appendChild(renderBucketHeader(bucket));
       lastBucket = bucket;
@@ -2718,57 +2742,35 @@ function ensureFilterInput(): HTMLInputElement | null {
   clearBtn.hidden = !input.value;
   header.appendChild(clearBtn);
 
-  // Canonical filter button (meeting-polish #25 — supersedes the
-  // 2026-07-09 ◉ meetings lens, one affordance instead of two): the
-  // funnel toggles the option filter ENGAGED/off, and an options strip
-  // under the header lists the available option(s) while engaged.
-  // Today's single option is "Has recording", DEFAULT ON — per the
-  // approved spec's "default true", read as: the option is pre-ticked
-  // when the filter UI is engaged, NOT that the drawer boots filtered
-  // (boot-filtering would hide most sessions). State is per-device and
-  // session-ephemeral by design (module vars — never IDB/synced).
+  // Lens chips (2026-10-20, replaces the funnel button + its single
+  // "Has recording" option): All · Meetings · Unread · Drafts, single-
+  // select, WhatsApp-style, on their own row under the filter input.
   const rerenderRows = () => {
     const listEl = document.getElementById('sessions-list');
     if (listEl) renderListFiltered(listEl, activeRowId());
   };
-  const filterBtn = document.createElement('button');
-  filterBtn.type = 'button';
-  filterBtn.id = 'sess-filter-btn';
-  filterBtn.className = 'sess-filter-btn';
-  filterBtn.setAttribute('aria-label', 'Filter sessions');
-  filterBtn.setAttribute('aria-pressed', 'false');
-  filterBtn.title = 'Filter sessions — "has recording" is on by default';
-  filterBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18l-7 8v5.5l-4 2.5v-8L3 5z"/></svg>';
-  header.appendChild(filterBtn);
-
-  const optionsRow = document.createElement('div');
-  optionsRow.id = 'sess-filter-options';
-  optionsRow.className = 'sess-filter-options';
-  optionsRow.hidden = true;
-  optionsRow.innerHTML =
-    '<label class="sess-filter-option" for="sess-filter-has-recording">'
-    + '<input type="checkbox" id="sess-filter-has-recording">'
-    + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none"/></svg>'
-    + '<span>Has recording</span></label>';
-  header.insertAdjacentElement('afterend', optionsRow);
-  const hasRecCb = optionsRow.querySelector<HTMLInputElement>('#sess-filter-has-recording')!;
-  hasRecCb.checked = recordingFilter.hasRecording;
-
-  const syncFilterUi = () => {
-    filterBtn.classList.toggle('active', recordingFilter.engaged);
-    filterBtn.setAttribute('aria-pressed', String(recordingFilter.engaged));
-    optionsRow.hidden = !recordingFilter.engaged;
-  };
-  filterBtn.onclick = () => {
-    recordingFilter.engaged = !recordingFilter.engaged;
-    syncFilterUi();
-    rerenderRows();
-  };
-  hasRecCb.addEventListener('change', () => {
-    recordingFilter.hasRecording = hasRecCb.checked;
-    rerenderRows();
-  });
-  syncFilterUi();
+  const lensRow = document.createElement('div');
+  lensRow.id = 'sess-lens';
+  lensRow.className = 'sess-lens';
+  lensRow.setAttribute('role', 'toolbar');
+  lensRow.setAttribute('aria-label', 'Show sessions');
+  for (const { lens, label } of DRAWER_LENSES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sess-lens-chip';
+    b.dataset.lens = lens;
+    b.innerHTML = `<span class="sess-lens-label">${label}</span><span class="sess-lens-count" hidden></span>`;
+    b.addEventListener('click', () => {
+      // Tapping the active chip goes back to All.
+      drawerLens = drawerLens === lens && lens !== 'all' ? 'all' : lens;
+      unreadLensKeep.clear();
+      syncLensUi();
+      rerenderRows();
+    });
+    lensRow.appendChild(b);
+  }
+  header.insertAdjacentElement('afterend', lensRow);
+  syncLensUi();
 
   // Re-render rows when the meetings index refreshes (boot fetch or a
   // capture_changed envelope) so badges + the lens stay live.

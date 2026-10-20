@@ -86,16 +86,15 @@ export default async function run({ page, log, mock }) {
     window.__badge = await import('/build/notifications/badge.mjs');
   });
 
-  // Badge hydrated: B's chip is up and B sits at the TOP (unread-first).
+  // Badge hydrated: B's chip is up. (Since 2026-10-20 the drawer keeps
+  // recency order — no unread-first resort — so B stays where it is; the
+  // mid-gesture unread change below must still never cost the tap.)
   await page.waitForFunction(
-    (id) => {
-      if (window.__badge.unreadFor(id) === 0) return false;
-      const first = document.querySelector('#sessions-list li[data-chat-id]');
-      return first?.dataset?.chatId === id;
-    },
+    (id) => window.__badge.unreadFor(id) > 0
+      && !!document.querySelector(`#sessions-list li[data-chat-id="${id}"] .sess-unread-chip`),
     CHAT_B, { timeout: 10_000, polling: 100 },
   );
-  log(`row ${CHAT_B} unread + sorted to top; beginning the tap gesture`);
+  log(`row ${CHAT_B} unread; beginning the tap gesture`);
 
   // Stash the exact node the finger lands on so we can verify it
   // survives the gesture (the invariant the fix establishes).

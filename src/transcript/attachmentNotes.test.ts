@@ -38,3 +38,8 @@ test('a reduced PDF block yields its user-facing note; the bubble text still hid
   assert.equal(stripAttachmentNotes(msg), 'Check this.');
   assert.deepEqual(pdfNotices('Complete PDF, no note'), []);
 });
+
+test('hermes memory-context block stored in a multimodal user row is hidden (field 2026-10-20)', () => {
+  const t = 'Can’t copy these numbers\nPls fix now and in future\n\n[Image attached at: /tmp/parley-attach-x.png]\n[screenshot]\n<memory-context>\n[System note: recalled]\n\n- fact one\n</memory-context>';
+  assert.equal(stripAttachmentNotes(t), 'Can’t copy these numbers\nPls fix now and in future');
+});

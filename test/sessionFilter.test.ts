@@ -5,7 +5,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseQuery, applyFilter, applyRecordingFilter, defaultRecordingFilter, matchSession, displayLabel } from '../src/sessionFilter.ts';
+import { parseQuery, applyFilter, applyLens, matchSession, displayLabel } from '../src/sessionFilter.ts';
 
 const sessions = [
   { id: 'parley-main', title: 'Project Hermes', snippet: 'migration plan', source: 'api_server' },
@@ -154,52 +154,32 @@ describe('sessionFilter.applyFilter', () => {
   });
 });
 
-describe('sessionFilter.applyRecordingFilter (meeting-polish #25)', () => {
+describe('sessionFilter.applyLens (drawer chips, 2026-10-20)', () => {
   const rows = [
-    { id: 'chat-rec', title: 'Standup', snippet: null, source: 'api_server' },
-    { id: 'chat-plain', title: 'Notes', snippet: null, source: 'api_server' },
-    { id: 'chat-rec-2', title: 'Retro', snippet: null, source: 'api_server' },
+    { id: 'a', title: 'Standup', snippet: null, source: 'api_server' },
+    { id: 'b', title: 'Notes', snippet: null, source: 'api_server' },
+    { id: 'c', title: 'Retro', snippet: null, source: 'api_server' },
+    { title: 'ghost', snippet: null, source: 'api_server' },
   ];
-  const recorded = new Set(['chat-rec', 'chat-rec-2']);
-  const hasRec = (id: string) => recorded.has(id);
-
-  it('defaults: disengaged, has-recording option pre-ticked', () => {
-    const st = defaultRecordingFilter();
-    assert.equal(st.engaged, false, 'the drawer must not boot filtered');
-    assert.equal(st.hasRecording, true, 'option defaults to on per spec');
+  const probes = {
+    hasRec: (id: string) => id === 'a' || id === 'c',
+    isUnread: (id: string) => id === 'b',
+    hasDraft: (id: string) => id === 'c',
+  };
+  it('all → pass-through, order kept', () => {
+    assert.deepEqual(applyLens(rows, 'all', probes), rows);
   });
-
-  it('disengaged → pass-through regardless of option', () => {
-    assert.deepEqual(
-      applyRecordingFilter(rows, { engaged: false, hasRecording: true }, hasRec),
-      rows,
-    );
+  it('meetings / unread / drafts narrow, preserving recency order', () => {
+    assert.deepEqual(applyLens(rows, 'meetings', probes).map((r: any) => r.id), ['a', 'c']);
+    assert.deepEqual(applyLens(rows, 'unread', probes).map((r: any) => r.id), ['b']);
+    assert.deepEqual(applyLens(rows, 'drafts', probes).map((r: any) => r.id), ['c']);
   });
-
-  it('engaged + option on → only sessions with recordings', () => {
-    const out = applyRecordingFilter(rows, { engaged: true, hasRecording: true }, hasRec);
-    assert.deepEqual(out.map((r) => r.id), ['chat-rec', 'chat-rec-2']);
+  it('unread lens keeps a chat you just read (keep probe)', () => {
+    const out = applyLens(rows, 'unread', { ...probes, isUnread: () => false, keep: (id: string) => id === 'b' });
+    assert.deepEqual(out.map((r: any) => r.id), ['b']);
   });
-
-  it('engaged + option unticked → pass-through (no option constrains)', () => {
-    assert.deepEqual(
-      applyRecordingFilter(rows, { engaged: true, hasRecording: false }, hasRec),
-      rows,
-    );
-  });
-
-  it('rows without an id never pass an engaged has-recording filter', () => {
-    const out = applyRecordingFilter(
-      [...rows, { title: 'ghost', snippet: null, source: 'api_server' }],
-      { engaged: true, hasRecording: true },
-      () => true,
-    );
-    assert.deepEqual(out.map((r: any) => r.id), ['chat-rec', 'chat-plain', 'chat-rec-2']);
-  });
-
-  it('stacks with the text filter (drawer order: text first, then option)', () => {
-    const texted = applyFilter(rows, parseQuery('re'));   // Retro + chat-rec ids…
-    const out = applyRecordingFilter(texted, { engaged: true, hasRecording: true }, hasRec);
-    assert.ok(out.every((r) => recorded.has(r.id)));
+  it('stacks with the text filter', () => {
+    const out = applyLens(applyFilter(rows, parseQuery('re')), 'meetings', probes);
+    assert.ok(out.every((r: any) => probes.hasRec(r.id)));
   });
 });

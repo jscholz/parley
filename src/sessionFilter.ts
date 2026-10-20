@@ -129,36 +129,35 @@ export function matchSession(s: SessionRow, q: FilterQuery): SessionMatch | null
   return matchCompiled(s, compile(q));
 }
 
-/** Drawer option-filter state (meeting-polish #25). `engaged` is the
- *  canonical filter button; `hasRecording` is the one option it hosts
- *  today, DEFAULT TRUE — i.e. engaging the filter narrows to sessions
- *  with meeting captures unless the user unticks the option. Both are
- *  per-device + session-ephemeral (module state in the drawer; never
- *  persisted or synced). */
-export type RecordingFilterState = {
-  engaged: boolean;
-  hasRecording: boolean;
+/** Drawer lens chips — All · Meetings · Unread · Drafts (2026-10-20,
+ *  WhatsApp-style; supersedes the funnel button whose one option was
+ *  "Has recording"). Single-select, per-device, session-ephemeral. The
+ *  list is ALWAYS recency-ordered; a lens only narrows it. */
+export type DrawerLens = 'all' | 'meetings' | 'unread' | 'drafts';
+export const DRAWER_LENSES: ReadonlyArray<{ lens: DrawerLens; label: string }> = [
+  { lens: 'all', label: 'All' },
+  { lens: 'meetings', label: 'Meetings' },
+  { lens: 'unread', label: 'Unread' },
+  { lens: 'drafts', label: 'Drafts' },
+];
+
+export type LensProbes = {
+  hasRec: (chatId: string) => boolean;
+  isUnread: (chatId: string) => boolean;
+  hasDraft: (chatId: string) => boolean;
+  /** Unread lens only: chats that were unread while the lens is on stay
+   *  listed after you read them (WhatsApp keeps the row until you leave
+   *  the filter — otherwise opening a chat makes it vanish under you). */
+  keep?: (chatId: string) => boolean;
 };
 
-/** Fresh default state: filter disengaged (the drawer must NOT boot
- *  filtered — that would hide most sessions), has-recording option
- *  pre-ticked so engaging the button immediately shows recorded
- *  sessions only. */
-export function defaultRecordingFilter(): RecordingFilterState {
-  return { engaged: false, hasRecording: true };
-}
-
-/** Apply the option filter on top of the text filter. Pure: the
- *  captures-per-chat lookup is injected (`hasRec`, backed by
- *  capture/meetingsIndex in the drawer). Disengaged — or engaged with
- *  the has-recording option unticked — passes everything through. */
-export function applyRecordingFilter<T extends SessionRow>(
-  sessions: T[],
-  state: RecordingFilterState,
-  hasRec: (chatId: string) => boolean,
-): T[] {
-  if (!state.engaged || !state.hasRecording) return sessions;
-  return sessions.filter((s) => !!s.id && hasRec(s.id));
+/** Apply a lens on top of the text filter. Pure; order-preserving. */
+export function applyLens<T extends SessionRow>(sessions: T[], lens: DrawerLens, p: LensProbes): T[] {
+  if (lens === 'all') return sessions;
+  const test = lens === 'meetings' ? p.hasRec
+    : lens === 'unread' ? (id: string) => p.isUnread(id) || !!p.keep?.(id)
+    : p.hasDraft;
+  return sessions.filter((s) => !!s.id && test(s.id));
 }
 
 /** Filter a session list against a parsed query. AND across all

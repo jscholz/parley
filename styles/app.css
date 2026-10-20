@@ -6191,33 +6191,30 @@
    2026-07-09 #7). Same ring+dot record glyph as everywhere. */
 .sess-meeting-badge { display: inline-flex; align-items: center; gap: 2px; color: var(--muted, #9a9a9a); }
 .sess-meeting-badge svg { width: 11px; height: 11px; }
-/* Canonical session-filter button (meeting-polish #25; supersedes the
-   ◉ meetings-lens toggle) + its options strip. Same quiet-icon-button
-   family as the old lens; active = filled funnel, same color logic
-   (field 2026-07-09: red would imply recording; state reads via fill
-   like iOS toggles). */
-.sess-filter-btn {
-  background: transparent; border: none; color: var(--muted, #8a8a8a);
-  padding: 4px; border-radius: 6px; cursor: pointer; flex: none;
-  display: inline-flex; align-items: center;
+/* Lens chips under the session filter (2026-10-20, WhatsApp-style):
+   All · Meetings · Unread · Drafts. Active chip = sage tint. */
+.sess-lens {
+  display: flex; gap: 6px; padding: 2px 12px 8px; overflow-x: auto;
+  scrollbar-width: none;
 }
-.sess-filter-btn svg { width: 15px; height: 15px; }
-.sess-filter-btn:hover { color: var(--fg, #eee); }
-.sess-filter-btn.active { background: rgba(255, 255, 255, 0.08); color: var(--fg, #eee); }
-.sess-filter-btn.active svg path { fill: currentColor; }
-.sess-filter-options {
-  display: flex; align-items: center; gap: 10px;
-  padding: 4px 12px 6px; font-size: 12.5px; color: var(--muted, #9a9a9a);
+.sess-lens::-webkit-scrollbar { display: none; }
+.sess-lens-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 12.5px; line-height: 1.3;
+  color: var(--muted, #9a9a9a); background: transparent;
+  border: 1px solid color-mix(in srgb, var(--fg, #eee) 18%, transparent);
 }
-.sess-filter-options[hidden] { display: none; }
-.sess-filter-option {
-  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+.sess-lens-chip:hover { color: var(--fg, #eee); border-color: color-mix(in srgb, var(--fg, #eee) 32%, transparent); }
+.sess-lens-chip.active {
+  color: var(--fg, #eee);
+  background: color-mix(in srgb, var(--primary, #8fbc8f) 22%, transparent);
+  border-color: color-mix(in srgb, var(--primary, #8fbc8f) 55%, transparent);
 }
-.sess-filter-option input { margin: 0; accent-color: var(--primary, #7aa2ff); }
-.sess-filter-option svg { width: 12px; height: 12px; }
-.sess-filter-option:hover { color: var(--fg, #eee); }
-#sidebar.collapsed .sess-filter-btn,
-#sidebar.collapsed .sess-filter-options { display: none; }
+.sess-lens-count { font-size: 11.5px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+.sess-lens-count[hidden] { display: none; }
+@media (pointer: coarse) { .sess-lens-chip { padding: 6px 13px; font-size: 13.5px; } }
+#sidebar.collapsed .sess-lens { display: none; }
 .doc-player-purge {
   display: flex; color: var(--muted, #aaa); flex: none; padding: 7px;
   background: transparent; border: none; cursor: pointer; border-radius: 6px;

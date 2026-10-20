@@ -162,3 +162,18 @@ def test_complete_scanned_pdf_has_no_note(pdf):
     b = ing.build_text_block("scan.pdf", 3, ["", "", ""], [1, 2, 3], "/u/0-scan.pdf", scanned=True)
     assert "Complete: every page" in b and "[PDF note: " not in b
     assert b.endswith("[end of PDF: scan.pdf]")
+
+
+def test_user_rows_lose_hermes_memory_context(pdf):
+    """Multimodal turns: hermes stores the recalled-memory block inside the
+    user row; the transcript read strips it (field 2026-10-20)."""
+    import importlib
+    plugin, _ = pdf
+    up = importlib.import_module(f"{plugin.__name__}.parley_user_uploads")
+    items = [
+        {"role": "user", "content": "Can't copy these\n\n[screenshot]\n<memory-context>\n[System note: x]\n- fact\n</memory-context>"},
+        {"role": "assistant", "content": "an answer quoting <memory-context> literally"},
+    ]
+    up.clean_user_rows(items)
+    assert items[0]["content"] == "Can't copy these\n\n[screenshot]"
+    assert items[1]["content"] == "an answer quoting <memory-context> literally"
