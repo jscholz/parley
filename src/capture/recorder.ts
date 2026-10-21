@@ -19,7 +19,11 @@
 // capture-pill-survives-session-switch smoke).
 
 import * as mic from '../audio/shared/capture.ts';
-import { putSegment, clearExpired, putLedger, getLedger, updateLedger, removeLedger } from './segmentStore.ts';
+import * as audioSession from '../audio/shared/session.ts';
+import {
+  putSegment, putPartialSegment, removeSegment, segmentKey, finalizePartials, clearExpired,
+  putLedger, getLedger, updateLedger, removeLedger,
+} from './segmentStore.ts';
 import { mintChatId } from '../conversations.ts';
 import { createUploader, type Uploader } from './uploader.ts';
 import { apiUrl } from '../apiBase.ts';
@@ -69,6 +73,19 @@ export interface CaptureUiState {
 }
 
 const SEGMENT_MS = 45_000;
+
+/** How often the running segment's chunks-so-far are rewritten to the
+ *  durable buffer (partial row). A page the OS kills mid-segment loses
+ *  at most this much audio instead of the whole segment. */
+const PARTIAL_FLUSH_MS = 5_000;
+
+/** Holder key for the background keepalive (audio/shared/ios-specific).
+ *  Held `always` for the life of a capture: the 2026-10-21 meeting was
+ *  lost because the native shell's page froze five seconds after the
+ *  screen locked, with nothing playing to keep it alive — the mic
+ *  indicator stayed on (WebKit's capture process held the mic) while
+ *  the recorder that consumes it was suspended for an hour. */
+const KEEPALIVE_KEY = 'meeting';
 
 /** Bounded startup (postmortem P1): the incident's getUserMedia hung
  *  for 21 minutes with no visible state. Past this, startup fails
@@ -191,8 +208,12 @@ function syncPending(): void {
 export function resumePendingUploads(): void {
   void clearExpired(LOCAL_RETENTION_MS)
     .catch(() => 0)
-    .then((n) => {
+    .then(async (n) => {
       if (n) log(`[capture] dropped ${n} buffered segment(s) past the ${Math.round(LOCAL_RETENTION_MS / 86400000)}d retention window`);
+      // A partial row at boot is a segment whose page died before the
+      // seal — promote it; it is the only copy of that audio.
+      const promoted = await finalizePartials().catch(() => 0);
+      if (promoted) log(`[capture] promoted ${promoted} partial segment(s) a previous session left unsealed`);
       ensureUploader().kick();
     });
 }
@@ -223,17 +244,41 @@ function mintCaptureId(): string {
  *  (postmortem P0 #1); mid-meeting callers route false into the
  *  interruption/recovery path instead. */
 function startSegment(): boolean {
-  if (!stream || !state.active) return false;
+  if (!stream || !state.active || !state.captureId) return false;
   const chunks: Blob[] = [];
   segStartMs = nowMs();
+  // The seq is claimed up front so the partial flushes below and the
+  // final seal share one durable key. An empty segment hands it back
+  // (see onstop) — the server orders by seq and tolerates gaps anyway.
+  const captureId = state.captureId;
+  const mySeq = seq++;
+  const t0Ms = segStartMs;
   const rec = new MediaRecorder(
     stream,
     mimeType ? { mimeType, audioBitsPerSecond: 32_000 } : { audioBitsPerSecond: 32_000 },
   );
   recorder = rec;
+  // Partial persistence: every PARTIAL_FLUSH_MS the chunks so far are
+  // written as a `partial` row (same key the seal will overwrite). The
+  // uploader ignores partial rows; boot-time finalizePartials promotes
+  // one a dead page left behind. One flush in flight at a time.
+  let lastFlushAt = Date.now();
+  let flushing = false;
+  let dirty = false;
+  const flushPartial = () => {
+    if (flushing || !dirty || state.captureId !== captureId) return;
+    flushing = true; dirty = false; lastFlushAt = Date.now();
+    const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+    void putPartialSegment({ captureId, seq: mySeq, t0Ms, mime: blob.type, blob })
+      .catch(() => { /* durability is best-effort; the seal still persists */ })
+      .finally(() => { flushing = false; });
+  };
   rec.ondataavailable = (ev: BlobEvent) => {
     lastChunkAt = Date.now();
-    if (ev.data && ev.data.size) { chunkCount += 1; chunks.push(ev.data); }
+    if (ev.data && ev.data.size) { chunkCount += 1; chunks.push(ev.data); dirty = true; }
+    // The dataavailable that accompanies stop() is followed by onstop's
+    // final put — no partial write races it.
+    if (rec.state === 'recording' && Date.now() - lastFlushAt >= PARTIAL_FLUSH_MS) flushPartial();
   };
   // A recorder error is a dead segment chain unless handled — route it
   // through the interruption path (seal what we have, re-acquire).
@@ -244,16 +289,19 @@ function startSegment(): boolean {
   rec.onstop = () => {
     if (recorder === rec) recorder = null;
     const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
-    if (blob.size > 0 && state.captureId) {
-      const mySeq = seq++;
-      void putSegment({
-        captureId: state.captureId, seq: mySeq, t0Ms: segStartMs,
-        mime: blob.type, blob,
-      }).then(() => {
+    if (blob.size > 0 && state.captureId === captureId) {
+      void putSegment({ captureId, seq: mySeq, t0Ms, mime: blob.type, blob }).then(() => {
         state.sealedSegments += 1;
         ensureUploader().kick();
         syncPending();
       });
+    } else {
+      // Nothing to keep (empty segment) or the capture was cancelled
+      // mid-segment (captureId cleared — the current segment is dropped,
+      // as before partial rows existed): remove any partial copy, and
+      // hand an unused seq back when no later segment has claimed one.
+      void removeSegment(segmentKey(captureId, mySeq)).catch(() => { /* nothing there */ });
+      if (blob.size === 0 && seq === mySeq + 1) seq = mySeq;
     }
     // Chain the next segment while the meeting is live (a stop()
     // requested by stopMeetingCapture flips state.active first). A
@@ -389,6 +437,11 @@ function healthSnapshot(): Record<string, unknown> {
     pending_uploads: state.uploaderPending,
     sealed_segments: state.sealedSegments,
     mime: mimeType || null,
+    // Was the page visible, and was anything keeping it alive? The
+    // 2026-10-21 audit trail could not say either — the discriminator
+    // between "locked phone froze the page" and "recorder died".
+    visibility: typeof document !== 'undefined' ? document.visibilityState : null,
+    keepalive: audioSession.isKeepaliveRunning(),
   };
 }
 
@@ -455,6 +508,7 @@ async function forceLocalStop(remoteStatus: string): Promise<void> {
   try { sealCurrent(); } catch { /* best effort */ }
   try { mic.release('meeting'); } catch { /* released */ }
   stream = null;
+  audioSession.releaseKeepalive(KEEPALIVE_KEY);
   state.active = false;
   state.phase = 'failed';
   // Bounded, so a data-loss notice can never become permanent chrome.
@@ -518,9 +572,12 @@ function startResumeReconcile(): void {
   reconcileWired = true;
   try {
     document.addEventListener('visibilitychange', () => {
+      // Both directions: the 'hidden' ping (fetch keepalive: true) is the
+      // last word the server hears before a possible freeze — it records
+      // whether the page went to the background with the keepalive playing.
+      void pingHealth();
       if (document.visibilityState !== 'visible') return;
       void reconcileWithServer('resume');
-      void pingHealth();     // ...and re-report immediately on wake
     });
     // A capture_changed envelope naming OUR capture is the fastest
     // possible notice. Previously this event had exactly one consumer
@@ -579,12 +636,18 @@ export async function startMeetingCapture(
   // its create POST, and phase alone can't tell the two apart.
   const myEpoch = ++startEpoch;
   emit();
+  // Keep the page alive from the FIRST synchronous statement of the
+  // start — this runs inside the user's tap, which is what unlocks
+  // background play() on iOS, and before any await a lock button could
+  // interleave with. Released on every exit from the capture lifecycle.
+  try { audioSession.holdKeepalive(KEEPALIVE_KEY, { always: true }); } catch { /* non-browser */ }
   // Scoped to THIS attempt: a stand-down followed by an immediate
   // restart means this closure can still fire (late create rejection,
   // late 409) while attempt N+1 already owns the state — idling it
   // would kill a start the user is currently watching come up.
   const failToIdle = () => {
     if (startEpoch !== myEpoch) return;
+    audioSession.releaseKeepalive(KEEPALIVE_KEY);
     state = { ...IDLE_STATE };
     emit();
   };
@@ -710,6 +773,7 @@ export async function startMeetingCapture(
 function standDownPendingStart(): boolean {
   if (state.active || state.phase !== 'starting') return false;
   log(`[capture] stood down pending start ${state.captureId || '(not yet created)'}`);
+  audioSession.releaseKeepalive(KEEPALIVE_KEY);
   state = { ...IDLE_STATE };
   emit();
   return true;
@@ -762,6 +826,7 @@ export async function stopMeetingCapture(): Promise<void> {
   if (!drainedInTime) {
     log(`[capture] ${captureId}: uploads still draining — stop deferred until they land`);
   }
+  audioSession.releaseKeepalive(KEEPALIVE_KEY);
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
@@ -799,6 +864,7 @@ export async function cancelMeetingCapture(): Promise<string | null> {
   sealCurrent();                       // stops the recorder; persist skipped (captureId cleared)
   try { mic.release('meeting'); } catch { /* fine */ }
   stream = null;
+  audioSession.releaseKeepalive(KEEPALIVE_KEY);
   const entry = await getLedger(captureId).catch(() => null);
   if (entry && !entry.registered) {
     // The server never heard of this capture, so there is nothing to

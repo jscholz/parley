@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -104,3 +105,33 @@ def test_native_routes(db, monkeypatch):
     r = _run(routes.handle_unsubscribe_native(ctx, _Req({"token": TOK_A})))
     assert r.status == 200 and json.loads(r.text)["removed"] is True and json.loads(r.text)["total"] == 0
     assert _run(routes.handle_unsubscribe_native(ctx, _Req({}))).status == 400
+
+
+def test_dispatch_system_reaches_web_and_native_verbatim_and_ignores_chat_gates(dispatcher, db):
+    """The capture stall warning (proxy capture.ts) is a safety alert: it
+    must arrive even when the meeting's chat is muted and the phone looks
+    engaged — a frozen page cannot un-engage itself. Incident 2026-10-21."""
+    state.upsert_subscription(db, endpoint="https://web/1", p256dh="p", auth="a", user_agent="t")
+    state.upsert_native_token(db, token=TOK_A, user_agent="iphone")
+    state.upsert_native_token(db, token=TOK_B, user_agent="old-iphone")
+    state.set_mute(db, "parley:meeting-1", True)
+    dispatcher.engagement._last_seen["parley:meeting-1"] = int(time.time() * 1000)  # looks engaged right now
+    out = dispatcher.dispatch_system({
+        "title": '⚠️ "Board meeting" may not be recording',
+        "body": "No audio has reached the server since it started 3m ago. Open Parley to check.",
+        "chat_id": "parley:meeting-1",
+        "tag": "capture-stall-cap_1",
+    })
+    assert out["web"] == 1 and out["native"] == 1 and out["pruned"] == 1 and "skipped" not in out
+    assert dispatcher._sent_web == ["https://web/1"]
+    tok, payload = dispatcher._sent_native[0]
+    assert tok == TOK_A
+    assert payload["title"] == '⚠️ "Board meeting" may not be recording', "title is delivered verbatim, no speaker/icon rewrite"
+    assert payload["tag"] == "capture-stall-cap_1" and payload["chat_id"] == "parley:meeting-1"
+    assert payload["url"].startswith("/?chat=parley%3Ameeting-1"), "tap deep-links to the meeting chat"
+    assert [r["token"] for r in state.list_native_tokens(db)] == [TOK_A], "dead token pruned like any other send"
+
+
+def test_dispatch_system_with_nobody_to_tell_says_so(dispatcher, db):
+    out = dispatcher.dispatch_system({"title": "t", "body": "b"})
+    assert out["skipped"] == "no_subscribers" and out["delivered"] == 0

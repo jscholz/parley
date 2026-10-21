@@ -70,3 +70,10 @@ the proxy. Send a test from the same panel. That's it.
   push 410s. Mutes, quiet hours and kind filters apply identically.
 - **Proxy**: `/api/parley/notifications/subscribe-native` and
   `unsubscribe-native` forward to the plugin.
+- **Server-originated alerts**: the capture stall warning ("… may not be
+  recording", `proxy/parley/capture.ts`) is posted to the plugin's
+  `/v1/push/system`, which delivers it verbatim to every web subscription
+  AND every APNs token, bypassing mutes / kind filters / engagement — it
+  is the one notification whose job is to reach a phone whose page may be
+  frozen. The proxy's own web-push store is only used when the plugin
+  does not own push. Delivery is audited per capture as `stall-push`.

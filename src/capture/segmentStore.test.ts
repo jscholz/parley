@@ -95,3 +95,36 @@ test('isClosedConnectionError recognises WebKit and Chromium wording', () => {
   assert.ok(isClosedConnectionError(new Error('The database connection is closing.')));
   assert.ok(!isClosedConnectionError(new Error('QuotaExceededError')));
 });
+
+// ── partial rows (2026-10-21) ─────────────────────────────────────────
+// A segment still being recorded is flushed every few seconds as a
+// `partial` row under the key the seal will overwrite. The uploader
+// never sees partial rows; boot promotes any a dead page left behind.
+
+test('partial rows are hidden from the uploader view and replaced by the seal under the same key', async () => {
+  const { setBackend, memoryBackend, putPartialSegment, putSegment, listPending } = await import('./segmentStore.ts');
+  setBackend(memoryBackend());
+  await putPartialSegment({ captureId: 'cap_9_aaaaaa', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: new Blob(['abc']) });
+  await putPartialSegment({ captureId: 'cap_9_aaaaaa', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: new Blob(['abcdef']) });
+  assert.equal((await listPending()).length, 1, 'rewrites land on one row');
+  assert.equal((await listPending({ includePartial: false })).length, 0, 'nothing uploadable yet');
+  await putSegment({ captureId: 'cap_9_aaaaaa', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: new Blob(['abcdefghi']) });
+  const rows = await listPending({ includePartial: false });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].partial, false);
+  assert.equal(rows[0].blob.size, 9, 'the seal replaced the partial blob');
+  setBackend(null);
+});
+
+test('finalizePartials promotes what a dead page left and drops empty leftovers', async () => {
+  const { setBackend, memoryBackend, putPartialSegment, finalizePartials, listPending } = await import('./segmentStore.ts');
+  setBackend(memoryBackend());
+  await putPartialSegment({ captureId: 'cap_9_bbbbbb', seq: 3, t0Ms: 135_000, mime: 'audio/mp4', blob: new Blob(['tail audio']) });
+  await putPartialSegment({ captureId: 'cap_9_bbbbbb', seq: 4, t0Ms: 180_000, mime: 'audio/mp4', blob: new Blob([]) });
+  assert.equal(await finalizePartials(), 1);
+  const rows = await listPending({ includePartial: false });
+  assert.deepEqual(rows.map((r) => r.seq), [3], 'the non-empty partial is now a real segment; the empty one is gone');
+  assert.equal((await listPending()).length, 1);
+  assert.equal(await finalizePartials(), 0, 'idempotent');
+  setBackend(null);
+});

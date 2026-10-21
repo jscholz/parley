@@ -17,7 +17,7 @@ import * as crypto from 'node:crypto';
 import {
   initCapture, createCapture, activateCapture, putSegment, stopCapture,
   patchCapture, addMark, getCapture, listCaptures, discardCapture,
-  purgeCapture, CaptureError, sweepCaptures,
+  purgeCapture, CaptureError, sweepCaptures, __setStallNotifierForTest,
 } from '../capture.ts';
 
 let dir = '';
@@ -809,4 +809,49 @@ test('no pings, a stale ping, or a stopped recorder all fall back to the audio-c
   await ageOut(a.id);
   await sweepCaptures();
   assert.equal((await getCapture(a.id)).status, 'complete');
+});
+
+test('stall: the warning is handed to the push lane naming the meeting, and its delivery is audited', async () => {
+  const sent: any[] = [];
+  __setStallNotifierForTest(async (payload) => { sent.push(payload); return { lane: 'test', delivered: 1, native: 1 }; });
+  try {
+    const c = await createCapture({ title: 'Board meeting' });
+    await activateCapture(c.id);
+    await patchCapture(c.id, { linkedChat: 'parley:chat-stall' });
+    await backdateAudio(dir, c.id, 3 * 60 * 1000);
+    await sweepCaptures();
+    assert.equal(sent.length, 1, 'exactly one warning per stall');
+    assert.match(sent[0].title, /Board meeting/);
+    assert.match(sent[0].title, /may not be recording/);
+    assert.match(sent[0].body, /No audio has reached the server/);
+    assert.equal(sent[0].chat_id, 'parley:chat-stall');
+    assert.equal(sent[0].tag, `capture-stall-${c.id}`);
+    const actions = await auditActions(c.id);
+    assert.ok(actions.includes('stall-push'), `delivery must be audited (got ${actions.join(', ')})`);
+    const raw = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
+    const line = raw.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.capture_id === c.id && e.action === 'stall-push');
+    assert.equal(line.detail.lane, 'test');
+    assert.equal(line.detail.native, 1);
+  } finally {
+    __setStallNotifierForTest(null);
+  }
+});
+
+test('stall: a push lane that throws is audited as a miss, and the stall itself still stands', async () => {
+  __setStallNotifierForTest(async () => { throw new Error('upstream down'); });
+  try {
+    const c = await createCapture({ title: 'Quiet room' });
+    await activateCapture(c.id);
+    await backdateAudio(dir, c.id, 3 * 60 * 1000);
+    await sweepCaptures();
+    const m = await readManifestRaw(dir, c.id);
+    assert.ok(m.stalled_since, 'the stall is recorded regardless of the push');
+    assert.ok((await auditActions(c.id)).includes('stall-push'), 'the miss is audited');
+    const raw = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
+    const line = raw.split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((e) => e.capture_id === c.id && e.action === 'stall-push');
+    assert.ok(line, 'the miss is audited');
+    assert.match(String(line.error), /upstream down/);
+  } finally {
+    __setStallNotifierForTest(null);
+  }
 });

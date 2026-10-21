@@ -30,6 +30,13 @@ export interface PendingSegment {
   mime: string;
   blob: Blob;
   createdAt: number;
+  /** A segment still being recorded (2026-10-21): the recorder rewrites
+   *  this row every few seconds with the chunks so far, so a page the OS
+   *  kills mid-segment loses seconds, not the whole 45 s. The uploader
+   *  skips partial rows; the seal replaces the row with the final blob
+   *  (same key, flag cleared), and boot-time `finalizePartials` promotes
+   *  whatever a dead page left behind — it is the only copy. */
+  partial?: boolean;
 }
 
 /** What the client knows about a capture it started, and what the
@@ -196,20 +203,53 @@ export function segmentKey(captureId: string, seq: number): string {
   return `${captureId}:${seq}`;
 }
 
-export async function putSegment(seg: Omit<PendingSegment, 'key' | 'createdAt'>): Promise<PendingSegment> {
+export async function putSegment(seg: Omit<PendingSegment, 'key' | 'createdAt' | 'partial'>): Promise<PendingSegment> {
   const full: PendingSegment = {
     ...seg,
     key: segmentKey(seg.captureId, seg.seq),
     createdAt: Date.now(),
+    partial: false,
   };
   await resolveBackend().put(full);
   return full;
 }
 
+/** Durable copy of a segment that is still recording — same key as the
+ *  final put, which replaces it. Never uploaded as-is. */
+export async function putPartialSegment(seg: Omit<PendingSegment, 'key' | 'createdAt' | 'partial'>): Promise<PendingSegment> {
+  const full: PendingSegment = {
+    ...seg,
+    key: segmentKey(seg.captureId, seg.seq),
+    createdAt: Date.now(),
+    partial: true,
+  };
+  await resolveBackend().put(full);
+  return full;
+}
+
+/** Boot-time: a partial row that survived to the next launch belongs to
+ *  a segment whose seal never ran (the page was killed or frozen until
+ *  the OS reclaimed it). Promote each to a final segment so the uploader
+ *  sends what exists. Returns how many were promoted. */
+export async function finalizePartials(): Promise<number> {
+  const backend = resolveBackend();
+  let n = 0;
+  for (const seg of await backend.getAll()) {
+    if (!seg.partial) continue;
+    if (!seg.blob || !seg.blob.size) { await backend.remove(seg.key); continue; }
+    await backend.put({ ...seg, partial: false });
+    n += 1;
+  }
+  return n;
+}
+
 /** All un-acked segments, upload order (capture, then seq). Boot-time
- *  resume calls this to re-enqueue whatever a previous session left. */
-export async function listPending(): Promise<PendingSegment[]> {
-  const all = await resolveBackend().getAll();
+ *  resume calls this to re-enqueue whatever a previous session left.
+ *  `includePartial: false` hides segments still being recorded (the
+ *  uploader's view). */
+export async function listPending(opts: { includePartial?: boolean } = {}): Promise<PendingSegment[]> {
+  const includePartial = opts.includePartial !== false;
+  const all = (await resolveBackend().getAll()).filter((s) => includePartial || !s.partial);
   all.sort((a, b) => a.captureId === b.captureId
     ? a.seq - b.seq
     : a.captureId.localeCompare(b.captureId));

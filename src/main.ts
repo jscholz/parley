@@ -730,8 +730,8 @@ async function boot() {
     // feature (skip 30s into a long answer). Not wired today.
     onSeekTo: (_seconds: number) => { /* reserved */ },
   });
-  if (!audioSession.isStandalone()) {
-    log('NOTE: not running as installed PWA — background audio will be limited');
+  if (!audioSession.supportsBackgroundAudio()) {
+    log('NOTE: not running as installed PWA or native shell — background audio will be limited');
   }
 
   // Pocket lock — full-screen overlay with swipe-to-unlock. Keeps tab

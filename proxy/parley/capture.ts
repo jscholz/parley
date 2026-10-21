@@ -477,24 +477,62 @@ const DISCARD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  *  The copy names the ACTION, not the diagnosis: the user cannot fix a
  *  stalled uploader, but they can look at their phone — which is all
  *  that was needed on 2026-08-27 to save the meeting. */
+export interface StallWarningPayload {
+  title: string;
+  body: string;
+  chat_id?: string;
+  tag: string;
+}
+
+/** Where the warning goes. Push ownership decides the lane: when the
+ *  hermes plugin owns push (PARLEY_PUSH_OWNED_BY_PLUGIN) it holds every
+ *  subscription \u2014 web AND the native shell's APNs tokens \u2014 and this
+ *  proxy's own store is empty, which is exactly how the 2026-10-21
+ *  warning was "sent" to nobody while a phone with a registered APNs
+ *  token sat in the meeting. Returns a delivery summary for the audit. */
+type StallNotifier = (payload: StallWarningPayload) => Promise<Record<string, unknown>>;
+
+async function defaultStallNotifier(payload: StallWarningPayload): Promise<Record<string, unknown>> {
+  const { isPushOwnedByPlugin, delegateSystemPush } = await import('./notifications/delegate.ts');
+  if (isPushOwnedByPlugin()) {
+    const r = await delegateSystemPush(payload);
+    return { lane: 'plugin', status: r.status, ...(r.body && typeof r.body === 'object' ? r.body : {}) };
+  }
+  const { dispatchPush } = await import('./notifications/dispatch.ts');
+  const r = await dispatchPush(payload);
+  return { lane: 'proxy', ...r };
+}
+
+let stallNotifier: StallNotifier = defaultStallNotifier;
+
+/** Test seam: capture the payload instead of sending it. */
+export function __setStallNotifierForTest(fn: StallNotifier | null): void {
+  stallNotifier = fn ?? defaultStallNotifier;
+}
+
 async function warnStalledCapture(m: CaptureManifest, silentForMs: number): Promise<void> {
+  const mins = Math.max(1, Math.round(silentForMs / 60000));
+  const body = m.segments.length === 0
+    ? `No audio has reached the server since it started ${mins}m ago. Open Parley to check.`
+    : `Audio stopped arriving ${mins}m ago (${m.segments.length} segments saved). Open Parley to check.`;
+  const payload: StallWarningPayload = {
+    title: `\u26a0\ufe0f "${m.title}" may not be recording`,
+    body,
+    chat_id: m.linked_chat || undefined,
+    // Stable tag: a stall that persists across sweeps must not stack
+    // duplicate banners. (Re-warning is already edge-triggered by
+    // stalled_since; this is belt-and-braces for multi-device.)
+    tag: `capture-stall-${m.id}`,
+  };
   try {
-    const { dispatchPush } = await import('./notifications/dispatch.ts');
-    const mins = Math.max(1, Math.round(silentForMs / 60000));
-    const body = m.segments.length === 0
-      ? `No audio has reached the server since it started ${mins}m ago. Open Parley to check.`
-      : `Audio stopped arriving ${mins}m ago (${m.segments.length} segments saved). Open Parley to check.`;
-    await dispatchPush({
-      title: `\u26a0\ufe0f "${m.title}" may not be recording`,
-      body,
-      chat_id: m.linked_chat || undefined,
-      // Stable tag: a stall that persists across sweeps must not stack
-      // duplicate banners. (Re-warning is already edge-triggered by
-      // stalled_since; this is belt-and-braces for multi-device.)
-      tag: `capture-stall-${m.id}`,
-    });
+    const result = await stallNotifier(payload);
+    // Audited so the trail answers "did the warning reach a device?" \u2014
+    // the one question the 2026-10-21 log could not.
+    void audit(m, 'stall-push', { actor: { source: 'sweep' }, detail: result });
   } catch (e) {
-    console.warn(`[capture] stall push failed for ${m.id}: ${String((e as Error)?.message || e)}`);
+    const error = String((e as Error)?.message || e);
+    console.warn(`[capture] stall push failed for ${m.id}: ${error}`);
+    void audit(m, 'stall-push', { actor: { source: 'sweep' }, error, detail: { lane: 'none' } });
   }
 }
 
@@ -908,6 +946,10 @@ export interface CaptureHealth {
   pending_uploads?: number;
   sealed_segments?: number;
   mime?: string;
+  /** document.visibilityState on the client at ping time. */
+  visibility?: string | null;
+  /** Was the client's background keepalive element playing? */
+  keepalive?: boolean;
 }
 
 function healthPath(id: string): string {
@@ -922,6 +964,10 @@ function healthSignature(h: CaptureHealth): string {
     String(h.track_muted), String(h.track_enabled),
     // Not the count — just whether audio is flowing at all.
     (h.chunks ?? 0) > 0 ? 'chunks' : 'no-chunks',
+    // Page visibility + keepalive (2026-10-21): the "hidden, keepalive
+    // playing" line before a silence is what separates a frozen page
+    // from a dead recorder.
+    h.visibility ?? '-', h.keepalive === undefined ? '-' : String(h.keepalive),
   ].join('|');
 }
 

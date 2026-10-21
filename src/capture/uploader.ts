@@ -321,7 +321,11 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
     running = true;
     try {
       for (;;) {
-        const queue = (await listPending()).filter((s) => !parked.has(s.key) && !parkedCaptures.has(s.captureId));
+        // Partial rows are segments still being recorded — the seal
+        // replaces them; uploading one would hand the server a prefix
+        // it later refuses to overwrite (same seq, different sha → 409).
+        const queue = (await listPending({ includePartial: false }))
+          .filter((s) => !parked.has(s.key) && !parkedCaptures.has(s.captureId));
         pending = queue.length;
         if (!queue.length) {
           // Nothing to upload: register captures the server hasn't met…

@@ -149,6 +149,17 @@ export async function delegateUnsubscribe(req: http.IncomingMessage, res: http.S
   } catch (e: any) { sendJson(res, 400, { error: 'bad_body', detail: e?.message }); }
 }
 
+/** Server-originated alert (capture stall warning) → plugin
+ *  `/v1/push/system`, which fans it out verbatim to every web
+ *  subscription and APNs token it holds, bypassing the per-chat gates
+ *  that exist for agent chatter. Throws on network failure so the
+ *  caller can audit the miss. */
+export async function delegateSystemPush(payload: {
+  title: string; body: string; chat_id?: string; tag?: string; url?: string;
+}): Promise<ForwardResult> {
+  return forwardRaw('/v1/push/system', 'POST', payload);
+}
+
 /** Native (APNs) device tokens from the Capacitor shell — plugin-owned store + sender. */
 export async function delegateSubscribeNative(req: http.IncomingMessage, res: http.ServerResponse) {
   try {

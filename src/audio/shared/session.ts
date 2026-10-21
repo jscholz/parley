@@ -39,8 +39,14 @@ export {
   prepareForCapture,
   prepareForPlayback,
   isStandalone,
+  isCapShell,
+  supportsBackgroundAudio,
   getKeepaliveEl,
   setListening,
+  holdKeepalive,
+  releaseKeepalive,
+  isKeepaliveRunning,
+  keepaliveHolderKeys,
   ensureIOSAudioSessionPrimed,
 } from './ios-specific.ts';
 
@@ -71,7 +77,7 @@ export function init(opts: SessionHandlers = {}) {
   handlers = opts;
   initMediaSession();
   initLifecycleLogging();
-  log('audio session: init (standalone=', iosSpecific.isStandalone(), ')');
+  log('audio session: init (standalone=', iosSpecific.isStandalone(), ', cap=', iosSpecific.isCapShell(), ')');
 }
 
 async function initMediaSession() {

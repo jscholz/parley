@@ -742,3 +742,66 @@ class PushDispatcher:
         )
         return {"delivered": delivered + native["delivered"], "pruned": pruned + native["pruned"],
                 "web": delivered, "native": native["delivered"]}
+
+    def dispatch_system(self, payload: Dict) -> Dict:
+        """Server-originated safety alert — today the capture stall
+        warning ("<meeting> may not be recording", proxy capture.ts).
+
+        Delivered VERBATIM (``title``/``body``/``tag``/``url`` as given) to
+        every web subscription and every APNs token, bypassing the
+        per-chat gates (kind prefs, engagement, mute) that exist for
+        agent chatter: the user is in a meeting believing it is being
+        recorded, and a frozen phone cannot report itself engaged.
+        Incident 2026-10-21: the proxy pushed this warning to its own
+        empty web-push store while the phone's APNs token lived here.
+        Returns ``{delivered, pruned, web, native}``.
+        """
+        title = str(payload.get("title") or "Parley")
+        body = str(payload.get("body") or "")
+        chat_id = payload.get("chat_id") if isinstance(payload.get("chat_id"), str) else ""
+        tag = payload.get("tag") if isinstance(payload.get("tag"), str) and payload.get("tag") else (chat_id or "parley")
+        url = payload.get("url") if isinstance(payload.get("url"), str) and payload.get("url") else "/"
+        if url == "/" and chat_id:
+            url_chat_id = chat_id if ":" in chat_id else f"parley:{chat_id}"
+            url = f"/?chat={quote(url_chat_id, safe='')}"
+        payload_dict: Dict[str, Any] = {
+            "title": title[:120], "body": body[:PUSH_BODY_MAX_CHARS], "chat_id": chat_id, "tag": tag, "url": url,
+        }
+        subs = list_subscriptions(self.db)
+        native_tokens = list_native_tokens(self.db)
+        if not subs and not native_tokens:
+            logger.warning("skip system tag=%s reason=no_subscribers", tag)
+            return {"delivered": 0, "pruned": 0, "web": 0, "native": 0, "skipped": "no_subscribers"}
+        vapid = self._ensure_vapid() if subs else None
+        payload_json = json.dumps(payload_dict)
+        delivered = pruned = 0
+        for sub in subs:
+            wp_sub = {"endpoint": sub["endpoint"], "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}}
+            try:
+                webpush(
+                    subscription_info=wp_sub,
+                    data=payload_json,
+                    vapid_private_key=vapid["private_key"],
+                    vapid_claims={"sub": vapid["subject"]},
+                    # Short TTL: a stall warning that arrives after the
+                    # meeting is noise, not news.
+                    ttl=120,
+                )
+                mark_subscription_used(self.db, sub["endpoint"])
+                delivered += 1
+            except WebPushException as err:
+                code = getattr(err.response, "status_code", 0)
+                if code in (404, 410):
+                    remove_subscription(self.db, sub["endpoint"])
+                    pruned += 1
+                else:
+                    logger.warning("system push send failed (%s): %s", code, err)
+            except Exception as err:  # network / unexpected
+                logger.warning("system push send error: %s", err)
+        native = self._dispatch_native(payload_dict, "system", chat_id or "-")
+        logger.warning(
+            "dispatch system tag=%s delivered=%d pruned=%d (of %d subs) native=%d/%d pruned=%d",
+            tag, delivered, pruned, len(subs), native["delivered"], native["tokens"], native["pruned"],
+        )
+        return {"delivered": delivered + native["delivered"], "pruned": pruned + native["pruned"],
+                "web": delivered, "native": native["delivered"]}

@@ -300,6 +300,26 @@ async def handle_visibility(ctx, request: web.Request) -> web.Response:
     return _json({"ok": True, "chat_id": chat_id, "visible": visible})
 
 
+async def handle_system_push(ctx, request: web.Request) -> web.Response:
+    """POST /v1/push/system — a server-originated alert from the proxy
+    (capture stall warning), delivered verbatim to every subscriber on
+    both lanes. Body: ``{title, body, chat_id?, tag?, url?}``. No
+    envelope, no stream, no per-chat gates — see
+    PushDispatcher.dispatch_system."""
+    body = await _read_json(request)
+    title = body.get("title")
+    text = body.get("body")
+    if not isinstance(title, str) or not title.strip() or not isinstance(text, str) or not text.strip():
+        return _json({"error": "invalid_request", "message": "title and body required"}, status=400)
+    payload: Dict[str, Any] = {"title": title.strip(), "body": text.strip()}
+    for k in ("chat_id", "tag", "url"):
+        v = body.get(k)
+        if isinstance(v, str) and v:
+            payload[k] = v
+    result = ctx.dispatcher.dispatch_system(payload)
+    return _json({"ok": True, **result})
+
+
 async def handle_test(ctx, request: web.Request) -> web.Response:
     body = await _read_json(request)
     chat_id = body.get("chat_id") or body.get("chatId") or "parley-test"
@@ -589,6 +609,7 @@ def register_routes(app: web.Application, ctx) -> None:
     app.router.add_get("/v1/push/health", lambda r: handle_push_health(ctx, r))
     app.router.add_post("/v1/push/visibility", lambda r: handle_visibility(ctx, r))
     app.router.add_post("/v1/push/test", lambda r: handle_test(ctx, r))
+    app.router.add_post("/v1/push/system", lambda r: handle_system_push(ctx, r))
 
     app.router.add_get("/v1/transcript/health", lambda r: handle_transcript_health(ctx, r))
     app.router.add_post("/v1/transcript/repair", lambda r: handle_transcript_repair(ctx, r))

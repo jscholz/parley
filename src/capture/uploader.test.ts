@@ -275,3 +275,18 @@ test('queued marks and a dirty title are delivered right after registration', as
   assert.equal(row?.titleDirty, false);
   assert.equal((await listLedger()).length, 1);   // not stopped → row stays
 });
+
+test('a partial (still-recording) row is never uploaded; its seal is', async () => {
+  const { putPartialSegment } = await import('./segmentStore.ts');
+  await putPartialSegment({ captureId: 'cap_8_pppppp', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: blobOf('half') });
+  const { fn, calls } = stubFetch(() => 200);
+  const up = createUploader({ fetchFn: fn, baseDelayMs: 1 });
+  await up.drained();
+  assert.deepEqual(calls.map((c) => c.seq), [], 'nothing sent while the segment is still recording');
+  assert.equal((await listPending()).length, 1, 'the partial copy stays durable');
+  await putSegment({ captureId: 'cap_8_pppppp', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: blobOf('whole') });
+  up.kick();
+  await up.drained();
+  assert.deepEqual(calls.map((c) => c.seq), [0]);
+  assert.equal((await listPending()).length, 0);
+});

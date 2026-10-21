@@ -126,3 +126,39 @@ def test_push_test_endpoint_supports_every_settings_category():
             assert env["kind"] == kind
         assert env["chat_id"] == f"chat-{kind}"
         assert env["content"] == f"Body for {kind}"
+
+
+class FakeSystemDispatcher:
+    def __init__(self):
+        self.payloads = []
+
+    def dispatch_system(self, payload):
+        self.payloads.append(payload)
+        return {"delivered": 2, "pruned": 0, "web": 1, "native": 1}
+
+
+def test_system_push_route_forwards_verbatim_and_validates():
+    from backends.hermes.plugin.parley_routes import handle_system_push
+    dispatcher = FakeSystemDispatcher()
+    ctx = SimpleNamespace(dispatcher=dispatcher)
+
+    resp = asyncio.run(handle_system_push(ctx, FakeRequest({
+        "title": '⚠️ "Board meeting" may not be recording',
+        "body": "No audio has reached the server since it started 3m ago. Open Parley to check.",
+        "chat_id": "parley:abc",
+        "tag": "capture-stall-cap_1",
+        "ignored": "field",
+    })))
+    assert resp.status == 200
+    assert _body(resp) == {"ok": True, "delivered": 2, "pruned": 0, "web": 1, "native": 1}
+    assert dispatcher.payloads == [{
+        "title": '⚠️ "Board meeting" may not be recording',
+        "body": "No audio has reached the server since it started 3m ago. Open Parley to check.",
+        "chat_id": "parley:abc",
+        "tag": "capture-stall-cap_1",
+    }]
+
+    for bad in ({}, {"title": "t"}, {"body": "b"}, {"title": " ", "body": "b"}):
+        resp = asyncio.run(handle_system_push(ctx, FakeRequest(bad)))
+        assert resp.status == 400, bad
+    assert len(dispatcher.payloads) == 1

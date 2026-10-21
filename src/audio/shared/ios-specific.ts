@@ -29,11 +29,19 @@ import { setPlaybackState } from './session.ts';
 let keepaliveEl: HTMLAudioElement | null = null;
 let keepaliveUrl: string | null = null;
 
-// State tracked so the visibilitychange handler knows when to engage the
-// silent-audio keepalive. Foreground listening runs without keepalive so
-// the barge-in worklet can read mic peaks (iOS's AEC silences the worklet
-// mic path when any <audio> element is playing, even one with zero samples).
-let listeningActive = false;
+// Who wants the page kept alive, and how. Each holder is a feature that
+// must outlive a hidden page: 'listening' (call/listen modes) runs the
+// keepalive only while HIDDEN, because foreground listening needs the
+// barge-in worklet to read mic peaks (iOS's AEC silences the worklet mic
+// path when any <audio> element is playing, even one with zero samples).
+// 'meeting' (recorder.ts) runs it ALWAYS: meeting capture has no worklet
+// to protect, and the lost-meeting incidents of 2026-08-27 and
+// 2026-10-21 were both a page frozen within seconds of the screen
+// locking — a keepalive that waits for visibilitychange races the
+// suspension; one already playing when the lock button is pressed
+// does not.
+interface KeepaliveHold { always: boolean }
+const keepaliveHolders = new Map<string, KeepaliveHold>();
 
 /** True if the AVAudioSession WebKit hint API is exposed. iOS 17+ Safari only. */
 export function hasAudioSessionAPI() {
@@ -50,6 +58,29 @@ export function isStandalone() {
     if ((window.navigator as any).standalone === true) return true;
   } catch {}
   return false;
+}
+
+/** True inside the Capacitor native shell. WebViewDelegate stamps
+ *  `<html class="capacitor-app">` at document start; the Capacitor
+ *  global is the belt to that brace. The shell is NOT standalone by the
+ *  display-mode test (WKWebView reports `browser`), which is why the
+ *  background keepalive never ran there (phone logs: "audio session:
+ *  init (standalone= false)") and a locked phone froze the recorder. */
+export function isCapShell(): boolean {
+  try {
+    if (document.documentElement.classList.contains('capacitor-app')) return true;
+    const cap = (window as any).Capacitor;
+    if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) return true;
+  } catch {}
+  return false;
+}
+
+/** Surfaces where background audio is worth fighting for: the installed
+ *  PWA and the native shell. Browser tabs don't qualify for lock-screen
+ *  treatment, and on desktop Chrome the keepalive element interferes
+ *  with SpeechSynthesis — so it stays off there. */
+export function supportsBackgroundAudio(): boolean {
+  return isStandalone() || isCapShell();
 }
 
 /** Set the WebKit `navigator.audioSession.type` hint. iOS 17+ uses this
@@ -220,10 +251,51 @@ export function getKeepaliveEl(): HTMLMediaElement | null {
  *  treatment), and on Chrome desktop the idle keepalive element seems to
  *  interfere with SpeechSynthesis output. */
 export function setListening(on) {
-  listeningActive = !!on;
-  if (!isStandalone()) return;  // no keepalive in browser tabs
-  if (on) primeKeepalive();
+  if (on) holdKeepalive('listening');
+  else releaseKeepalive('listening');
+}
+
+/** Should the keepalive be playing right now, given who holds it? */
+function shouldKeepaliveRun(): boolean {
+  for (const hold of keepaliveHolders.values()) {
+    if (hold.always) return true;
+    if (document.visibilityState === 'hidden') return true;
+  }
+  return false;
+}
+
+/** Register a feature that needs the page to survive backgrounding.
+ *  `always: true` starts the silent element immediately and keeps it
+ *  playing in the foreground too (meeting capture); the default runs
+ *  it only while hidden (listening, where the barge worklet needs a
+ *  quiet output path in the foreground). Call it INSIDE the user
+ *  gesture that starts the feature where you can — iOS unlocks later
+ *  background play() calls from that gesture. No-op in browser tabs. */
+export function holdKeepalive(key: string, opts: { always?: boolean } = {}): void {
+  keepaliveHolders.set(key, { always: !!opts.always });
+  if (!supportsBackgroundAudio()) return;  // no keepalive in browser tabs
+  if (opts.always) startKeepalive();
+  else primeKeepalive();
   reconcileKeepalive();
+}
+
+/** Drop a holder; the element pauses when the last one that wanted it
+ *  running is gone. Idempotent. */
+export function releaseKeepalive(key: string): void {
+  keepaliveHolders.delete(key);
+  reconcileKeepalive();
+}
+
+/** Is the silent element actually playing right now? Reported in the
+ *  recorder's health pings so a stalled capture's audit line says
+ *  whether the page was being kept alive at all. */
+export function isKeepaliveRunning(): boolean {
+  return !!(keepaliveEl && !keepaliveEl.paused);
+}
+
+/** Test seam — the smoke suite reads it through session.ts. */
+export function keepaliveHolderKeys(): string[] {
+  return Array.from(keepaliveHolders.keys());
 }
 
 /** Unlock the <audio> element for later background playback by playing it
@@ -237,7 +309,7 @@ function primeKeepalive() {
     p.then(() => {
       // Don't pause if reconcileKeepalive already wants it running (e.g.
       // started foreground via a rare race with visibilitychange).
-      if (!(listeningActive && document.visibilityState === 'hidden')) {
+      if (!shouldKeepaliveRun()) {
         try { el.pause(); el.currentTime = 0; } catch {}
       }
       diag('audio session: keepalive primed');
@@ -246,12 +318,12 @@ function primeKeepalive() {
 }
 
 /** Called by session.ts's lifecycle handler on visibilitychange. Reconciles
- *  keepalive run/stop based on listeningActive + visibility state. No-op on
- *  non-PWA browsers. */
+ *  keepalive run/stop based on the holders + visibility state. No-op in
+ *  browser tabs (see supportsBackgroundAudio). */
 export function reconcileKeepalive() {
-  if (!isStandalone()) return;
-  const shouldRun = listeningActive && document.visibilityState === 'hidden';
-  const isRunning = keepaliveEl && !keepaliveEl.paused;
+  if (!supportsBackgroundAudio()) return;
+  const shouldRun = shouldKeepaliveRun();
+  const isRunning = isKeepaliveRunning();
   if (shouldRun && !isRunning) startKeepalive();
   else if (!shouldRun && isRunning) stopKeepalive();
 }
