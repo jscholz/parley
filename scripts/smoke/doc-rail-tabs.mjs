@@ -123,18 +123,30 @@ export default async function run({ page, log, mock }) {
 
   // 5. The generic Docs rail button opens the LIST view now (the tabs
   // took over per-doc reader entry; management — Clear all — lives in
-  // the list).
-  await page.click('#btn-doc-drawer-rail');   // active doc panel open → closes
+  // the list). From a READER it goes straight to the list — NOT the
+  // close-toggle (field nit 2026-10-21: "I expect to go back to the main
+  // menu to select docs, but instead it collapses the sidebar"); same
+  // contract as ⌘0. Toggle parity remains for the list itself: a second
+  // click on the open list closes the drawer, a third reopens the list.
+  await page.click('#btn-doc-drawer-rail');   // reader in front → list view, drawer stays open
+  await page.waitForFunction(
+    () => document.body.classList.contains('pin-drawer-open')
+      && document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 3,
+    null, { timeout: 4000, polling: 50 },
+  );
+  log('generic Docs rail button: reader → list view (no collapse)');
+  await page.click('#btn-doc-drawer-rail');   // list in front → closes
   await page.waitForFunction(
     () => !document.body.classList.contains('pin-drawer-open'),
     null, { timeout: 4000, polling: 50 },
   );
   await page.click('#btn-doc-drawer-rail');   // reopen → list view
   await page.waitForFunction(
-    () => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 3,
+    () => document.body.classList.contains('pin-drawer-open')
+      && document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 3,
     null, { timeout: 4000, polling: 50 },
   );
-  log('generic Docs rail button opens the list view');
+  log('generic Docs rail button: list toggles closed, reopens on the list');
 
   // 6b. Rail honesty in LIST view: the Docs button carries the selected
   // tint and NO doc tab does — a tinted tab would claim a reader that

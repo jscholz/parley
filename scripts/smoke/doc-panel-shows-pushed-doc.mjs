@@ -72,11 +72,19 @@ export default async function run({ page, log, mock }) {
   // Reload: doc survives via localStorage, but the drawer must NOT be
   // auto-yanked open by hydrate. (Drawer open-state itself persists via
   // its own pref — collapse it first so the assertion is meaningful.)
-  await page.evaluate(() => {
+  // From a reader the Docs button goes to the LIST (2026-10-21 nit, see
+  // doc-rail-tabs); the second click on the open list collapses.
+  const clickDocsBtn = () => page.evaluate(() => {
     document.getElementById('btn-doc-drawer-rail')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true }),
     );
   });
+  await clickDocsBtn();
+  await page.waitForFunction(
+    () => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 1,
+    null, { timeout: 4_000, polling: 50 },
+  );
+  await clickDocsBtn();
   await page.waitForFunction(
     () => document.getElementById('pin-drawer')?.classList.contains('collapsed'),
     null, { timeout: 4_000, polling: 50 },

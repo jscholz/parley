@@ -291,10 +291,26 @@ export function initPinDrawer(opts: {
   // direct reader entry point, "Docs" the button means the shelf, not
   // whichever doc happens to be active. Capture-phase and registered
   // BEFORE the host wires its own capture listener on the same button,
-  // so the view is aimed by the time host.select renders. Deliberately
-  // no stopPropagation — the host's toggle semantics still run.
+  // so the view is aimed by the time host.select renders.
+  //
+  // With a READER in front the click goes to the list instead of the
+  // host's close-toggle (field nit 2026-10-21: "if I'm viewing a doc and
+  // I click the doc view I expect to go back to the main menu to select
+  // docs, but instead it collapses the sidebar") — the same contract ⌘0
+  // already had (openAllDocs). Toggle parity is kept where it makes
+  // sense: with the LIST in front the click closes the drawer, and a
+  // click on the closed drawer opens it on the list — those two fall
+  // through to the host's generic toggle.
   if (docModule) {
-    document.getElementById('btn-doc-drawer-rail')?.addEventListener('click', () => {
+    document.getElementById('btn-doc-drawer-rail')?.addEventListener('click', (e) => {
+      if (drawerHost?.isOpen() && drawerHost.activeModuleId() === 'doc'
+          && docModule.getView() === 'reader') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        openAllDocs();
+        return;
+      }
       docModule.setView('list');
     }, true);
   }
