@@ -40,6 +40,7 @@ import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import {
   currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
+  snapshotDocs, restoreDocs,
   type DocState, setDoc,
 } from '../docStore.ts';
 import { loadSortable } from '../sortableLoader.ts';
@@ -70,6 +71,13 @@ export function createDocModule(opts: {
   onOpenChat?: (chatId: string) => void;
 }): DocModule {
   let view: DocView = 'reader';
+  // Temporary Undo after a close / clear-all (field nit 2026-10-22). An
+  // IN-FLOW bar at the top of the panel — it pushes the content down
+  // instead of floating over it, so it can never shadow a doc's title
+  // row, its ×, or the list's rows (the exact complaint the old floating
+  // "Closed …" status earned on 2026-10-12). Auto-hides; ✕ dismisses;
+  // a newer close replaces it.
+  const undo = createUndoBar(opts.panel);
   /** ALL view mutations go through here: the rail's doc tabs tint by
    *  which view the panel shows (docTabs.ts), and they can only stay
    *  honest if every flip — external setView OR an internal list/reader
@@ -170,7 +178,17 @@ export function createDocModule(opts: {
       close.className = 'doc-shelf-item-close';
       close.textContent = '✕';
       close.setAttribute('aria-label', `Remove "${d.title}"`);
-      close.onclick = (e) => { e.stopPropagation(); removeDoc(d.id); rerender(ctx); };
+      close.onclick = (e) => {
+        e.stopPropagation();
+        const snap = snapshotDocs();
+        removeDoc(d.id);
+        rerender(ctx);
+        undo.show(`Closed "${d.title}"`, () => {
+          restoreDocs(snap);
+          setViewState('list');
+          rerender(ctx);
+        });
+      };
       li.appendChild(close);
       ul.appendChild(li);
     }
@@ -291,6 +309,7 @@ export function createDocModule(opts: {
     rm.setAttribute('aria-label', 'Close document (file stays on disk)');
     rm.setAttribute('title', 'Close — file stays on disk');
     rm.onclick = () => {
+      const snap = snapshotDocs();
       removeDoc(doc.id);
       try {
         window.dispatchEvent(new CustomEvent('parley:doc-removed', {
@@ -298,6 +317,11 @@ export function createDocModule(opts: {
         }));
       } catch { /* non-browser */ }
       rerender(ctx);
+      undo.show(`Closed "${doc.title}"`, () => {
+        restoreDocs(snap);          // re-activates this doc
+        setViewState('reader');
+        rerender(ctx);
+      });
     };
 
     // Option B (UX-pass point 4, approved direction 2026-08-25): ONE
@@ -455,11 +479,75 @@ export function createDocModule(opts: {
     onClear: (ctx) => {
       // Only reachable from list view (the header action is hidden in the
       // reader — see render()); clears the whole shelf.
+      const snap = snapshotDocs();
+      const n = snap.docs.length;
       clearDocs();
       setViewState('reader');
       ctx.render();
+      if (!n) return;
+      undo.show(n === 1 ? `Closed "${snap.docs[0].title}"` : `Closed ${n} documents`, () => {
+        restoreDocs(snap);
+        setViewState('list');
+        ctx.render();
+      });
     },
     onSelect: () => { opts.onSelect?.(); },
+  };
+}
+
+/** How long the Undo stays offered. Long enough to notice a mis-tap and
+ *  read the bar; short enough that it is a moment, not chrome. */
+const UNDO_MS = 8_000;
+
+interface UndoBar {
+  show(message: string, onUndo: () => void): void;
+  hide(): void;
+}
+
+/** In-flow Undo bar, first child of the panel so it sits ABOVE the body
+ *  and the empty state and overlays nothing. */
+function createUndoBar(panel: HTMLElement): UndoBar {
+  if (typeof document === 'undefined') return { show() {}, hide() {} };
+  const bar = document.createElement('div');
+  bar.className = 'doc-undo-bar';
+  bar.setAttribute('role', 'status');
+  bar.setAttribute('aria-live', 'polite');
+  bar.hidden = true;
+  const text = document.createElement('span');
+  text.className = 'doc-undo-text';
+  const action = document.createElement('button');
+  action.type = 'button';
+  action.className = 'doc-undo-action';
+  action.textContent = 'Undo';
+  const dismiss = document.createElement('button');
+  dismiss.type = 'button';
+  dismiss.className = 'doc-undo-dismiss';
+  dismiss.setAttribute('aria-label', 'Dismiss');
+  dismiss.textContent = '✕';
+  bar.append(text, action, dismiss);
+  panel.insertBefore(bar, panel.firstChild);
+  let timer: number | null = null;
+  let pending: (() => void) | null = null;
+  const hide = () => {
+    if (timer != null) { window.clearTimeout(timer); timer = null; }
+    pending = null;
+    bar.hidden = true;
+  };
+  action.addEventListener('click', () => {
+    const fn = pending;
+    hide();
+    fn?.();
+  });
+  dismiss.addEventListener('click', hide);
+  return {
+    show(message, onUndo) {
+      text.textContent = message;
+      pending = onUndo;
+      bar.hidden = false;
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(hide, UNDO_MS);
+    },
+    hide,
   };
 }
 

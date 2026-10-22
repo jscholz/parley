@@ -6592,3 +6592,38 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
   100% { background: transparent; }
 }
 #sessions-list li.sess-reveal { animation: sess-reveal-pulse 1.3s ease-out; }
+
+/* ── Docs panel Undo bar (rightDrawer/modules/doc.ts createUndoBar;
+   field nit 2026-10-22: "a temporary undo popup after closing a doc or
+   clearing all docs … that doesn't shadow buttons or content"). IN-FLOW,
+   first child of the panel: it pushes the reader / list / empty state
+   down instead of floating over them, so nothing underneath is ever
+   covered. Same ghost + tinted-action language as the toast. */
+.doc-undo-bar {
+  flex: none;
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 10px 0; padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 12px; line-height: 1.3;
+}
+.doc-undo-bar[hidden] { display: none; }
+.doc-undo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-undo-action {
+  flex: 0 0 auto; border: none; cursor: pointer;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
+  font-size: 12px; font-weight: 700;
+  padding: 6px 10px; border-radius: 6px;
+  min-height: 28px;
+  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+}
+.doc-undo-action:hover { background: color-mix(in srgb, var(--primary) 26%, transparent); }
+.doc-undo-dismiss {
+  flex: 0 0 auto; border: none; background: none; cursor: pointer;
+  color: var(--muted); font-size: 12px; line-height: 1;
+  padding: 6px 8px; min-height: 28px; border-radius: 6px;
+}
+.doc-undo-dismiss:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }

@@ -197,3 +197,38 @@ test('docIdFor matches the plugin-side djb2 mirror', async () => {
   assert.notEqual(s.docIdFor('/w/a.md', 'T'), s.docIdFor('/w/b.md', 'T'));
   assert.equal(s.docIdFor(undefined, 'Same Title'), s.docIdFor(undefined, 'same title'));
 });
+
+// ── snapshot / restore (Undo after close or clear-all, 2026-10-22) ──
+
+test('restoreDocs puts a closed doc back, re-activates it, and keeps its tab position', async () => {
+  const s = await freshStore();
+  s.setDoc({ title: 'A', content: 'a', format: 'markdown', path: '/w/a.md' });
+  s.setDoc({ title: 'B', content: 'b', format: 'markdown', path: '/w/b.md' });
+  s.setDoc({ title: 'C', content: 'c', format: 'markdown', path: '/w/c.md' });
+  s.selectDoc(s.listDocs().find((d: any) => d.title === 'B')!.id);
+  const snap = s.snapshotDocs();
+  s.removeDoc(snap.activeId!);
+  assert.equal(s.docCount(), 2);
+  assert.notEqual(s.currentDoc()?.title, 'B');
+  assert.equal(s.restoreDocs(snap), 1);
+  assert.equal(s.docCount(), 3);
+  assert.equal(s.currentDoc()?.title, 'B', 'the closed doc is active again');
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A', 'B', 'C'], 'tab order restored');
+  assert.equal(s.restoreDocs(snap), 0, 'idempotent');
+});
+
+test('restoreDocs after clear-all brings the whole shelf back and keeps a doc pushed meanwhile', async () => {
+  const s = await freshStore();
+  s.setDoc({ title: 'A', content: 'a', format: 'markdown', path: '/w/a.md' });
+  s.setDoc({ title: 'B', content: 'b', format: 'markdown', path: '/w/b.md' });
+  const snap = s.snapshotDocs();
+  s.clearDocs();
+  assert.equal(s.docCount(), 0);
+  s.setDoc({ title: 'New', content: 'n', format: 'markdown', path: '/w/new.md' });   // agent push between clear and Undo
+  assert.equal(s.restoreDocs(snap), 2);
+  assert.deepEqual(s.listDocs().map((d: any) => d.title).sort(), ['A', 'B', 'New'], 'nothing newer is lost');
+  assert.deepEqual(s.tabOrderDocs().map((d: any) => d.title), ['A', 'B', 'New'], 'restored tabs first, newer behind');
+  assert.equal(s.currentDoc()?.title, 'B', "the snapshot's active doc is active again");
+  const persisted = JSON.parse(localStorage.getItem('parley.docs.v2')!);
+  assert.equal(persisted.docs.length, 3, 'restore is persisted');
+});

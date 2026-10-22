@@ -1,12 +1,14 @@
 // Closing a doc must not hold the next doc's controls hostage (field
 // 2026-10-12: "the banner that comes up masks the heading of the next
 // message, and isn't dismissable, and doesn't let me click the x of the
-// window below"). The "Closed …" notice now sits at the bottom of the
-// drawer and a tap dismisses it.
+// window below"). Since 2026-10-22 the "Closed …" notice is the doc
+// panel's IN-FLOW Undo bar (.doc-undo-bar): it pushes the reader down
+// rather than floating over it, so it can never cover the next doc's ×;
+// its own ✕ dismisses it.
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'doc-close-notice-never-blocks';
-export const DESCRIPTION = 'After closing a doc, the next doc\'s × is tappable at once; the notice sits clear of it and dismisses on tap';
+export const DESCRIPTION = 'After closing a doc, the next doc\'s × is tappable at once; the in-flow Undo bar sits clear of it and its ✕ dismisses it';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = 'both';
@@ -41,7 +43,7 @@ export default async function run({ page, log, mock }) {
   await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-drawer-remove').click());
   await shows('FIRST-MARK');
   const geo = await page.evaluate(() => {
-    const st = document.getElementById('pin-drawer-status');
+    const st = document.querySelector('#doc-drawer-panel .doc-undo-bar');
     const x = document.querySelector('#doc-drawer-body .doc-drawer-remove');
     const s = st.getBoundingClientRect(), r = x.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
@@ -61,9 +63,9 @@ export default async function run({ page, log, mock }) {
   await page.waitForFunction(() => !document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('FIRST-MARK'), null, { timeout: 3000 });
   log('next doc\'s × closes it right away ✓');
 
-  // Tap the notice → gone.
-  await page.evaluate(() => document.getElementById('pin-drawer-status').click());
-  const gone = await page.evaluate(() => document.getElementById('pin-drawer-status').hidden);
-  assert(gone, 'a tap must dismiss the notice');
-  log('tap on the notice dismisses it ✓');
+  // Its ✕ → gone.
+  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-dismiss').click());
+  const gone = await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-bar').hidden);
+  assert(gone, 'the ✕ must dismiss the Undo bar');
+  log('✕ dismisses the Undo bar ✓');
 }

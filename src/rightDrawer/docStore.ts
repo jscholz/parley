@@ -284,6 +284,48 @@ export function clearDocs(): void {
   notify(false);
 }
 
+/** Everything a close / clear-all takes away, so an Undo can put it
+ *  back exactly (2026-10-22 nit: a temporary Undo after closing a doc or
+ *  clearing the shelf). Copies, so later mutations can't reach in. */
+export interface DocShelfSnapshot {
+  docs: DocState[];
+  activeId: string | null;
+  order: string[];
+}
+
+export function snapshotDocs(): DocShelfSnapshot {
+  return { docs: docs.map(d => ({ ...d })), activeId, order: [...order] };
+}
+
+/** Undo: re-shelve every snapshot doc that is missing now. Docs that
+ *  arrived AFTER the snapshot stay (an agent push between close and
+ *  Undo is not the user's to lose); their tabs keep their place behind
+ *  the restored order. The snapshot's active doc becomes active again
+ *  when it is back. Returns how many docs were re-shelved. */
+export function restoreDocs(snap: DocShelfSnapshot): number {
+  const present = new Set(docs.map(d => d.id));
+  const missing = snap.docs.filter(d => !present.has(d.id)).map(d => ({ ...d }));
+  if (!missing.length) return 0;
+  // Snapshot docs first in their own recency order, then whatever is
+  // newer; the LRU cap still applies (newest-activity-first list).
+  const merged = [...docs, ...missing];
+  const snapIndex = new Map(snap.docs.map((d, i) => [d.id, i]));
+  merged.sort((a, b) => {
+    const ia = snapIndex.has(a.id) ? snapIndex.get(a.id)! : -1;
+    const ib = snapIndex.has(b.id) ? snapIndex.get(b.id)! : -1;
+    return ia - ib;
+  });
+  docs = merged.slice(0, MAX_DOCS);
+  const ids = new Set(docs.map(d => d.id));
+  order = [...snap.order.filter(id => ids.has(id)), ...order.filter(id => ids.has(id) && !snap.order.includes(id))];
+  order = reconcileTabOrder(order, docs);
+  if (snap.activeId && ids.has(snap.activeId)) activeId = snap.activeId;
+  else if (!activeId || !ids.has(activeId)) activeId = docs[0]?.id ?? null;
+  persist();
+  notify(false);
+  return missing.filter(d => ids.has(d.id)).length;
+}
+
 // ── Back-compat aliases (v1 API names used by existing call sites) ──
 export const hydrateDoc = hydrateDocs;
 export const clearDoc = clearDocs;

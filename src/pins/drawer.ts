@@ -416,13 +416,11 @@ export function initPinDrawer(opts: {
     showPinStatus(detail?.message || 'Could not update pinned messages.');
   });
   // Closing a doc only drops the shelf entry — the file on disk is
-  // untouched. Say exactly that (field nit 2026-07-07: the old trash
-  // icon + "Removed" wording read as deletion).
-  window.addEventListener('parley:doc-removed', (ev) => {
+  // untouched. The doc panel's own in-flow Undo bar says "Closed …" now
+  // (2026-10-22); the floating status here used to shadow the next doc's
+  // controls (2026-10-12), so it no longer speaks for doc closes.
+  window.addEventListener('parley:doc-removed', () => {
     refreshRailCounts();
-    const title = (ev as CustomEvent<{ title?: string }>).detail?.title;
-    // info, not error: closing a doc is benign (red implied breakage).
-    showPinStatus(`Closed ${title ? `"${title}"` : 'document'} — the file is untouched; ask the agent to display it again anytime.`, 'info');
   });
 
   // #doc: links (capture transcript paths linkified in bubbles —
