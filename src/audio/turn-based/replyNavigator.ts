@@ -84,7 +84,9 @@ async function resolveVoice(): Promise<string> {
 function listAgentBubbles(): HTMLElement[] {
   const transcript = document.getElementById('transcript');
   if (!transcript) return [];
-  return Array.from(transcript.querySelectorAll<HTMLElement>('.line.agent'));
+  // Status notes (hindsight indicators, heartbeats) are not replies — a
+  // headset skip must never land on "recalled 44 memories".
+  return Array.from(transcript.querySelectorAll<HTMLElement>('.line.agent:not(.status-note)'));
 }
 
 function findBubbleByReplyId(replyId: string | null): HTMLElement | null {

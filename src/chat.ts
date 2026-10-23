@@ -27,6 +27,7 @@ import { rerenderActive, isBackfillActive } from './transcript/index.ts';
 import * as transcriptStore from './transcript/store.ts';
 import * as switchCtl from './switchController.ts';
 import { isDurableMessageKey } from './transcript/keys.ts';
+import { isStatusNoteText } from './util/progressHeartbeat.ts';
 
 let transcriptEl: HTMLElement | null = null;
 
@@ -1527,7 +1528,12 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   // Bar layers (.play-bar-loaded under .play-bar-played) are present
   // in the DOM but invisible until styled by .tts-active states —
   // see styles/app.css for the visual spec.
-  if (cls.includes('agent')) {
+  // Status notes (hindsight recall/retain indicators, heartbeats) are
+  // agent LINES but not replies: no play button, no play bar. Field
+  // 2026-10-23 — a pointer-down on a recall note's bar spoke it unasked.
+  const statusNote = cls.includes('agent') && isStatusNoteText(text);
+  if (statusNote) div.classList.add('status-note');
+  if (cls.includes('agent') && !statusNote) {
     const playGlyph = `<svg class="glyph-play" viewBox="0 0 16 16" fill="none"><polygon points="5 3 13 8 5 13 5 3" fill="currentColor"/></svg>`;
     const pauseGlyph = `<svg class="glyph-pause" viewBox="0 0 16 16" fill="none"><rect x="4" y="3" width="3" height="10" fill="currentColor"/><rect x="9" y="3" width="3" height="10" fill="currentColor"/></svg>`;
     // Loading spinner — minimal line-style ring; CSS spins it via

@@ -6693,3 +6693,10 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
   .capture-pill.processing .capture-pill-state,
   .capture-pill.ready .capture-pill-state { flex: none; }
 }
+
+/* ── Agent status notes (chat.ts addLine + util/progressHeartbeat
+   isStatusNoteText): hindsight recall/retain indicators and heartbeats
+   that hermes persists as assistant rows. Quiet, and with NO play
+   button / bar — a pointer-down on one spoke it unasked (2026-10-23). */
+.line.agent.status-note { opacity: 0.8; }
+.line.agent.status-note .msg-caret { display: none; }

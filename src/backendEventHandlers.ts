@@ -14,7 +14,7 @@
 
 import { log, diag } from './util/log.ts';
 import { notePlaybackStart } from './playbackAudit.ts';
-import { isProgressHeartbeatText } from './util/progressHeartbeat.ts';
+import { isProgressHeartbeatText, isStatusNoteText } from './util/progressHeartbeat.ts';
 import { replaySessionMessages, persistGrownTranscript, NO_REPLY_RE } from './sessionResume.ts';
 import * as backend from './backend.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
@@ -383,7 +383,9 @@ export function handleReplyFinal({ replyId, text, content = [], conversation, me
       : webrtcOpen ? 'webrtc-peer'
       : 'turnbased-tts';
     diag(`[reply-route] ${route} replyId=${replyId} len=${finalText.length} turnbased=${turnbased.getState()} webrtcOpen=${webrtcOpen} isReplay=${isReplay}`);
-    if (!isReplay && inListen && !webrtcOpen && listenReply.shouldAutoPlay(conversation)) {
+    // Status notes (hindsight "recalled N memories", heartbeats) are not
+    // replies — listen mode must not read them aloud (field 2026-10-23).
+    if (!isReplay && inListen && !webrtcOpen && !isStatusNoteText(finalText) && listenReply.shouldAutoPlay(conversation)) {
       // Use the rendered bubble's id (bare message_id, = spec.key) as the
       // TTS reply id, NOT the sk-${message_id} `replyId` from the adapter.
       // The bubble's data-reply-id is the bare message_id, so playing under
