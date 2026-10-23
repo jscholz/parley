@@ -212,6 +212,15 @@ async function retitleFromTranscript(m: CaptureManifest): Promise<void> {
 /** Rebuild transcript.md from every seg/<seq>.txt present, in seq
  *  order, interleaving [MARK]s by timestamp. Untranscribed tail
  *  segments simply aren't in it yet. */
+/** "2026-10-23 18:53" in the server's LOCAL time zone. The header used
+ *  toISOString() and printed UTC — a meeting recorded at 18:53 BST read
+ *  "Recorded 17:53" in the doc (field 2026-10-23). */
+export function fmtLocalStamp(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export async function rebuildTranscript(id: string): Promise<string> {
   const m = await getCapture(id);
   const live = m.status === 'recording' || m.status === 'transcribing';
@@ -220,7 +229,7 @@ export async function rebuildTranscript(id: string): Promise<string> {
     '',
     live
       ? '_Live transcript — recording in progress; updates roughly every minute._'
-      : `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)}_`,
+      : `_Recorded ${fmtLocalStamp(m.started_at)} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)}_`,
     '',
   ];
   const marks = [...m.marks].sort((a, b) => a.t_ms - b.t_ms);
@@ -395,7 +404,7 @@ function renderDiarized(
   const lines: string[] = [
     `# ${m.title}`,
     '',
-    `_Recorded ${new Date(m.started_at).toISOString().slice(0, 16).replace('T', ' ')} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized (${n} speaker${n === 1 ? '' : 's'})_`,
+    `_Recorded ${fmtLocalStamp(m.started_at)} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)} · diarized (${n} speaker${n === 1 ? '' : 's'})_`,
     '',
   ];
   const marks = [...m.marks].sort((a, b) => a.t_ms - b.t_ms);

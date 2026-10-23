@@ -60,7 +60,11 @@ export interface UploaderOpts {
   /** Registration refused for good (4xx). Audio stays buffered. */
   onRegisterFailed?: (entry: CaptureLedgerEntry, reason: string) => void;
   /** `POST /stop` acked for a capture the user had stopped offline. */
-  onStopped?: (captureId: string) => void;
+  onStopped?: (captureId: string, title: string) => void;
+  /** Queue depth after every listing and every ack, with the captures
+   *  that still have audio buffered — the pill's "Uploading k of N" /
+   *  "saved on this phone" feed (sync transparency, 2026-10-23). */
+  onProgress?: (info: { pending: number; captureIds: string[] }) => void;
   /** Network reachability as observed by the last request: false after a
    *  fetch that threw, true after any HTTP answer. Drives the pill's
    *  "offline — saving locally" chip. */
@@ -299,7 +303,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
         // 4xx = the server already moved this capture on (healed,
         // discarded elsewhere): nothing more we can say about it.
         await removeLedger(entry.id);
-        opts.onStopped?.(entry.id);
+        opts.onStopped?.(entry.id, entry.title);
         return 'done';
       }
       return 'retry';
@@ -327,6 +331,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
         const queue = (await listPending({ includePartial: false }))
           .filter((s) => !parked.has(s.key) && !parkedCaptures.has(s.captureId));
         pending = queue.length;
+        opts.onProgress?.({ pending, captureIds: Array.from(new Set(queue.map((s) => s.captureId))) });
         if (!queue.length) {
           // Nothing to upload: register captures the server hasn't met…
           const unregistered = await registrationsOwed();
@@ -364,6 +369,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
           attempts409.delete(seg.key);
           await removeSegment(seg.key);
           pending -= 1;
+          opts.onProgress?.({ pending, captureIds: Array.from(new Set(queue.slice(1).map((s) => s.captureId))) });
           continue;
         }
         if (outcome === 'unregistered') { continue; }   // re-registers on the next pass

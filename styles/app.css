@@ -753,6 +753,12 @@
     background: transparent; border: none; color: var(--fg); text-align: left;
     padding: 6px 10px; cursor: pointer; font: inherit; border-radius: 4px;
   }
+  /* Portaled to <body> (sessionDrawer.ts openMenu, 2026-10-23): fixed
+   * to the viewport so neither the scrolling list nor the sidebar's
+   * bottom box can clip or cover it. Above every drawer/overlay. */
+  .sess-menu.portal {
+    position: fixed; right: auto; margin-top: 0; z-index: 400;
+  }
   .sess-menu button:hover { background: var(--surface-2); }
   .sess-menu button.danger { color: #e66; }
   .sess-menu button.danger:hover { background: rgba(230, 102, 102, 0.12); }
@@ -6627,3 +6633,63 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
   padding: 6px 8px; min-height: 28px; border-radius: 6px;
 }
 .doc-undo-dismiss:hover { color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent); }
+
+/* ── Capture pill: sync states with NO live recording (capture/pill.ts
+   syncMode; field 2026-10-23 "no indication that there was locally
+   buffered content … couldn't see that it was pushing it … couldn't see
+   that it was processing"). Neutral chrome — nothing here is red,
+   because nothing here is a recording. Controls are hidden: there is
+   no mic to mark, pause or stop. */
+.capture-pill.syncing,
+.capture-pill.processing,
+.capture-pill.ready {
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface-1, #1c1c1e));
+  border-color: color-mix(in srgb, var(--primary) 40%, transparent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+}
+.capture-pill.syncing .capture-pill-dot { background: var(--primary); }
+.capture-pill.syncing.waiting .capture-pill-dot { background: #f1c40f; animation: none; }
+.capture-pill.processing .capture-pill-dot { background: var(--primary); animation-duration: 1s; }
+.capture-pill.ready { cursor: pointer; }
+.capture-pill.ready .capture-pill-dot { background: #4caf50; animation: none; }
+.capture-pill.ready:hover { border-color: color-mix(in srgb, var(--primary) 70%, transparent); }
+.capture-pill.syncing .capture-pill-state,
+.capture-pill.processing .capture-pill-state,
+.capture-pill.ready .capture-pill-state {
+  border-color: color-mix(in srgb, var(--primary) 45%, transparent);
+  color: color-mix(in srgb, var(--primary) 85%, #fff);
+  text-transform: none; letter-spacing: 0; font-size: 11px;
+}
+.capture-pill.syncing.waiting .capture-pill-state {
+  border-color: color-mix(in srgb, #f1c40f 45%, transparent);
+  color: color-mix(in srgb, #f1c40f 85%, #fff);
+}
+.capture-pill.ready .capture-pill-state {
+  border-color: color-mix(in srgb, #4caf50 55%, transparent);
+  color: #9be29f;
+}
+.capture-pill.syncing #capture-pill-timer,
+.capture-pill.processing #capture-pill-timer,
+.capture-pill.ready #capture-pill-timer,
+.capture-pill.syncing #capture-pill-flag,
+.capture-pill.syncing #capture-pill-pause,
+.capture-pill.syncing #capture-pill-stop,
+.capture-pill.syncing #capture-pill-more,
+.capture-pill.processing #capture-pill-flag,
+.capture-pill.processing #capture-pill-pause,
+.capture-pill.processing #capture-pill-stop,
+.capture-pill.processing #capture-pill-more,
+.capture-pill.ready #capture-pill-flag,
+.capture-pill.ready #capture-pill-pause,
+.capture-pill.ready #capture-pill-stop,
+.capture-pill.ready #capture-pill-more { display: none; }
+/* No controls to make room for: the title can show on a phone too
+   (the generic phone-width rule hides it only while a LIVE chip shows). */
+@media (max-width: 699px) {
+  .capture-pill.syncing .capture-pill-title,
+  .capture-pill.processing .capture-pill-title,
+  .capture-pill.ready .capture-pill-title { display: block; }
+  .capture-pill.syncing .capture-pill-state,
+  .capture-pill.processing .capture-pill-state,
+  .capture-pill.ready .capture-pill-state { flex: none; }
+}

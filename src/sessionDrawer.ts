@@ -1992,16 +1992,51 @@ function openMenu(li: HTMLLIElement, s: any) {
   // click on empty menu space would otherwise bubble to li.onclick and
   // trigger a session resume — surprising mid-action.
   menu.addEventListener('click', (e) => e.stopPropagation());
-  li.appendChild(menu);
+  // Portal + fixed positioning (field nit 2026-10-23: "if I'm low in the
+  // scroll bar, the menu is underneath the Refresh/Settings box"). As a
+  // child of the row it lived inside the scrolling .sidebar-content,
+  // which clips it, and under .sidebar-bottom, which paints over it.
+  // On <body> it clips to nothing; it anchors to the ⋮ button and flips
+  // ABOVE it when there is no room below.
+  menu.classList.add('portal');
+  const anchor = (li.querySelector('.sess-menu-btn') as HTMLElement | null) ?? li;
+  document.body.appendChild(menu);
+  const place = () => {
+    const r = anchor.getBoundingClientRect();
+    const h = menu.offsetHeight;
+    const w = menu.offsetWidth;
+    const margin = 8;
+    let top = r.bottom + 2;
+    if (top + h > window.innerHeight - margin) top = Math.max(margin, r.top - h - 2);
+    // An anchor the list has scrolled off-screen must not drag the menu
+    // out with it: clamp to the viewport as the last word.
+    top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - h - margin));
+    let left = r.right - w;
+    if (left < margin) left = margin;
+    if (left + w > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - margin - w);
+    menu.style.top = `${Math.round(top)}px`;
+    menu.style.left = `${Math.round(left)}px`;
+  };
+  place();
 
-  // Close on outside click (once).
+  // Close on outside click (once), on a sidebar scroll (the anchor
+  // moves), or on resize.
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', closer);
+    scroller?.removeEventListener('scroll', close);
+    window.removeEventListener('resize', close);
+  };
+  const closer = (e: MouseEvent) => {
+    if (menu.contains(e.target as Node)) return;
+    close();
+  };
+  const scroller = li.closest('.sidebar-content');
   setTimeout(() => {
-    const closer = (e: MouseEvent) => {
-      if (menu.contains(e.target as Node)) return;
-      menu.remove();
-      document.removeEventListener('click', closer);
-    };
+    if (!menu.isConnected) return;
     document.addEventListener('click', closer);
+    scroller?.addEventListener('scroll', close, { passive: true });
+    window.addEventListener('resize', close);
   }, 0);
 }
 

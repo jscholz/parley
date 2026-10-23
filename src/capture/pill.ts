@@ -19,10 +19,31 @@ import {
   getCaptureState, resumePendingUploads, type CaptureUiState,
 } from './recorder.ts';
 import { openPillSheet } from './pillSheet.ts';
+import { getSyncState, type CaptureSyncState } from './syncStatus.ts';
 import * as switchCtl from '../switchController.ts';
 import { log } from '../util/log.ts';
 
 let timerInterval: number | null = null;
+
+/** What the pill shows when NO recording is live (sync transparency,
+ *  2026-10-23): buffered audio waiting for the network, a backlog
+ *  draining, the server transcribing, or a transcript that just
+ *  landed. null = nothing to say, pill hidden. */
+type SyncMode = 'syncing' | 'processing' | 'ready' | null;
+
+function syncMode(sync: CaptureSyncState): SyncMode {
+  if (sync.pending > 0) return 'syncing';
+  if (sync.processing) return 'processing';
+  if (sync.ready) return 'ready';
+  return null;
+}
+
+/** "Uploading 57 of 132" — the human count is the one being sent now. */
+function uploadingWord(sync: CaptureSyncState): string {
+  const total = Math.max(sync.batch, sync.pending);
+  const current = Math.min(total, total - sync.pending + 1);
+  return total > 1 ? `Uploading ${current} of ${total}` : 'Uploading…';
+}
 
 /** RECORDED time, not wall time: pause/interruption spans are
  *  subtracted, so the timer freezes while paused (field nit
@@ -39,7 +60,7 @@ function fmtElapsed(st: CaptureUiState): string {
     : `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
-function render(state: CaptureUiState): void {
+function render(state: CaptureUiState, sync: CaptureSyncState = getSyncState()): void {
   const pill = document.getElementById('capture-pill');
   if (!pill) return;
   const title = document.getElementById('capture-pill-title');
@@ -51,9 +72,43 @@ function render(state: CaptureUiState): void {
   // see: the recording is over and nothing was saved. Hiding the pill
   // here would reproduce the incident exactly — silence where a warning
   // belongs.
-  const show = state.active || state.phase === 'starting'
+  const liveShow = state.active || state.phase === 'starting'
     || state.phase === 'finishing' || state.phase === 'failed';
+  // No live recording: the pill still has to account for audio that
+  // exists only on this device, a backlog being sent, and a transcript
+  // being built (field 2026-10-23: all three were invisible).
+  const mode: SyncMode = liveShow ? null : syncMode(sync);
+  const show = liveShow || mode !== null;
   pill.hidden = !show;
+  pill.classList.toggle('syncing', mode === 'syncing');
+  pill.classList.toggle('processing', mode === 'processing');
+  pill.classList.toggle('ready', mode === 'ready');
+  pill.classList.toggle('waiting', mode === 'syncing' && sync.online === false);
+  if (mode) {
+    for (const cls of ['starting', 'interrupted', 'paused', 'finishing', 'failed', 'offline']) pill.classList.remove(cls);
+    if (timerInterval != null) { window.clearInterval(timerInterval); timerInterval = null; }
+    const stateEl = document.getElementById('capture-pill-state');
+    const word = mode === 'syncing'
+      ? (sync.online === false ? 'Saved on this phone — waiting for network' : uploadingWord(sync))
+      : mode === 'processing' ? 'Transcribing…'
+        : 'Transcript ready';
+    if (stateEl) { stateEl.textContent = word; stateEl.hidden = false; }
+    if (title) {
+      title.textContent = mode === 'syncing'
+        ? (sync.titles.length ? sync.titles.join(' · ') : `${sync.pending} segment${sync.pending === 1 ? '' : 's'} buffered`)
+        : mode === 'processing' ? (sync.processing?.title || 'Meeting')
+          : `${sync.ready?.title || 'Meeting'} — tap to open`;
+    }
+    if (timer) timer.textContent = '';
+    pill.setAttribute('role', mode === 'ready' ? 'button' : 'status');
+    pill.setAttribute('title', mode === 'ready' ? 'Open the transcript'
+      : mode === 'syncing' && sync.online === false
+        ? 'Audio is safe on this device and uploads by itself when the network returns'
+        : '');
+    return;
+  }
+  pill.removeAttribute('role');
+  pill.removeAttribute('title');
   const headerBtn = document.getElementById('btn-capture-header');
   if (headerBtn) {
     // Red whenever a capture is live in ANY phase; pulse only while
@@ -96,12 +151,16 @@ function render(state: CaptureUiState): void {
     // device and syncs when the network returns — but the user in the
     // windowless room deserves to know the server has not seen it yet.
     const offline = state.offline && state.phase !== 'failed';
+    // A backlog behind a LIVE recording (slow uplink) is worth a word
+    // too: "3 to upload" says the meeting is safe here and still being
+    // sent, which is the trust the field report asked for.
+    const backlog = sync.pending >= 2 ? `${sync.pending} to upload` : '';
     const word = state.phase === 'paused' ? 'Paused'
       : state.phase === 'interrupted' ? 'Reconnecting…'
-        : state.phase === 'finishing' ? (offline ? 'Offline — will sync' : 'Uploading…')
+        : state.phase === 'finishing' ? (offline ? 'Offline — will sync' : uploadingWord(sync))
           : state.phase === 'failed' ? 'Not recorded'
             : (offline && state.phase === 'recording') ? 'Offline — saving locally'
-              : '';
+              : (state.phase === 'recording' ? backlog : '');
     stateEl.textContent = word;
     stateEl.hidden = !word;
   }
@@ -209,6 +268,20 @@ export function initCapturePill(opts: { openChat?: (chatId: string) => void } = 
   openChatCb = opts.openChat ?? null;
   window.addEventListener('parley:capture-state', (ev) => {
     render((ev as CustomEvent<CaptureUiState>).detail);
+  });
+  // Sync transparency: buffered / uploading / transcribing / ready all
+  // re-render the pill; it reads both states every time.
+  window.addEventListener('parley:capture-sync', (ev) => {
+    render(getCaptureState(), (ev as CustomEvent<CaptureSyncState>).detail);
+  });
+  // "Transcript ready — tap to open": the whole pill is the target.
+  document.getElementById('capture-pill')?.addEventListener('click', (e) => {
+    const pill = e.currentTarget as HTMLElement;
+    if (!pill.classList.contains('ready')) return;
+    if ((e.target as HTMLElement | null)?.closest?.('button')) return;
+    const id = getSyncState().ready?.id;
+    if (!id) return;
+    try { window.dispatchEvent(new CustomEvent('parley:open-transcript', { detail: { captureId: id } })); } catch { /* non-browser */ }
   });
 
   document.getElementById('capture-pill-stop')?.addEventListener('click', () => {

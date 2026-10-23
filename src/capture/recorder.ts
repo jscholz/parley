@@ -26,6 +26,7 @@ import {
 } from './segmentStore.ts';
 import { mintChatId } from '../conversations.ts';
 import { createUploader, type Uploader } from './uploader.ts';
+import * as syncStatus from './syncStatus.ts';
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
 import * as settings from '../settings.ts';
@@ -160,10 +161,12 @@ function ensureUploader(): Uploader {
     onDrained: () => { state.uploaderPending = 0; emit(); },
     onDropped: () => { syncPending(); },
     onNetwork: (online) => {
+      syncStatus.reportNetwork(online);
       if (state.offline === !online) return;
       state.offline = !online;
       emit();
     },
+    onProgress: (info) => { syncStatus.reportUploader(info); },
     onRegistered: (entry, capture) => {
       log(`[capture] ${entry.id}: registered with the server${capture?.linked_chat ? ` chat=${capture.linked_chat}` : ''}`);
       if (entry.id !== state.captureId) return;
@@ -186,8 +189,14 @@ function ensureUploader(): Uploader {
       state.failedReason = `The server refused this recording (${reason}). Audio is kept on this device.`;
       emit();
     },
-    onStopped: (captureId) => { log(`[capture] ${captureId}: deferred stop landed`); },
+    onStopped: (captureId, title) => {
+      log(`[capture] ${captureId}: deferred stop landed`);
+      // From here the server owns the meeting: the pill keeps reporting
+      // its transcription until the capture settles (sync transparency).
+      syncStatus.reportStopped(captureId, title);
+    },
   });
+  syncStatus.initSyncStatus();
   // Coming back online is the moment the backlog can move; don't wait
   // for the backoff timer to expire.
   try {
