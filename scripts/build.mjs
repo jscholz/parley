@@ -194,6 +194,20 @@ async function writeHashedIndex(imports) {
   );
 }
 
+/** build/version.json — { sha, builtAt }. Shown in the About panel so a
+ *  device can prove which bundle it runs (CAP bundles are frozen at
+ *  build time; "did the rebuild land?" needs an answer on the device). */
+async function writeVersionStamp() {
+  let sha = 'unknown';
+  try {
+    const { execSync } = await import('node:child_process');
+    sha = execSync('git rev-parse --short HEAD', { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'unknown';
+    const dirty = execSync('git status --porcelain --untracked-files=no -- src styles index.html proxy server.ts', { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    if (dirty) sha += '+';
+  } catch { /* not a git checkout (published tarball) */ }
+  await writeFile(join(OUT, 'version.json'), JSON.stringify({ sha, builtAt: new Date().toISOString() }));
+}
+
 async function build({ watch }) {
   await rm(OUT, { recursive: true, force: true });
   const entries = await collectSources(SRC);
@@ -220,6 +234,7 @@ async function build({ watch }) {
     await buildServerBundle();
     const imports = await hashBuildAssets();
     await writeHashedIndex(imports);
+    await writeVersionStamp();
     console.log(`[build] compiled ${entries.length} files → ${relative(ROOT, OUT)}/ (${Object.keys(imports).length} hashed + import map)`);
   }
 }

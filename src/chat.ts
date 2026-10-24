@@ -1346,7 +1346,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   /** Message timestamp; defaults to now. */
   timestamp?: number | Date | string;
   /** Image / video thumbnails rendered under the line. */
-  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
+  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number; purged?: boolean }>;
   /** TTS reply id for agent lines — links bubble to playback events
    *  (loading bar + play-icon wiring). */
   replyId?: string;
@@ -1606,6 +1606,18 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       // against the API origin (CAP contract) — 2026-10-11.
       const src = att?.dataUrl || (att?.url ? apiUrl(att.url) : '');
       if (!src) continue;
+      if (att?.purged) {
+        // Swept by the storage policy: the record that a file was sent
+        // outlives the file (field 2026-10-24: "there needs to be an
+        // indicator in the UX that there had been an attachment, even if
+        // it's no longer visible").
+        const gone = document.createElement('span');
+        gone.className = 'pdf-chip file-chip purged';
+        gone.title = 'This file was removed by the storage cleanup policy';
+        gone.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h7L13 4.5V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5z"/><path d="M9.5 1.5V4.5H13"/><path d="M5.5 9l5 3M10.5 9l-5 3"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || 'file')} — no longer stored</span>`;
+        attDiv.appendChild(gone);
+        continue;
+      }
       if (att.mimeType?.startsWith('image/')) {
         const img = document.createElement('img');
         img.src = src;
@@ -1652,7 +1664,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     }
     // Download affordance for durable copies: one small link per file.
     // (CAP's WKWebView cannot save an <a download>; hand it to the OS.)
-    const durable = opts.attachments.filter((a: any) => a?.url);
+    const durable = opts.attachments.filter((a: any) => a?.url && !a?.purged);
     if (durable.length) {
       const row = document.createElement('div');
       row.className = 'line-attachment-downloads';

@@ -1353,7 +1353,18 @@ async function boot() {
   const infoPanel = document.getElementById('info-panel');
   const infoClose = document.getElementById('info-close');
   if (btnInfo && infoPanel) {
-    btnInfo.onclick = () => { infoPanel.classList.remove('hidden'); infoPanel.setAttribute('aria-hidden', 'false'); };
+    btnInfo.onclick = () => {
+      infoPanel.classList.remove('hidden'); infoPanel.setAttribute('aria-hidden', 'false');
+      // Build stamp (2026-10-24): fetched lazily on open; relative URL so
+      // the CAP shell reads ITS bundled copy, not the server's.
+      const stamp = document.getElementById('info-build');
+      if (stamp && !stamp.dataset.loaded) {
+        fetch('build/version.json', { cache: 'no-store' }).then((r) => r.ok ? r.json() : null).then((v) => {
+          stamp.dataset.loaded = '1';
+          stamp.textContent = v?.sha ? `build: ${v.sha} · ${new Date(v.builtAt).toLocaleString()}` : 'build: unknown';
+        }).catch(() => { stamp.textContent = 'build: unknown'; });
+      }
+    };
     const closeInfo = (e?: Event) => {
       if (e) { e.preventDefault(); e.stopPropagation(); }
       infoPanel.classList.add('hidden');

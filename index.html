@@ -233,6 +233,10 @@
     <button class="info-close" id="info-close" title="Close">×</button>
     <h2>Parley</h2>
     <p class="info-tagline">A voice-first portal to your agent.</p>
+    <!-- Build stamp (2026-10-24): which bundle THIS device runs — the one
+         question "did the rebuild land?" keeps asking. Filled from
+         /build/version.json by src/main.ts. -->
+    <p class="info-build" id="info-build" title="Bundle build id (git commit · build time)">build: …</p>
 
     <h3>Toolbar</h3>
     <ul class="info-icon-list">
@@ -372,6 +376,7 @@
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
       <button type="button" class="settings-nav-btn" data-target="health">Health</button>
+      <button type="button" class="settings-nav-btn" data-target="storage">Storage</button>
       <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
       <button type="button" class="settings-nav-btn" data-target="interaction">Hotkeys</button>
       <button type="button" class="settings-nav-btn" data-target="meetings">Meetings</button>
@@ -526,6 +531,11 @@
     <!-- Agent health checks over the optional /v1/health extension; rendered by src/healthSettings.ts. -->
     <div class="row row-wide" data-health-placeholder><span class="hint">Loading health checks…</span></div>
     <div id="health-checks-host" class="cron-jobs"></div>
+  </div>
+  <div class="settings-group" id="settings-group-storage" data-section="storage" hidden>
+    <div class="group-label">Storage</div>
+    <!-- Data-home inventory + cleanup policy from the proxy's /api/parley/storage; rendered by src/storageSettings.ts (2026-10-24). -->
+    <div id="storage-host" class="storage-host"><span class="hint">Measuring…</span></div>
   </div>
   <div class="settings-group" data-section="voice-input" data-nav-target="voice" hidden>
     <div class="group-label">Voice input</div>

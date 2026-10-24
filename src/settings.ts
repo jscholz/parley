@@ -6,6 +6,7 @@ import * as backend from './backend.ts';
 import * as agentSettings from './agentSettings.ts';
 import * as cronSettings from './cronSettings.ts';
 import * as healthSettings from './healthSettings.ts';
+import * as storageSettings from './storageSettings.ts';
 import { log } from './util/log.ts';
 import {
   isPushSupported,
@@ -1465,6 +1466,7 @@ export function hydrate(handlers: {
     agentSettings.load().catch(() => {});
     cronSettings.load().catch(() => {});
     healthSettings.load().catch(() => {});
+    storageSettings.load().catch(() => {});
     modelHandlers.reloadKeyterms?.();
   };
   const closePanel = () => {
@@ -1475,6 +1477,7 @@ export function hydrate(handlers: {
     agentSettings.load().catch(() => {});
     cronSettings.load().catch(() => {});
     healthSettings.load().catch(() => {});
+    storageSettings.load().catch(() => {});
     // Suppress toolbar clicks for a brief delay AFTER close to cover the
     // remainder of the iOS touch sequence (touchend → click). 350ms is
     // long enough for the synthetic click to fire and be ignored, short

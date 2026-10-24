@@ -179,7 +179,7 @@ export function project(state: ChatState): BubbleSpec[] {
         if (Array.isArray((item as any).attachments) && (item as any).attachments.length) {
           spec.attachments = (item as any).attachments
             .filter((a: any) => a && typeof a.url === 'string')
-            .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size }));
+            .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size, ...(a.purged ? { purged: true } : {}) }));
         }
         pushDurableSpec(spec);
         // Track by content for the heal-rekey echo shadow (step 2) —

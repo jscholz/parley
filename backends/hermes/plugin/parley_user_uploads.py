@@ -107,16 +107,23 @@ def attachments_for(parley_db: Any, user_message_ids: Iterable[str]) -> Dict[str
         for i in range(0, len(ids), 400):
             chunk = ids[i:i + 400]
             rows = parley_db.fetchall(
-                f"SELECT user_message_id, idx, file_name, mime, size FROM msg_attachments "
+                f"SELECT user_message_id, idx, file_name, mime, size, path FROM msg_attachments "
                 f"WHERE user_message_id IN ({','.join('?' for _ in chunk)}) ORDER BY user_message_id, idx",
                 chunk,
             )
             for r in rows:
                 umsg = str(r[0]); idx = int(r[1])
-                out.setdefault(umsg, []).append({
+                row = {
                     "idx": idx, "fileName": r[2], "mimeType": r[3], "size": int(r[4] or 0),
                     "url": url_for(umsg, idx),
-                })
+                }
+                # The storage sweep (proxy storage.ts) deletes aged files and
+                # leaves `<file>.purged` behind; the index row stays so the
+                # chat can still say a file WAS sent (2026-10-24).
+                path = r[5] if len(r) > 5 else None
+                if path and not os.path.exists(path):
+                    row["purged"] = True
+                out.setdefault(umsg, []).append(row)
     except Exception as exc:
         logger.debug("[parley] attachments_for failed: %s", exc)
     return out

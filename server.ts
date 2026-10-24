@@ -28,6 +28,7 @@ import { readEnv } from './proxy/env.mjs';
 import { isLiveDataHome } from './proxy/dataHome.mjs';
 import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import * as uploads from './proxy/parley/uploads.ts';
+import * as storage from './proxy/parley/storage.ts';
 import { installJsonCompression } from './proxy/compressJson.ts';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
@@ -1073,6 +1074,8 @@ if (DEEPGRAM_KEY) {
 // stale recordings, and purge Recently-Deleted captures only after the
 // retention window. Also runs inline on every create; the timer covers
 // the no-new-capture case. unref(): never keeps the process alive.
+// Storage policy sweep: hourly tick, acts at most daily (storage.ts).
+storage.startStorageScheduler();
 setInterval(() => {
   void parley.sweepCaptures().catch((e: unknown) => {
     console.warn(`[capture] sweep failed: ${String(e)}`);
@@ -1335,6 +1338,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (attachmentGet) {
       return parley.handleAttachmentGet(req, res, attachmentGet[1]);
     }
+    // Storage governance (2026-10-24): inventory, policy, sweep, purge.
+    if (req.method === 'GET' && req.url === '/api/parley/storage') return storage.handleStorageGet(req, res);
+    if (req.method === 'PUT' && req.url === '/api/parley/storage/policy') return storage.handleStoragePolicyPut(req, res);
+    if (req.method === 'POST' && req.url === '/api/parley/storage/sweep') return storage.handleStorageSweep(req, res);
+    if (req.method === 'POST' && req.url === '/api/parley/storage/purge') return storage.handleStoragePurge(req, res);
     const capPurge = req.method === 'POST'
       && req.url.match(/^\/api\/parley\/captures\/([^/]+)\/purge-audio$/);
     if (capPurge) {
