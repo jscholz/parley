@@ -686,6 +686,54 @@ export async function installMockBackend(page) {
   // FULL url, so `?include=discarded` (the Recently-Deleted UI's opt-in
   // view, B2) fell through to the real isolated server — which knows
   // none of the mock's captures and answered an empty list.
+  // ── Docs shelf sync (proxy docShelf.ts, 2026-10-24) ────────────────
+  // In-memory shelf + doc_show content cache. `setDocShelf` lets a smoke
+  // play "the other device" (bumps the version + broadcasts the envelope).
+  let docShelf = { version: 0, updatedAt: 0, by: '', order: [], docs: {} };
+  const docCache = new Map();
+  const docIdFor = (p, title) => {
+    const key = (p && p.trim()) || `title:${(title || '').trim().toLowerCase()}`;
+    let h = 5381;
+    for (let i = 0; i < key.length; i++) h = ((h << 5) + h + key.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(16);
+  };
+  const mergeShelf = (incoming) => {
+    const list = Array.isArray(incoming.docs) ? incoming.docs : Object.values(incoming.docs || {});
+    const inDocs = {};
+    for (const d of list) if (d && typeof d.id === 'string') inDocs[d.id] = { updatedAt: Date.now(), format: 'text', ...d };
+    const inOrder = (Array.isArray(incoming.order) ? incoming.order : []).filter((id) => inDocs[id]);
+    for (const id of Object.keys(inDocs)) if (!inOrder.includes(id)) inOrder.push(id);
+    let docs, order;
+    if (incoming.base_version === docShelf.version) { docs = inDocs; order = inOrder; }
+    else {
+      docs = { ...docShelf.docs };
+      for (const d of Object.values(inDocs)) { const prev = docs[d.id]; if (!prev || d.updatedAt >= prev.updatedAt) docs[d.id] = d; }
+      order = [...inOrder];
+      for (const id of docShelf.order) if (docs[id] && !order.includes(id)) order.push(id);
+      for (const id of Object.keys(docs)) if (!order.includes(id)) order.push(id);
+    }
+    docShelf = { version: docShelf.version + 1, updatedAt: Date.now(), by: String(incoming.by || ''), order, docs };
+    broadcast({ type: 'doc_shelf_changed', chat_id: 'parley:docs', version: docShelf.version, by: docShelf.by });
+    return docShelf;
+  };
+  await page.route(/.*\/api\/parley\/docs\/shelf$/, async (route) => {
+    const method = route.request().method();
+    if (method === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(docShelf) });
+    if (method === 'PUT') {
+      let body = {};
+      try { body = JSON.parse(route.request().postData() || '{}'); } catch {}
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mergeShelf(body)) });
+    }
+    return route.fallback();
+  });
+  await page.route(/.*\/api\/parley\/docs\/[0-9a-f]{1,8}$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const id = new URL(route.request().url()).pathname.split('/').pop();
+    const doc = docCache.get(id);
+    if (!doc) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not_cached' }) });
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(doc) });
+  });
+
   await page.route(/.*\/api\/parley\/captures(?:\?.*)?$/, async (route) => {
     if (captureOffline) return offlineAbort(route);
     // GET = the capture list meetingsIndex fetches at boot (and on
@@ -1791,6 +1839,12 @@ export async function installMockBackend(page) {
       if (env && (env.type === 'notification' || env.type === 'reply_final')) {
         bumpUnread(env.chat_id);
       }
+      // Docs shelf: mirror the proxy's doc_show content cache.
+      if (env && env.type === 'doc_show' && typeof env.content === 'string') {
+        const id = docIdFor(typeof env.path === 'string' ? env.path : undefined, env.title || 'Document');
+        docCache.set(id, { id, title: env.title || 'Document', content: env.content, format: env.format || 'text',
+          path: env.path, chat_id: env.chat_id, source: env.source, capture_id: env.capture_id, displayed_at: env.displayed_at });
+      }
       // Tool-row durability (opt-in): mirror hermes persisting the
       // turn's tool activity so the post-final durable refresh carries
       // it (see persistToolRows comment). Append BEFORE broadcasting so
@@ -1864,6 +1918,25 @@ export async function installMockBackend(page) {
     /** No network at all for the capture API (requests abort). */
     setCaptureOffline(on) { captureOffline = !!on; },
     getCaptures() { return Array.from(captures.values()); },
+    /** Docs shelf sync: the mock's shelf record; `setDocShelf` plays the
+     *  OTHER device (replaces the record, bumps the version, broadcasts
+     *  doc_shelf_changed). `seedDoc` puts content in the doc cache so a
+     *  shelf entry this device never received can be opened. */
+    getDocShelf() { return JSON.parse(JSON.stringify(docShelf)); },
+    setDocShelf(state) {
+      const docs = {};
+      for (const d of (Array.isArray(state.docs) ? state.docs : Object.values(state.docs || {}))) docs[d.id] = { updatedAt: Date.now(), format: 'text', ...d };
+      const order = (state.order || Object.keys(docs)).filter((id) => docs[id]);
+      docShelf = { version: docShelf.version + 1, updatedAt: Date.now(), by: state.by || 'other-device', order, docs };
+      broadcast({ type: 'doc_shelf_changed', chat_id: 'parley:docs', version: docShelf.version, by: docShelf.by });
+      return JSON.parse(JSON.stringify(docShelf));
+    },
+    seedDoc(doc) {
+      const id = doc.id || docIdFor(doc.path, doc.title);
+      docCache.set(id, { format: 'markdown', ...doc, id });
+      return id;
+    },
+    docIdFor,
     /** Force a capture into a terminal state SERVER-SIDE without the
      *  client doing it — models the stale-heal sweep failing a recording
      *  the client still believes in (incident 2026-08-27). */

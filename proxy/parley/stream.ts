@@ -70,6 +70,7 @@ import {
 } from './notifications/diagnostics.ts';
 import * as replyBuffer from './notifications/replyBuffer.ts';
 import type { ParleyEnvelope, UpstreamAgent } from './upstream.ts';
+import { cacheDocShow } from './docShelf.ts';
 
 type Envelope = Record<string, unknown> & { type: string; chat_id?: string };
 
@@ -123,6 +124,9 @@ const FANOUT_TYPES = new Set<string>([
   // ("start recording" from a Shortcut → foregrounded device's mic).
   'capture_changed',
   'capture_control',
+  // Docs shelf (proxy-owned — docShelf.ts): "the open set changed on
+  // another device, fetch the merged shelf".
+  'doc_shelf_changed',
 ]);
 
 // Bumped from 32 → 128: traffic is heavier now (every reply_delta
@@ -467,6 +471,11 @@ export function pushEnvelope(env: ParleyEnvelope | Envelope): void {
   const prevBroadcastAt = broadcastChatId ? (lastBroadcastAt.get(broadcastChatId) || 0) : 0;
 
   broadcast(env as Envelope);
+  // Docs shelf content cache (docShelf.ts): a device asleep for this
+  // push can still open the doc from the synced shelf later.
+  if (env.type === 'doc_show') {
+    try { cacheDocShow(env); } catch { /* cache is best-effort */ }
+  }
   // Push dispatch runs AFTER broadcast so live tabs see the message
   // first (no double-render race), and so the hasActiveSubFor check
   // sees the up-to-date subscriber set just before deciding.

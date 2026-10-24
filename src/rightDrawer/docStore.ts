@@ -198,7 +198,10 @@ export function currentDoc(): DocState | null {
  *  Old-backend fallback (no displayed_at field): a byte-identical
  *  re-push keeps the prior stamp — only genuinely new content moves the
  *  clock — so replays still can't reset timestamps to 0s. */
-export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void {
+export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean;
+  /** Shelf sync (2026-10-24): a doc another device already saw is not
+   *  "new" here — no unread dot, no activation, no front-of-shelf move. */
+  silent?: boolean }): void {
   const title = payload.title || 'Document';
   const id = docIdFor(payload.path, title);
   const existing = docs.find(d => d.id === id);
@@ -222,8 +225,10 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
     receivedAt: existing?.receivedAt ?? displayedAt ?? now,
     updatedAt,
   };
-  docs = [entry, ...docs.filter(d => d.id !== id)].slice(0, MAX_DOCS);
-  activeId = id;
+  docs = opts?.silent
+    ? [...docs.filter(d => d.id !== id), entry].slice(-MAX_DOCS)   // keep the reader where it is
+    : [entry, ...docs.filter(d => d.id !== id)].slice(0, MAX_DOCS);
+  if (!opts?.silent || !activeId) activeId = id;
   // New doc → tab appended at the bottom; re-push → tab stays put
   // (browser semantics: reloading a tab doesn't move it). Eviction
   // above also drops the evicted doc's tab here.
@@ -233,7 +238,7 @@ export function setDoc(payload: DocPayload, opts?: { autoOpen?: boolean }): void
   // changed. A ring-replayed envelope lands here byte-identical with the
   // same stamp; flagging that as 'push' lit a false dot every reconnect.
   const fresh = !existing || existing.content !== content || existing.updatedAt !== updatedAt;
-  notify(opts?.autoOpen !== false, fresh ? 'push' : 'change');
+  notify(opts?.autoOpen !== false && !opts?.silent, fresh && !opts?.silent ? 'push' : 'change');
 }
 
 /** User taps a shelf row — make it the reader's doc. */

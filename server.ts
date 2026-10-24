@@ -29,6 +29,7 @@ import { isLiveDataHome } from './proxy/dataHome.mjs';
 import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import * as uploads from './proxy/parley/uploads.ts';
 import * as storage from './proxy/parley/storage.ts';
+import * as docShelf from './proxy/parley/docShelf.ts';
 import { installJsonCompression } from './proxy/compressJson.ts';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
@@ -1594,6 +1595,12 @@ const requestHandler: http.RequestListener = async (req, res) => {
   // with its trigger — always on, per data home. GET returns the newest.
   // User-upload lane (2026-10-11): durable copies of what the user attached,
   // referenced by history rows so thumbnails survive a transcript rebuild.
+  // Docs shelf sync (2026-10-24, docShelf.ts): tenant-wide open set +
+  // tab order, and the doc_show content cache behind it.
+  if (req.url === '/api/parley/docs/shelf' && req.method === 'GET') return docShelf.handleShelfGet(req, res);
+  if (req.url === '/api/parley/docs/shelf' && req.method === 'PUT') return docShelf.handleShelfPut(req, res);
+  const cachedDoc = req.method === 'GET' && /^\/api\/parley\/docs\/([0-9a-f]{1,8})$/.exec(req.url || '');
+  if (cachedDoc) return docShelf.handleDocGet(req, res, cachedDoc[1]);
   const upl = (req.method === 'GET' || req.method === 'HEAD') && /^\/api\/parley\/uploads\/([^/?]+)\/(\d+)(?:\?.*)?$/.exec(req.url || '');
   if (upl) return uploads.handleUploadGet(req, res, decodeURIComponent(upl[1]), upl[2]);
   if (req.url === '/api/parley/diag/playback' && req.method === 'POST') return playbackAudit.handlePlaybackAudit(req, res);
