@@ -6,7 +6,8 @@
 //   (b) the OTHER device opens a doc this one never received → it
 //       appears here, content fetched from the proxy's doc cache, no
 //       unread dot, reader stays where it was (inbound open);
-//   (c) the other device closes a doc → it closes here (close-sync);
+//   (c0) a doc the shelf never knew survives a remote write and goes up (merge, not intersect);
+//   (c) the other device closes a doc this device has SEEN on the shelf → it closes here;
 //   (d) closing a doc here → gone from the shelf record (outbound close).
 
 import { waitForReady, assert } from './lib.mjs';
@@ -67,12 +68,35 @@ export default async function run({ page, log, mock }) {
   assert(/BRAVO-MARK/.test(bravoBody), 'content came from the doc cache');
   log('inbound: remote open → tab here, content fetched, reader untouched, no dot ✓');
 
-  // (c) close-sync: the other device closed Alpha.
+  // (c0) MERGE, not intersect (field 2026-10-24: the CAP closed a bunch of
+  // docs on first contact): a doc opened here that the shelf has NEVER
+  // known must survive a remote write that lacks it, and go up.
+  mock.pushEnvelope({ type: 'doc_show', chat_id: CHAT_ID, title: 'Charlie doc', content: '# Charlie\n\nCHARLIE-MARK', format: 'markdown', path: '/w/charlie.md' });
+  await page.waitForFunction(() => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('CHARLIE-MARK'), null, { timeout: 6000, polling: 50 });
+  const charlieId = mock.docIdFor('/w/charlie.md', 'Charlie doc');
+  // The other device writes the shelf before our debounced push lands — without Charlie.
+  const shelfB0 = mock.getDocShelf();
+  mock.setDocShelf({ by: 'other-device', order: [alphaId, bravoId], docs: [shelfB0.docs[alphaId] || shelfA.docs[alphaId], shelfB0.docs[bravoId] || { id: bravoId, title: 'Bravo doc', path: '/w/bravo.md', format: 'markdown', chatId: CHAT_ID, updatedAt: Date.now() }] });
+  await page.waitForTimeout(600);
+  const tabsC0 = await tabTitles(page);
+  assert(tabsC0.includes('Charlie doc'), `a doc the shelf never knew must NOT be closed by a remote write (got ${JSON.stringify(tabsC0)})`);
+  const shelfC0 = await until(() => { const s = mock.getDocShelf(); return s.docs[charlieId] ? s : null; }, 6000);
+  assert(shelfC0, `…and it must be contributed to the shelf (${JSON.stringify(mock.getDocShelf().order)})`);
+  log('merge: local-only doc survives a remote write and goes up ✓');
+
+  // (c) close-sync: the other device closed Alpha — a doc this device
+  // has SEEN on the shelf — so it closes here. Charlie stays.
   const shelfB = mock.getDocShelf();
-  mock.setDocShelf({ by: 'other-device', order: [bravoId], docs: [shelfB.docs[bravoId]] });
+  mock.setDocShelf({ by: 'other-device', order: [bravoId, charlieId], docs: [shelfB.docs[bravoId], shelfB.docs[charlieId]] });
   const tabsC = await until(async () => { const t = await tabTitles(page); return !t.includes('Alpha doc') ? t : null; }, 6000);
-  assert(tabsC && tabsC.join(',') === 'Bravo doc', `remote close must close here (got ${JSON.stringify(tabsC)})`);
-  log('close-sync: remote close → closed here ✓');
+  assert(tabsC && tabsC.join(',') === 'Bravo doc,Charlie doc', `remote close of a KNOWN doc closes here, nothing else moves (got ${JSON.stringify(tabsC)})`);
+  log('close-sync: remote close of a known doc → closed here ✓');
+
+  // Charlie is closed here before (d) so the empty-shelf assertion holds.
+  await page.evaluate(() => { const t = [...document.querySelectorAll('#doc-rail-tabs .doc-rail-tab')].find((x) => x.getAttribute('aria-label') === 'Charlie doc'); t?.click(); });
+  await page.waitForFunction(() => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('CHARLIE-MARK'), null, { timeout: 4000, polling: 50 });
+  await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-drawer-remove').click());
+  await until(() => { const s = mock.getDocShelf(); return !s.docs[charlieId] ? s : null; }, 5000);
 
   // (d) outbound close: closing Bravo here empties the shelf record.
   await page.waitForFunction(() => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes('BRAVO-MARK'), null, { timeout: 4000, polling: 50 });

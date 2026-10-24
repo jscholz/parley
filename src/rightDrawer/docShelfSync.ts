@@ -23,9 +23,24 @@ import { log } from '../util/log.ts';
 import {
   listDocs, tabOrderDocs, setDoc, removeDoc, setTabOrder, type DocState,
 } from './docStore.ts';
+import { planInbound } from './docShelfMerge.ts';
 
 const DEVICE_KEY = 'parley.deviceId';
+/** Ids this device has SEEN on the shared shelf (last applied or last
+ *  pushed). Merge-not-intersect (2026-10-24): only a doc the shelf knew
+ *  and then dropped is closed here; a doc the shelf never knew is ours to
+ *  contribute. Persisted so a reload keeps the knowledge; lost knowledge
+ *  degrades to a pure merge, never to closes. */
+const KNOWN_KEY = 'parley.docShelf.known';
 const DEBOUNCE_MS = 1500;
+let knownRemoteIds: Set<string> = new Set();
+function loadKnown(): void {
+  try { knownRemoteIds = new Set(JSON.parse(localStorage.getItem(KNOWN_KEY) || '[]')); } catch { knownRemoteIds = new Set(); }
+}
+function saveKnown(ids: Iterable<string>): void {
+  knownRemoteIds = new Set(ids);
+  try { localStorage.setItem(KNOWN_KEY, JSON.stringify(Array.from(knownRemoteIds))); } catch { /* storage unavailable */ }
+}
 
 let deviceId = '';
 let lastSeenVersion = 0;
@@ -72,6 +87,7 @@ async function push(): Promise<void> {
     const next = await res.json().catch(() => null);
     if (next && typeof next.version === 'number') {
       lastSeenVersion = next.version;
+      saveKnown(Object.keys(next.docs || {}));
       // A merge against a concurrent writer may have added docs we lack;
       // apply the answer so both devices converge without another hop.
       if (next.by === deviceId) await applyRemote(next);
@@ -130,28 +146,30 @@ async function applyRemote(remote: any): Promise<void> {
   const remoteDocs: Record<string, any> = remote.docs && typeof remote.docs === 'object' ? remote.docs : {};
   const remoteOrder: string[] = Array.isArray(remote.order) ? remote.order.filter((x: any) => typeof x === 'string') : [];
   const localById = new Map<string, DocState>(listDocs().map((d) => [d.id, d]));
+  const remoteIds = new Set<string>([...remoteOrder, ...Object.keys(remoteDocs)]);
+  // MERGE, never intersect: open what the shelf has, close only what the
+  // shelf KNEW and dropped, keep (and later push) what it never knew.
+  const plan = planInbound(localById.keys(), remoteIds, knownRemoteIds);
   applying = true;
   try {
-    // Open what the shelf has and we don't.
     for (const id of remoteOrder) {
-      if (localById.has(id)) continue;
+      if (!plan.toOpen.includes(id)) continue;
       const meta = remoteDocs[id];
       if (!meta) continue;
       const payload = await fetchContent(meta);
       if (!payload) { log(`[doc-shelf] no content for ${id} (${meta.title}) — will retry on the next pull`); continue; }
       setDoc(payload, { autoOpen: false, silent: true });
     }
-    // Close what the shelf dropped (only once we have a real version to
-    // compare against — version 0 means "no shelf yet", not "empty").
-    if (remote.version > lastSeenVersion && remote.version > 0) {
-      for (const d of listDocs()) {
-        if (!remoteDocs[d.id]) removeDoc(d.id);
-      }
+    for (const id of plan.toClose) removeDoc(id);
+    if (plan.toContribute.length) {
+      log(`[doc-shelf] keeping ${plan.toContribute.length} doc(s) the shelf never knew — contributing them`);
     }
     const have = new Set(listDocs().map((d) => d.id));
-    const order = remoteOrder.filter((id) => have.has(id));
+    // Shelf order first, then anything we are contributing, in our order.
+    const order = [...remoteOrder.filter((id) => have.has(id)), ...tabOrderDocs().map((d) => d.id).filter((id) => have.has(id) && !remoteIds.has(id))];
     if (order.length) setTabOrder(order);
     lastSeenVersion = Math.max(lastSeenVersion, remote.version);
+    saveKnown(remoteIds);
   } finally {
     applying = false;
   }
@@ -196,6 +214,7 @@ export function initDocShelfSync(): void {
   wired = true;
   if (typeof window === 'undefined') return;
   ensureDeviceId();
+  loadKnown();
   window.addEventListener('parley:doc-changed', () => { schedulePush(); });
   window.addEventListener('parley:doc-shelf-changed', (ev) => {
     const by = (ev as CustomEvent).detail?.by;
