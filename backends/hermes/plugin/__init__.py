@@ -1440,6 +1440,7 @@ class ParleyAdapter(BasePlatformAdapter):
 
         from . import parley_route_upload as _route_upload
         from . import parley_user_uploads as _uploads
+        from . import parley_text_ingest as _text
 
         paths: List[str] = []
         mimes: List[str] = []
@@ -1490,6 +1491,23 @@ class ParleyAdapter(BasePlatformAdapter):
                     )
                     continue
                 mime = a.get("mimeType") or ""
+                if _text.is_text_attachment(mime, a.get("fileName")):
+                    # Plain text rides in the turn's text, not media_urls
+                    # (parley_text_ingest, 2026-10-24).
+                    mime = _text.normalized_mime(mime, a.get("fileName"))
+                    saved = _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
+                    if text_out is not None:
+                        try:
+                            raw = staged.read_bytes()
+                            text_out.append(_text.text_block(
+                                a.get("fileName") or "file.txt", _text.decode_text(raw), len(raw), saved))
+                        except Exception:
+                            logger.exception("[parley] inlining staged text attachment failed")
+                    try:
+                        staged.unlink()
+                    except OSError:
+                        pass
+                    continue
                 saved = _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
                 if mime.lower() == "application/pdf":
                     pages = _pdf_pages(staged, a.get("fileName") or "document.pdf", saved)
@@ -1524,6 +1542,14 @@ class ParleyAdapter(BasePlatformAdapter):
                 payload = base64.b64decode(b64, validate=False)
             except Exception:
                 logger.warning("[parley] base64 decode failed for attachment")
+                continue
+            if _text.is_text_attachment(mime, a.get("fileName")):
+                # Plain text: durable copy + inlined block; never media.
+                mime = _text.normalized_mime(mime, a.get("fileName"))
+                saved = _keep(file_name=a.get("fileName") or "file.txt", mime=mime, payload=payload)
+                if text_out is not None:
+                    text_out.append(_text.text_block(
+                        a.get("fileName") or "file.txt", _text.decode_text(payload), len(payload), saved))
                 continue
             ext = self._ext_for_mime(mime, a.get("fileName"))
             saved = _keep(file_name=a.get("fileName") or f"attachment{ext}", mime=mime, payload=payload)

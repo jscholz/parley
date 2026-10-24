@@ -47,6 +47,50 @@ const DOWNSCALE_MAX_DIM = 2048;
 // wire payload is small enough to survive a flaky link.
 const DOWNSCALE_JPEG_QUALITIES = [0.85, 0.7, 0.55, 0.4];
 
+// ── Plain-text attachments (2026-10-24) ─────────────────────────────
+// Mirror of the plugin's parley_text_ingest classification: MIME first,
+// then the extension for empty / mislabeled MIMEs (".md" often arrives
+// as "", ".ts" as video/mp2t). Kept small on purpose — the plugin owns
+// the full list; the client only has to say yes to the obvious ones.
+const TEXT_MAX_BYTES = 2_000_000;
+const TEXT_EXTS = new Set([
+  'txt', 'text', 'md', 'markdown', 'mdx', 'rst', 'adoc', 'org', 'log', 'csv', 'tsv',
+  'json', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'env', 'properties',
+  'xml', 'html', 'htm', 'svg', 'css', 'scss', 'less',
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'm',
+  'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'php', 'pl', 'lua', 'r', 'jl', 'scala', 'ex', 'exs', 'hs', 'dart', 'vue', 'svelte',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'sql', 'graphql', 'proto', 'tex', 'bib', 'diff', 'patch',
+  'gitignore', 'editorconfig', 'dockerfile', 'makefile', 'srt', 'vtt', 'ics',
+]);
+const TEXT_APP_MIMES = new Set([
+  'application/json', 'application/ld+json', 'application/x-ndjson', 'application/xml', 'application/x-yaml',
+  'application/yaml', 'application/toml', 'application/javascript', 'application/x-javascript',
+  'application/typescript', 'application/x-sh', 'application/x-shellscript', 'application/sql', 'image/svg+xml',
+]);
+function extOf(name: string): string {
+  const base = (name || '').toLowerCase().split('/').pop() || '';
+  if (base === 'dockerfile' || base === 'makefile') return base;
+  return base.includes('.') ? base.split('.').pop()! : '';
+}
+export function isTextMime(mime: string | undefined | null): boolean {
+  const m = (mime || '').split(';')[0].trim().toLowerCase();
+  return m.startsWith('text/') || TEXT_APP_MIMES.has(m);
+}
+/** The MIME we send for a text-like file, or null when it is not one. */
+export function textMimeFor(file: { type: string; name: string }): string | null {
+  const m = (file.type || '').split(';')[0].trim().toLowerCase();
+  const ext = extOf(file.name);
+  if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'text/markdown';
+  if (isTextMime(m)) return m;
+  if (m && m !== 'application/octet-stream' && m !== 'video/mp2t') return null;
+  if (!TEXT_EXTS.has(ext)) return null;
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'json' || ext === 'jsonl') return 'application/json';
+  if (ext === 'html' || ext === 'htm') return 'text/html';
+  return 'text/plain';
+}
+
+
 /** Downscale a large still image to ≤DOWNSCALE_MAX_DIM on the long edge.
  *  Skips gif/svg (animation / vector). Returns the original file when
  *  it's already small, decoding fails, or the re-encode isn't smaller
@@ -150,7 +194,7 @@ export function hasPending() { return pending.length > 0; }
 export function toSendPayload() {
   const items = pending.slice();
   return Promise.all(items.map(async (a) => {
-    const type = a.mimeType?.startsWith('video/') ? 'video' : 'image';
+    const type = a.mimeType?.startsWith('video/') ? 'video' : isTextMime(a.mimeType) ? 'file' : 'image';
     const base = { type, mimeType: a.mimeType, fileName: a.fileName };
     if (a.size > UPLOAD_THRESHOLD) {
       const uploadId = await uploadLarge(a.file);
@@ -195,11 +239,23 @@ export async function add(file) {
   // Some multimodal models (Gemini, some Gemma variants) decode video
   // frames; others reject. We keep the client permissive — if the
   // gateway or model rejects, the user sees it in the reply.
-  const isImage = file.type.startsWith('image/');
-  const isVideo = file.type.startsWith('video/');
-  const isPdf = file.type === 'application/pdf';
-  if (!isImage && !isVideo && !isPdf) {
-    rejectAttachment('Only image, video, and PDF attachments are supported');
+  // Plain text and anything that is a synonym for it — .md, .txt, logs,
+  // CSV/JSON/YAML, source files (2026-10-24). Decided FIRST: a browser
+  // labels "recorder.ts" video/mp2t, and the video branch must not win.
+  // The plugin inlines the content into the turn (fenced) and keeps a
+  // durable copy; no model capability is needed, so text is never gated
+  // on vision.
+  const textMime = textMimeFor(file);
+  const isText = !!textMime;
+  const isImage = !isText && file.type.startsWith('image/');
+  const isVideo = !isText && file.type.startsWith('video/');
+  const isPdf = !isText && file.type === 'application/pdf';
+  if (!isImage && !isVideo && !isPdf && !isText) {
+    rejectAttachment('Only image, video, PDF, and text attachments are supported');
+    return;
+  }
+  if (isText && file.size > TEXT_MAX_BYTES) {
+    rejectAttachment(`Text file too large — ${(file.size / 1_000_000).toFixed(1)}MB exceeds the ${TEXT_MAX_BYTES / 1_000_000}MB limit for text`);
     return;
   }
   // A PDF only reaches the model if it's pdf-native or rasterize-capable
@@ -216,10 +272,11 @@ export async function add(file) {
   }
   try {
     if (isImage) file = await maybeDownscaleImage(file);
-    const kindLabel = isVideo ? 'video' : (isPdf ? 'document' : 'image');
+    const kindLabel = isVideo ? 'video' : (isPdf ? 'document' : isText ? 'file' : 'image');
     const ext = isPdf
       ? 'pdf'
-      : (file.type.split('/')[1] || (isVideo ? 'mp4' : 'jpg')).split(';')[0];
+      : isText ? (file.name.split('.').pop() || 'txt')
+        : (file.type.split('/')[1] || (isVideo ? 'mp4' : 'jpg')).split(';')[0];
     // Large files skip base64 — reading a 57 MB PDF into a data URL
     // would buffer ~76 MB of base64 in JS memory for nothing (it's
     // streamed raw to the upload endpoint at send time). They get an
@@ -232,7 +289,7 @@ export async function add(file) {
       file,
       dataUrl,
       previewUrl,
-      mimeType: file.type,
+      mimeType: textMime || file.type,
       fileName: file.name || `${kindLabel}-${Date.now()}.${ext}`,
       size: file.size,
     });
@@ -285,6 +342,15 @@ function renderChips() {
       placeholder.textContent = 'PDF';
       chip.appendChild(placeholder);
       chip.classList.add('chip-pdf');
+    } else if (isTextMime(att.mimeType)) {
+      // Text file: the extension is the glyph (MD / TXT / JSON …).
+      const placeholder = document.createElement('div');
+      placeholder.className = 'chip-pdf-label chip-file-label';
+      placeholder.title = att.fileName;
+      const ext = String(att.fileName || '').split('.').pop() || 'txt';
+      placeholder.textContent = ext.length <= 4 ? ext.toUpperCase() : 'TXT';
+      chip.appendChild(placeholder);
+      chip.classList.add('chip-pdf', 'chip-file');
     } else {
       const img = document.createElement('img');
       img.src = att.previewUrl;
@@ -323,7 +389,8 @@ export function updateModelGate() {
   if (!modelCaps.capsKnownFor(modelCaps.currentModelId())) return;
   const canImage = modelCaps.canAttachFiles();
   const canPdf = modelCaps.canAttachPdf();
-  const keep = (a) => (a.mimeType === 'application/pdf' ? canPdf : canImage);
+  // Text attachments need no model capability — they ride in the turn's text.
+  const keep = (a) => (isTextMime(a.mimeType) ? true : a.mimeType === 'application/pdf' ? canPdf : canImage);
   const kept = pending.filter(keep);
   if (kept.length === pending.length) return;
   const dropped = pending.length - kept.length;

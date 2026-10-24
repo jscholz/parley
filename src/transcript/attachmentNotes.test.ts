@@ -43,3 +43,21 @@ test('hermes memory-context block stored in a multimodal user row is hidden (fie
   const t = 'Can’t copy these numbers\nPls fix now and in future\n\n[Image attached at: /tmp/parley-attach-x.png]\n[screenshot]\n<memory-context>\n[System note: recalled]\n\n- fact one\n</memory-context>';
   assert.equal(stripAttachmentNotes(t), 'Can’t copy these numbers\nPls fix now and in future');
 });
+
+test('a text-file upload block is hidden; a truncation note becomes a caption', async () => {
+  const { stripAttachmentNotes, pdfNotices } = await import('./attachmentNotes.ts');
+  const block = [
+    'Here are my notes.',
+    '',
+    '[File attached: notes.md — 3 lines, 1.2 KB. Saved at: /x/0-notes.md]',
+    '[File note: notes.md is 9.0 MB — only the first 200,000 characters are inlined; the full file is saved on disk.]',
+    '````md',
+    '# Title',
+    '```js',
+    'x',
+    '````',
+    '[end of file: notes.md]',
+  ].join('\n');
+  assert.equal(stripAttachmentNotes(block), 'Here are my notes.');
+  assert.deepEqual(pdfNotices(block), ['notes.md is 9.0 MB — only the first 200,000 characters are inlined; the full file is saved on disk.']);
+});

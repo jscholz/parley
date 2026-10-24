@@ -157,7 +157,7 @@ export function handleNotification({ chatId, kind, content, parleyId, isReplay }
  *  conversation is explicitly different from the viewed one. When
  *  getViewed() is null (boot races), render — there's no on-screen
  *  session to protect. */
-export function handleUserMessage({ conversation, text, messageId, isReplay }: any): void {
+export function handleUserMessage({ conversation, text, messageId, isReplay, attachments }: any): void {
   if (!messageId || !conversation) return;
   // Defensive: empty text must not wipe an existing bubble. Production
   // envelopes always carry text; future metadata-only pings shouldn't
@@ -173,6 +173,7 @@ export function handleUserMessage({ conversation, text, messageId, isReplay }: a
     chat_id: conversation,
     message_id: messageId,
     text,
+    ...(Array.isArray(attachments) && attachments.length ? { attachments } : {}),
   });
   // Unread badge: a CROSS-DEVICE user message is an unread; the
   // originator's own echo (matched by its pendingSend, cleared just

@@ -1068,7 +1068,11 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       // the whole staleness window.
       noteTurnStarted(chatId, { isReplay: env?._replay === true });
       const isReplay = env?._replay === true;
-      subs?.onUserMessage?.({ conversation: chatId, text, messageId, isReplay });
+      const attachments = Array.isArray(env?.attachments)
+        ? env.attachments.filter((a: any) => a && typeof a.url === 'string')
+          .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size }))
+        : undefined;
+      subs?.onUserMessage?.({ conversation: chatId, text, messageId, isReplay, attachments });
       // Drawer ordering — skip on replay (see reply_final's matching
       // guard). Server replays N user_message envelopes per chat on
       // every reconnect; without this gate that triggers N drawer

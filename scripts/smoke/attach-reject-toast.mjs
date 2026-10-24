@@ -9,7 +9,8 @@
 //
 // Two rejection cases, both must surface a visible toast AND add no chip:
 //   A. oversized (> MAX_BYTES 100 MB) → "File too large" toast.
-//   B. unsupported type (text/plain) → "Only image, video, and PDF" toast.
+//   B. unsupported type (application/zip) → "Only image, video, PDF, and text" toast.
+//      (text/plain is ACCEPTED since 2026-10-24 — see composer-attach-text-file.)
 //
 // And one accept case (sanity): a small image is accepted (chip rendered,
 // no error toast) — proves the reject path isn't rejecting everything.
@@ -73,10 +74,10 @@ export default async function run({ page, log }) {
   log('A ✓ oversized image → persistent error toast, no chip');
 
   // ── B: unsupported type → toast + no chip ───────────────────────────
-  await addFile(page, { bytes: 1024, type: 'text/plain', name: 'notes.txt' });
+  await addFile(page, { bytes: 1024, type: 'application/zip', name: 'archive.zip' });
   t = await toastState(page);
   assert(t.visible && t.err, 'B: unsupported-type rejection must show a visible err toast');
-  assert(/image, video, and pdf/i.test(t.text), `B: toast should name the supported types (got ${JSON.stringify(t.text)})`);
+  assert(/image, video, pdf, and text/i.test(t.text), `B: toast should name the supported types (got ${JSON.stringify(t.text)})`);
   assert((await chipCount(page)) === 0, 'B: unsupported file must NOT add a chip');
   log('B ✓ wrong type → persistent error toast, no chip');
 

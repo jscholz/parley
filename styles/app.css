@@ -3444,6 +3444,11 @@
     top: -10px; left: 0; right: 0;
     height: 24px;
     cursor: pointer;
+    /* Inert unless THIS reply is the one playing/paused (2026-10-23): the
+       strip straddles the gap above every agent bubble, so a stray
+       pointer anywhere in the transcript used to land on one and start
+       speech. Starting lives in the ··· menu's play button only. */
+    pointer-events: none;
     background: rgba(0,0,0,0.01);
     touch-action: pan-y;   /* vertical swipes scroll; only taps and sideways drags scrub (2026-10-12) */
     -webkit-tap-highlight-color: rgba(0,0,0,0);
@@ -3457,6 +3462,7 @@
     transition: width 0.12s linear;
     pointer-events: none;
   }
+  .line.agent.tts-active .play-bar { pointer-events: auto; }
   .line.agent .play-bar-loaded { background: color-mix(in srgb, var(--primary) 25%, transparent); }
   .line.agent .play-bar-played { background: var(--primary); opacity: 0.9; }
   /* Streaming: subtle shimmer on the loaded bar while fetch is in

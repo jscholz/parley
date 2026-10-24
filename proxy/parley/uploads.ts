@@ -28,6 +28,11 @@ const INLINE_MIME: Record<string, string> = {
   // Inline so the in-app viewer can frame it (2026-10-15); the viewer's
   // Download button still saves it (<a download>).
   '.pdf': 'application/pdf',
+  // Text uploads (2026-10-24) open readable in a tab; charset keeps
+  // non-ASCII notes intact.
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.markdown': 'text/markdown; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8', '.json': 'application/json; charset=utf-8', '.log': 'text/plain; charset=utf-8',
+  '.yaml': 'text/plain; charset=utf-8', '.yml': 'text/plain; charset=utf-8', '.xml': 'text/xml; charset=utf-8',
 };
 
 let rootResolver: () => string = () => path.join(dataHome(), 'uploads');

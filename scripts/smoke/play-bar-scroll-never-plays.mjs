@@ -1,19 +1,23 @@
-// A scroll that starts on a reply's play bar must never start speech
-// (field 2026-10-12: "Literally all I was doing was scrolling around on
-// the cap and it started talking." The playback audit logged
-// `user-tap reason=scrub` — playback used to start on pointerdown).
+// A reply's play bar must never START speech (field 2026-10-12: "all I
+// was doing was scrolling around on the cap and it started talking";
+// field 2026-10-23: a trackpad tap-to-click nobody meant landed on an
+// idle bubble's bar and spoke it — "that bar shouldn't result in playing
+// the message; playback is buried inside the context menu"). The bar
+// only SEEKS the reply that is already playing; starting is the play
+// button's job (the ··· menu synthesizes a click on it).
 //
 // Drives real PointerEvent sequences on the bar:
-//   vertical swipe (down → move 60px → cancel, as iOS does when the
-//   scroll takes the touch)                → no /tts, no audit entry
-//   vertical swipe released on the bar     → no /tts
-//   tap (down → up in place)               → plays, audit reason=scrub-tap
-//   horizontal drag                        → plays, audit reason=scrub-drag
+//   vertical swipe (down → move 60px → cancel)     → no /tts, no audit
+//   vertical swipe released on the bar             → no /tts
+//   tap on an IDLE bubble's bar                    → no /tts, no audit
+//   sideways drag on an IDLE bubble's bar          → no /tts
+//   play button → playing; tap / drag on ITS bar   → seeks, no new /tts
+//   tap on ANOTHER bubble's bar while one plays    → nothing
 
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'play-bar-scroll-never-plays';
-export const DESCRIPTION = 'Vertical swipes that begin on a reply play bar scroll without starting speech; taps and sideways drags still scrub';
+export const DESCRIPTION = 'The play bar never starts speech — swipes, taps and drags on an idle bubble are inert; it only seeks the reply already playing';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = 'both';
@@ -77,15 +81,46 @@ export default async function run({ page, log, mock }) {
   assert(tts.length === 0 && audits.length === 0, `vertical swipe released on the bar must not play: tts=${tts.length}`);
   log('vertical swipe released on the bar → no speech ✓');
 
+  // Idle bubble: a tap on its bar is inert — no speech, no audit.
   await gesture('m-pbs1', [['pointerdown', 0, 0], ['pointerup', 2, 1]]);
   await settle();
-  assert(tts.length === 1, `a tap on the bar should play, tts=${tts.length}`);
-  assert(audits.some((a) => a.reason === 'scrub-tap' && a.replyId === 'm-pbs1'), `audit should name scrub-tap: ${JSON.stringify(audits)}`);
-  log('tap on the bar → plays, audited as scrub-tap ✓');
+  assert(tts.length === 0 && audits.length === 0, `a tap on an idle bar must not play: tts=${tts.length} audits=${JSON.stringify(audits)}`);
+  const inert = await page.evaluate(() => getComputedStyle(document.querySelector('#transcript .line.agent[data-reply-id="m-pbs1"] .play-bar')).pointerEvents);
+  assert(inert === 'none', `an idle bar must not even take pointer events (got ${inert})`);
+  log('tap on an idle bar → nothing ✓');
 
   await gesture('m-pbs2', [['pointerdown', 0, 0], ['pointermove', 30, 3], ['pointermove', 60, 4], ['pointerup', 60, 4]]);
   await settle();
-  assert(tts.length === 2, `a sideways drag should scrub-start, tts=${tts.length}`);
-  assert(audits.some((a) => a.reason === 'scrub-drag' && a.replyId === 'm-pbs2'), `audit should name scrub-drag: ${JSON.stringify(audits)}`);
-  log('sideways drag on the bar → plays, audited as scrub-drag ✓');
+  assert(tts.length === 0 && audits.length === 0, `a sideways drag on an idle bar must not play: tts=${tts.length}`);
+  log('sideways drag on an idle bar → nothing ✓');
+
+  // The play button starts it (what the ··· menu's Play synthesizes).
+  await page.evaluate(() => document.querySelector('#transcript .line.agent[data-reply-id="m-pbs1"] .play-btn').click());
+  await page.waitForFunction(() => document.querySelector('#transcript .line.agent[data-reply-id="m-pbs1"]')?.classList.contains('tts-active'), null, { timeout: 4000 });
+  assert(tts.length === 1 && audits.some((a) => a.reason === 'play-btn' && a.replyId === 'm-pbs1'), `play button starts speech, audited as play-btn: tts=${tts.length} ${JSON.stringify(audits)}`);
+  const live = await page.evaluate(() => getComputedStyle(document.querySelector('#transcript .line.agent[data-reply-id="m-pbs1"] .play-bar')).pointerEvents);
+  assert(live === 'auto', `the ACTIVE reply's bar takes pointer events (got ${live})`);
+
+  // Its bar now seeks — no second /tts, no new start audit.
+  const seeks = await page.evaluate(() => {
+    window.__seeks = [];
+    const player = document.getElementById('player');
+    const d = Object.getOwnPropertyDescriptor(player, 'currentTime');
+    Object.defineProperty(player, 'currentTime', { get: () => d?.value ?? 0, set: (v) => { window.__seeks.push(v); }, configurable: true });
+    return true;
+  });
+  assert(seeks, 'seek probe installed');
+  await gesture('m-pbs1', [['pointerdown', 0, 0], ['pointerup', 2, 1]]);
+  await gesture('m-pbs1', [['pointerdown', 0, 0], ['pointermove', 30, 3], ['pointermove', 60, 4], ['pointerup', 60, 4]]);
+  await settle();
+  const seekCount = await page.evaluate(() => window.__seeks.length);
+  assert(tts.length === 1 && audits.filter((a) => a.replyId === 'm-pbs1').length === 1, `bar gestures on the playing reply must not start another playback: tts=${tts.length}`);
+  assert(seekCount >= 1, `bar gestures on the playing reply seek it (seeks=${seekCount})`);
+  log('active reply: bar tap/drag seek, nothing restarts ✓');
+
+  // Another bubble's bar stays inert while this one plays.
+  await gesture('m-pbs2', [['pointerdown', 0, 0], ['pointerup', 1, 1]]);
+  await settle();
+  assert(tts.length === 1 && !audits.some((a) => a.replyId === 'm-pbs2'), `another bubble's bar must do nothing: tts=${tts.length}`);
+  log('other bubble\'s bar while one plays → nothing ✓');
 }

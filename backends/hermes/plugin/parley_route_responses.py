@@ -427,12 +427,23 @@ async def handle_responses(adapter, request: "web.Request") -> "web.StreamRespon
     # there's no in-turn queue to bypass — _safe_send_envelope will
     # route it through _publish_out_of_turn which prefixes the
     # chat_id to `parley:<chat_id>` on the wire.
-    await adapter._safe_send_envelope({
+    # Attachment metadata rides along (2026-10-24): without it a device
+    # that painted this bubble from the broadcast showed no trace of the
+    # files — he had to check the phone to be sure the PDF was sent.
+    _um_env: Dict[str, Any] = {
         "type": "user_message",
         "chat_id": chat_id,
         "message_id": user_message_id,
         "text": text,
-    })
+    }
+    try:
+        from .parley_user_uploads import attachment_meta as _attachment_meta
+        _meta = _attachment_meta(attachments, user_message_id)
+        if _meta:
+            _um_env["attachments"] = _meta
+    except Exception:  # never let metadata break the send
+        pass
+    await adapter._safe_send_envelope(_um_env)
 
     # Register the turn queue. If a queue already exists for this
     # chat_id, replace it — the proxy is expected to serialize per-

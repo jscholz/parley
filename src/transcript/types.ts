@@ -203,7 +203,9 @@ export type ParleyEnvelope =
   | { type: 'image'; chat_id: string; url: string; caption?: string }
   | { type: 'notification'; chat_id: string; kind: string; content: string; parley_id?: string; command?: string; reason?: string }
   | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
-  | { type: 'user_message'; chat_id: string; message_id: string; text: string }
+  | { type: 'user_message'; chat_id: string; message_id: string; text: string;
+      /** Cross-device: the send's files {url, mimeType, fileName, size} (2026-10-24). */
+      attachments?: Array<{ url: string; mimeType: string; fileName?: string; size?: number }> }
   | { type: 'error'; chat_id: string; message: string };
 
 /**

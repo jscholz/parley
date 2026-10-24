@@ -202,3 +202,45 @@ def attach_user_attachments(parley_db: Any, items: List[Dict[str, Any]], chat_id
                 it["attachments"] = a
     except Exception as exc:
         logger.debug("[parley] attach_user_attachments failed: %s", exc)
+
+
+def attachment_meta(raw_attachments: Any, user_message_id: str) -> List[Dict[str, Any]]:
+    """What OTHER devices need to know about this send's files, computed
+    from the request before the turn runs (2026-10-24, field: "I uploaded
+    a PDF from the CAP and looked at it from my desktop, and I didn't
+    see any evidence that the PDF was attached"). The cross-device
+    ``user_message`` broadcast carried only the text; the durable copies
+    exist (persist_user_attachment) but a device that rendered the
+    bubble from the broadcast never learned of them.
+
+    Shape mirrors ``attachments_for`` rows — ``{idx, fileName, mimeType,
+    size, url}`` — with the url the durable copy WILL have: the index
+    follows the attachment order exactly as ``_materialize_attachments``
+    assigns it (one ``_keep`` per entry, in order)."""
+    out: List[Dict[str, Any]] = []
+    if not isinstance(raw_attachments, list) or not user_message_id:
+        return out
+    idx = 0
+    for a in raw_attachments:
+        if not isinstance(a, dict):
+            continue
+        name = a.get("fileName") or ""
+        mime = a.get("mimeType") or ""
+        content = a.get("content")
+        size: Optional[int] = None
+        if isinstance(content, str) and "," in content:
+            b64 = content.split(",", 1)[1]
+            size = max(0, (len(b64) * 3) // 4 - b64[-2:].count("="))
+        elif isinstance(a.get("size"), (int, float)):
+            size = int(a["size"])
+        if not name and not mime and content is None and not (a.get("uploadId") or a.get("upload_id")):
+            continue
+        out.append({
+            "idx": idx,
+            "fileName": safe_name(name, f"attachment-{idx}"),
+            "mimeType": mime or "application/octet-stream",
+            "size": size,
+            "url": f"/api/parley/uploads/{user_message_id}/{idx}",
+        })
+        idx += 1
+    return out

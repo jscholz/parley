@@ -358,19 +358,16 @@ function onTranscriptPointerDown(e: Event) {
   void onBarPointerDown(e as PointerEvent, bar);
 }
 
-async function seekOrStart(bar: HTMLElement, replyId: string, text: string, ratio: number, how: 'tap' | 'drag'): Promise<void> {
-  if (tts.getActiveReplyId() === replyId) { tts.seekTo(ratio); return; }
-  const voice = await resolveVoiceAsync();
-  notePlaybackStart('user-tap', { reason: how === 'tap' ? 'scrub-tap' : 'scrub-drag', replyId, ttsState: tts.getState() });
-  // playReplyTts internally cancels any prior session before starting.
-  await tts.playReplyTts(text, voice, replyId);
-  const onceDur = (p: any) => {
-    if (p.replyId !== replyId) return;
-    tts.off('duration-known', onceDur);
-    tts.seekTo(ratio);
-  };
-  tts.on('duration-known', onceDur);
-  void bar;
+/** The bar SEEKS the reply that is already playing/paused. It never
+ *  starts speech (field 2026-10-23: "that bar shouldn't result in
+ *  playing the message … playback is buried inside the context menu" —
+ *  a bar tap on an idle bubble, registered by a trackpad tap-to-click
+ *  nobody meant, spoke a message unasked). Starting is the play button's
+ *  job (the ··· menu synthesizes a click on it). */
+function seekActive(replyId: string, ratio: number, how: 'tap' | 'drag'): void {
+  if (tts.getActiveReplyId() !== replyId) return;
+  tts.seekTo(ratio);
+  log(`[reply-player] scrub-${how} ${replyId} → ${Math.round(ratio * 100)}%`);
 }
 
 /** Touch on a reply's play bar. NOTHING plays on pointerdown: the touch
@@ -382,8 +379,10 @@ async function onBarPointerDown(e: PointerEvent, bar: HTMLElement): Promise<void
   if (!bubble) return;
   const replyId = bubble.dataset.replyId || '';
   if (!replyId) return;
-  const text = (bubble.dataset.text || bubble.textContent || '').trim();
-  if (!text) return;
+  // Only the ACTIVE reply's bar is live. An idle bubble's bar is inert
+  // (CSS also drops its pointer-events) — nothing a stray pointer can do
+  // there starts speech.
+  if (tts.getActiveReplyId() !== replyId) return;
   if (e.button != null && e.button > 0) return;   // right/middle click
 
   const rect = bar.getBoundingClientRect();
@@ -404,7 +403,7 @@ async function onBarPointerDown(e: PointerEvent, bar: HTMLElement): Promise<void
       if (mode === 'scroll') { cleanup(); return; }
       if (mode === 'drag') {
         try { bar.setPointerCapture(e.pointerId); } catch { /* noop */ }
-        void seekOrStart(bar, replyId, text, ratioAt(ev.clientX), 'drag');
+        seekActive(replyId, ratioAt(ev.clientX), 'drag');
       }
       return;
     }
@@ -415,7 +414,7 @@ async function onBarPointerDown(e: PointerEvent, bar: HTMLElement): Promise<void
     if (mode !== 'pending') return;
     if (classifyBarGesture(ev.clientX - x0, ev.clientY - y0) !== 'pending') return;
     // A real tap: released where it landed.
-    void seekOrStart(bar, replyId, text, ratioAt(x0), 'tap');
+    seekActive(replyId, ratioAt(x0), 'tap');
   };
   const onCancel = () => { cleanup(); };   // the browser took the touch (scroll)
   bar.addEventListener('pointermove', onMove);

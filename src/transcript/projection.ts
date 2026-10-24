@@ -370,7 +370,10 @@ export function project(state: ChatState): BubbleSpec[] {
             text: env.text || pend?.text || '',
             timestamp: ts,
             source: pend?.source,
-            attachments: pend?.attachments,
+            // Our own send: the optimistic pending copy (data: thumbnails).
+            // Another device's send: the broadcast's durable metadata
+            // (url chips) — the bubble must show the files either way.
+            attachments: pend?.attachments ?? (env as any).attachments,
           });
         }
         break;

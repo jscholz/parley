@@ -1634,6 +1634,20 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         a.title = att.fileName || 'PDF attachment';
         a.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h7L13 4.5V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5z"/><path d="M9.5 1.5V4.5H13"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || 'PDF')}</span>`;
         attDiv.appendChild(a);
+      } else {
+        // Any other file (text/markdown/source uploads, 2026-10-24): a
+        // named chip that opens the durable copy. The file's existence
+        // must be visible on every device, not only the one that sent it.
+        const a = document.createElement('a');
+        a.href = att?.url ? apiUrl(att.url) : src;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.dataset.fileName = att.fileName || 'file';
+        a.className = 'pdf-chip file-chip';
+        a.title = att.fileName || 'attachment';
+        const ext = String(att.fileName || '').split('.').pop() || '';
+        a.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h7L13 4.5V14a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V1.5z"/><path d="M9.5 1.5V4.5H13"/><path d="M5.5 8h5M5.5 10.5h5"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || (ext ? `file.${ext}` : 'file'))}</span>`;
+        attDiv.appendChild(a);
       }
     }
     // Download affordance for durable copies: one small link per file.
