@@ -16,11 +16,16 @@ const NOTE_LINE = [
 
 /** A PDF upload's extracted text, fenced by the plugin (parley_pdf_ingest,
  *  2026-10-18): "[PDF attached: …]" … "[end of PDF: …]". */
-const PDF_BLOCK = /^\[PDF attached: [^\n]*\]\n[\s\S]*?\n\[end of PDF: [^\n]*\]$/gm;
+// Body optional (2026-10-24): an image-only PDF ("no usable text layer")
+// has NO lines between the head and the end marker, and the old pattern
+// required one — the block leaked into the bubble, and because the twin
+// matcher compares stripped text, the echo and the durable row stopped
+// matching and rendered as two bubbles until a later refresh.
+const PDF_BLOCK = /^\[PDF attached: [^\n]*\](?:\n[\s\S]*?)?\n\[end of PDF: [^\n]*\]$/gm;
 /** A text-file upload's inlined content, fenced by the plugin
  *  (parley_text_ingest, 2026-10-24): "[File attached: …]" … "[end of
  *  file: …]". The bubble shows the file chip; the model gets the text. */
-const FILE_BLOCK = /^\[File attached: [^\n]*\]\n[\s\S]*?\n\[end of file: [^\n]*\]$/gm;
+const FILE_BLOCK = /^\[File attached: [^\n]*\](?:\n[\s\S]*?)?\n\[end of file: [^\n]*\]$/gm;
 
 /** hermes' recalled-memory block, stored INSIDE a multimodal user row
  *  (hermes keeps it durable for prompt-cache parity). The plugin strips it

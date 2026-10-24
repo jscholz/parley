@@ -61,3 +61,16 @@ test('a text-file upload block is hidden; a truncation note becomes a caption', 
   assert.equal(stripAttachmentNotes(block), 'Here are my notes.');
   assert.deepEqual(pdfNotices(block), ['notes.md is 9.0 MB — only the first 200,000 characters are inlined; the full file is saved on disk.']);
 });
+
+test('an image-only PDF block (no text lines between head and end) is hidden too', async () => {
+  const { stripAttachmentNotes } = await import('./attachmentNotes.ts');
+  const t = [
+    'here it is. untouched for 2 weeks.',
+    '',
+    '[PDF attached: R2_Seed_Pitch_Deck_6.pdf — 19 pages. Complete: every page is attached as an image (no usable text layer — read the images). Saved at: /x/0-R2_Seed_Pitch_Deck_6.pdf.]',
+    '[end of PDF: R2_Seed_Pitch_Deck_6.pdf]',
+    '[Image attached at: /tmp/p001.png]',
+    '[screenshot]',
+  ].join('\n');
+  assert.equal(stripAttachmentNotes(t), 'here it is. untouched for 2 weeks.');
+});
