@@ -13,6 +13,7 @@ import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/p
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
 import { hydrateDoc, listDocs, selectDoc, docCount, setDoc } from '../rightDrawer/docStore.ts';
+import { initDocShelfSync } from '../rightDrawer/docShelfSync.ts';
 import { apiUrl } from '../apiBase.ts';
 import { reconcileStaleCaptureDocs } from '../rightDrawer/docReconcile.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
@@ -259,6 +260,9 @@ export function initPinDrawer(opts: {
   // Sync localStorage read — a persisted doc paints on the host's initial
   // render (autoOpen=false, so boot never yanks the drawer open).
   hydrateDoc();
+  // Cross-device shelf (2026-10-24): after local hydrate, reconcile with
+  // the proxy's shelf and keep it updated from here on.
+  initDocShelfSync();
   // Boot sweep: persisted capture docs still titled "(live)" are checked
   // against the capture manifest and healed/removed ("Meeting 2026-08-24
   // (live)" field report 2026-08-26 — the finished doc_show is a one-shot

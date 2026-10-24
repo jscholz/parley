@@ -464,7 +464,9 @@ function startStreamChannel(): void {
                    'agent_question',
                    // Meeting capture: external start/stop triggers +
                    // cross-device lifecycle state.
-                   'capture_control', 'capture_changed']) {
+                   'capture_control', 'capture_changed',
+                   // Docs shelf sync (proxy docShelf.ts, 2026-10-24).
+                   'doc_shelf_changed']) {
     streamES.addEventListener(t, onEvent as any);
   }
   // #204: the server emits replay_gap when our cursor predates its
@@ -956,6 +958,18 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
         conversation: chatId,
         isReplay: env?._replay === true,
       });
+      return;
+    }
+
+    case 'doc_shelf_changed': {
+      // Another device changed the open set / tab order. Replays are
+      // ignored: the sync module fetches the current shelf on boot anyway.
+      if (env?._replay === true) return;
+      try {
+        window.dispatchEvent(new CustomEvent('parley:doc-shelf-changed', {
+          detail: { version: Number(env?.version) || 0, by: typeof env?.by === 'string' ? env.by : '' },
+        }));
+      } catch { /* non-browser */ }
       return;
     }
 
