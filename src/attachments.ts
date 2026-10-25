@@ -67,6 +67,29 @@ const TEXT_APP_MIMES = new Set([
   'application/yaml', 'application/toml', 'application/javascript', 'application/x-javascript',
   'application/typescript', 'application/x-sh', 'application/x-shellscript', 'application/sql', 'image/svg+xml',
 ]);
+// ── Audio attachments (2026-10-25) ──────────────────────────────────
+// Voice notes and recordings. Capped under the proxy's 25 MB /transcribe
+// body limit (the plugin transcribes through it).
+const AUDIO_MAX_BYTES = 24_000_000;
+const AUDIO_EXTS = new Set(['ogg', 'oga', 'opus', 'm4a', 'mp3', 'wav', 'aac', 'flac', 'amr', 'weba', 'caf', 'aiff', 'aif']);
+const AUDIO_EXT_MIME: Record<string, string> = {
+  ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav',
+  aac: 'audio/aac', flac: 'audio/flac', amr: 'audio/amr', weba: 'audio/webm', caf: 'audio/x-caf', aiff: 'audio/aiff', aif: 'audio/aiff',
+};
+export function isAudioMime(mime: string | undefined | null): boolean {
+  const m = (mime || '').split(';')[0].trim().toLowerCase();
+  return m.startsWith('audio/') || m === 'application/ogg' || m === 'application/x-ogg';
+}
+/** The MIME we send for an audio file, or null when it is not one. */
+export function audioMimeFor(file: { type: string; name: string }): string | null {
+  const m = (file.type || '').split(';')[0].trim().toLowerCase();
+  const ext = extOf(file.name);
+  if (AUDIO_EXT_MIME[ext]) return AUDIO_EXT_MIME[ext];
+  if (m.startsWith('audio/')) return m;
+  if (m === 'application/ogg' || m === 'application/x-ogg') return 'audio/ogg';
+  if (m && m !== 'application/octet-stream') return null;
+  return AUDIO_EXTS.has(ext) ? 'audio/ogg' : null;
+}
 function extOf(name: string): string {
   const base = (name || '').toLowerCase().split('/').pop() || '';
   if (base === 'dockerfile' || base === 'makefile') return base;
@@ -194,7 +217,7 @@ export function hasPending() { return pending.length > 0; }
 export function toSendPayload() {
   const items = pending.slice();
   return Promise.all(items.map(async (a) => {
-    const type = a.mimeType?.startsWith('video/') ? 'video' : isTextMime(a.mimeType) ? 'file' : 'image';
+    const type = a.mimeType?.startsWith('video/') ? 'video' : isTextMime(a.mimeType) ? 'file' : isAudioMime(a.mimeType) ? 'audio' : 'image';
     const base = { type, mimeType: a.mimeType, fileName: a.fileName };
     if (a.size > UPLOAD_THRESHOLD) {
       const uploadId = await uploadLarge(a.file);
@@ -247,11 +270,19 @@ export async function add(file) {
   // on vision.
   const textMime = textMimeFor(file);
   const isText = !!textMime;
-  const isImage = !isText && file.type.startsWith('image/');
-  const isVideo = !isText && file.type.startsWith('video/');
-  const isPdf = !isText && file.type === 'application/pdf';
-  if (!isImage && !isVideo && !isPdf && !isText) {
-    rejectAttachment('Only image, video, PDF, and text attachments are supported');
+  // Audio (2026-10-25: a WhatsApp voice note, Opus in OGG) — the plugin
+  // transcribes it for the agent; the bubble shows a player.
+  const audioMime = isText ? null : audioMimeFor(file);
+  const isAudio = !!audioMime;
+  const isImage = !isText && !isAudio && file.type.startsWith('image/');
+  const isVideo = !isText && !isAudio && file.type.startsWith('video/');
+  const isPdf = !isText && !isAudio && file.type === 'application/pdf';
+  if (!isImage && !isVideo && !isPdf && !isText && !isAudio) {
+    rejectAttachment('Only image, video, PDF, text, and audio attachments are supported');
+    return;
+  }
+  if (isAudio && file.size > AUDIO_MAX_BYTES) {
+    rejectAttachment(`Audio too large — ${(file.size / 1_000_000).toFixed(1)}MB exceeds the ${AUDIO_MAX_BYTES / 1_000_000}MB limit for audio`);
     return;
   }
   if (isText && file.size > TEXT_MAX_BYTES) {
@@ -272,10 +303,10 @@ export async function add(file) {
   }
   try {
     if (isImage) file = await maybeDownscaleImage(file);
-    const kindLabel = isVideo ? 'video' : (isPdf ? 'document' : isText ? 'file' : 'image');
+    const kindLabel = isVideo ? 'video' : (isPdf ? 'document' : isText ? 'file' : isAudio ? 'audio' : 'image');
     const ext = isPdf
       ? 'pdf'
-      : isText ? (file.name.split('.').pop() || 'txt')
+      : (isText || isAudio) ? (file.name.split('.').pop() || (isAudio ? 'ogg' : 'txt'))
         : (file.type.split('/')[1] || (isVideo ? 'mp4' : 'jpg')).split(';')[0];
     // Large files skip base64 — reading a 57 MB PDF into a data URL
     // would buffer ~76 MB of base64 in JS memory for nothing (it's
@@ -289,7 +320,7 @@ export async function add(file) {
       file,
       dataUrl,
       previewUrl,
-      mimeType: textMime || file.type,
+      mimeType: textMime || audioMime || file.type,
       fileName: file.name || `${kindLabel}-${Date.now()}.${ext}`,
       size: file.size,
     });
@@ -342,6 +373,13 @@ function renderChips() {
       placeholder.textContent = 'PDF';
       chip.appendChild(placeholder);
       chip.classList.add('chip-pdf');
+    } else if (isAudioMime(att.mimeType)) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'chip-pdf-label chip-audio-label';
+      placeholder.title = att.fileName;
+      placeholder.textContent = '♪ ' + ((String(att.fileName || '').split('.').pop() || 'audio').toUpperCase().slice(0, 4));
+      chip.appendChild(placeholder);
+      chip.classList.add('chip-pdf', 'chip-audio');
     } else if (isTextMime(att.mimeType)) {
       // Text file: the extension is the glyph (MD / TXT / JSON …).
       const placeholder = document.createElement('div');
@@ -390,7 +428,7 @@ export function updateModelGate() {
   const canImage = modelCaps.canAttachFiles();
   const canPdf = modelCaps.canAttachPdf();
   // Text attachments need no model capability — they ride in the turn's text.
-  const keep = (a) => (isTextMime(a.mimeType) ? true : a.mimeType === 'application/pdf' ? canPdf : canImage);
+  const keep = (a) => ((isTextMime(a.mimeType) || isAudioMime(a.mimeType)) ? true : a.mimeType === 'application/pdf' ? canPdf : canImage);
   const kept = pending.filter(keep);
   if (kept.length === pending.length) return;
   const dropped = pending.length - kept.length;

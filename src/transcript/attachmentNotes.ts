@@ -26,6 +26,9 @@ const PDF_BLOCK = /^\[PDF attached: [^\n]*\](?:\n[\s\S]*?)?\n\[end of PDF: [^\n]
  *  (parley_text_ingest, 2026-10-24): "[File attached: …]" … "[end of
  *  file: …]". The bubble shows the file chip; the model gets the text. */
 const FILE_BLOCK = /^\[File attached: [^\n]*\](?:\n[\s\S]*?)?\n\[end of file: [^\n]*\]$/gm;
+/** A voice note's transcript (parley_audio_ingest, 2026-10-25):
+ *  "[Audio attached: …]" … "[end of audio: …]". The bubble shows the player. */
+const AUDIO_BLOCK = /^\[Audio attached: [^\n]*\](?:\n[\s\S]*?)?\n\[end of audio: [^\n]*\]$/gm;
 
 /** hermes' recalled-memory block, stored INSIDE a multimodal user row
  *  (hermes keeps it durable for prompt-cache parity). The plugin strips it
@@ -46,6 +49,10 @@ export function stripAttachmentNotes(text: string): string {
     const without = text.replace(FILE_BLOCK, '');
     if (without !== text) return stripAttachmentNotes(without.replace(/\n{3,}/g, '\n\n').trim());
   }
+  if (text.indexOf('[Audio attached: ') >= 0) {
+    const without = text.replace(AUDIO_BLOCK, '');
+    if (without !== text) return stripAttachmentNotes(without.replace(/\n{3,}/g, '\n\n').trim());
+  }
   const lines = text.split('\n');
   const kept = lines.filter((l) => !NOTE_LINE.some((re) => re.test(l.trim())));
   if (kept.length === lines.length) return text;
@@ -56,9 +63,9 @@ export function stripAttachmentNotes(text: string): string {
  *  ("[PDF note: tax.pdf (94 pages) was reduced for the agent — …]",
  *  2026-10-20). The bubble hides the block but shows these as a caption,
  *  so he knows when the agent didn't see every page as an image. */
-const PDF_NOTE = /^\[(?:PDF|File) note: ([^\n]*)\]$/gm;
+const PDF_NOTE = /^\[(?:PDF|File|Audio) note: ([^\n]*)\]$/gm;
 
 export function pdfNotices(text: string): string[] {
-  if (!text || (text.indexOf('[PDF note: ') < 0 && text.indexOf('[File note: ') < 0)) return [];
+  if (!text || (text.indexOf('[PDF note: ') < 0 && text.indexOf('[File note: ') < 0 && text.indexOf('[Audio note: ') < 0)) return [];
   return [...text.matchAll(PDF_NOTE)].map((m) => m[1].trim()).filter(Boolean);
 }

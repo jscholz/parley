@@ -74,3 +74,12 @@ test('an image-only PDF block (no text lines between head and end) is hidden too
   ].join('\n');
   assert.equal(stripAttachmentNotes(t), 'here it is. untouched for 2 weeks.');
 });
+
+test('a voice-note block is hidden; a failed-transcription note becomes a caption', async () => {
+  const { stripAttachmentNotes, pdfNotices } = await import('./attachmentNotes.ts');
+  const ok = 'listen to this\n\n[Audio attached: note.ogg — 120.0 KB. Saved at: /x/0-note.ogg. Transcript follows.]\nthe flat deposit is due friday\n[end of audio: note.ogg]';
+  assert.equal(stripAttachmentNotes(ok), 'listen to this');
+  const bad = 'listen\n\n[Audio attached: note.ogg — 5 B. Transcription FAILED — the file is saved; transcribe it with a tool if the content matters.]\n[Audio note: note.ogg could not be transcribed (bridge timeout).]\n[end of audio: note.ogg]';
+  assert.equal(stripAttachmentNotes(bad), 'listen');
+  assert.deepEqual(pdfNotices(bad), ['note.ogg could not be transcribed (bridge timeout).']);
+});

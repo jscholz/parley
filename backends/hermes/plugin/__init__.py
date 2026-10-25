@@ -1441,6 +1441,7 @@ class ParleyAdapter(BasePlatformAdapter):
         from . import parley_route_upload as _route_upload
         from . import parley_user_uploads as _uploads
         from . import parley_text_ingest as _text
+        from . import parley_audio_ingest as _audio
 
         paths: List[str] = []
         mimes: List[str] = []
@@ -1475,6 +1476,19 @@ class ParleyAdapter(BasePlatformAdapter):
                     text_out.append(plan.text_block)
                     return list(plan.images)
             return self._rasterize_pdf(pdf)
+        def _ingest_audio(name: str, mime: str, payload: bytes, saved: Optional[str]) -> None:
+            """Voice note → transcript block (parley_audio_ingest). Never
+            media: hermes has no STT configured here; the proxy's batch
+            STT does the work and the bubble shows a player."""
+            if text_out is None:
+                return
+            try:
+                text = _audio.transcribe(payload, mime)
+                text_out.append(_audio.audio_block(name, text, len(payload), saved))
+            except Exception as err:  # noqa: BLE001 — an honest note beats a lost turn
+                logger.warning("[parley] audio attachment %s: transcription failed: %s", name, err)
+                text_out.append(_audio.audio_block(name, None, len(payload), saved, error=str(err)[:200]))
+
         for a in attachments:
             if not isinstance(a, dict):
                 continue
@@ -1491,6 +1505,19 @@ class ParleyAdapter(BasePlatformAdapter):
                     )
                     continue
                 mime = a.get("mimeType") or ""
+                if _audio.is_audio_attachment(mime, a.get("fileName")):
+                    mime = _audio.normalized_mime(mime, a.get("fileName"))
+                    saved = _keep(file_name=a.get("fileName"), mime=mime, source_path=staged)
+                    try:
+                        raw = staged.read_bytes()
+                    except Exception:
+                        raw = b""
+                    _ingest_audio(a.get("fileName") or "audio.ogg", mime, raw, saved)
+                    try:
+                        staged.unlink()
+                    except OSError:
+                        pass
+                    continue
                 if _text.is_text_attachment(mime, a.get("fileName")):
                     # Plain text rides in the turn's text, not media_urls
                     # (parley_text_ingest, 2026-10-24).
@@ -1542,6 +1569,11 @@ class ParleyAdapter(BasePlatformAdapter):
                 payload = base64.b64decode(b64, validate=False)
             except Exception:
                 logger.warning("[parley] base64 decode failed for attachment")
+                continue
+            if _audio.is_audio_attachment(mime, a.get("fileName")):
+                mime = _audio.normalized_mime(mime, a.get("fileName"))
+                saved = _keep(file_name=a.get("fileName") or "audio.ogg", mime=mime, payload=payload)
+                _ingest_audio(a.get("fileName") or "audio.ogg", mime, payload, saved)
                 continue
             if _text.is_text_attachment(mime, a.get("fileName")):
                 # Plain text: durable copy + inlined block; never media.

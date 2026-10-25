@@ -6735,3 +6735,8 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
 /* Attachment swept by the storage policy: the chip stays, greyed. */
 .pdf-chip.purged { opacity: 0.55; cursor: default; text-decoration: line-through; }
 .info-build { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin: -4px 0 10px; }
+/* Voice note / audio attachment in a bubble (2026-10-25). */
+.line-audio { display: flex; flex-direction: column; gap: 2px; max-width: 360px; }
+.line-audio audio { width: 100%; height: 36px; }
+.line-audio-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-audio .chip-pdf-label { letter-spacing: 0; }

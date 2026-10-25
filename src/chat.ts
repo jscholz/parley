@@ -1625,7 +1625,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         img.title = att.fileName || 'attachment';
         img.loading = 'lazy';
         attDiv.appendChild(img);
-      } else if (att.mimeType?.startsWith('video/')) {
+      } else if (att.mimeType?.startsWith('video/') && !/^audio\//.test(att.mimeType)) {
         const vid = document.createElement('video');
         vid.src = src;
         vid.controls = true;
@@ -1633,6 +1633,22 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         vid.playsInline = true;
         vid.title = att.fileName || 'attachment';
         attDiv.appendChild(vid);
+      } else if (att.mimeType?.startsWith('audio/') || att.mimeType === 'application/ogg') {
+        // Voice note / recording (2026-10-25): a native player on the
+        // durable copy, with the name beside it.
+        const wrap = document.createElement('div');
+        wrap.className = 'line-audio';
+        const aud = document.createElement('audio');
+        aud.src = src;
+        aud.controls = true;
+        aud.preload = 'metadata';
+        aud.title = att.fileName || 'audio';
+        wrap.appendChild(aud);
+        const name = document.createElement('span');
+        name.className = 'line-audio-name';
+        name.textContent = att.fileName || 'audio';
+        wrap.appendChild(name);
+        attDiv.appendChild(wrap);
       } else if (att.mimeType === 'application/pdf') {
         // PDF chip → the in-app viewer (imageViewer.ts, via the
         // transcript's capture-phase link handler). Prefers the durable

@@ -77,7 +77,7 @@ export default async function run({ page, log }) {
   await addFile(page, { bytes: 1024, type: 'application/zip', name: 'archive.zip' });
   t = await toastState(page);
   assert(t.visible && t.err, 'B: unsupported-type rejection must show a visible err toast');
-  assert(/image, video, pdf, and text/i.test(t.text), `B: toast should name the supported types (got ${JSON.stringify(t.text)})`);
+  assert(/image, video, pdf, text, and audio/i.test(t.text), `B: toast should name the supported types (got ${JSON.stringify(t.text)})`);
   assert((await chipCount(page)) === 0, 'B: unsupported file must NOT add a chip');
   log('B ✓ wrong type → persistent error toast, no chip');
 
