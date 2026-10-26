@@ -477,8 +477,224 @@ def enumerate_custom() -> List[Dict[str, Any]]:
     return out
 
 
+# ── skills with credentials ──────────────────────────────────────────────
+# hermes skills declare what they need in SKILL.md frontmatter:
+#   prerequisites.env_vars: [NOTION_API_KEY]            (env; also metadata.hermes.env_vars)
+#   required_credential_files: [{path: google_token.json, …}]  ($HERMES_HOME-relative)
+# A skill with at least one declared credential PRESENT is an integration
+# the user has (Google Workspace, Granola, Notion…); one with none present
+# is just an installable skill and stays out of the list.
+
+def _skill_dirs() -> List[Path]:
+    dirs: List[Path] = [hermes_home() / "skills"]
+    try:
+        import hermes_cli  # type: ignore
+        dirs.append(Path(hermes_cli.__file__).resolve().parent.parent / "skills")
+    except Exception:
+        pass
+    cfg = _load_config().get("skills")
+    if isinstance(cfg, dict):
+        for d in cfg.get("external_dirs") or []:
+            if isinstance(d, str) and d.strip():
+                dirs.append(Path(_expand(d)))
+    out: List[Path] = []
+    seen: set = set()
+    for d in dirs:
+        try:
+            r = d.resolve()
+        except Exception:
+            continue
+        if r in seen or not r.is_dir():
+            continue
+        seen.add(r)
+        out.append(r)
+    return out
+
+
+def _skill_frontmatter(path: Path) -> Dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {}
+    if not text.startswith("---"):
+        return {}
+    end = text.find("\n---", 3)
+    if end < 0:
+        return {}
+    try:
+        import yaml  # type: ignore
+        data = yaml.safe_load(text[3:end]) or {}
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+# Test actions for skills whose status needs a real call (read-only, bounded).
+# argv is relative to the skill dir; {py} = the gateway's python; {since7d} = ISO date a week ago.
+SKILL_PROBES: Dict[str, List[str]] = {
+    "granola": ["{py}", "scripts/granola.py", "list", "--since", "{since7d}"],
+}
+
+
+def _google_token_report(path: Path) -> List[str]:
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        return []
+    lines = []
+    if data.get("account"):
+        lines.append(f"account: {data['account']}")
+    scopes = [str(x).rsplit("/", 1)[-1] for x in (data.get("scopes") or [])]
+    if scopes:
+        lines.append("scopes: " + ", ".join(scopes))
+    if data.get("expiry"):
+        lines.append(f"access token expiry: {data['expiry']}" + (" (refreshable)" if data.get("refresh_token") else ""))
+    return lines
+
+
+def enumerate_skills() -> List[Dict[str, Any]]:
+    """One item per CREDENTIAL, not per skill: three skills that all use
+    NOTION_API_KEY are one Notion integration (named after the shortest
+    skill, listing the others as users)."""
+    out: List[Dict[str, Any]] = []
+    by_cred: Dict[str, Dict[str, Any]] = {}
+    seen: set = set()
+    for base in _skill_dirs():
+        for mf in sorted(list(base.glob("*/SKILL.md")) + list(base.glob("*/*/SKILL.md"))):
+            fm = _skill_frontmatter(mf)
+            if not fm:
+                continue
+            name = str(fm.get("name") or mf.parent.name).strip().lower()
+            if not name or name in seen:
+                continue
+            meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+            hm = meta.get("hermes") if isinstance(meta.get("hermes"), dict) else {}
+            pre = fm.get("prerequisites") if isinstance(fm.get("prerequisites"), dict) else {}
+            # hermes conventions seen in the wild: prerequisites.env_vars (bundled
+            # skills), metadata.hermes.env_vars, top-level env_vars; credential
+            # files under required_credential_files or prerequisites.credential_files.
+            env_vars = [str(v) for v in (pre.get("env_vars") or hm.get("env_vars") or fm.get("env_vars") or []) if v]
+            files = [f for f in (fm.get("required_credential_files") or pre.get("credential_files") or []) if isinstance(f, (dict, str))]
+            if not env_vars and not files:
+                continue
+            seen.add(name)
+            missing_env = [v for v in env_vars if not _env(v)]
+            present_env = [v for v in env_vars if v not in missing_env]
+            file_paths = [Path(_expand(str(f.get("path") if isinstance(f, dict) else f))) for f in files]
+            file_paths = [p if p.is_absolute() else hermes_home() / p for p in file_paths]
+            present_files = [p for p in file_paths if p.exists()]
+            missing_files = [p for p in file_paths if not p.exists()]
+            if not present_env and not present_files:
+                continue  # installable, not integrated
+            sig = "|".join(sorted(env_vars) + sorted(str(p) for p in file_paths))
+            if sig in by_cred:
+                holder = by_cred[sig]
+                holder["users"].append(name)
+                if len(name) < len(holder["name"]):
+                    holder["name"], holder["fm"], holder["dir"] = name, fm, mf.parent
+                continue
+            by_cred[sig] = {"name": name, "fm": fm, "dir": mf.parent, "users": [name], "env_vars": env_vars, "files": file_paths,
+                            "missing_env": missing_env, "present_env": present_env, "present_files": present_files, "missing_files": missing_files}
+    for rec in by_cred.values():
+        name, fm, mf_dir = rec["name"], rec["fm"], rec["dir"]
+        meta = fm.get("metadata") if isinstance(fm.get("metadata"), dict) else {}
+        hm = meta.get("hermes") if isinstance(meta.get("hermes"), dict) else {}
+        present_env, missing_env = rec["present_env"], rec["missing_env"]
+        present_files, missing_files = rec["present_files"], rec["missing_files"]
+        if True:
+            account = ""
+            lines: List[str] = [str(fm.get("description") or "").strip()[:160]] if fm.get("description") else []
+            if present_env:
+                lines.append("env set: " + ", ".join(present_env))
+            if present_files:
+                lines.append("credential files: " + ", ".join(p.name for p in present_files))
+            for pth in present_files:
+                if pth.name == "google_token.json":
+                    extra = _google_token_report(pth)
+                    lines.extend(extra)
+                    for ln in extra:
+                        if ln.startswith("account: "):
+                            account = ln[len("account: "):]
+            missing = missing_env + [p.name for p in missing_files]
+            if missing:
+                lines.append("missing: " + ", ".join(missing))
+            others = [u for u in rec["users"] if u != name]
+            if others:
+                lines.append("also used by: " + ", ".join(sorted(others)))
+            connected = not missing
+            worst = "OK" if connected else "WARN"
+            probe = name in SKILL_PROBES
+            if probe:
+                lines.append("not tested yet — press Test")
+            out.append(_item("skill", name, str(fm.get("name") or name), connected=connected, worst=worst,
+                             report="\n".join(lines), can_run=probe, provider=name, account=account,
+                             docs_url=str(hm.get("homepage") or ""), description=str(fm.get("description") or "")[:160]))
+            out[-1]["integration"]["skill_dir"] = str(mf_dir)
+    out.sort(key=lambda it: it["id"])
+    return out
+
+
+def probe_skill(spec_dir: str, name: str) -> Dict[str, Any]:
+    import sys
+    from datetime import timedelta
+    argv_t = SKILL_PROBES.get(name)
+    if not argv_t:
+        return {"worst": "UNKNOWN", "report": "no test for this skill"}
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+    argv = [a.replace("{py}", sys.executable).replace("{since7d}", since) for a in argv_t]
+    t0 = time.time()
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=_probe_timeout(), cwd=spec_dir,
+                              env={**os.environ, "H_NO_ALERT": "1"})
+    except subprocess.TimeoutExpired:
+        return {"worst": "FAIL", "report": f"FAIL test did not finish within {_probe_timeout()}s"}
+    except Exception as e:
+        return {"worst": "FAIL", "report": f"FAIL test error: {e}"}
+    ms = int((time.time() - t0) * 1000)
+    out = (proc.stdout or "").strip()
+    err = (proc.stderr or "").strip()
+    if proc.returncode != 0:
+        return {"worst": "FAIL", "report": f"FAIL exit {proc.returncode} ({ms} ms)\n{(err or out)[-2000:]}"}
+    head = out.splitlines()[:12]
+    return {"worst": "OK", "report": f"OK reachable ({ms} ms)\n" + "\n".join(head)}
+
+
+def write_custom(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Create/replace ``$HERMES_HOME/integrations/<name>.yaml`` from a
+    form: name, label, description, status_command, timeout_s, setup_markdown,
+    docs. Returns the item view. Raises ValueError on bad input."""
+    import yaml  # type: ignore
+    name = str(spec.get("name") or "").strip().lower()
+    if not _NAME_RE.match(name):
+        raise ValueError("name must be 1–20 chars of a-z, 0-9, - or _")
+    label = str(spec.get("label") or name).strip()[:80]
+    doc: Dict[str, Any] = {"name": name, "label": label, "kind": "custom"}
+    if spec.get("description"):
+        doc["description"] = str(spec["description"]).strip()[:400]
+    if spec.get("docs"):
+        doc["docs"] = str(spec["docs"]).strip()[:400]
+    cmd = str(spec.get("status_command") or "").strip()
+    if cmd:
+        try:
+            timeout = max(5, min(600, int(spec.get("timeout_s") or 60)))
+        except (TypeError, ValueError):
+            timeout = 60
+        doc["status"] = {"command": cmd, "timeout_s": timeout}
+    if spec.get("setup_markdown"):
+        doc["setup"] = {"kind": "instructions", "markdown": str(spec["setup_markdown"]).strip()[:4000]}
+    d = registry_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / f"{name}.yaml"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    os.replace(tmp, path)
+    invalidate_list_cache()
+    items = {it["id"]: it for it in list_items()}
+    return items.get(item_id("custom", name)) or _item("custom", name, label, connected=None, worst="UNKNOWN", report="registered", can_run=bool(cmd))
+
+
 ENUMERATORS: List[Callable[[], List[Dict[str, Any]]]] = [
-    enumerate_mcp, enumerate_platforms, enumerate_model_providers, enumerate_plugins, enumerate_custom,
+    enumerate_mcp, enumerate_platforms, enumerate_model_providers, enumerate_plugins, enumerate_skills, enumerate_custom,
 ]
 
 
@@ -604,6 +820,10 @@ def run_item(item: str) -> Optional[Dict[str, Any]]:
         if not isinstance(cfg, dict):
             raise ValueError(f"MCP server '{name}' is no longer configured")
         res = probe_mcp(name, cfg)
+    elif kind == "skill":
+        if name not in SKILL_PROBES:
+            raise ValueError(f"'{cur['name']}' has no test here (its status is read from its credentials)")
+        res = probe_skill(str(cur["integration"].get("skill_dir") or ""), name)
     elif kind == "custom":
         spec = None
         for f in sorted(list(registry_dir().glob("*.yaml")) + list(registry_dir().glob("*.yml"))):

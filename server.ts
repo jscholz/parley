@@ -1432,6 +1432,9 @@ const requestHandler: http.RequestListener = async (req, res) => {
     if (catalogAdd) {
       return parley.handleParleyHealthCatalogAdd(req, res, decodeURIComponent(catalogAdd[1]));
     }
+    if (req.method === 'POST' && /^\/api\/parley\/health\/custom(?:\?.*)?$/.test(req.url)) {
+      return parley.handleParleyHealthCustomAdd(req, res);
+    }
     const flowGet = req.method === 'GET' && req.url.match(/^\/api\/parley\/health\/flows\/([^/?]+)(?:\?.*)?$/);
     if (flowGet) {
       return parley.handleParleyHealthFlow(req, res, decodeURIComponent(flowGet[1]), false);

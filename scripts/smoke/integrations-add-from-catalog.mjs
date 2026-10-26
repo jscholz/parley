@@ -4,7 +4,7 @@
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
 export const NAME = 'integrations-add-from-catalog';
-export const DESCRIPTION = 'Integrations: Add → catalog picker (search, credential form) → install flow → new item listed with Connect';
+export const DESCRIPTION = 'Integrations: Add → catalog picker (search, credential form) → install flow → new item listed with Connect; Custom integration… registers a user-made one';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -30,10 +30,10 @@ export default async function run({ page, log, mock }) {
   // 1. Picker: entries listed, installed ones disabled, search narrows.
   await page.click('[data-role="int-add"]');
   await page.waitForSelector('.int-picker', { timeout: 5_000 });
-  const rows = await page.$$eval('.int-picker-row', (els) => els.map((e) => ({ p: e.dataset.provider, disabled: e.disabled })));
+  const rows = await page.$$eval('.int-picker-row:not(.int-picker-custom)', (els) => els.map((e) => ({ p: e.dataset.provider, disabled: e.disabled })));
   assert(rows.length === 4 && rows.find((r) => r.p === 'notion').disabled === true && rows.find((r) => r.p === 'linear').disabled === false, `rows: ${JSON.stringify(rows)}`);
   await page.fill('.int-picker-search', 'asa');
-  const narrowed = await page.$$eval('.int-picker-row', (els) => els.map((e) => e.dataset.provider));
+  const narrowed = await page.$$eval('.int-picker-row:not(.int-picker-custom)', (els) => els.map((e) => e.dataset.provider));
   assert(narrowed.length === 1 && narrowed[0] === 'asana', `search narrows: ${narrowed}`);
   log('picker lists the catalog, disables installed entries, searches ✓');
 
@@ -57,11 +57,34 @@ export default async function run({ page, log, mock }) {
   assert((await page.$('.int-picker')) === null, 'picker closed');
   log('add with credentials → install flow → item listed with Connect ✓');
 
-  // 3. Escape cancels the picker without adding.
+  // 3. "Custom integration…" registers something the user built: a form, then the item appears with Test.
+  await page.click('[data-role="int-add"]');
+  await page.waitForSelector('.int-picker', { timeout: 5_000 });
+  const first = await page.$eval('.int-picker-row', (e) => e.dataset.provider);
+  assert(first === '__custom__', `custom entry is offered first: ${first}`);
+  await page.click('.int-picker-row[data-provider="__custom__"]');
+  await page.waitForSelector('.int-picker-field input[data-field="name"]', { timeout: 3_000 });
+  assert(await page.$eval('[data-role="add"]', (b) => b.disabled && b.textContent === 'Register'), 'Register disabled until name + label are valid');
+  await page.fill('.int-picker-field input[data-field="name"]', 'Bad Name');
+  await page.fill('.int-picker-field input[data-field="label"]', 'LinkedIn (Playwright harness)');
+  assert(await page.$eval('[data-role="add"]', (b) => b.disabled), 'an invalid short name keeps Register disabled');
+  await page.fill('.int-picker-field input[data-field="name"]', 'linkedin-harness');
+  await page.fill('.int-picker-field input[data-field="status_command"]', '~/code/li-harness/bin/status');
+  await page.fill('.int-picker-field textarea[data-field="setup_markdown"]', 'Run `bin/login` once.');
+  await page.click('[data-role="add"]');
+  await page.waitForSelector('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"]', { timeout: 8_000 });
+  const reg = mock.getFlowLog().find((f) => f.kind === 'custom');
+  assert(reg && reg.spec.name === 'linkedin-harness' && reg.spec.status_command === '~/code/li-harness/bin/status' && /bin\/login/.test(reg.spec.setup_markdown), `custom spec posted: ${JSON.stringify(reg)}`);
+  const custom = await page.$eval('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"]', (e) => ({ kind: e.querySelector('[data-role="kind"]')?.textContent, test: e.querySelector('[data-role="run"]')?.textContent, setup: e.querySelector('.int-setup-body')?.textContent || '' }));
+  assert(custom.kind === 'Custom' && custom.test === 'Test' && /bin\/login/.test(custom.setup), `custom card: ${JSON.stringify(custom)}`);
+  assert(/registered/.test(await page.$eval('[data-role="int-add-status"]', (e) => e.textContent)), 'status says registered');
+  log('Custom integration… → form → registered → card with Test ✓');
+
+  // 4. Escape cancels the picker without adding.
   await page.click('[data-role="int-add"]');
   await page.waitForSelector('.int-picker', { timeout: 5_000 });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.int-picker'), null, { timeout: 3_000 });
-  assert(mock.getFlowLog().length === 1, 'Escape adds nothing');
+  assert(mock.getFlowLog().length === 2, 'Escape adds nothing');
   log('Escape cancels the picker ✓');
 }

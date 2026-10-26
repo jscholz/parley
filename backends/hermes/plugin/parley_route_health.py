@@ -290,6 +290,26 @@ async def handle_item_action(adapter, request):
     return web.json_response(view, status=202 if view.get("flow_id") else 200)
 
 
+async def handle_custom_add(adapter, request):
+    """POST /v1/health/custom — register a user-made integration from the pane."""
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    body = await _json_body(request)
+    try:
+        from . import parley_integrations as _integ
+    except ImportError:  # pragma: no cover
+        import parley_integrations as _integ  # type: ignore
+    try:
+        view = await _in_executor(_integ.write_custom, body)
+    except ValueError as e:
+        return _err(web, 400, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] custom integration write failed")
+        return _err(web, 500, "server_error", str(e))
+    return web.json_response(view, status=201)
+
+
 async def handle_flow_status(adapter, request):
     from aiohttp import web
     if _unauthorized(adapter, request):
@@ -324,6 +344,7 @@ def register_health_routes(app, adapter) -> None:
     # Literal segments before the {check_id} routes so "catalog"/"flows"/"oauth" never match as ids.
     app.router.add_get("/v1/health/catalog", lambda r: handle_catalog(adapter, r))
     app.router.add_post("/v1/health/catalog/{provider}/add", lambda r: handle_catalog_add(adapter, r))
+    app.router.add_post("/v1/health/custom", lambda r: handle_custom_add(adapter, r))
     app.router.add_get("/v1/health/flows/{flow_id}", lambda r: handle_flow_status(adapter, r))
     app.router.add_post("/v1/health/flows/{flow_id}/cancel", lambda r: handle_flow_cancel(adapter, r))
     app.router.add_get("/v1/health/oauth/callback/{server}", lambda r: handle_oauth_callback(adapter, r))

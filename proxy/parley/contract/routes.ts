@@ -54,7 +54,7 @@ export const UPSTREAM_ROUTES: readonly UpstreamRouteFamily[] = [
     degrade: '404 → null; proxy and PWA discover each feature by probing, as before.', doc: 'ABSTRACT_AGENT_PROTOCOL §capabilities' },
   { family: 'health', routes: ['GET /v1/health', 'POST /v1/health/{check_id}/run'], support: 'optional',
     degrade: '404 → Settings hides Integrations (liveness still works via GET /health).', doc: 'ABSTRACT_AGENT_PROTOCOL §health' },
-  { family: 'integrations', routes: ['GET /v1/health/catalog', 'POST /v1/health/catalog/{provider}/add',
+  { family: 'integrations', routes: ['GET /v1/health/catalog', 'POST /v1/health/catalog/{provider}/add', 'POST /v1/health/custom',
       'POST /v1/health/{check_id}/actions/{action}', 'GET /v1/health/flows/{flow_id}', 'POST /v1/health/flows/{flow_id}/cancel',
       'GET /v1/health/oauth/callback/{server}'],
     support: 'optional', degrade: '404 → no Connect / Add integration buttons; the status list still renders.', doc: 'ABSTRACT_AGENT_PROTOCOL §health (flows)' },

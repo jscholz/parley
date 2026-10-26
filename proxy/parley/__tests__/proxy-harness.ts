@@ -287,6 +287,13 @@ export class FakeAgent {
       this.json(res, 200, { object: 'list', data: [{ provider: 'linear', name: 'Linear', kind: 'mcp', setup: 'oauth', fields: [], installed: false }] });
       return;
     }
+    if (url.pathname === '/v1/health/custom' && method === 'POST') {
+      void this.readJson(req).then((body) => {
+        this.lastHealthFlowBody = { route: 'custom', body };
+        this.json(res, 201, { id: `int-custom-${body.name}`, name: body.label || body.name, worst: 'UNKNOWN', can_run: !!body.status_command, integration: { kind: 'custom', provider: body.name, connected: null } });
+      });
+      return;
+    }
     const catalogAdd = url.pathname.match(/^\/v1\/health\/catalog\/([^/]+)\/add$/);
     if (catalogAdd && method === 'POST') {
       void this.readJson(req).then((body) => {
@@ -543,6 +550,7 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     // Scheduled-jobs extension — mirrors server.ts ordering (run/runs before bare id).
     if (method === 'GET' && path === '/api/parley/health') return parley.handleParleyHealthList(req, res);
     if (method === 'GET' && path === '/api/parley/health/catalog') return parley.handleParleyHealthCatalog(req, res);
+    if (method === 'POST' && path === '/api/parley/health/custom') return parley.handleParleyHealthCustomAdd(req, res);
     const catAdd = method === 'POST' && path.match(/^\/api\/parley\/health\/catalog\/([^/]+)\/add$/);
     if (catAdd) return parley.handleParleyHealthCatalogAdd(req, res, decodeURIComponent(catAdd[1]));
     const flowGet = method === 'GET' && path.match(/^\/api\/parley\/health\/flows\/([^/]+)$/);

@@ -80,7 +80,7 @@ export {
   handleParleyJobRunGet,
   handleParleyJobRunConsole,
 } from './jobs.ts';
-export { handleParleyHealthList, handleParleyHealthRun, handleParleyHealthCatalog, handleParleyHealthCatalogAdd, handleParleyHealthAction, handleParleyHealthFlow, handleParleyOAuthCallback } from './health.ts';
+export { handleParleyHealthList, handleParleyHealthRun, handleParleyHealthCatalog, handleParleyHealthCatalogAdd, handleParleyHealthCustomAdd, handleParleyHealthAction, handleParleyHealthFlow, handleParleyOAuthCallback } from './health.ts';
 export { handleParleyCommands } from './commands.ts';
 export { handleParleySearch } from './search.ts';
 export {

@@ -56,7 +56,8 @@ export default async function run({ page, log, mock }) {
   assert(cards[0].id === 'int-mcp-linear', `needs-attention sorts first: ${cards.map((c) => c.id).join(',')}`);
   assert(by['int-mcp-notion'].kind === 'MCP server' && by['int-mcp-notion'].connected === 'connected' && /not tested yet/.test(by['int-mcp-notion'].meta), JSON.stringify(by['int-mcp-notion']));
   assert(by['int-mcp-linear'].pill === 'warn' && by['int-mcp-linear'].connected === 'not connected', JSON.stringify(by['int-mcp-linear']));
-  assert(by['int-platform-telegram'].kind === 'Chat platform' && by['int-platform-telegram'].testDisabled === true, JSON.stringify(by['int-platform-telegram']));
+  // No probe for a platform: no greyed-out Test, the meta says where the status comes from (field 2026-10-26).
+  assert(by['int-platform-telegram'].kind === 'Chat platform' && by['int-platform-telegram'].testDisabled === undefined && /status from configuration/.test(by['int-platform-telegram'].meta), JSON.stringify(by['int-platform-telegram']));
   assert(by['int-model-provider-openrouter'].kind === 'Model provider' && by['int-model-provider-openrouter'].docs === 'https://openrouter.ai', JSON.stringify(by['int-model-provider-openrouter']));
   const li = by['int-custom-linkedin-harness'];
   assert(li.kind === 'Custom' && li.connected === 'unknown' && /bin\/login/.test(li.setup) && li.testLabel === 'Test' && li.testDisabled === false, JSON.stringify(li));

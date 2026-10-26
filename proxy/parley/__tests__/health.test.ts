@@ -53,6 +53,10 @@ test('health — integration flows pass through with origin; callback renders a 
     assert.equal(rig.fakeAgent.lastHealthFlowBody?.body.env.A, '1');
     assert.match(rig.fakeAgent.lastHealthFlowBody?.body.origin, /^http:\/\/127\.0\.0\.1:\d+$/);
 
+    const custom = await fetch(`${rig.proxyUrl}/api/parley/health/custom`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'li', label: 'LinkedIn', status_command: 'true' }) });
+    assert.equal(custom.status, 201);
+    assert.equal((await custom.json()).id, 'int-custom-li');
+    assert.equal(rig.fakeAgent.lastHealthFlowBody?.route, 'custom');
     const bad = await fetch(`${rig.proxyUrl}/api/parley/health/int-mcp-attio/actions/nope`, { method: 'POST' });
     assert.equal(bad.status, 400);                      // upstream status kept
     assert.equal((await fetch(`${rig.proxyUrl}/api/parley/health/flows/f-1`)).status, 200);

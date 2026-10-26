@@ -83,7 +83,7 @@ export function splitStatus(checks: HealthCheck[]): { integrations: HealthCheck[
 }
 
 const KIND_LABELS: Record<string, string> = {
-  mcp: 'MCP server', platform: 'Chat platform', 'model-provider': 'Model provider', plugin: 'Plugin', custom: 'Custom', other: 'Other',
+  mcp: 'MCP server', platform: 'Chat platform', 'model-provider': 'Model provider', plugin: 'Plugin', skill: 'Skill', custom: 'Custom', other: 'Other',
 };
 
 export function kindLabel(kind: string | undefined): string {

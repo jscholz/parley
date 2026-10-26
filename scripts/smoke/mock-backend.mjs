@@ -1227,6 +1227,16 @@ export async function installMockBackend(page) {
       flow.status = 'done'; flow.message = `'${provider}' installed. ${entry.setup === 'oauth' ? 'Press Connect to sign in.' : 'Press Test to check it.'}`;
       return jsonOk(flow, 202);
     }
+    if (method === 'POST' && /\/health\/custom$/.test(url.pathname)) {
+      let body = {}; try { body = route.request().postDataJSON() || {}; } catch {}
+      if (!/^[a-z0-9_-]{1,20}$/.test(body.name || '')) return jsonOk({ error: { message: 'name must be 1–20 chars of a-z, 0-9, - or _' } }, 400);
+      flowLog.push({ kind: 'custom', spec: body });
+      const item = { id: `int-custom-${body.name}`, name: body.label || body.name, worst: 'UNKNOWN', last_run_at: null,
+        report: body.status_command ? `status check: ${body.status_command}\nnot tested yet — press Test` : 'status check: none configured', can_run: !!body.status_command,
+        counts: { fail: 0, warn: 0, ok: 0 }, integration: { kind: 'custom', provider: body.name, connected: null, description: body.description || '', setup_markdown: body.setup_markdown || '' } };
+      health.push(item);
+      return jsonOk(item, 201);
+    }
     const flowGet = url.pathname.match(/\/health\/flows\/([^/]+)$/);
     if (flowGet && method === 'GET') {
       const f = flows.get(decodeURIComponent(flowGet[1]));

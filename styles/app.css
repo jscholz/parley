@@ -6556,9 +6556,9 @@ a.cron-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .int-flow-cancel { margin-left: auto; }
 /* Add-integration picker (shares the confirm overlay chrome) */
 .int-picker-overlay { z-index: 10050; }   /* above the settings panel (#settings is 9998) */
-.int-picker { max-width: 520px; display: flex; flex-direction: column; max-height: min(80vh, 640px); }
+.int-picker { max-width: 520px; display: flex; flex-direction: column; max-height: min(88vh, 720px); overflow: auto; }
 .int-picker-search { width: 100%; box-sizing: border-box; margin: 4px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 14px; }
-.int-picker-list { overflow: auto; min-height: 120px; flex: 1 1 auto; border: 1px solid var(--border-subtle); border-radius: 8px; }
+.int-picker-list { overflow: auto; min-height: 96px; max-height: 40vh; flex: 0 1 auto; border: 1px solid var(--border-subtle); border-radius: 8px; }
 .int-picker-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--fg); cursor: pointer; font: inherit; }
 .int-picker-row:last-child { border-bottom: 0; }
 .int-picker-row:hover { background: var(--surface-subtle); }
@@ -6567,10 +6567,12 @@ a.cron-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .int-picker-row-main { flex: 1 1 auto; min-width: 0; }
 .int-picker-row-name { font-weight: 600; font-size: 14px; }
 .int-picker-row-desc { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.int-picker-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.int-picker-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; flex: none; }
 .int-picker-chosen { font-size: 13px; }
 .int-picker-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-.int-picker-field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 14px; }
+.int-picker-field input, .int-picker-field textarea { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 14px; font-family: inherit; }
+.int-picker-field textarea { min-height: 64px; resize: vertical; }
+.int-picker-custom { border-bottom: 2px solid var(--border) !important; }
 @media (max-width: 640px) {
   .cron-job-controls { grid-template-columns: 1fr; }
   .cron-btn-danger { margin-left: 0; }

@@ -83,7 +83,9 @@ function renderIntegrationCard(c: HealthCheck, card: HTMLElement, notice?: strin
 
   const bits: string[] = [connectedText(c)];
   if (integ.account) bits.push(integ.account);
-  bits.push(c.last_run_at ? `tested ${agoText(c.last_run_at)}` : 'not tested yet');
+  // No probe exists for this kind (status is read from configuration):
+  // say so instead of offering a greyed-out Test (field 2026-10-26).
+  bits.push(c.last_run_at ? `tested ${agoText(c.last_run_at)}` : (c.can_run ? 'not tested yet' : 'status from configuration'));
   const meta = el('div', 'cron-job-meta', bits.join(' · '));
   meta.dataset.role = 'meta';
   card.appendChild(meta);
@@ -97,11 +99,13 @@ function renderIntegrationCard(c: HealthCheck, card: HTMLElement, notice?: strin
     btn.onclick = () => { void runAction(c, card, a.id, a.flow); };
     controls.appendChild(btn);
   }
-  const test = el('button', 'cron-btn' + (integ.actions?.length ? '' : ' cron-btn-primary'), 'Test');
-  test.type = 'button'; test.dataset.role = 'run'; test.disabled = !c.can_run;
-  test.title = c.can_run ? 'Connect and check this integration now' : 'Status comes from configuration; nothing to test here';
-  test.onclick = () => { void runCheck(c, card, test, 'Testing…'); };
-  controls.appendChild(test);
+  if (c.can_run) {
+    const test = el('button', 'cron-btn' + (integ.actions?.length ? '' : ' cron-btn-primary'), 'Test');
+    test.type = 'button'; test.dataset.role = 'run';
+    test.title = 'Connect and check this integration now';
+    test.onclick = () => { void runCheck(c, card, test, 'Testing…'); };
+    controls.appendChild(test);
+  }
   if (integ.docs_url) {
     const a = el('a', 'cron-btn', 'Docs');
     a.href = integ.docs_url; a.target = '_blank'; a.rel = 'noopener'; a.dataset.role = 'docs';
@@ -195,23 +199,33 @@ async function addIntegration(btn: HTMLButtonElement, status: HTMLElement) {
   status.textContent = 'Loading the catalog…';
   let payload: { data: CatalogEntry[] } | null = null;
   try { payload = await adapter.healthCatalog?.(); } catch { payload = null; }
-  if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) {
-    status.textContent = payload === null ? 'This agent has no catalog of addable integrations. Ask it to register one (see the note below).' : 'The catalog is empty.';
-    btn.disabled = false;
-    return;
-  }
+  if (!payload || !Array.isArray(payload.data)) payload = { data: [] };   // no catalog: the picker still offers Custom
   status.textContent = '';
   btn.disabled = false;
   const pick = await pickIntegration(payload.data);
   if (!pick) return;
   btn.disabled = true;
-  status.textContent = `Adding ${pick.entry.name}…`;
+  if (pick.custom) {
+    status.textContent = `Registering ${pick.custom.label || pick.custom.name}…`;
+    try {
+      const item: HealthCheck = await adapter.healthCustomAdd(pick.custom);
+      status.textContent = `${item.name} registered${item.can_run ? ' — press Test to check it.' : '.'}`;
+      await load();
+    } catch (e: any) {
+      status.textContent = `Could not register: ${e?.message ?? e}`;
+    } finally {
+      btn.disabled = false;
+    }
+    return;
+  }
+  const entry = pick.entry!;
+  status.textContent = `Adding ${entry.name}…`;
   try {
-    const result = await runCatalogAdd(pick.entry.provider, pick.env, { onUpdate: (f) => { status.textContent = `${pick.entry.name}: ${flowText(f)}`; } });
-    status.textContent = result.status === 'done' ? (result.message || `${pick.entry.name} added.`) : `${pick.entry.name}: ${flowText(result)}`;
+    const result = await runCatalogAdd(entry.provider, pick.env, { onUpdate: (f) => { status.textContent = `${entry.name}: ${flowText(f)}`; } });
+    status.textContent = result.status === 'done' ? (result.message || `${entry.name} added.`) : `${entry.name}: ${flowText(result)}`;
     await load();
   } catch (e: any) {
-    status.textContent = `Could not add ${pick.entry.name}: ${e?.message ?? e}`;
+    status.textContent = `Could not add ${entry.name}: ${e?.message ?? e}`;
   } finally {
     btn.disabled = false;
   }

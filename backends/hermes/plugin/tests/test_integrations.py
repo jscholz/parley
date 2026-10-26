@@ -83,6 +83,18 @@ def home(tmp_path, monkeypatch):
                       ("hindsight", "name: hindsight\nrequires_env: []\n"),
                       ("parley", "name: parley\nkind: platform\nrequires_env:\n  - name: PARLEY_PLATFORM_TOKEN\n")):
         d = h / "plugins" / name; d.mkdir(parents=True); (d / "plugin.yaml").write_text(man)
+    # skills with credentials (hermes conventions: metadata.hermes.env_vars / required_credential_files)
+    sk = h / "skills" / "productivity"
+    (sk / "notion").mkdir(parents=True); (sk / "notion" / "SKILL.md").write_text("---\nname: notion\ndescription: Notion pages\nmetadata:\n  hermes:\n    env_vars: [NOTION_API_KEY]\n---\n# Notion\n")
+    (sk / "linear").mkdir(); (sk / "linear" / "SKILL.md").write_text("---\nname: linear\nprerequisites:\n  env_vars: [LINEAR_KEY]\n---\n")
+    (sk / "airtable").mkdir(); (sk / "airtable" / "SKILL.md").write_text("---\nname: airtable\nprerequisites:\n  env_vars: [HASS_TOKEN]\n---\n")
+    (sk / "notion-daily-planner-rollover").mkdir(); (sk / "notion-daily-planner-rollover" / "SKILL.md").write_text("---\nname: notion-daily-planner-rollover\nprerequisites:\n  env_vars: [NOTION_API_KEY]\n---\n")
+    (sk / "google-workspace").mkdir(); (sk / "google-workspace" / "SKILL.md").write_text("---\nname: google-workspace\ndescription: Gmail, Calendar\nrequired_credential_files:\n  - path: google_token.json\n  - path: google_client_secret.json\n---\n")
+    (h / "google_token.json").write_text(json.dumps({"account": "jonathan@example.com", "scopes": ["https://www.googleapis.com/auth/calendar"], "expiry": "2026-04-25T11:49:47Z", "refresh_token": "r"}))
+    (sk / "granola").mkdir(); (sk / "granola" / "scripts").mkdir()
+    (sk / "granola" / "SKILL.md").write_text("---\nname: granola\ndescription: Granola meetings\nrequired_credential_files:\n  - path: private/granola/api_key\n---\n")
+    (sk / "granola" / "scripts" / "granola.py").write_text("import sys; print('notes: 3 (since', sys.argv[sys.argv.index('--since')+1], ')')\n")
+    (h / "private" / "granola").mkdir(parents=True); (h / "private" / "granola" / "api_key").write_text("k")
     reg = h / "integrations"; reg.mkdir()
     script = tmp_path / "li-status"
     script.write_text("#!/usr/bin/env bash\necho 'logged in as jonathan · 3 scripts ok'\nexit ${LI_RC:-0}\n")
@@ -180,3 +192,36 @@ def test_one_broken_enumerator_does_not_hide_the_rest(home, monkeypatch):
     assert "int-custom-linkedin-harness" in items
     broken = items["int-other-boom"]
     assert broken["worst"] == "UNKNOWN" and "hermes moved the function" in broken["report"]
+
+
+def test_skills_with_credentials_are_integrations(home):
+    items = _by_id(integ.list_items())
+    n = items["int-skill-notion"]                                            # NOTION_API_KEY is set in the fixture env
+    assert n["integration"]["kind"] == "skill" and n["integration"]["connected"] is True and "env set: NOTION_API_KEY" in n["report"]
+    assert n["can_run"] is False                                            # no probe → Test hidden
+    assert "also used by: notion-daily-planner-rollover" in n["report"]     # one item per credential, not per skill
+    assert not any(k.startswith("int-skill-notion-daily") for k in items)
+    assert "int-skill-linear" not in items                                  # no credential present → not an integration
+    assert items["int-skill-airtable"]["integration"]["connected"] is True   # prerequisites.env_vars convention
+    g = items["int-skill-google-workspace"]
+    assert g["integration"]["connected"] is False and "missing: google_client_secret.json" in g["report"]
+    assert g["integration"]["account"] == "jonathan@example.com" and "calendar" in g["report"] and "refreshable" in g["report"]
+    gr = items["int-skill-granola"]
+    assert gr["integration"]["connected"] is True and gr["worst"] == "OK" and gr["can_run"] is True
+    out = integ.run_item("int-skill-granola")
+    assert out["worst"] == "OK" and "notes: 3" in out["report"]
+    with pytest.raises(ValueError, match="no test here"):
+        integ.run_item("int-skill-google-workspace")
+
+
+def test_write_custom_registers_a_yaml_the_enumerator_reads(home):
+    view = integ.write_custom({"name": "X-Harness", "label": "X (Playwright)", "description": "My X scraper",
+                               "status_command": "true", "timeout_s": 5, "setup_markdown": "Run bin/login."})
+    assert view["id"] == "int-custom-x-harness" and view["name"] == "X (Playwright)" and view["can_run"] is True
+    assert (integ.registry_dir() / "x-harness.yaml").exists()
+    assert "Run bin/login." in view["integration"]["setup_markdown"]
+    assert integ.run_item("int-custom-x-harness")["worst"] == "OK"
+    with pytest.raises(ValueError, match="name must"):
+        integ.write_custom({"name": "Not Valid!"})
+    with pytest.raises(ValueError):
+        integ.write_custom({})

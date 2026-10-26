@@ -5,6 +5,7 @@
 //   POST /api/parley/health/{id}/run                → upstream POST /v1/health/{id}/run
 //   GET  /api/parley/health/catalog                 → upstream GET  /v1/health/catalog
 //   POST /api/parley/health/catalog/{p}/add         → upstream POST /v1/health/catalog/{p}/add
+//   POST /api/parley/health/custom                  → upstream POST /v1/health/custom (register a user-made integration)
 //   POST /api/parley/health/{id}/actions/{action}   → upstream POST …/actions/{action}
 //        (the proxy stamps `origin` = the Origin/Host the client used, so the
 //        agent builds an OAuth redirect URI the browser can follow)
@@ -93,6 +94,11 @@ export async function handleParleyHealthCatalogAdd(req: any, res: any, provider:
   const body = await readBody(req);
   await passthrough(res, `health catalog add ${provider}`, () =>
     getUpstream()!.healthCall!('POST', `catalog/${encodeURIComponent(provider)}/add`, { ...body, origin: clientOrigin(req) }));
+}
+
+export async function handleParleyHealthCustomAdd(req: any, res: any) {
+  const body = await readBody(req);
+  await passthrough(res, 'health custom add', () => getUpstream()!.healthCall!('POST', 'custom', body));
 }
 
 export async function handleParleyHealthAction(req: any, res: any, id: string, action: string) {

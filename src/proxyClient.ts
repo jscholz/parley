@@ -1909,6 +1909,14 @@ export const proxyClientAdapter = {
     if (!r.ok) throw new Error(await errorMessage(r));
     return r.json();
   },
+  /** POST /api/parley/health/custom → the registered item (custom integration from the pane). */
+  async healthCustomAdd(spec: Record<string, unknown>): Promise<any> {
+    const r = await fetch(`${apiBase()}/health/custom`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(spec),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
   /** POST /api/parley/health/{id}/actions/{action} → Flow (oauth…) or {item} for run-type actions. */
   async healthAction(id: string, action: string): Promise<any> {
     const r = await fetch(`${apiBase()}/health/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, {
