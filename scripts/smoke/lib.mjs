@@ -398,8 +398,12 @@ export async function openSettingsSection(page, section, { timeout = 3_000 } = {
     null,
     { timeout },
   );
-  await page.click(`.settings-nav-btn[data-target="${NAV_TARGET_FOR_SECTION[section] || section}"]`);
-  await page.waitForSelector(`.settings-group[data-section="${section}"]:not([hidden])`, { timeout });
+  // DOM click, not a pointer click: an advanced-only section's nav button is
+  // display:none in basic mode, and showSection turns Advanced mode on for
+  // it (2026-10-26) — exactly what a user deep-linking there gets.
+  await page.evaluate((t) => { document.querySelector(`.settings-nav-btn[data-target="${t}"]`)?.click(); },
+    NAV_TARGET_FOR_SECTION[section] || section);
+  await page.waitForSelector(`.settings-group[data-section="${section}"]:not([hidden]):not(.adv-hidden)`, { timeout });
 }
 
 /** Click the new-chat button. Handles both the desktop (drawer-open)

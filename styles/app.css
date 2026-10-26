@@ -6740,3 +6740,23 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
 .line-audio audio { width: 100%; height: 36px; }
 .line-audio-name { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-audio .chip-pdf-label { letter-spacing: 0; }
+
+/* ── Settings › Advanced mode (src/settings.ts; 2026-10-26) ── */
+#settings .settings-advanced {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: auto; padding: 10px 12px 4px;
+  font-size: 12px; color: var(--muted); cursor: pointer; user-select: none;
+}
+#settings .settings-advanced input { margin: 0; }
+body.settings-advanced #settings .settings-advanced { color: var(--primary); }
+#settings .adv-hidden { display: none !important; }
+#settings .settings-shell .settings-group.adv-hidden { display: none !important; }
+body:not(.settings-advanced) #settings .settings-group [data-advanced] { display: none !important; }
+#settings .settings-advanced-hint { margin: 6px 0 2px; font-size: 11px; opacity: 0.8; }
+@media (max-width: 699px) {
+  /* The nav column is hidden on phones; keep the toggle as a footer row. */
+  #settings .settings-nav { display: flex; }
+  #settings .settings-nav .settings-nav-btn { display: none; }
+  #settings .settings-shell { display: flex; flex-direction: column; }
+  #settings .settings-nav { order: 99; padding-top: 6px; border-top: 1px solid var(--border); }
+}

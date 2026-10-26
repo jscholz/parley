@@ -61,6 +61,9 @@ export interface AgentSettingDef {
    *  active runtime profile and aren't independently editable here
    *  (docs/LOCAL_MODE.md §3). */
   readonly?: boolean;
+  /** Hidden unless the user turns on Advanced mode (2026-10-26). The
+   *  agent decides what is advanced — Parley never classifies agent knobs. */
+  advanced?: boolean;
 }
 
 let lastSchema: AgentSettingDef[] = [];
@@ -552,7 +555,21 @@ export async function load() {
     }
     const row = renderRow(def);
     if (!row) continue;
+    if (def.advanced) row.setAttribute('data-advanced', '');
     insertAfterCursor(host, row);
+  }
+  // A group sub-heading whose rows are ALL advanced hides with them.
+  for (const host of new Set([agentHost, ...hostBySection.values()])) {
+    if (!host) continue;
+    for (const heading of Array.from(host.querySelectorAll<HTMLElement>('.agent-setting-group-heading'))) {
+      let allAdvanced = true; let any = false;
+      for (let el = heading.nextElementSibling as HTMLElement | null; el && !el.classList.contains('agent-setting-group-heading'); el = el.nextElementSibling as HTMLElement | null) {
+        if (!el.classList.contains('row')) continue;
+        any = true;
+        if (!el.hasAttribute('data-advanced')) { allAdvanced = false; break; }
+      }
+      if (any && allAdvanced) heading.setAttribute('data-advanced', ''); else heading.removeAttribute('data-advanced');
+    }
   }
   // Memory is the one section whose absence needs to say something
   // (Cron/Health have their own "not supported" 404 path via a

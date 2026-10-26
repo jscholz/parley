@@ -75,10 +75,13 @@ items generically; grouping is data-driven. One section, one contract, one
 renderer — and a non-Hermes upstream that only has plain checks (or nothing) still
 works unchanged.
 
-Section name: **Integrations & health** (nav button "Integrations"). The existing
-`health` section is folded into it; `src/healthSettings.ts` becomes
-`src/statusSettings.ts` (rename, same data model, extended). The daily digests in
-the ops repo are untouched — they remain the *source* of the system checks.
+**Integrations is a top-level menu** (Jonathan, 2026-10-26: "integrations are
+fundamental enough that it should be a top-level menu … critical for new
+users"): nav button "Integrations", first among the settings sections, visible in
+basic mode. The existing Health section is folded INTO it as a "System checks"
+group at the bottom (the health digests stay the source of those checks);
+`src/healthSettings.ts` becomes `src/integrationsSettings.ts`. One section, one
+contract, one renderer.
 
 ### 2.1 Contract (extension of `/v1/health`, backward compatible)
 
@@ -236,6 +239,75 @@ Total ≈ 5–6 days of focused work; phase 1 is independently shippable.
 | Model providers (OpenAI Codex, Gemini, OpenRouter, local) | `hermes auth` pool, device-code OAuth for Codex | Phase 3 `device` flow | Akhil's Codex login was done by hand on 2026-10-10; this makes it self-serve. |
 
 ---
+
+## 5b. Custom integrations — the "integration protocol" for things you rolled yourself
+
+Jonathan's X/LinkedIn access is a Playwright harness he built; it must show up in
+the pane honestly, without pretending to be a standard integration. The same
+mechanism answers "how does a user make whatever integration they want and still
+see it here?"
+
+**Registry, agent-side**: `~/.hermes/integrations/<name>.yaml` (one file per
+integration, hand-written or written by the agent):
+
+```yaml
+name: linkedin-harness            # id: [a-z0-9_-]
+label: LinkedIn (Playwright harness)
+kind: custom                      # always "custom" for user-made ones
+description: Logged-in LinkedIn profile driven by my Playwright scripts.
+docs: ~/code/li-harness/README.md # optional, shown as a link / inline
+status:                           # how to health-check it (optional → UNKNOWN)
+  command: ~/code/li-harness/bin/status   # exit 0 OK, 1 WARN, 2 FAIL; stdout = report
+  timeout_s: 60
+  interval_min: 360               # probe cadence; "Test" re-runs on demand
+setup:                            # how a user connects it (optional)
+  kind: instructions              # instructions | command | api-key
+  markdown: |
+    Log in once in the harness profile: `bin/login`, then run `bin/status`.
+actions:                          # optional extra buttons
+  - id: relogin
+    label: Re-login
+    command: ~/code/li-harness/bin/login
+```
+
+The plugin enumerates this directory next to MCP servers / plugins / platforms and
+emits them as ordinary status items (`integration.kind: "custom"`, a small
+"custom" tag in the UI). `status.command` runs through the same bounded runner the
+health extension already uses (`PARLEY_HEALTH_RUNNERS` machinery; exit code → worst,
+stdout → report). `setup.kind: command` runs a command and streams its output into
+the flow; `api-key` writes fields into Hermes' secret store under the integration's
+name; `instructions` renders the markdown.
+
+**The pane's info bubble** (next to "Add integration"): *"Standard integrations
+connect with the buttons here. For anything else, ask your agent to create one — it
+knows the format (`~/.hermes/integrations/<name>.yaml`) and can write the status
+check for you."* The agent side is a skill shipped with the plugin
+(`skills/integrations-registry/SKILL.md`) so "make my Playwright harness show up in
+Integrations" is a one-sentence request to the agent.
+
+This is still agent-owned data: Parley never reads the registry; it renders items.
+A non-Hermes upstream can implement the same item shape from any registry it likes.
+
+## 5c. Google and Slack, honestly
+
+Neither has become standard in Hermes:
+
+- **Slack** (`hermes slack manifest`) generates the app manifest with every gateway
+  command as a slash command, but the Slack app still has to be created in Slack's
+  admin UI by pasting that manifest, and the bot/app tokens copied back. That is a
+  guided **`instructions` + `api-key`** flow in the pane (show the manifest, link to
+  Slack's "create app from manifest", collect the two tokens), not OAuth. Slack as a
+  *tool source* would be a Slack MCP server — none is curated in Hermes today.
+- **Google** (Gmail/Calendar/Drive) has no Hermes-native integration and no curated
+  MCP entry. Any route needs a Google Cloud project with an OAuth client and the
+  right API scopes enabled — the manual part Jonathan remembers. Once an R2-owned
+  OAuth client exists, a Google Workspace MCP server can be added as a
+  Parley-curated entry with the `oauth` flow (the bridge handles the redirect), and
+  Akhil's setup becomes one click. Until then it is a **custom integration** with an
+  `instructions` flow that walks through the Cloud console steps.
+
+So: treat both as "custom with a guided flow" in phase 3; promote Google to a
+one-click entry the day a shared OAuth client is registered.
 
 ## 6. Open questions for Jonathan
 

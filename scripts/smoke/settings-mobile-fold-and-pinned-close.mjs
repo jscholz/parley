@@ -13,6 +13,9 @@ export const MOBILE = true;   // phone layout only
 const open = (page) => page.evaluate(() => (document.getElementById('sb-settings') || document.getElementById('btn-settings'))?.click());
 
 export default async function run({ page, log }) {
+  // Every section must exist for this layout test: Advanced mode on
+  // (basic mode hides Hotkeys / Storage / Cron, 2026-10-26).
+  await page.addInitScript(() => { try { localStorage.setItem('parley.settings.advanced', '1'); } catch {} });
   await waitForReady(page);
   await page.evaluate(() => localStorage.removeItem('parley.settings.openSections'));
   await open(page);

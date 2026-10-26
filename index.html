@@ -376,12 +376,20 @@
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
       <button type="button" class="settings-nav-btn" data-target="health">Health</button>
-      <button type="button" class="settings-nav-btn" data-target="storage">Storage</button>
+      <button type="button" class="settings-nav-btn" data-target="storage" data-advanced>Storage</button>
       <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
-      <button type="button" class="settings-nav-btn" data-target="interaction">Hotkeys</button>
+      <button type="button" class="settings-nav-btn" data-target="interaction" data-advanced>Hotkeys</button>
       <button type="button" class="settings-nav-btn" data-target="meetings">Meetings</button>
       <!-- Cron last (2026-10-12): long, rarely touched, and it buried everything below it. -->
-      <button type="button" class="settings-nav-btn" data-target="cron">Cron</button>
+      <button type="button" class="settings-nav-btn" data-target="cron" data-advanced>Cron</button>
+      <!-- Advanced mode (2026-10-26: "the settings menu is pretty overwhelming").
+           Off by default: sections and rows marked data-advanced — and agent
+           rows the agent flags `advanced` — stay hidden; a per-section hint
+           says how many. Per-device (localStorage), bottom-left of the nav. -->
+      <label class="settings-advanced" id="settings-advanced" title="Show every setting, including the ones most people never touch">
+        <input type="checkbox" id="settings-advanced-toggle">
+        <span>Advanced mode</span>
+      </label>
     </nav>
     <div class="settings-content">
   <!-- Notifications + Display moved to top of the group list so the
@@ -437,7 +445,7 @@
         <input type="time" id="set-quiet-hours-end" value="07:00" step="60">
       </span>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-push-test">Send test push</label>
       <button type="button" id="set-push-test" class="settings-btn">Fire test</button>
       <span class="hint" id="set-push-test-hint">delivers to every subscribed device</span>
@@ -447,7 +455,7 @@
       <button type="button" id="set-mark-all-read" class="settings-btn">Mark all read</button>
       <span class="hint" id="set-mark-all-read-hint">clear the unread count across all chats</span>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-push-diagnostics">Recent dispatch decisions</label>
       <span>
         <button type="button" id="set-push-diagnostics" class="settings-btn">Refresh</button>
@@ -466,12 +474,12 @@
       <input type="range" id="set-fontsize" min="13" max="28" step="1" value="15">
       <span class="val" id="set-fontsize-val">15px</span>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-gutter">Transcript margin</label>
       <input type="range" id="set-gutter" min="0" max="30" step="1" value="12">
       <span class="val" id="set-gutter-val">12%</span>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-panel-width">Panel max width</label>
       <input type="range" id="set-panel-width" min="30" max="90" step="5" value="60">
       <span class="val" id="set-panel-width-val">60%</span>
@@ -532,7 +540,7 @@
     <div class="row row-wide" data-health-placeholder><span class="hint">Loading health checks…</span></div>
     <div id="health-checks-host" class="cron-jobs"></div>
   </div>
-  <div class="settings-group" id="settings-group-storage" data-section="storage" hidden>
+  <div class="settings-group" id="settings-group-storage" data-section="storage" hidden data-advanced>
     <div class="group-label">Storage</div>
     <!-- Data-home inventory + cleanup policy from the proxy's /api/parley/storage; rendered by src/storageSettings.ts (2026-10-24). -->
     <div id="storage-host" class="storage-host"><span class="hint">Measuring…</span></div>
@@ -545,7 +553,7 @@
         <option value="">Default</option>
       </select>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-streaming-engine">STT engine</label>
       <select id="set-streaming-engine">
         <option value="server">Server (Deepgram)</option>
@@ -558,7 +566,7 @@
       <input type="text" id="set-stt-keyterms" placeholder="add a term + Enter" autocomplete="off" spellcheck="false">
       <span class="hint">type a term and press Enter (or comma) to add it; × on a chip to remove. Stored per-user in browser storage; takes effect on next mic-stream start.</span>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-listen-stt">Sendword detector</label>
       <select id="set-listen-stt" class="text-input">
         <option value="local">On — Web Speech (this device)</option>
@@ -576,14 +584,14 @@
 
   <div class="settings-group" data-section="voice-output" data-nav-target="voice" hidden>
     <div class="group-label">Voice output</div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-tts-engine">TTS engine</label>
       <select id="set-tts-engine">
         <option value="server">Server (Deepgram Aura)</option>
         <option value="local">Local (on-device)</option>
       </select>
     </div>
-    <div class="row" id="row-tts-voice-local" style="display:none">
+    <div class="row" id="row-tts-voice-local" style="display:none" data-advanced>
       <label for="set-tts-voice-local">TTS voice (local)</label>
       <select id="set-tts-voice-local">
         <option value="">System default</option>
@@ -611,7 +619,7 @@
       <label for="set-commit-phrase">Send word</label>
       <input type="text" id="set-commit-phrase" class="text-input" placeholder='e.g. "over" (empty = off)'>
     </div>
-    <div class="row">
+    <div class="row" data-advanced>
       <label for="set-commit-delay">Send word delay</label>
       <input type="range" id="set-commit-delay" min="0" max="4" step="0.5" value="0">
       <span class="val" id="set-commit-delay-val">0s</span>
@@ -641,7 +649,7 @@
     </div>
   </div>
 
-  <div class="settings-group" data-section="interaction" hidden>
+  <div class="settings-group" data-section="interaction" hidden data-advanced>
     <div class="group-label">Hotkeys</div>
     <!-- Barge moved to the call-mode menu (chevron next to btn-call).
          Slider 0 = OFF, 5-100 = ON + sensitivity. iOS speakerphone
@@ -710,7 +718,7 @@
     </div>
   </div>
 
-  <div class="settings-group" id="settings-group-cron" data-section="cron" hidden>
+  <div class="settings-group" id="settings-group-cron" data-section="cron" hidden data-advanced>
     <div class="group-label">Cron</div>
     <!--
       Scheduled jobs the agent declares over the optional /v1/jobs

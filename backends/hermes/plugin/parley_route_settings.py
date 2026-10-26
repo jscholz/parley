@@ -1487,6 +1487,27 @@ def apply_hindsight_setting(sid: str, value: Any) -> Dict[str, Any]:
     })
 
 
+# Advanced-mode classification (2026-10-26, "hide most of the crazy stuff
+# by default"). The AGENT decides what is advanced — Parley only honours
+# the flag. Basic = the model picker and nothing else from this plugin.
+_ADVANCED_GROUPS = frozenset({_FILES_GROUP, _HINDSIGHT_GROUP, _RUNTIME_GROUP})
+_ADVANCED_IDS = frozenset({"preferred_models", "runtime_profile"})
+
+
+def mark_advanced(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Stamp ``advanced: True`` on memory / runtime / power-user rows; the
+    model picker stays basic. Idempotent; never removes a flag a builder
+    set itself."""
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if row.get("advanced"):
+            continue
+        if row.get("group") in _ADVANCED_GROUPS or row.get("id") in _ADVANCED_IDS:
+            row["advanced"] = True
+    return rows
+
+
 async def handle_schema(adapter, request: "web.Request") -> "web.Response":
     """GET /v1/settings/schema — list the agent's user-facing knobs."""
     if not adapter._check_http_auth(request):
@@ -1501,7 +1522,7 @@ async def handle_schema(adapter, request: "web.Request") -> "web.Response":
             {"error": {"type": "server_error", "message": str(e)}},
             status=500,
         )
-    return web.json_response({"object": "list", "data": schema})
+    return web.json_response({"object": "list", "data": mark_advanced(schema)})
 
 
 async def handle_update(adapter, request: "web.Request") -> "web.Response":

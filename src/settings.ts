@@ -1550,7 +1550,62 @@ export function hydrate(handlers: {
       });
     }
   }
+  // ── Advanced mode (2026-10-26: "the settings menu is pretty
+  // overwhelming … a toggle in the bottom left for advanced mode which
+  // exposes everything, but by default hides most of the crazy stuff").
+  // Three sources of "advanced": whole sections / nav buttons marked
+  // `data-advanced` in index.html, Parley-native rows marked the same,
+  // and agent-declared rows whose schema says `advanced: true`
+  // (agentSettings.ts stamps `data-advanced` on those). Basic mode hides
+  // them all (class, not [hidden] — the phone layout forces [hidden]
+  // groups visible) and leaves a one-line hint per section so nothing
+  // feels lost. Per device, remembered.
+  const ADV_KEY = 'parley.settings.advanced';
+  const advToggle = panel?.querySelector<HTMLInputElement>('#settings-advanced-toggle') ?? null;
+  const readAdvanced = (): boolean => { try { return localStorage.getItem(ADV_KEY) === '1'; } catch { return false; } };
+  const applyAdvanced = () => {
+    const on = readAdvanced();
+    document.body.classList.toggle('settings-advanced', on);
+    if (advToggle) advToggle.checked = on;
+    for (const group of groups) {
+      const wholeGroup = group.hasAttribute('data-advanced');
+      const rows = Array.from(group.querySelectorAll<HTMLElement>('.row[data-advanced]'));
+      group.classList.toggle('adv-hidden', !on && wholeGroup);
+      let hint = group.querySelector<HTMLElement>(':scope > .settings-advanced-hint');
+      const n = rows.length;
+      if (!on && !wholeGroup && n > 0) {
+        if (!hint) {
+          hint = document.createElement('div');
+          hint.className = 'settings-advanced-hint hint';
+          group.appendChild(hint);
+        }
+        hint.textContent = `${n} more in Advanced mode`;
+        hint.hidden = false;
+      } else if (hint) {
+        hint.hidden = true;
+      }
+    }
+    for (const btn of navBtns) {
+      btn.classList.toggle('adv-hidden', !on && btn.hasAttribute('data-advanced'));
+    }
+    // The section on screen may have just vanished: fall back to the first.
+    const active = navBtns.find((b) => b.classList.contains('active'));
+    if (active && active.classList.contains('adv-hidden')) showSectionFn?.(navBtns[0]?.dataset.target || 'notifications');
+  };
+  advToggle?.addEventListener('change', () => {
+    try { localStorage.setItem(ADV_KEY, advToggle.checked ? '1' : '0'); } catch { /* private mode */ }
+    applyAdvanced();
+  });
+  // Agent rows render asynchronously; re-apply when they land.
+  window.addEventListener('agent-schema-loaded', applyAdvanced);
   const showSection = (target: string) => {
+    // A deep link into an advanced section (/cron, Settings › Storage from a
+    // digest) is intent: turn Advanced mode on rather than show nothing.
+    const targetBtn = navBtns.find((b) => b.dataset.target === target);
+    if (targetBtn?.hasAttribute('data-advanced') && !readAdvanced()) {
+      try { localStorage.setItem(ADV_KEY, '1'); } catch { /* private mode */ }
+      applyAdvanced();
+    }
     for (const btn of navBtns) {
       btn.classList.toggle('active', btn.dataset.target === target);
     }
@@ -1572,6 +1627,7 @@ export function hydrate(handlers: {
     };
   }
   showSectionFn = showSection;
+  applyAdvanced();
 
   const closeBtn = $any('settings-close');
   if (closeBtn) {

@@ -525,6 +525,10 @@ by other clients changing the same agent state).
   clustered. The client renders it as a heading above the first
   setting carrying that value; settings without one sit above the
   first group.
+- `advanced` (boolean, optional, default `false`) — a power-user knob.
+  Parley hides it unless the user turns on Settings › Advanced mode and
+  shows "N more in Advanced mode" in the section. The agent owns this
+  classification; Parley never decides which agent settings are advanced.
 - `readonly` (boolean, optional, default `false`) — the setting is
   reportable but not writable. The client renders it as a value line
   (label + current value) instead of an input, whatever `type` says,
