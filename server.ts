@@ -1409,13 +1409,40 @@ const requestHandler: http.RequestListener = async (req, res) => {
     }
     // Scheduled-jobs extension (Settings › Cron). Order matters: the
     // two-segment `/run` and `/runs` routes must match before the bare id.
-    // Health extension (Settings › Health).
+    // Health extension (Settings › Integrations: integrations + system checks).
     if (req.method === 'GET' && /^\/api\/parley\/health(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleyHealthList(req, res);
+    }
+    // Literal sub-routes (catalog / flows) before the {id} routes.
+    if (req.method === 'GET' && /^\/api\/parley\/health\/catalog(?:\?.*)?$/.test(req.url)) {
+      return parley.handleParleyHealthCatalog(req, res);
+    }
+    const catalogAdd = req.method === 'POST' && req.url.match(/^\/api\/parley\/health\/catalog\/([^/?]+)\/add(?:\?.*)?$/);
+    if (catalogAdd) {
+      return parley.handleParleyHealthCatalogAdd(req, res, decodeURIComponent(catalogAdd[1]));
+    }
+    const flowGet = req.method === 'GET' && req.url.match(/^\/api\/parley\/health\/flows\/([^/?]+)(?:\?.*)?$/);
+    if (flowGet) {
+      return parley.handleParleyHealthFlow(req, res, decodeURIComponent(flowGet[1]), false);
+    }
+    const flowCancel = req.method === 'POST' && req.url.match(/^\/api\/parley\/health\/flows\/([^/?]+)\/cancel(?:\?.*)?$/);
+    if (flowCancel) {
+      return parley.handleParleyHealthFlow(req, res, decodeURIComponent(flowCancel[1]), true);
     }
     const healthRun = req.method === 'POST' && req.url.match(/^\/api\/parley\/health\/([^/?]+)\/run(?:\?.*)?$/);
     if (healthRun) {
       return parley.handleParleyHealthRun(req, res, decodeURIComponent(healthRun[1]));
+    }
+    const healthAction = req.method === 'POST' && req.url.match(/^\/api\/parley\/health\/([^/?]+)\/actions\/([^/?]+)(?:\?.*)?$/);
+    if (healthAction) {
+      return parley.handleParleyHealthAction(req, res, decodeURIComponent(healthAction[1]), decodeURIComponent(healthAction[2]));
+    }
+    // OAuth redirect target for integration connect flows: the PROVIDER sends
+    // the user's browser here; no pairing cookie is required because the
+    // callback is bound by the provider's `state` (validated by the agent).
+    const oauthCb = req.method === 'GET' && req.url.match(/^\/api\/parley\/integrations\/oauth\/callback\/([^/?]+)(?:\?.*)?$/);
+    if (oauthCb) {
+      return parley.handleParleyOAuthCallback(req, res, decodeURIComponent(oauthCb[1]));
     }
     if (req.method === 'GET' && /^\/api\/parley\/jobs(?:\?.*)?$/.test(req.url)) {
       return parley.handleParleyJobsList(req, res);

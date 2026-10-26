@@ -541,7 +541,11 @@
        group so deep links and smokes keep working. -->
   <div class="settings-group" id="settings-group-integrations" data-section="integrations" hidden>
     <div class="group-label">Integrations</div>
-    <div class="row row-wide int-summary-row"><span class="hint" data-role="int-summary"></span></div>
+    <div class="row row-wide int-summary-row">
+      <span class="hint" data-role="int-summary"></span>
+      <button type="button" class="cron-btn cron-btn-primary int-add-btn" data-role="int-add" title="Add an integration from your agent's catalog">+ Add integration</button>
+    </div>
+    <div class="row row-wide int-add-status-row"><span class="hint" data-role="int-add-status"></span></div>
     <div class="row row-wide" data-health-placeholder><span class="hint">Loading integrations…</span></div>
     <div id="integrations-host" class="cron-jobs"></div>
     <div class="row row-wide int-custom-note">

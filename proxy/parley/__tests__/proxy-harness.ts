@@ -109,6 +109,15 @@ export class FakeAgent {
   /** Health extension — null = unsupported (404). */
   private health: any[] | null = [];
   public lastHealthRun: string | null = null;
+  public lastHealthFlowBody: { route: string; body: any } | null = null;
+  public lastOAuthCallback: { server: string; query: Record<string, string> } | null = null;
+  private readJson(req: any): Promise<any> {
+    return new Promise((resolve) => {
+      let data = '';
+      req.on('data', (c: any) => { data += c; });
+      req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { resolve({}); } });
+    });
+  }
   setHealth(checks: any[] | null): void { this.health = checks; this.lastHealthRun = null; }
 
   /** Scheduled-jobs extension — null = agent has no scheduler (404). */
@@ -263,6 +272,45 @@ export class FakeAgent {
     if (url.pathname === '/v1/health' && method === 'GET') {
       if (this.health === null) { this.json(res, 404, { error: { message: 'no health' } }); return; }
       this.json(res, 200, { object: 'list', data: this.health });
+      return;
+    }
+    // Integrations flows (phase 2): record what arrived, answer like the plugin.
+    if (url.pathname === '/v1/health/catalog' && method === 'GET') {
+      if (this.health === null) { this.json(res, 404, { error: { message: 'no health' } }); return; }
+      this.json(res, 200, { object: 'list', data: [{ provider: 'linear', name: 'Linear', kind: 'mcp', setup: 'oauth', fields: [], installed: false }] });
+      return;
+    }
+    const catalogAdd = url.pathname.match(/^\/v1\/health\/catalog\/([^/]+)\/add$/);
+    if (catalogAdd && method === 'POST') {
+      void this.readJson(req).then((body) => {
+        this.lastHealthFlowBody = { route: `add:${catalogAdd[1]}`, body };
+        this.json(res, 202, { flow_id: 'f-add', kind: 'install', status: 'waiting', item_id: `int-mcp-${catalogAdd[1]}` });
+      });
+      return;
+    }
+    const flowGet = url.pathname.match(/^\/v1\/health\/flows\/([^/]+)$/);
+    if (flowGet && method === 'GET') {
+      if (flowGet[1] === 'gone') { this.json(res, 404, { error: { type: 'not_found', message: 'flow not found or expired' } }); return; }
+      this.json(res, 200, { flow_id: flowGet[1], kind: 'oauth', status: 'done', message: 'Signed in.' });
+      return;
+    }
+    const flowCancel = url.pathname.match(/^\/v1\/health\/flows\/([^/]+)\/cancel$/);
+    if (flowCancel && method === 'POST') { this.json(res, 200, { ok: true, status: 'cancelled' }); return; }
+    const oauthCb = url.pathname.match(/^\/v1\/health\/oauth\/callback\/([^/]+)$/);
+    if (oauthCb && method === 'GET') {
+      this.lastOAuthCallback = { server: oauthCb[1], query: Object.fromEntries(url.searchParams) };
+      const ok = url.searchParams.get('state') === 'good';
+      this.json(res, ok ? 200 : 400, ok ? { ok: true, status: 'received', message: 'Signed in. You can close this tab.' }
+                                        : { ok: false, status: 'expired', message: 'This sign-in has expired.' });
+      return;
+    }
+    const healthAction = url.pathname.match(/^\/v1\/health\/([^/]+)\/actions\/([^/]+)$/);
+    if (healthAction && method === 'POST') {
+      void this.readJson(req).then((body) => {
+        this.lastHealthFlowBody = { route: `action:${healthAction[1]}/${healthAction[2]}`, body };
+        if (healthAction[2] === 'nope') { this.json(res, 400, { error: { type: 'invalid_request_error', message: "'nope' is not available" } }); return; }
+        this.json(res, 202, { flow_id: 'f-1', kind: 'oauth', status: 'waiting', authorization_url: 'https://provider.example/authorize?state=good' });
+      });
       return;
     }
     const healthRun = url.pathname.match(/^\/v1\/health\/([^/]+)\/run$/);
@@ -487,6 +535,17 @@ export async function startRig(opts: { mode?: FakeMode } = {}): Promise<ProxyRig
     }
     // Scheduled-jobs extension — mirrors server.ts ordering (run/runs before bare id).
     if (method === 'GET' && path === '/api/parley/health') return parley.handleParleyHealthList(req, res);
+    if (method === 'GET' && path === '/api/parley/health/catalog') return parley.handleParleyHealthCatalog(req, res);
+    const catAdd = method === 'POST' && path.match(/^\/api\/parley\/health\/catalog\/([^/]+)\/add$/);
+    if (catAdd) return parley.handleParleyHealthCatalogAdd(req, res, decodeURIComponent(catAdd[1]));
+    const flowGet = method === 'GET' && path.match(/^\/api\/parley\/health\/flows\/([^/]+)$/);
+    if (flowGet) return parley.handleParleyHealthFlow(req, res, decodeURIComponent(flowGet[1]), false);
+    const flowCancel = method === 'POST' && path.match(/^\/api\/parley\/health\/flows\/([^/]+)\/cancel$/);
+    if (flowCancel) return parley.handleParleyHealthFlow(req, res, decodeURIComponent(flowCancel[1]), true);
+    const healthAction = method === 'POST' && path.match(/^\/api\/parley\/health\/([^/]+)\/actions\/([^/]+)$/);
+    if (healthAction) return parley.handleParleyHealthAction(req, res, decodeURIComponent(healthAction[1]), decodeURIComponent(healthAction[2]));
+    const oauthCb = method === 'GET' && path.match(/^\/api\/parley\/integrations\/oauth\/callback\/([^/]+)$/);
+    if (oauthCb) return parley.handleParleyOAuthCallback(req, res, decodeURIComponent(oauthCb[1]));
     const healthRun = method === 'POST' && path.match(/^\/api\/parley\/health\/([^/]+)\/run$/);
     if (healthRun) return parley.handleParleyHealthRun(req, res, decodeURIComponent(healthRun[1]));
     if (method === 'GET' && path === '/api/parley/jobs') {

@@ -491,17 +491,29 @@ def invalidate_list_cache() -> None:
     _list_cache["items"] = None
 
 
+def _with_actions(item: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        from . import parley_integration_flows as _flows
+        acts = _flows.actions_for(item)
+    except Exception:
+        acts = []
+    if acts:
+        item["integration"] = {**item["integration"], "actions": acts}
+    return item
+
+
 def list_items() -> List[Dict[str, Any]]:
-    """Every integration as a health item, cached probe results applied.
-    Enumeration is memoised for LIST_TTL_S (Settings loads the list on
-    open AND close); one broken enumerator never hides the others."""
+    """Every integration as a health item, cached probe results applied
+    and connect/add actions attached. Enumeration is memoised for
+    LIST_TTL_S (Settings loads the list on open AND close); one broken
+    enumerator never hides the others."""
     now = time.time()
     cached = _list_cache.get("items")
     if cached is not None and now - float(_list_cache.get("at") or 0) < LIST_TTL_S:
-        return [_apply_cache(dict(it)) for it in cached]
+        return [_with_actions(_apply_cache(dict(it))) for it in cached]
     items = _enumerate_all()
     _list_cache["at"], _list_cache["items"] = now, [dict(it) for it in items]
-    return items
+    return [_with_actions(it) for it in items]
 
 
 def _enumerate_all() -> List[Dict[str, Any]]:

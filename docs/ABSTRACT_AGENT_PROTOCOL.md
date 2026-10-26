@@ -834,9 +834,44 @@ the section says so.
 - Ids: `int-<kind>-<name>`, same charset as other checks. Nothing probes
   on `GET`; the agent caches probe results and re-probes on `run`.
 
-Connect / add flows (OAuth, device code, api-key forms, a catalog of
-addable integrations) are not part of this version of the contract — see
-`docs/INTEGRATIONS_PANE_PLAN.md` phases 2–3.
+### Connect / add flows (2026-10-26, phase 2)
+
+Integration items may list `integration.actions`
+(`[{id, label, flow, danger?}]`); `flow` is one of `oauth` (browser
+sign-in), `run` (same as Test), `confirm`. Parley renders a button per
+action and drives it through:
+
+```
+GET  /v1/health/catalog                    → { data: [CatalogEntry] }   addable integrations
+POST /v1/health/catalog/{provider}/add     { env: {FIELD: value}, origin } → Flow (202)
+POST /v1/health/{id}/actions/{action}      { origin } → Flow (202) | { item } for run-type (200)
+GET  /v1/health/flows/{flow_id}            → Flow
+POST /v1/health/flows/{flow_id}/cancel     → { ok, status }
+GET  /v1/health/oauth/callback/{server}?code&state&error&iss → { ok, status, message }
+```
+
+`CatalogEntry`: `{provider, name, kind, description?, setup: oauth|api-key|none,
+fields: [{id, label, secret, required}], installed, needs_install, docs_url?}`.
+`fields` are collected by Parley and sent once in `add`; the agent writes
+them into its own secret store and never echoes them back.
+
+`Flow`: `{flow_id, item_id, kind: oauth|install, status: starting|waiting|
+done|error|cancelled, authorization_url?, error?, message?}`. For an
+`oauth` flow Parley opens `authorization_url` away from the app (popup on
+the web, OS browser in the native shell) and polls `flows/{id}` every 2 s;
+the provider redirects the browser to
+`<origin>/api/parley/integrations/oauth/callback/<server>` on the proxy,
+which forwards the query to the callback route above and renders a small
+"you can close this tab" page. `origin` is the origin the client reached
+the proxy on (stamped by the proxy from the request), so each tenant and
+device gets a redirect URI its browser can follow; the agent falls back to
+`PARLEY_PUBLIC_ORIGIN` / `PARLEY_PROXY_ORIGIN`. The callback is bound by
+the provider's `state`; no Parley session is needed to reach it.
+
+Reference: `backends/hermes/plugin/parley_integration_flows.py` — OAuth
+via hermes' dashboard bridge (`tools.mcp_dashboard_oauth`), catalog via
+`hermes_cli.mcp_catalog`. Device-code OAuth and api-key/instructions
+flows for non-MCP kinds are phase 3.
 
 ### `POST /v1/health/{id}/run`
 

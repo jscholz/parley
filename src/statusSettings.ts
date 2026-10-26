@@ -13,9 +13,11 @@
 import * as backend from './backend.ts';
 import { miniMarkdown } from './util/markdown.ts';
 import {
-  type HealthCheck, agoText, isStale, reportLines, worstTone,
+  type HealthCheck, type IntegrationFlow, type CatalogEntry, agoText, isStale, reportLines, worstTone,
   splitStatus, kindLabel, connectedText, attentionOrder, integrationSummary,
 } from './healthModel.ts';
+import { runItemAction, runCatalogAdd } from './integrationFlows.ts';
+import { pickIntegration } from './integrationPicker.ts';
 
 let checks: HealthCheck[] = [];
 
@@ -88,7 +90,14 @@ function renderIntegrationCard(c: HealthCheck, card: HTMLElement, notice?: strin
   if (integ.description) card.appendChild(el('div', 'hint int-desc', integ.description));
 
   const controls = el('div', 'cron-job-controls');
-  const test = el('button', 'cron-btn cron-btn-primary', 'Test');
+  // Agent-declared actions first (Connect / Reconnect …), then Test.
+  for (const a of integ.actions || []) {
+    const btn = el('button', 'cron-btn' + (a.danger ? ' cron-btn-danger' : ' cron-btn-primary'), a.label);
+    btn.type = 'button'; btn.dataset.role = 'action'; btn.dataset.action = a.id; btn.dataset.flow = a.flow;
+    btn.onclick = () => { void runAction(c, card, a.id, a.flow); };
+    controls.appendChild(btn);
+  }
+  const test = el('button', 'cron-btn' + (integ.actions?.length ? '' : ' cron-btn-primary'), 'Test');
   test.type = 'button'; test.dataset.role = 'run'; test.disabled = !c.can_run;
   test.title = c.can_run ? 'Connect and check this integration now' : 'Status comes from configuration; nothing to test here';
   test.onclick = () => { void runCheck(c, card, test, 'Testing…'); };
@@ -114,6 +123,108 @@ function renderIntegrationCard(c: HealthCheck, card: HTMLElement, notice?: strin
   }
   appendReport(card, c, c.worst === 'FAIL' || c.worst === 'CRASHED');
   if (notice) card.appendChild(el('div', 'hint cron-job-notice', notice));
+}
+
+/** A flow-driven action (Connect → browser sign-in → poll). The card shows
+ *  progress with a Cancel while it waits, then reloads the whole list so
+ *  the item reflects the agent's view. */
+async function runAction(c: HealthCheck, card: HTMLElement, actionId: string, flow: string) {
+  card.classList.add('cron-job-busy-soft');
+  card.querySelectorAll('[data-role="flow"]').forEach((n) => n.remove());   // one notice per card
+  let cancel: (() => void) | null = null;
+  const notice = el('div', 'hint cron-job-notice int-flow');
+  notice.dataset.role = 'flow';
+  const text = el('span', '', flow === 'oauth' ? 'Opening the sign-in…' : 'Working…');
+  const cancelBtn = el('button', 'cron-btn int-flow-cancel', 'Cancel'); cancelBtn.type = 'button';
+  cancelBtn.onclick = () => { cancel?.(); text.textContent = 'Cancelling…'; };
+  notice.append(text, cancelBtn);
+  card.appendChild(notice);
+  for (const b of card.querySelectorAll<HTMLButtonElement>('.cron-job-controls button')) b.disabled = true;
+  try {
+    const result: IntegrationFlow = await runItemAction(c.id, actionId, {
+      onUpdate: (f) => { text.textContent = flowText(f); },
+      onCancelable: (fn) => { cancel = fn; },
+    });
+    if (result.status === 'done') {
+      text.textContent = result.message || 'Done.';
+      await load();
+      return;
+    }
+    const outcome = result.status === 'cancelled' ? 'Cancelled.' : `Failed: ${result.error || 'unknown error'}`;
+    text.textContent = outcome;
+    cancelBtn.remove();
+    card.classList.remove('cron-job-busy-soft');
+    for (const b of card.querySelectorAll<HTMLButtonElement>('.cron-job-controls button')) b.disabled = b.dataset.role === 'run' ? !c.can_run : false;
+    if (result.status === 'error') {
+      // The agent recorded the failure on the item; reload so the pill and
+      // report agree, then keep the outcome visible on the fresh card.
+      await load();
+      noteOnCard(c.id, outcome);
+    }
+  } catch (e: any) {
+    text.textContent = `Failed: ${e?.message ?? e}`;
+    cancelBtn.remove();
+    card.classList.remove('cron-job-busy-soft');
+    for (const b of card.querySelectorAll<HTMLButtonElement>('.cron-job-controls button')) b.disabled = b.dataset.role === 'run' ? !c.can_run : false;
+  }
+}
+
+function noteOnCard(id: string, text: string) {
+  const card = document.querySelector<HTMLElement>(`#integrations-host .integration-card[data-health-check="${CSS.escape(id)}"]`);
+  if (!card) return;
+  card.querySelectorAll('[data-role="flow"]').forEach((n) => n.remove());
+  const notice = el('div', 'hint cron-job-notice int-flow', text);
+  notice.dataset.role = 'flow';
+  card.appendChild(notice);
+}
+
+function flowText(f: IntegrationFlow): string {
+  switch (f.status) {
+    case 'starting': return 'Starting…';
+    case 'waiting': return f.kind === 'oauth' ? 'Waiting for you to finish signing in with the provider…' : (f.message || 'Installing…');
+    case 'done': return f.message || 'Done.';
+    case 'error': return `Failed: ${f.error || 'unknown error'}`;
+    case 'cancelled': return 'Cancelled.';
+    default: return f.status;
+  }
+}
+
+async function addIntegration(btn: HTMLButtonElement, status: HTMLElement) {
+  const adapter = await getAdapter();
+  btn.disabled = true;
+  status.textContent = 'Loading the catalog…';
+  let payload: { data: CatalogEntry[] } | null = null;
+  try { payload = await adapter.healthCatalog?.(); } catch { payload = null; }
+  if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) {
+    status.textContent = payload === null ? 'This agent has no catalog of addable integrations. Ask it to register one (see the note below).' : 'The catalog is empty.';
+    btn.disabled = false;
+    return;
+  }
+  status.textContent = '';
+  btn.disabled = false;
+  const pick = await pickIntegration(payload.data);
+  if (!pick) return;
+  btn.disabled = true;
+  status.textContent = `Adding ${pick.entry.name}…`;
+  try {
+    const result = await runCatalogAdd(pick.entry.provider, pick.env, { onUpdate: (f) => { status.textContent = `${pick.entry.name}: ${flowText(f)}`; } });
+    status.textContent = result.status === 'done' ? (result.message || `${pick.entry.name} added.`) : `${pick.entry.name}: ${flowText(result)}`;
+    await load();
+  } catch (e: any) {
+    status.textContent = `Could not add ${pick.entry.name}: ${e?.message ?? e}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+let addWired = false;
+function wireAdd(group: HTMLElement) {
+  if (addWired) return;
+  const btn = group.querySelector<HTMLButtonElement>('[data-role="int-add"]');
+  const status = group.querySelector<HTMLElement>('[data-role="int-add-status"]');
+  if (!btn || !status) return;
+  addWired = true;
+  btn.onclick = () => { void addIntegration(btn, status); };
 }
 
 function renderSystemCard(c: HealthCheck, card: HTMLElement, notice?: string) {
@@ -178,6 +289,7 @@ export async function load() {
   }
   checks = payload.data;
   const { integrations, system } = splitStatus(checks);
+  wireAdd(intGroup);
 
   intHost.innerHTML = '';
   if (integrations.length === 0) {

@@ -6544,9 +6544,33 @@
 .int-setup-body { font-size: calc(var(--content-size) - 1px); margin-top: 6px; }
 .int-setup-body p { margin: 4px 0; }
 .int-setup-body code { font-family: var(--font-mono); font-size: calc(var(--content-size) - 2px); }
-.int-summary-row:empty, .int-summary-row .hint:empty { display: none; }
 .int-custom-note .hint code { font-family: var(--font-mono); font-size: calc(var(--content-size) - 3px); }
 a.cron-btn { text-decoration: none; display: inline-flex; align-items: center; }
+.int-summary-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.int-summary-row:empty, .int-summary-row .hint:empty { display: none; }
+.int-summary-row:has(.int-add-btn) { display: flex; }
+.int-add-status-row .hint:empty { display: none; }
+.int-add-status-row:has(.hint:empty) { display: none; }
+.cron-job-busy-soft .cron-job-controls { opacity: .6; }
+.int-flow { display: flex; align-items: center; gap: 10px; }
+.int-flow-cancel { margin-left: auto; }
+/* Add-integration picker (shares the confirm overlay chrome) */
+.int-picker-overlay { z-index: 10050; }   /* above the settings panel (#settings is 9998) */
+.int-picker { max-width: 520px; display: flex; flex-direction: column; max-height: min(80vh, 640px); }
+.int-picker-search { width: 100%; box-sizing: border-box; margin: 4px 0 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 14px; }
+.int-picker-list { overflow: auto; min-height: 120px; flex: 1 1 auto; border: 1px solid var(--border-subtle); border-radius: 8px; }
+.int-picker-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--border-subtle); background: transparent; color: var(--fg); cursor: pointer; font: inherit; }
+.int-picker-row:last-child { border-bottom: 0; }
+.int-picker-row:hover { background: var(--surface-subtle); }
+.int-picker-row.selected { background: var(--primary-soft); }
+.int-picker-row:disabled { opacity: .5; cursor: default; }
+.int-picker-row-main { flex: 1 1 auto; min-width: 0; }
+.int-picker-row-name { font-weight: 600; font-size: 14px; }
+.int-picker-row-desc { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.int-picker-form { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.int-picker-chosen { font-size: 13px; }
+.int-picker-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.int-picker-field input { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--fg); font-size: 14px; }
 @media (max-width: 640px) {
   .cron-job-controls { grid-template-columns: 1fr; }
   .cron-btn-danger { margin-left: 0; }

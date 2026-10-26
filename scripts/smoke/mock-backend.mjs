@@ -1171,15 +1171,81 @@ export async function installMockBackend(page) {
   // /api/parley/health* — health extension (Settings › Health).
   let health = null;                     // null | HealthCheck[]
   let lastHealthRun = null;
+  // Integrations flows (phase 2): catalog + actions → flows the PWA polls.
+  // A flow stays `waiting` until the scenario settles it (mock.settleFlow)
+  // or `flowAutoSettleMs` elapses — the mock stands in for the provider.
+  let catalog = null;                    // null | CatalogEntry[]
+  const flows = new Map();               // flow_id → flow
+  const flowLog = [];                    // what the PWA started: {kind, item_id|provider, env, origin}
+  let flowAutoSettleMs = 0;
+  let route_fulfill_json = null;
+  const jsonOk = (body, status = 200) => route_fulfill_json(body, status);
   await page.route(/.*\/api\/parley\/health(?:\/.*)?$/, async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
+    route_fulfill_json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     const notSupported = () => route.fulfill({ status: 404, contentType: 'application/json',
       body: JSON.stringify({ error: { message: 'agent does not implement /v1/health' } }) });
     if (health === null) return notSupported();
     if (method === 'GET' && /\/health\/?$/.test(url.pathname)) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ object: 'list', data: health }) });
       return;
+    }
+    const mkFlow = (kind, extra) => {
+      const flow = { flow_id: `flow-${flows.size + 1}`, kind, status: 'waiting', created_at: Date.now(), ...extra };
+      flows.set(flow.flow_id, flow);
+      if (flowAutoSettleMs > 0) setTimeout(() => { if (flow.status === 'waiting') { flow.status = 'done'; flow.message = 'Signed in.'; } }, flowAutoSettleMs);
+      return flow;
+    };
+    if (method === 'GET' && /\/health\/catalog\/?$/.test(url.pathname)) {
+      if (catalog === null) return notSupported();
+      return jsonOk({ object: 'list', data: catalog });
+    }
+    const add = url.pathname.match(/\/health\/catalog\/([^/]+)\/add$/);
+    if (add && method === 'POST') {
+      if (catalog === null) return notSupported();
+      const provider = decodeURIComponent(add[1]);
+      const entry = catalog.find((c) => c.provider === provider);
+      if (!entry) return jsonOk({ error: { message: `no catalog entry '${provider}'` } }, 404);
+      let body = {}; try { body = route.request().postDataJSON() || {}; } catch {}
+      const missing = (entry.fields || []).filter((f) => f.required !== false && !(body.env || {})[f.id]).map((f) => f.id);
+      if (missing.length) return jsonOk({ error: { message: `missing: ${missing.join(', ')}` } }, 400);
+      flowLog.push({ kind: 'install', provider, env: body.env || {}, origin: body.origin });
+      const flow = mkFlow('install', { item_id: `int-mcp-${provider}`, message: 'Installing…' });
+      // The mock agent "installs" at once: the item appears on the next list.
+      entry.installed = true;
+      health.push({ id: `int-mcp-${provider}`, name: provider, worst: 'UNKNOWN', last_run_at: null, report: 'installed · not tested yet',
+        can_run: true, counts: { fail: 0, warn: 0, ok: 0 },
+        integration: { kind: 'mcp', provider, connected: entry.setup === 'oauth' ? false : true,
+          actions: entry.setup === 'oauth' ? [{ id: 'connect', label: 'Connect', flow: 'oauth' }] : undefined } });
+      flow.status = 'done'; flow.message = `'${provider}' installed. ${entry.setup === 'oauth' ? 'Press Connect to sign in.' : 'Press Test to check it.'}`;
+      return jsonOk(flow, 202);
+    }
+    const flowGet = url.pathname.match(/\/health\/flows\/([^/]+)$/);
+    if (flowGet && method === 'GET') {
+      const f = flows.get(decodeURIComponent(flowGet[1]));
+      return f ? jsonOk(f) : jsonOk({ error: { message: 'flow not found' } }, 404);
+    }
+    const flowCancel = url.pathname.match(/\/health\/flows\/([^/]+)\/cancel$/);
+    if (flowCancel && method === 'POST') {
+      const f = flows.get(decodeURIComponent(flowCancel[1]));
+      if (f && f.status === 'waiting') { f.status = 'cancelled'; f.error = 'Cancelled by user'; }
+      return jsonOk({ ok: true, status: f ? f.status : 'expired' });
+    }
+    const action = url.pathname.match(/\/health\/([^/]+)\/actions\/([^/]+)$/);
+    if (action && method === 'POST') {
+      const id = decodeURIComponent(action[1]); const act = decodeURIComponent(action[2]);
+      const c = health.find((x) => x.id === id);
+      if (!c) return jsonOk({ error: { message: 'no such integration' } }, 404);
+      let body = {}; try { body = route.request().postDataJSON() || {}; } catch {}
+      const declared = (c.integration?.actions || []).find((a) => a.id === act);
+      if (!declared) return jsonOk({ error: { message: `'${act}' is not available for this integration` } }, 400);
+      flowLog.push({ kind: declared.flow, item_id: id, action: act, origin: body.origin });
+      if (declared.flow === 'oauth') {
+        const flow = mkFlow('oauth', { item_id: id, authorization_url: `https://provider.example/authorize?client_id=mock&state=st-${flows.size + 1}` });
+        return jsonOk(flow, 202);
+      }
+      return jsonOk({ error: { message: 'unsupported flow' } }, 400);
     }
     const m = url.pathname.match(/\/health\/([^/]+)\/run$/);
     if (m && method === 'POST') {
@@ -2189,6 +2255,25 @@ export async function installMockBackend(page) {
     /** Health checks served at /api/parley/health (null = 404). */
     setHealth(list) { health = list; lastHealthRun = null; },
     getLastHealthRun() { return lastHealthRun; },
+    /** Addable integrations served at /api/parley/health/catalog (null = 404). */
+    setCatalog(list) { catalog = list; },
+    /** Flows the PWA started (actions / catalog adds), oldest first. */
+    getFlowLog() { return flowLog.slice(); },
+    getFlows() { return [...flows.values()]; },
+    /** Settle the most recent waiting flow the way the provider would. On
+     *  `done` for an oauth flow, the item flips to connected + OK. */
+    settleFlow(status = 'done', extra = {}) {
+      const f = [...flows.values()].reverse().find((x) => x.status === 'waiting');
+      if (!f) return null;
+      Object.assign(f, { status }, status === 'done' ? { message: 'Signed in.' } : { error: extra.error || 'Provider refused' }, extra);
+      if (status === 'done' && f.kind === 'oauth' && health) {
+        const c = health.find((x) => x.id === f.item_id);
+        if (c) Object.assign(c, { worst: 'OK', last_run_at: new Date().toISOString(), report: 'connected · 3 tool(s)\nOK   search\nOK   fetch\nOK   update',
+          counts: { fail: 0, warn: 0, ok: 1 }, integration: { ...c.integration, connected: true, actions: [{ id: 'connect', label: 'Reconnect', flow: 'oauth' }] } });
+      }
+      return f;
+    },
+    setFlowAutoSettle(ms) { flowAutoSettleMs = ms; },
     /** Scheduled jobs served at /api/parley/jobs (null = 404). */
     setJobs(list) { jobs = list; lastJobPost = null; lastBulkModelPost = null; defaultModel = 'gpt-6-astra'; },
     getLastJobPost() { return lastJobPost; },

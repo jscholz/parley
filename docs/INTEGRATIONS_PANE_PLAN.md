@@ -218,7 +218,23 @@ Hermes' secret store; Parley never echoes it back (fields are write-only).
   points at it. Tests: `test_integrations.py`, `healthModel.test.ts`, smoke
   `settings-integrations-panel`. Protocol doc: health section documents the `integration`
   block.
-* Phases 2–4: not started. Open questions in §6 still open.
+* **Phase 2 — shipped 2026-10-26.** `parley_integration_flows.py`: browser OAuth for
+  `auth: oauth` MCP servers through hermes' dashboard bridge (`DashboardOAuthFlow`; the SDK
+  does discovery/DCR/PKCE/token exchange; tokens backed up and restored on failure; live
+  reconnect on success), redirect URI = `<client origin>/api/parley/integrations/oauth/callback/<server>`
+  (origin stamped by the proxy from the request; `PARLEY_PUBLIC_ORIGIN`/`PARLEY_PROXY_ORIGIN`
+  fallbacks); catalog list + add from hermes' curated MCP catalog (secrets to .env, config
+  block via `install_entry`, as the dashboard does); per-item `actions` (Connect/Reconnect).
+  Proxy: pass-through routes + the callback page (posts `parley:oauth-callback` to its
+  opener). Parley: `integrationFlows.ts` (popup / OS browser, 2 s poll, Cancel),
+  `integrationPicker.ts` (+ Add integration: search, write-only credential form),
+  card progress notices. Mock + smokes `integrations-connect-oauth`,
+  `integrations-add-from-catalog`; proxy `health.test.ts`; plugin `test_integration_flows.py`.
+  Assumptions taken (§6): any paired client may connect; CAP returns to the app after the
+  OS-browser sign-in and the poll picks it up; route name stays `/v1/health`.
+  **Not in phase 2:** device-code OAuth (hermes' device login is CLI-bound), Remove/Disable,
+  api-key/instructions flows for non-MCP kinds (Google/Slack guided flows) — phase 3.
+* Phases 3–4: not started.
 
 ## 3. Phases and effort
 

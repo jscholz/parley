@@ -1891,6 +1891,43 @@ export const proxyClientAdapter = {
     return r.json();
   },
 
+  // ── Integrations flows (health extension, phase 2) ──────────────────
+  /** GET /api/parley/health/catalog → {data: CatalogEntry[]} or null when unsupported. */
+  async healthCatalog(): Promise<any | null> {
+    try {
+      const r = await fetch(`${apiBase()}/health/catalog`);
+      if (r.status === 404) return null;
+      if (!r.ok) { diag(`proxy-client.healthCatalog: HTTP ${r.status}`); return null; }
+      return await r.json();
+    } catch (e: any) { diag(`proxy-client.healthCatalog failed: ${e.message}`); return null; }
+  },
+  /** POST /api/parley/health/catalog/{provider}/add → Flow (install). */
+  async healthCatalogAdd(provider: string, env: Record<string, string>): Promise<any> {
+    const r = await fetch(`${apiBase()}/health/catalog/${encodeURIComponent(provider)}/add`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ env, origin: window.location.origin }),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** POST /api/parley/health/{id}/actions/{action} → Flow (oauth…) or {item} for run-type actions. */
+  async healthAction(id: string, action: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/health/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ origin: window.location.origin }),
+    });
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** GET /api/parley/health/flows/{id} → Flow. */
+  async healthFlow(flowId: string): Promise<any> {
+    const r = await fetch(`${apiBase()}/health/flows/${encodeURIComponent(flowId)}`);
+    if (!r.ok) throw new Error(await errorMessage(r));
+    return r.json();
+  },
+  /** POST /api/parley/health/flows/{id}/cancel. Best-effort. */
+  async healthFlowCancel(flowId: string): Promise<void> {
+    try { await fetch(`${apiBase()}/health/flows/${encodeURIComponent(flowId)}/cancel`, { method: 'POST' }); } catch { /* best-effort */ }
+  },
+
   /** DELETE /api/parley/jobs/{id} → {deleted:true}. Permanent. */
   async deleteJob(id: string): Promise<any> {
     const r = await fetch(`${apiBase()}/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' });

@@ -20,6 +20,9 @@ heartbeat, no Telegram/push):
 Routes:
   GET  /v1/health              -> {"object":"list","data":[CheckDef…]}   (system checks + integrations)
   POST /v1/health/{id}/run     -> CheckDef (after the run; `int-*` ids probe an integration)
+  GET  /v1/health/catalog, POST /v1/health/catalog/{provider}/add,
+  POST /v1/health/{id}/actions/{action}, GET /v1/health/flows/{id}, POST …/cancel,
+  GET  /v1/health/oauth/callback/{server}   -> integrations connect/add flows (parley_integration_flows)
 CheckDef: {id, name, worst ("OK"|"WARN"|"FAIL"|"CRASHED"|"UNKNOWN"), last_run_at (iso|null),
            report (str), can_run (bool), counts: {fail, warn, ok}}
 """
@@ -220,6 +223,109 @@ async def handle_health_run(adapter, request):
     return web.json_response(view)
 
 
+# ── integrations: catalog, actions, flows, OAuth callback ─────────────────
+
+def _flows():
+    try:
+        from . import parley_integration_flows as m
+    except ImportError:  # pragma: no cover
+        import parley_integration_flows as m  # type: ignore
+    return m
+
+
+async def _json_body(request) -> Dict[str, Any]:
+    try:
+        data = await request.json()
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+async def handle_catalog(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    try:
+        data = await _in_executor(_flows().catalog)
+    except Exception as e:
+        logger.exception("[parley] integrations catalog failed")
+        return _err(web, 500, "server_error", str(e))
+    return web.json_response({"object": "list", "data": data})
+
+
+async def handle_catalog_add(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    body = await _json_body(request)
+    env = body.get("env") if isinstance(body.get("env"), dict) else {}
+    try:
+        view = await _in_executor(_flows().start_add, request.match_info.get("provider", ""), env)
+    except _flows().FlowError as e:
+        return _err(web, e.status, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] integrations add failed")
+        return _err(web, 500, "server_error", str(e))
+    return web.json_response(view, status=202)
+
+
+async def handle_item_action(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    item_id = request.match_info.get("check_id", "")
+    action = request.match_info.get("action", "")
+    if not _ID_RE.match(item_id) or not _ID_RE.match(action):
+        return _err(web, 400, "invalid_request_error", "invalid id")
+    body = await _json_body(request)
+    try:
+        view = await _flows().run_action(item_id, action, body)
+    except _flows().FlowError as e:
+        return _err(web, e.status, "invalid_request_error", str(e))
+    except HealthValidationError as e:
+        return _err(web, 400, "invalid_request_error", str(e))
+    except Exception as e:
+        logger.exception("[parley] integrations action failed")
+        return _err(web, 500, "server_error", str(e))
+    return web.json_response(view, status=202 if view.get("flow_id") else 200)
+
+
+async def handle_flow_status(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    flow = _flows().get_flow(request.match_info.get("flow_id", ""))
+    if flow is None:
+        return _err(web, 404, "not_found", "flow not found or expired")
+    return web.json_response(flow.view())
+
+
+async def handle_flow_cancel(adapter, request):
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    return web.json_response(_flows().cancel_flow(request.match_info.get("flow_id", "")))
+
+
+async def handle_oauth_callback(adapter, request):
+    """The provider's redirect, forwarded by the proxy. JSON back; the
+    proxy renders the human page."""
+    from aiohttp import web
+    if _unauthorized(adapter, request):
+        return web.Response(status=401, text="invalid token")
+    q = request.query
+    res = _flows().deliver_callback(request.match_info.get("server", ""), code=q.get("code"), state=q.get("state"),
+                                    error=q.get("error"), iss=q.get("iss"))
+    return web.json_response(res, status=200 if res.get("ok") else 400)
+
+
 def register_health_routes(app, adapter) -> None:
     app.router.add_get("/v1/health", lambda r: handle_health_list(adapter, r))
+    # Literal segments before the {check_id} routes so "catalog"/"flows"/"oauth" never match as ids.
+    app.router.add_get("/v1/health/catalog", lambda r: handle_catalog(adapter, r))
+    app.router.add_post("/v1/health/catalog/{provider}/add", lambda r: handle_catalog_add(adapter, r))
+    app.router.add_get("/v1/health/flows/{flow_id}", lambda r: handle_flow_status(adapter, r))
+    app.router.add_post("/v1/health/flows/{flow_id}/cancel", lambda r: handle_flow_cancel(adapter, r))
+    app.router.add_get("/v1/health/oauth/callback/{server}", lambda r: handle_oauth_callback(adapter, r))
     app.router.add_post("/v1/health/{check_id}/run", lambda r: handle_health_run(adapter, r))
+    app.router.add_post("/v1/health/{check_id}/actions/{action}", lambda r: handle_item_action(adapter, r))

@@ -266,6 +266,8 @@ export interface UpstreamAgent {
   /** Optional health extension (/v1/health/*). listHealth → null when unsupported (404). */
   listHealth(): Promise<any | null>;
   runHealth(id: string): Promise<any>;
+  /** Integrations flows under /v1/health/… (catalog, actions, flows, oauth callback). Optional. */
+  healthCall?(method: 'GET' | 'POST', sub: string, body?: unknown): Promise<{ status: number; body: any }>;
 
   /** Optional slash-command catalog. Returns null when the upstream
    *  doesn't implement /v1/commands (404); the proxy surfaces 404 to
@@ -555,6 +557,20 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     // Re-running a check can take a few minutes (real probes); no fetch timeout here —
     // the upstream enforces PARLEY_HEALTH_RUN_TIMEOUT and answers 400 when exceeded.
     return this.postJob(`/v1/health/${encodeURIComponent(id)}/run`);
+  }
+
+  /** Integrations connect/add flows (health extension, phase 2): a thin
+   *  pass-through of `/v1/health/<sub>` with the upstream's status kept. */
+  async healthCall(method: 'GET' | 'POST', sub: string, body?: unknown): Promise<{ status: number; body: any }> {
+    const init: RequestInit = { method, headers: this.headers() };
+    if (body !== undefined) {
+      init.headers = { ...this.headers(), 'content-type': 'application/json' };
+      init.body = JSON.stringify(body);
+    }
+    const r = await fetch(`${this.url}/v1/health/${sub}`, init);
+    let parsed: any = null;
+    try { parsed = await r.json(); } catch { parsed = null; }
+    return { status: r.status, body: parsed };
   }
 
   async listJobRuns(id: string, limit = 20): Promise<any> {

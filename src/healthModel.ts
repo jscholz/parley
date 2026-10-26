@@ -7,6 +7,15 @@
  *  model providers, credentialed plugins, user-made "custom" ones). Items
  *  without it are plain system checks. Parley renders what it is told;
  *  what an MCP server IS lives in the agent (2026-10-26 Integrations pane). */
+export interface IntegrationAction {
+  id: string;
+  label: string;
+  /** How Parley drives it: `oauth` opens a browser sign-in and polls the
+   *  flow; `run` is the same as Test; `confirm` asks first. */
+  flow: 'oauth' | 'run' | 'confirm' | string;
+  danger?: boolean;
+}
+
 export interface IntegrationMeta {
   kind: 'mcp' | 'platform' | 'model-provider' | 'plugin' | 'custom' | 'other' | string;
   provider: string;
@@ -17,6 +26,37 @@ export interface IntegrationMeta {
   /** Markdown shown under "Setup" (custom integrations' instructions). */
   setup_markdown?: string;
   description?: string;
+  /** Buttons beyond Test (Connect / Reconnect …). Absent = none. */
+  actions?: IntegrationAction[];
+}
+
+/** One step of a connect/add flow, as the agent reports it. */
+export interface IntegrationFlow {
+  flow_id: string | null;
+  item_id?: string;
+  kind: 'oauth' | 'install' | 'run' | string;
+  status: 'starting' | 'waiting' | 'done' | 'error' | 'cancelled' | string;
+  authorization_url?: string;
+  error?: string;
+  message?: string;
+  item?: HealthCheck;
+}
+
+/** An addable integration from the agent's catalog. */
+export interface CatalogEntry {
+  provider: string;
+  name: string;
+  kind: string;
+  description?: string;
+  setup: 'oauth' | 'api-key' | 'none' | string;
+  fields?: Array<{ id: string; label: string; secret?: boolean; required?: boolean }>;
+  installed?: boolean;
+  needs_install?: boolean;
+  docs_url?: string;
+}
+
+export function isFlowSettled(f: IntegrationFlow | null | undefined): boolean {
+  return !!f && (f.status === 'done' || f.status === 'error' || f.status === 'cancelled');
 }
 
 export interface HealthCheck {
