@@ -31,6 +31,7 @@ try:
 except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
+from . import parley_envelopes as _envelopes
 from .parley_ids import (
     PARLEY_SOURCE,
     _GATEWAY_ID_SEP,
@@ -67,6 +68,7 @@ def publish_out_of_turn(adapter, env: Dict[str, Any]) -> bool:
     path. Internal queue routing (in-turn path) keys on bare chat_id
     and is unaffected — only the wire field is rewritten.
     """
+    _envelopes.warn_if_unknown(env.get("type"))
     chat_id = env.get("chat_id")
     if isinstance(chat_id, str) and chat_id and _GATEWAY_ID_SEP not in chat_id:
         env = {**env, "chat_id": _format_gateway_id(PARLEY_SOURCE, chat_id)}

@@ -1,12 +1,10 @@
-// When PARLEY_PUSH_OWNED_BY_PLUGIN=true, push storage + dispatch live
-// in the backend plugin's supplemental DB (see
-// backends/openclaw/src/push-*.js). The proxy stops
-// owning the JSON files + web-push send; it just forwards the PWA's
-// /api/parley/notifications/* calls to upstream /v1/push/* and skips
-// local dispatch in stream.ts.
-//
-// Hermes still uses the legacy in-proxy storage until its plugin grows
-// an equivalent surface. This env flag is the per-backend switch.
+// With PARLEY_PUSH_OWNED_BY_PLUGIN=true (the live setting — APNs needs
+// it), push storage + dispatch live in the hermes plugin
+// (backends/hermes/plugin/parley_routes.py /v1/push/*, parley_apns.py).
+// The proxy just forwards the PWA's /api/parley/notifications/* calls
+// to upstream /v1/push/* and skips local dispatch in stream.ts. The
+// in-proxy web-push stack behind the flag is the legacy path, slated
+// for retirement (2026-10-26 audit, phase 4).
 
 import * as http from 'node:http';
 import { readEnv } from '../../env.mjs';

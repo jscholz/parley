@@ -407,7 +407,7 @@ export function currentMode(): CallMode | null {
 
 /**
  * Send a {type:'dispatch', text} envelope to the audio bridge over the
- * data channel.  The bridge POSTs the text to /api/hermes/responses
+ * data channel.  The bridge POSTs the text to /api/parley/messages
  * via the proxy and streams the agent reply back as assistant
  * transcript envelopes.
  *

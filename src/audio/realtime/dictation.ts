@@ -24,7 +24,7 @@
  *
  * On dispatch:
  *   - Clear the buffer.
- *   - connection.dispatch(text) — bridge POSTs to /api/hermes/responses.
+ *   - connection.dispatch(text) — bridge POSTs to /api/parley/messages.
  *   - onUserBubble(text) — caller renders the user bubble locally
  *     (one utterance = one bubble = one dispatch).
  *

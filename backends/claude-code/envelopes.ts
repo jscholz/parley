@@ -1,51 +1,17 @@
 // Envelope types for the claude-code backend.
 //
-// The base union is imported type-only from the proxy's upstream contract
-// (proxy/parley/upstream.ts) so this backend can never drift from the
-// shapes the proxy multiplexer consumes. Two envelope types the runtime
-// protocol already carries (stream.ts ALLOWED_TYPES includes both) are not
-// yet in that TS union — agent_question (unified elicitation, 2026-07-13)
-// and doc_show (Docs panel push) — so they're defined here and unioned in.
-// The wiring step should add them to ParleyEnvelope in upstream.ts and
-// delete the local copies (see README "Wiring plan").
+// The union is imported type-only from the proxy's contract
+// (proxy/parley/contract/envelopes.ts) so this backend can never drift
+// from the shapes the proxy multiplexer consumes. agent_question and
+// doc_show are part of that union (the local copies this file once kept
+// were the third definition of those two shapes — 2026-10-26 audit).
 
-import type { ParleyEnvelope } from '../../proxy/parley/upstream.ts';
+import type { ParleyEnvelope } from '../../proxy/parley/contract/envelopes.ts';
 
 export type { ParleyEnvelope };
-
-/** Unified elicitation protocol (2026-07-13). Rendered by the PWA as a
- *  pop-up with choice buttons (+ free text); answered via
- *  POST /api/parley/questions/{question_id}. Mirrors the hermes
- *  plugin's send_clarify emission (backends/hermes/plugin/__init__.py). */
-export interface AgentQuestionEnvelope {
-  type: 'agent_question';
-  chat_id: string;
-  question_id: string;
-  kind: 'approval' | 'clarify';
-  question: string;
-  choices: string[];
-  allow_free_text: boolean;
-  /** Epoch ms deadline driving the pop-up countdown; null = sticks until
-   *  answered (approvals block the SDK turn indefinitely by design). */
-  expires_at: number | null;
-  urgent?: boolean;
-}
-
-/** Docs-panel push. Mirrors the hermes display_doc tool's emission
- *  (backends/hermes/plugin/parley_doc_tool.py). */
-export interface DocShowEnvelope {
-  type: 'doc_show';
-  chat_id: string;
-  title: string;
-  content: string;
-  format: string; // 'markdown' | 'html' | 'text'
-  path: string;
-  /** djb2 hex of the path — MUST mirror docStore.docIdFor in the PWA. */
-  doc_id: string;
-  displayed_at: number; // epoch ms, server clock
-}
-
-export type ClaudeCodeEnvelope = ParleyEnvelope | AgentQuestionEnvelope | DocShowEnvelope;
+export type AgentQuestionEnvelope = Extract<ParleyEnvelope, { type: 'agent_question' }>;
+export type DocShowEnvelope = Extract<ParleyEnvelope, { type: 'doc_show' }>;
+export type ClaudeCodeEnvelope = ParleyEnvelope;
 
 /** djb2 hex hash, mirroring the PWA's docStore.docIdFor and the hermes
  *  plugin's _doc_id_for — keeps doc_show dedup keys identical across

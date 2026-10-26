@@ -3100,8 +3100,8 @@ export function init(opts: {
 
 /** Adapter-driven new-session announcement entry point. Wired in main.ts
  *  via the BackendAdapter `onSessionStarted` callback — the active
- *  adapter normalizes its wire-protocol-specific signal (e.g. hermes'
- *  /api/hermes/drawer-events SSE) into a uniform shape and we paint a
+ *  adapter normalizes its wire-protocol-specific signal (the
+ *  `session_changed` envelope on /api/parley/stream) into a uniform shape and we paint a
  *  pending row so the just-created chat appears in the drawer before
  *  the next listSessions poll. Adapters without this signal leave the
  *  callback unset; their drawers simply don't get the pre-emptive row

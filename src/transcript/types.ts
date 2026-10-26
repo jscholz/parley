@@ -185,28 +185,13 @@ export interface ConversationItem {
 }
 
 /**
- * SSE-shape envelope. Mirror of `proxy/parley/upstream.ts`
- * ParleyEnvelope. Re-declared here so this module can be imported
- * without a circular dep through the proxy layer.
+ * SSE-shape envelope — the proxy's contract union, imported type-only
+ * (nothing from proxy/ reaches the bundle). The mirror that used to live
+ * here drifted from the proxy's copy (2026-10-26 audit); there is one
+ * definition now.
  */
-export type ParleyEnvelope =
-  | { type: 'reply_delta'; chat_id: string; text: string; message_id: string; edit?: boolean; interim?: boolean }
-  | { type: 'reply_final'; chat_id: string; message_id: string; text?: string; interim?: boolean }
-  | { type: 'tool_call'; chat_id: string; call_id: string; tool_name: string; args: unknown; started_at?: string }
-  | { type: 'tool_result'; chat_id: string; call_id: string; tool_name: string; result: unknown; duration_ms?: number }
-  | { type: 'typing'; chat_id: string }
-  /** Ephemeral working indicator. The hermes plugin converts the gateway's
-   *  "⏳ Working — N min — iteration i/n, tool" heartbeat into this (keyed
-   *  `status_<chat>`), so it renders as the turn-status line, never a
-   *  bubble. Not persisted; ignored on ring replay. */
-  | { type: 'status'; chat_id: string; message_id?: string; text?: string; state?: 'working' | 'done'; ts?: number }
-  | { type: 'image'; chat_id: string; url: string; caption?: string }
-  | { type: 'notification'; chat_id: string; kind: string; content: string; parley_id?: string; command?: string; reason?: string }
-  | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
-  | { type: 'user_message'; chat_id: string; message_id: string; text: string;
-      /** Cross-device: the send's files {url, mimeType, fileName, size} (2026-10-24). */
-      attachments?: Array<{ url: string; mimeType: string; fileName?: string; size?: number; purged?: boolean }> }
-  | { type: 'error'; chat_id: string; message: string };
+import type { ParleyEnvelope } from '../../proxy/parley/contract/envelopes.ts';
+export type { ParleyEnvelope };
 
 /**
  * Output of the projection — the canonical bubble list. The reconciler

@@ -145,10 +145,10 @@
  *   wire protocol surfaces a freshly-created session BEFORE the next
  *   listSessions poll would pick it up — lets the drawer paint a
  *   "pending" row immediately so the user sees their just-sent
- *   message in the list without waiting on a refresh. Currently only
- *   the legacy hermes adapter emits these (sourced from the proxy's
- *   /api/hermes/drawer-events SSE channel); other adapters leave it
- *   unset and their drawers just don't get the pre-emptive row.
+ *   message in the list without waiting on a refresh. Sourced from the
+ *   `session_changed` envelope on /api/parley/stream; adapters without
+ *   it leave this unset and their drawers just don't get the
+ *   pre-emptive row.
  */
 
 // ─── Tool-event surfacing (Phase 3) ─────────────────────────────────────────
@@ -380,8 +380,8 @@ export interface SearchOpts {
  *   index. Powers the drawer's debounced server-filter reconcile and
  *   the cmd+K palette. Backends without an index implementation leave
  *   it unset; callers fall back to the cached client-side filter
- *   (`src/sessionFilter.ts`). Currently implemented only by the legacy
- *   hermes adapter (against /api/hermes/search).
+ *   (`src/sessionFilter.ts`). Backed by /api/parley/search → upstream
+ *   GET /v1/conversations/search (404 = unsupported).
  */
 
 // JSDoc-only.

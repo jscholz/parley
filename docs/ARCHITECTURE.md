@@ -90,7 +90,7 @@ Every HTTP+SSE endpoint parley speaks, with a one-line purpose and a classificat
 | `DELETE /v1/conversations/{id}` | OAI-standard | Cascade-delete a session (transcript + memory store). |
 | `PATCH /v1/conversations/{id}` | parley-ext | Rename a conversation. Server-side persistence so renames cross devices via `session_changed`. |
 | `GET /v1/conversations/search` | parley-ext | Full-text search across messages (FTS5-backed when the upstream supports it). 404 = unsupported, PWA cmd+K Messages section stays empty. |
-| `GET /v1/events` | parley-ext | Persistent out-of-turn SSE channel: notifications, session_changed, tool events fired outside any active `/v1/responses` turn, **user_message broadcasts** for cross-device user-bubble propagation. Reconnect-aware via `Last-Event-ID`. |
+| `GET /v1/events` | parley-ext (**required**) | Persistent out-of-turn SSE channel: notifications, session_changed, tool events fired outside any active `/v1/responses` turn, **user_message broadcasts** for cross-device user-bubble propagation, cross-device sync (`unread_changed`, `pins_changed`, `activity_changed`, `conversation_deleted`), `job_run`, `agent_question`, `doc_show`. Reconnect-aware via `Last-Event-ID`. |
 | `GET /v1/gateway/conversations` | parley-ext | Cross-platform drawer. Same shape as `/v1/conversations` plus `metadata.source` (telegram/slack/whatsapp/parley) + `chat_type`. 404 = agent doesn't implement; proxy falls back to channel-only view. |
 | `GET /v1/settings/schema` | parley-ext | Agent-declared user-facing settings catalog. 404 = unsupported, parley hides the Agent group. |
 | `POST /v1/settings/{id}` | parley-ext | Update one agent setting. 400 propagates as a UI revert + error message. |
@@ -103,7 +103,7 @@ Every HTTP+SSE endpoint parley speaks, with a one-line purpose and a classificat
 | Method+Path | Class | Purpose |
 |---|---|---|
 | `POST /api/parley/messages` | parley-ext | Send a turn. Body `{chat_id, text, attachments?, voice?, user_message_id?}`. 202 fire-and-forget — replies arrive on the persistent SSE channel. |
-| `GET /api/parley/stream` | parley-ext | Persistent SSE multiplexer. Fans every upstream envelope (`reply_delta`, `reply_final`, `tool_call`, `tool_result`, `notification`, `session_changed`, `image`, `error`, `user_message`) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
+| `GET /api/parley/stream` | parley-ext | Persistent SSE multiplexer. Fans every contract envelope (the `ENVELOPE_TYPES` list in `proxy/parley/contract/envelopes.ts` — replies, tool events, notifications, cross-device sync, `job_run`, docs, capture) to subscribed PWA tabs, tagged with `chat_id`. Reconnect-aware via `Last-Event-ID` / `?last_event_id=N`; `?live_only=1` opts out of replay (audio bridge). |
 | `GET /api/parley/sessions` | mixed | Drawer list. Wraps `/v1/gateway/conversations` (when available) or `/v1/conversations`. |
 | `GET /api/parley/sessions/{id}/messages` | mixed | Transcript replay. Wraps `/v1/conversations/{id}/items`. |
 | `DELETE /api/parley/sessions/{id}` | mixed | Cascade delete. |

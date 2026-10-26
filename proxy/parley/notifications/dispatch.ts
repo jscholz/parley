@@ -15,6 +15,8 @@
 
 import webpush from 'web-push';
 import { getVapidConfig } from './index.ts';
+import { approvalPreview, stripLeadingMetadata } from '../../../src/notifications/approvalText.ts';
+export { approvalPreview, stripLeadingMetadata };
 import {
   listSubscriptions,
   removeSubscription,
@@ -224,48 +226,12 @@ export function parseCronContent(raw: string): {
   };
 }
 
-/** Strip "session_id: ..." / "job_id: ..." / "chat_id: ..." style
- *  metadata lines from the START of a notification body. Cron jobs
- *  often include these in their agent prompt's reply text — useful
- *  for desktop debugging but pure noise on a watch banner. Also
- *  drops leading dash-only separators ("------") and blank lines.
- *  Stops at the first non-metadata line so the agent's real content
- *  is preserved verbatim. */
-export function stripLeadingMetadata(s: string): string {
-  const META_LINE_RE = /^\s*(?:session_id|job_id|chat_id|message_id|user_id|run_id|trace_id)\s*:\s*\S/i;
-  const SEP_OR_BLANK_RE = /^\s*(?:-{3,}|=+|\*+)?\s*$/;
-  const lines = s.split('\n');
-  let i = 0;
-  while (i < lines.length && (META_LINE_RE.test(lines[i]) || SEP_OR_BLANK_RE.test(lines[i]))) {
-    i++;
-  }
-  return lines.slice(i).join('\n');
-}
-
-export function approvalPreview(raw: string): string {
-  const text = stripLeadingMetadata(raw || '');
-  const reason = /^Reason:\s*(.+)$/im.exec(text)?.[1]?.trim() || '';
-  const lines = text.split('\n');
-  const command: string[] = [];
-  let inCommand = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/Dangerous command requires approval/i.test(trimmed)) {
-      inCommand = true;
-      continue;
-    }
-    if (!inCommand) continue;
-    if (!trimmed) {
-      if (command.length) command.push('');
-      continue;
-    }
-    if (/^Reason:/i.test(trimmed) || /^Reply\s+\/approve/i.test(trimmed)) break;
-    command.push(line.replace(/\s+$/, ''));
-  }
-  const cmd = command.join('\n').trim().replace(/\n{3,}/g, '\n\n');
-  if (reason && cmd) return `${reason}: ${cmd}`;
-  return reason || cmd || text;
-}
+// approvalPreview / stripLeadingMetadata come from the PWA's shared
+// parser (src/notifications/approvalText.ts). The proxy kept its own copy
+// that only knew the pre-0.21.5 gateway wording ("Dangerous command
+// requires approval"), so after hermes changed the prompt the push body
+// was the whole raw prompt (2026-10-26 audit). One parser, both wordings;
+// re-exported below so existing imports keep working.
 
 /** True for the transient progress "heartbeat" the agent emits once per
  *  iteration during a long autonomous turn, e.g.

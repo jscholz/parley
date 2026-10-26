@@ -53,6 +53,7 @@ import * as switchCtl from './switchController.ts';
 import { fetchWithTimeout } from './util/fetchWithTimeout.ts';
 import * as reachability from './net/reachability.ts';
 import { isDevMode } from './util/devMode.ts';
+import { SUBSCRIBED_ENVELOPE_TYPES } from './envelopeTypes.ts';
 
 let subs: any = null;
 let connected = false;
@@ -438,35 +439,10 @@ function startStreamChannel(): void {
     if (!chatId) return;
     handleEnvelope(type, env, chatId);
   };
-  for (const t of ['reply_delta', 'reply_final', 'image', 'typing',
-                   // hermes' processing bracket — see handleEnvelope.
-                   'turn_start', 'turn_end',
-                   // Ephemeral working indicator (plugin-converted
-                   // gateway heartbeat) — see handleEnvelope 'status'.
-                   'status',
-                   // Scheduled-job run state changes (Settings › Cron live
-                   // row + "run finished" banner) — see handleEnvelope.
-                   'job_run',
-                   'notification', 'session_changed', 'error',
-                   'tool_call', 'tool_result', 'user_message',
-                   // Cross-device SSOT sync envelopes. The proxy
-                   // forwards these (see FANOUT_TYPES in
-                   // proxy/parley/stream.ts) but EventSource only
-                   // delivers events whose name we explicitly subscribe
-                   // to. Without these listeners, the handlers in
-                   // handleEnvelope() are unreachable — caught only
-                   // by cross-device-pin-sync.mjs smoke 2026-05-16.
-                   'unread_changed', 'pins_changed', 'activity_changed',
-                   'conversation_deleted',
-                   // display_doc tool → Docs panel push.
-                   'doc_show',
-                   // Unified elicitation: agent blocked on a user answer.
-                   'agent_question',
-                   // Meeting capture: external start/stop triggers +
-                   // cross-device lifecycle state.
-                   'capture_control', 'capture_changed',
-                   // Docs shelf sync (proxy docShelf.ts, 2026-10-24).
-                   'doc_shelf_changed']) {
+  // The subscription list is the PWA's half of the envelope contract —
+  // see src/envelopeTypes.ts (typed against the proxy's union, pinned to
+  // its fan-out set by the contract test).
+  for (const t of SUBSCRIBED_ENVELOPE_TYPES) {
     streamES.addEventListener(t, onEvent as any);
   }
   // #204: the server emits replay_gap when our cursor predates its

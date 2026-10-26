@@ -740,3 +740,22 @@ test('error: sender transient 5xx → counted as failed, subscription kept', asy
     await g.stop();
   }
 });
+
+import { envelopeToPayload } from '../notifications/dispatch.ts';
+
+// 2026-10-26 audit: the proxy's push preview had its own approval parser
+// that only knew the pre-0.21.5 wording, so a current approval's push body
+// was the whole raw prompt. It now shares src/notifications/approvalText.
+test('approval push body uses the shared parser for the hermes 0.21.5 wording', () => {
+  const raw =
+    '⚠️ **Hermes wants to run a command that needs your OK**\n' +
+    '```\n' +
+    'rm -rf /tmp/scratch\n' +
+    '```\n' +
+    'Why it was flagged: destructive file operation\n\n' +
+    'Reply `/approve` to run it once, `/approve session` to allow this pattern, or `/deny` to cancel.\n' +
+    "If you don't answer within 5 minutes it will NOT run.";
+  const p = envelopeToPayload({ type: 'notification', kind: 'approval', chat_id: 'parley:c1', content: raw, text: raw });
+  assert.equal(p.title, '⚠️ Approval required');
+  assert.equal(p.body, 'destructive file operation: rm -rf /tmp/scratch');
+});

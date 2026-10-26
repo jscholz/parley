@@ -815,6 +815,75 @@ contract; the reference deployment's live at `scripts/lib/health.sh` in a
 private repo) and re-runs the configured scripts with `--no-alert`
 (`PARLEY_HEALTH_STATE_DIR`, `PARLEY_HEALTH_RUNNERS`).
 
+## Contract summary (generated)
+
+The single source of truth for the envelope types and the `/v1` route
+families is `proxy/parley/contract/{envelopes,routes}.ts`. The proxy's
+fan-out set, the PWA's subscription list and the hermes plugin's
+`parley_envelopes.ENVELOPE_TYPES` are checked against it by
+`proxy/parley/__tests__/contract-*.test.ts` and
+`backends/hermes/plugin/tests/test_envelope_contract.py`. Regenerate the
+tables below with `node --experimental-strip-types scripts/contract-tables.mjs`.
+
+Every envelope carries `chat_id` (the proxy drops any that does not).
+`GET /v1/events` is **required**: it is the only path for out-of-turn
+envelopes (notifications, cross-device sync, `job_run`); an upstream
+without it looks alive but never pushes anything.
+
+### Stream envelope types
+
+| Type | Origin |
+|---|---|
+| `reply_delta` | upstream agent |
+| `reply_final` | upstream agent |
+| `tool_call` | upstream agent |
+| `tool_result` | upstream agent |
+| `typing` | upstream agent |
+| `status` | upstream agent |
+| `turn_start` | upstream agent |
+| `turn_end` | upstream agent |
+| `image` | upstream agent |
+| `notification` | upstream agent |
+| `session_changed` | upstream agent |
+| `user_message` | upstream agent |
+| `error` | upstream agent |
+| `agent_question` | upstream agent |
+| `doc_show` | upstream agent |
+| `unread_changed` | upstream agent |
+| `pins_changed` | upstream agent |
+| `activity_changed` | upstream agent |
+| `conversation_deleted` | upstream agent |
+| `job_run` | upstream agent |
+| `doc_shelf_changed` | proxy (never crosses the upstream boundary) |
+| `capture_changed` | proxy (never crosses the upstream boundary) |
+| `capture_control` | proxy (never crosses the upstream boundary) |
+
+### Upstream routes
+
+| Family | Routes | Support | If absent | Spec |
+|---|---|---|---|---|
+| responses | `POST /v1/responses` | required | None — the turn fails with an `error` envelope carrying user_message_id. | ABSTRACT_AGENT_PROTOCOL §Endpoint |
+| events | `GET /v1/events` | required | None — out-of-turn envelopes (notifications, cross-device sync, job_run) never arrive; the proxy retries the subscription forever. | ABSTRACT_AGENT_PROTOCOL §Events stream |
+| liveness | `GET /health` | required | Proxy /health reports upstream down. | ARCHITECTURE |
+| conversations | `GET /v1/conversations`<br>`GET /v1/conversations/{id}/items`<br>`GET /v1/conversations/{id}/items/{item_id}`<br>`DELETE /v1/conversations/{id}`<br>`PATCH /v1/conversations/{id}` | required | Drawer empty / transcript empty. items/{item_id} 404 → tool-output expansion unavailable; PATCH error → rename fails with the upstream status. | ABSTRACT_AGENT_PROTOCOL §Conversation lifecycle |
+| search | `GET /v1/conversations/search` | optional | 404 → cmd+K Messages section empty (client-side title filter only). | ABSTRACT_AGENT_PROTOCOL §search |
+| gateway | `GET /v1/gateway/conversations` | optional | 404 → channel-only drawer from /v1/conversations. | ABSTRACT_AGENT_PROTOCOL §gateway |
+| settings | `GET /v1/settings/schema`<br>`POST /v1/settings/{id}` | optional | 404 → Settings hides the Agent group. | ABSTRACT_AGENT_PROTOCOL §settings |
+| commands | `GET /v1/commands` | optional | 404 → no slash-command autocomplete. | ARCHITECTURE |
+| jobs | `GET /v1/jobs`<br>`POST /v1/jobs/{job_id}`<br>`POST /v1/jobs/model`<br>`POST /v1/jobs/{job_id}/run`<br>`GET /v1/jobs/{job_id}/runs`<br>`GET /v1/jobs/{job_id}/runs/{run_id}`<br>`GET /v1/jobs/{job_id}/runs/{run_id}/console`<br>`DELETE /v1/jobs/{job_id}` | optional | 404 → Settings hides Cron. | ABSTRACT_AGENT_PROTOCOL §jobs |
+| health | `GET /v1/health`<br>`POST /v1/health/{check_id}/run` | optional | 404 → Settings hides Health checks (liveness still works via GET /health). | ABSTRACT_AGENT_PROTOCOL §health |
+| models | `GET /v1/parley/auxiliary-models`<br>`GET /v1/parley/model-capabilities` | optional | Any failure → null → attach button follows the primary model only. | ARCHITECTURE |
+| upload | `POST /v1/parley/upload` | optional | Status passthrough → the send fails with the upstream status. | ARCHITECTURE |
+| push | `GET /v1/push/vapid-public-key`<br>`POST /v1/push/subscribe`<br>`POST /v1/push/unsubscribe`<br>`POST /v1/push/subscribe-native`<br>`POST /v1/push/unsubscribe-native`<br>`GET /v1/push/mutes`<br>`POST /v1/push/mute`<br>`GET /v1/push/prefs`<br>`POST /v1/push/prefs`<br>`GET /v1/push/health`<br>`POST /v1/push/visibility`<br>`POST /v1/push/test`<br>`POST /v1/push/system` | optional | Only used with PARLEY_PUSH_OWNED_BY_PLUGIN=true; 502 on failure. | APNS_SETUP |
+| unread | `GET /v1/unread`<br>`POST /v1/unread/seen`<br>`POST /v1/unread/mark` | optional | 502 → badge/unread lens unavailable (no silent fallback yet — phase 2). | ARCHITECTURE |
+| pins | `GET /v1/pins`<br>`POST /v1/pins`<br>`DELETE /v1/pins/{chat_id}/{msg_id}` | optional | 502 → pin drawer empty (phase 2: 404 → hide). | ARCHITECTURE |
+| activity | `GET /v1/activity`<br>`POST /v1/activity`<br>`POST /v1/activity/resolve`<br>`POST /v1/activity/seen`<br>`POST /v1/activity/clear`<br>`DELETE /v1/activity/{item_id}` | optional | 502 → Activity tray empty (phase 2: 404 → hide). | ARCHITECTURE |
+| questions | `POST /v1/questions/{question_id}` | optional | 404 = question lapsed; pop-up closes. | src/questionPopup.ts header |
+| user-settings | `GET /v1/user-settings`<br>`POST /v1/user-settings` | optional | 502 → synced prefs stay local to the device. | src/settings.ts |
+| transcript-ops | `GET /v1/transcript/health`<br>`POST /v1/transcript/repair`<br>`POST /v1/transcript/adopt-orphans` | optional | Ops-only (health digests, repair scripts); the proxy never calls these. | backends/hermes/README |
+
+---
+
 ## Errors
 
 Errors use the OpenAI shape:

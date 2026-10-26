@@ -71,63 +71,17 @@ import {
 import * as replyBuffer from './notifications/replyBuffer.ts';
 import type { ParleyEnvelope, UpstreamAgent } from './upstream.ts';
 import { cacheDocShow } from './docShelf.ts';
+import { ENVELOPE_TYPES } from './contract/envelopes.ts';
 
 type Envelope = Record<string, unknown> & { type: string; chat_id?: string };
 
-// Envelope types we mirror to PWA tabs. Anything else (heartbeats,
-// internal acks) is intentionally dropped here.
-const FANOUT_TYPES = new Set<string>([
-  'reply_delta',
-  'reply_final',
-  // Ephemeral per-chat working indicator (plugin turns the gateway's
-  // "⏳ Working — …" heartbeat into this instead of a bubble). Fans out
-  // like typing; never push-eligible (plugin stamps should_push=false).
-  'status',
-  'image',
-  'typing',
-  // hermes' processing bracket (on_processing_start/complete — the hooks
-  // Slack's 👀 rides): the authoritative "agent is working on this chat"
-  // signal plus the per-message 👀 → ✓/✗ mark. Never push-eligible.
-  'turn_start',
-  'turn_end',
-  'notification',
-  'session_changed',
-  'error',
-  'tool_call',
-  'tool_result',
-  // Cross-device user-message broadcast. Originating device dedups
-  // against its optimistic bubble via message_id; other devices render
-  // the user bubble for the first time. See proxyClient `handleEnvelope`
-  // case 'user_message' for the PWA-side handler.
-  'user_message',
-  // Cross-device SSOT sync — when one device hits /seen, /mark, or a
-  // pin/unpin, the plugin emits these envelopes so other devices
-  // re-fetch the canonical state without waiting for foreground.
-  // badge.ts + pin drawer use the diff-aware refresh path (1500ms
-  // debounced), so this stays cheap even with multi-PWA setups.
-  // conversation_deleted is fanned so other devices drop the row from
-  // their sidebar IDB cache without waiting for the next list poll.
-  'unread_changed',
-  'pins_changed',
-  'conversation_deleted',
-  // Unified elicitation protocol (2026-07-13): the agent is blocked on
-  // a user answer (hermes clarify tool today; any backend's ask-user
-  // mechanism tomorrow). PWA renders a pop-up with choice buttons +
-  // countdown from expires_at; the answer POSTs to /questions/{id}.
-  'agent_question',
-  // display_doc tool → Docs panel push. Carries the full document body
-  // (plugin caps it at 1MB) — rides the ring like any other envelope so
-  // a tab opened seconds after the push still receives it via replay.
-  'doc_show',
-  // Meeting capture (proxy-owned — capture.ts): lifecycle state for
-  // cross-device pills/lists, and the external-trigger control plane
-  // ("start recording" from a Shortcut → foregrounded device's mic).
-  'capture_changed',
-  'capture_control',
-  // Docs shelf (proxy-owned — docShelf.ts): "the open set changed on
-  // another device, fetch the merged shelf".
-  'doc_shelf_changed',
-]);
+// Envelope types we mirror to PWA tabs — derived from the contract
+// (proxy/parley/contract/envelopes.ts), never hand-maintained: the
+// hand-kept list silently dropped `job_run` and `activity_changed` for
+// months (2026-10-26 audit). Anything not in the contract (heartbeats,
+// internal acks) is intentionally dropped here. Exported for the
+// contract test.
+export const FANOUT_TYPES: ReadonlySet<string> = new Set<string>(ENVELOPE_TYPES);
 
 // Bumped from 32 → 128: traffic is heavier now (every reply_delta
 // rides this channel). 128 entries is roughly one fully-streamed

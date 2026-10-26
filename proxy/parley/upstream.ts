@@ -9,51 +9,16 @@
 // One interface, one implementation. The PWA-facing routes in
 // proxy/parley/{messages,sessions,history}.ts call into this.
 
-// No imports — this module is self-contained so it can be reused
-// across upstreams (backends/hermes/plugin, stub agent, etc.) without dragging
-// in WS-specific machinery. Auth comes from env or constructor opts.
+// Only the dependency-free contract module is imported (type-only) so
+// this stays reusable across upstreams without dragging in WS-specific
+// machinery. Auth comes from env or constructor opts.
 
-/** Parley envelope shape that the proxy's stream multiplexer consumes.
- *  Same shape as the legacy WS protocol — see backends/hermes/plugin/__init__.py
- *  module docstring for the canonical wire spec. */
-export type ParleyEnvelope =
-  | { type: 'reply_delta'; chat_id: string; text: string; message_id: string; edit?: boolean }
-  | { type: 'reply_final'; chat_id: string; message_id: string }
-  | { type: 'tool_call'; chat_id: string; call_id: string; tool_name: string; args: unknown; started_at?: string }
-  | { type: 'tool_result'; chat_id: string; call_id: string; tool_name: string; result: unknown; duration_ms?: number }
-  | { type: 'typing'; chat_id: string }
-  // hermes' processing bracket (plugin on_processing_start/complete).
-  // turn_id pairs them; user_message_id names the bubble to mark.
-  | { type: 'turn_start'; chat_id: string; turn_id: string; user_message_id?: string }
-  | { type: 'turn_end'; chat_id: string; turn_id: string; user_message_id?: string;
-      outcome: 'success' | 'failure' | 'cancelled'; replied?: boolean; active_turns?: number }
-  | { type: 'image'; chat_id: string; url: string; caption?: string }
-  | { type: 'notification'; chat_id: string; kind: string; content: string }
-  | { type: 'session_changed'; chat_id: string; session_id: string; title: string }
-  // Cross-device user-message broadcast. Emitted by the upstream as
-  // soon as a /v1/responses POST lands, BEFORE the agent dispatches.
-  // Other connected PWA tabs render the user bubble immediately; the
-  // originating tab dedups against its optimistic bubble via
-  // `message_id`. See backends/hermes/plugin/__init__.py
-  // `_handle_responses` for the emission site.
-  | { type: 'user_message'; chat_id: string; message_id: string; text: string }
-  // Unified elicitation (2026-07-13): the agent is blocked on a user
-  // answer. hermes emits these for clarify; the claude-code backend
-  // for canUseTool approvals. The PWA renders a pop-up; answers ride
-  // POST /api/parley/questions/{id}. expires_at null = sticks until
-  // answered.
-  | {
-      type: 'agent_question'; chat_id: string; question_id: string;
-      kind: string; question: string; choices?: string[];
-      allow_free_text?: boolean; expires_at?: number | null; urgent?: boolean;
-    }
-  // display_doc → Docs shelf push (hermes plugin + claude-code MCP shim).
-  | {
-      type: 'doc_show'; chat_id: string; title: string; content: string;
-      format?: string; path?: string; doc_id?: string;
-      displayed_at?: number; source?: string; capture_id?: string;
-    }
-  | { type: 'error'; chat_id: string; message: string; user_message_id?: string };
+// The envelope union lives in contract/envelopes.ts (one definition for
+// upstream, proxy and PWA — 2026-10-26 audit). Re-exported here so the
+// existing `import { ParleyEnvelope } from './upstream.ts'` sites keep
+// working.
+export type { ParleyEnvelope, EnvelopeType, EnvelopeAttachment } from './contract/envelopes.ts';
+import type { ParleyEnvelope } from './contract/envelopes.ts';
 
 /** Drawer-list row, OAI Conversations API shape. */
 export interface ConversationSummary {
