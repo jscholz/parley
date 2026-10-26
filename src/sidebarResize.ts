@@ -1,3 +1,4 @@
+import { encodeWidth, decodeWidth } from './util/panelWidth.ts';
 /**
  * @fileoverview Drag-to-resize on the sidebar's right edge.
  *
@@ -23,18 +24,17 @@ const DEFAULT_WIDTH = 300;
 const MIN_WIDTH = 220;
 const MAX_WIDTH = 600;
 
+// Persisted as a share of the viewport (util/panelWidth.ts): the sidebar
+// keeps its proportion when the window lands on a different screen.
 function readPersisted(): number | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const n = Number.parseInt(raw, 10);
-    if (!Number.isFinite(n)) return null;
-    return clamp(n);
+    const n = decodeWidth(localStorage.getItem(STORAGE_KEY), window.innerWidth);
+    return n === null ? null : clamp(n);
   } catch { return null; }
 }
 
 function writePersisted(width: number): void {
-  try { localStorage.setItem(STORAGE_KEY, String(width)); } catch {}
+  try { localStorage.setItem(STORAGE_KEY, encodeWidth(width, window.innerWidth)); } catch {}
 }
 
 function clamp(w: number): number {
@@ -54,9 +54,14 @@ export function init(): void {
   const handle = document.getElementById('sidebar-resizer');
   if (!handle) return;
 
-  // Hydrate persisted width on boot.
+  // Hydrate persisted width on boot, and re-derive it when the viewport changes.
   const persisted = readPersisted();
   if (persisted !== null) applyWidth(persisted);
+  window.addEventListener('resize', () => {
+    if (dragging) return;
+    const w = readPersisted();
+    if (w !== null) applyWidth(w);
+  });
 
   let dragging = false;
   let startX = 0;

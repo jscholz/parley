@@ -7,7 +7,7 @@
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'external-links-open-new-window';
-export const DESCRIPTION = 'Off-origin links (doc reader, chat, stray anchors) open a new window and never navigate the app; same-origin links stay in-app';
+export const DESCRIPTION = 'Off-origin links (doc reader, chat, stray anchors) open the in-app link viewer (Parley header, ×/Esc, Open in browser) and never navigate the app; same-origin links stay in-app';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -37,11 +37,20 @@ export default async function run({ page, log, mock }) {
   assert(ext && ext.target === '_blank' && /noopener/.test(ext.rel), `doc reader: off-origin anchor gets target=_blank rel=noopener: ${JSON.stringify(attrs)}`);
   assert(attrs.filter((a) => a.href !== 'https://example.org/x').every((a) => a.target !== '_blank'), `doc reader: in-app anchors are untouched: ${JSON.stringify(attrs)}`);
   await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-drawer-content a[href="https://example.org/x"]').click());
-  await page.waitForTimeout(150);
+  await page.waitForSelector('#link-viewer', { timeout: 3_000 });
+  const viewer = await page.$eval('#link-viewer', (v) => ({ brand: v.querySelector('.link-viewer-brand')?.textContent, host: v.querySelector('.link-viewer-host')?.textContent, src: v.querySelector('iframe')?.getAttribute('src'), open: v.querySelector('.link-viewer-open')?.textContent }));
+  assert(viewer.brand === 'Parley' && viewer.host === 'example.org' && viewer.src === 'https://example.org/x' && /Open in browser/.test(viewer.open), `viewer: ${JSON.stringify(viewer)}`);
   let o = await opened();
-  assert(o.length === 1 && o[0].url === 'https://example.org/x' && o[0].target === '_blank', `doc link → window.open: ${JSON.stringify(o)}`);
+  assert(o.length === 0, `no tab opens by itself: ${JSON.stringify(o)}`);
   assert(page.url() === startUrl, `app must not navigate (was ${startUrl}, now ${page.url()})`);
-  log('doc reader: off-origin link opens a new window, app stays ✓');
+  // "Open in browser" is the explicit way out: a real tab, no noopener feature (that returns null).
+  await page.click('#link-viewer .link-viewer-open');
+  o = await opened();
+  assert(o.length === 1 && o[0].url === 'https://example.org/x' && o[0].target === '_blank' && !/noopener/.test(o[0].features || ''), `Open in browser → window.open: ${JSON.stringify(o)}`);
+  assert(page.url() === startUrl, 'app still not navigated');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.getElementById('link-viewer'), null, { timeout: 2_000 });
+  log('doc reader: off-origin link → in-app viewer; Open in browser → tab; Esc closes; app stays ✓');
 
   // 2. A stray anchor with NO target (what a forgotten renderer produces)
   //    is caught by the delegated guard.
@@ -52,13 +61,14 @@ export default async function run({ page, log, mock }) {
     document.body.append(a, b);
   });
   await page.click('#stray-ext');
-  await page.waitForTimeout(150);
+  await page.waitForSelector('#link-viewer iframe[src="https://example.net/stray"]', { timeout: 3_000 });
   o = await opened();
-  assert(o.length === 2 && o[1].url === 'https://example.net/stray', `stray off-origin anchor → window.open: ${JSON.stringify(o)}`);
+  assert(o.length === 1, `stray off-origin anchor → viewer, no new tab: ${JSON.stringify(o)}`);
   assert(page.url() === startUrl, 'stray link must not navigate the app');
+  await page.click('#link-viewer .lightbox-close');
+  await page.waitForFunction(() => !document.getElementById('link-viewer'), null, { timeout: 2_000 });
   await page.click('#stray-same');
   await page.waitForTimeout(100);
-  o = await opened();
-  assert(o.length === 2 && await page.evaluate(() => window.__sameClicked === true), `same-origin anchor is left to its own handler: ${JSON.stringify(o)}`);
-  log('guard: stray off-origin anchor → new window; same-origin untouched ✓');
+  assert(!(await page.$('#link-viewer')) && await page.evaluate(() => window.__sameClicked === true), 'same-origin anchor is left to its own handler');
+  log('guard: stray off-origin anchor → viewer, × closes; same-origin untouched ✓');
 }

@@ -79,12 +79,24 @@ export default async function run({ page, log, mock }) {
   assert(custom.kind === 'Custom' && custom.test === 'Test' && /bin\/login/.test(custom.setup), `custom card: ${JSON.stringify(custom)}`);
   assert(/registered/.test(await page.$eval('[data-role="int-add-status"]', (e) => e.textContent)), 'status says registered');
   log('Custom integration… → form → registered → card with Test ✓');
+  // Remove asks first (in-app confirm), then the card goes.
+  await page.click('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"] [data-role="action"][data-action="remove"]');
+  await page.waitForSelector('.sk-confirm', { timeout: 3_000 });
+  await page.click('.sk-confirm-cancel');
+  assert(await page.$('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"]'), 'cancel keeps it');
+  await page.click('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"] [data-role="action"][data-action="remove"]');
+  await page.waitForSelector('.sk-confirm', { timeout: 3_000 });
+  await page.click('.sk-confirm-accept');
+  await page.waitForFunction(() => !document.querySelector('#integrations-host .integration-card[data-health-check="int-custom-linkedin-harness"]'), null, { timeout: 6_000 });
+  const removed = mock.getFlowLog().find((f) => f.action === 'remove');
+  assert(removed && removed.item_id === 'int-custom-linkedin-harness', `remove posted: ${JSON.stringify(mock.getFlowLog())}`);
+  log('Remove → confirm → gone ✓');
 
   // 4. Escape cancels the picker without adding.
   await page.click('[data-role="int-add"]');
   await page.waitForSelector('.int-picker', { timeout: 5_000 });
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.int-picker'), null, { timeout: 3_000 });
-  assert(mock.getFlowLog().length === 2, 'Escape adds nothing');
+  assert(mock.getFlowLog().length === 3, 'Escape adds nothing');
   log('Escape cancels the picker ✓');
 }

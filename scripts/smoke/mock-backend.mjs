@@ -1233,7 +1233,8 @@ export async function installMockBackend(page) {
       flowLog.push({ kind: 'custom', spec: body });
       const item = { id: `int-custom-${body.name}`, name: body.label || body.name, worst: 'UNKNOWN', last_run_at: null,
         report: body.status_command ? `status check: ${body.status_command}\nnot tested yet — press Test` : 'status check: none configured', can_run: !!body.status_command,
-        counts: { fail: 0, warn: 0, ok: 0 }, integration: { kind: 'custom', provider: body.name, connected: null, description: body.description || '', setup_markdown: body.setup_markdown || '' } };
+        counts: { fail: 0, warn: 0, ok: 0 }, integration: { kind: 'custom', provider: body.name, connected: null, description: body.description || '', setup_markdown: body.setup_markdown || '',
+          actions: [{ id: 'remove', label: 'Remove', flow: 'confirm', danger: true, message: 'Remove this integration from the registry?' }] } };
       health.push(item);
       return jsonOk(item, 201);
     }
@@ -1260,6 +1261,10 @@ export async function installMockBackend(page) {
       if (declared.flow === 'oauth') {
         const flow = mkFlow('oauth', { item_id: id, authorization_url: `https://provider.example/authorize?client_id=mock&state=st-${flows.size + 1}` });
         return jsonOk(flow, 202);
+      }
+      if (declared.flow === 'confirm' && act === 'remove') {
+        health.splice(health.indexOf(c), 1);
+        return jsonOk({ flow_id: null, kind: 'confirm', status: 'done', message: `'${c.name}' removed.` });
       }
       return jsonOk({ error: { message: 'unsupported flow' } }, 400);
     }

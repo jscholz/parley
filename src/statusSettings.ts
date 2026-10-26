@@ -18,6 +18,7 @@ import {
 } from './healthModel.ts';
 import { runItemAction, runCatalogAdd } from './integrationFlows.ts';
 import { pickIntegration } from './integrationPicker.ts';
+import { confirmDialog } from './confirmDialog.ts';
 
 let checks: HealthCheck[] = [];
 
@@ -133,12 +134,18 @@ function renderIntegrationCard(c: HealthCheck, card: HTMLElement, notice?: strin
  *  progress with a Cancel while it waits, then reloads the whole list so
  *  the item reflects the agent's view. */
 async function runAction(c: HealthCheck, card: HTMLElement, actionId: string, flow: string) {
+  if (flow === 'confirm') {
+    const a = c.integration?.actions?.find((x) => x.id === actionId);
+    const ok = await confirmDialog({ title: `${a?.label || actionId} ${c.name}?`, body: (a as any)?.message || '', confirmLabel: a?.label || actionId, danger: !!a?.danger });
+    if (!ok) return;
+  }
   card.classList.add('cron-job-busy-soft');
   card.querySelectorAll('[data-role="flow"]').forEach((n) => n.remove());   // one notice per card
   let cancel: (() => void) | null = null;
   const notice = el('div', 'hint cron-job-notice int-flow');
   notice.dataset.role = 'flow';
   const text = el('span', '', flow === 'oauth' ? 'Opening the sign-in…' : 'Working…');
+  if (flow === 'confirm') card.classList.add('int-removing');
   const cancelBtn = el('button', 'cron-btn int-flow-cancel', 'Cancel'); cancelBtn.type = 'button';
   cancelBtn.onclick = () => { cancel?.(); text.textContent = 'Cancelling…'; };
   notice.append(text, cancelBtn);

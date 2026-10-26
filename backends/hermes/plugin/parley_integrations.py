@@ -311,8 +311,10 @@ def enumerate_platforms(config: Optional[Dict[str, Any]] = None) -> List[Dict[st
             lines.append(f"error: {st['error_message']}")
         if env_key:
             lines.append(f"{env_key} {'set' if has_env else 'NOT set'}")
+        if name in PLATFORM_PROBES:
+            lines.append("not tested yet — press Test")
         out.append(_item("platform", name, name.replace("_", " ").title(), connected=is_live, worst=worst,
-                         report="\n".join(lines), can_run=False, provider=name))
+                         report="\n".join(lines), can_run=name in PLATFORM_PROBES, provider=name))
     return out
 
 
@@ -365,8 +367,11 @@ def enumerate_model_providers(config: Optional[Dict[str, Any]] = None) -> List[D
             lines.append("token expired — needs refresh")
         worst = "OK" if ok and not st.get("needs_refresh") else ("WARN" if st.get("needs_refresh") else "FAIL")
         label = str(getattr(d, "label", "") or slug)
+        probe = ok and _provider_probe_target(slug) is not None
+        if probe:
+            lines.append("not tested yet — press Test")
         out.append(_item("model-provider", slug, label, connected=ok, worst=worst,
-                         report="\n".join(lines) or "configured", can_run=False, provider=slug,
+                         report="\n".join(lines) or "configured", can_run=probe, provider=slug,
                          account=str(st.get("account") or st.get("email") or ""),
                          docs_url=str(getattr(d, "signup_url", "") or "")))
     return out
@@ -802,6 +807,104 @@ def probe_custom(spec: Dict[str, Any]) -> Dict[str, Any]:
     return {"worst": worst, "report": (out or f"exit {proc.returncode}")[-_REPORT_MAX:]}
 
 
+def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 10.0) -> Dict[str, Any]:
+    """Small GET helper (patched in tests). Returns {status, body}."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            raw = resp.read(200_000).decode("utf-8", errors="replace")
+            status = resp.status
+    except urllib.error.HTTPError as err:
+        raw = err.read(4000).decode("utf-8", errors="replace") if err.fp else ""
+        status = err.code
+    try:
+        body = json.loads(raw) if raw else {}
+    except Exception:
+        body = {"_raw": raw[:400]}
+    return {"status": status, "body": body}
+
+
+# Chat platforms with a cheap, read-only "who am I" call.
+PLATFORM_PROBES = {"telegram", "slack"}
+
+
+def probe_platform(name: str) -> Dict[str, Any]:
+    t0 = time.time()
+    try:
+        if name == "telegram":
+            tok = _env("TELEGRAM_BOT_TOKEN")
+            if not tok:
+                return {"worst": "FAIL", "report": "FAIL TELEGRAM_BOT_TOKEN not set"}
+            r = _http_get_json(f"https://api.telegram.org/bot{tok}/getMe")
+            ms = int((time.time() - t0) * 1000)
+            if r["status"] == 200 and r["body"].get("ok"):
+                me = r["body"].get("result") or {}
+                return {"worst": "OK", "report": f"OK bot @{me.get('username', '?')} ({me.get('first_name', '')}) · {ms} ms"}
+            return {"worst": "FAIL", "report": f"FAIL getMe HTTP {r['status']}: {r['body'].get('description') or r['body']}"}
+        if name == "slack":
+            tok = _env("SLACK_BOT_TOKEN")
+            if not tok:
+                return {"worst": "FAIL", "report": "FAIL SLACK_BOT_TOKEN not set"}
+            r = _http_get_json("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {tok}"})
+            ms = int((time.time() - t0) * 1000)
+            if r["status"] == 200 and r["body"].get("ok"):
+                b = r["body"]
+                return {"worst": "OK", "report": f"OK {b.get('user', '?')} in {b.get('team', '?')} · {ms} ms"}
+            return {"worst": "FAIL", "report": f"FAIL auth.test: {r['body'].get('error') or ('HTTP ' + str(r['status']))}"}
+    except Exception as e:
+        return {"worst": "FAIL", "report": f"FAIL {e}"}
+    return {"worst": "UNKNOWN", "report": "no test for this platform"}
+
+
+def _provider_probe_target(slug: str) -> Optional[Dict[str, str]]:
+    """(base_url, api key) for an API-key provider with an OpenAI-compatible
+    /models endpoint; None when hermes cannot resolve one (OAuth providers,
+    AWS, local)."""
+    try:
+        from hermes_cli.auth import _registry_lookup, _resolve_api_key_provider_secret, _provider_env_base_url  # type: ignore
+        pconfig = _registry_lookup(slug)
+        if not pconfig or getattr(pconfig, "auth_type", "") != "api_key":
+            return None
+        key, _src = _resolve_api_key_provider_secret(slug, pconfig)
+        base = _provider_env_base_url(pconfig) or getattr(pconfig, "inference_base_url", "") or ""
+        if not key or not base:
+            return None
+        return {"base": str(base).rstrip("/"), "key": str(key)}
+    except Exception:
+        return None
+
+
+def probe_model_provider(slug: str) -> Dict[str, Any]:
+    tgt = _provider_probe_target(slug)
+    if not tgt:
+        return {"worst": "UNKNOWN", "report": "no test for this provider (OAuth / SDK auth)"}
+    t0 = time.time()
+    try:
+        r = _http_get_json(f"{tgt['base']}/models", headers={"Authorization": f"Bearer {tgt['key']}"})
+    except Exception as e:
+        return {"worst": "FAIL", "report": f"FAIL {e}"}
+    ms = int((time.time() - t0) * 1000)
+    if r["status"] == 200:
+        data = r["body"].get("data") if isinstance(r["body"], dict) else None
+        n = len(data) if isinstance(data, list) else None
+        return {"worst": "OK", "report": f"OK {tgt['base']}/models reachable" + (f" · {n} model(s)" if n is not None else "") + f" · {ms} ms"}
+    if r["status"] in (401, 403):
+        return {"worst": "FAIL", "report": f"FAIL credential rejected (HTTP {r['status']})"}
+    return {"worst": "WARN", "report": f"WARN /models HTTP {r['status']} ({ms} ms)"}
+
+
+def remove_custom(name: str) -> bool:
+    for f in list(registry_dir().glob("*.yaml")) + list(registry_dir().glob("*.yml")):
+        spec = load_custom(f)
+        if spec and spec["name"] == name:
+            f.unlink()
+            invalidate_list_cache()
+            return True
+    return False
+
+
 def run_item(item: str) -> Optional[Dict[str, Any]]:
     """Probe one integration synchronously (call from an executor).
     None = not an integration id we know. Raises ValueError for items
@@ -820,6 +923,14 @@ def run_item(item: str) -> Optional[Dict[str, Any]]:
         if not isinstance(cfg, dict):
             raise ValueError(f"MCP server '{name}' is no longer configured")
         res = probe_mcp(name, cfg)
+    elif kind == "platform":
+        if name not in PLATFORM_PROBES:
+            raise ValueError(f"'{cur['name']}' has no test here (its status is the gateway's live state)")
+        res = probe_platform(name)
+    elif kind == "model-provider":
+        if _provider_probe_target(name) is None:
+            raise ValueError(f"'{cur['name']}' has no test here (OAuth / SDK auth; its status is read from hermes)")
+        res = probe_model_provider(name)
     elif kind == "skill":
         if name not in SKILL_PROBES:
             raise ValueError(f"'{cur['name']}' has no test here (its status is read from its credentials)")

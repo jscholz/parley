@@ -14,6 +14,8 @@ export interface IntegrationAction {
    *  flow; `run` is the same as Test; `confirm` asks first. */
   flow: 'oauth' | 'run' | 'confirm' | string;
   danger?: boolean;
+  /** For `confirm`: what the dialog says. */
+  message?: string;
 }
 
 export interface IntegrationMeta {

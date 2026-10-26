@@ -74,7 +74,7 @@ def test_actions_only_on_oauth_capable_mcp_items(home):
     assert "actions" not in items["int-mcp-notion"]["integration"]          # stdio: env keys, not OAuth
     assert "actions" not in items["int-mcp-linear"]["integration"]          # header auth
     assert "actions" not in items["int-platform-telegram"]["integration"]
-    assert "actions" not in items["int-custom-linkedin-harness"]["integration"]
+    assert [a["id"] for a in items["int-custom-linkedin-harness"]["integration"]["actions"]] == ["remove"]
 
 
 def test_public_origin_prefers_the_client_origin_and_validates(home, monkeypatch):

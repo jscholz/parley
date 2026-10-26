@@ -25,6 +25,7 @@
  */
 
 import { diag } from './util/log.ts';
+import { encodeWidth, decodeWidth } from './util/panelWidth.ts';
 import { initDrawerSwipe } from './drawerSwipe.ts';
 
 const MOBILE_BREAKPOINT_PX = 700;
@@ -205,22 +206,27 @@ function initResizer(
     Math.max(cfg.minWidthPx, Math.min(maxWidth(), Math.round(w)));
   const apply = (w: number) =>
     document.documentElement.style.setProperty(cfg.cssVar, `${clamp(w)}px`);
+  // Persisted as a share of the viewport (util/panelWidth.ts) so the panel
+  // keeps its proportion when the window moves to a different screen.
   const readPersisted = (): number | null => {
     try {
-      const raw = localStorage.getItem(cfg.widthPrefKey);
-      if (!raw) return null;
-      const n = Number.parseInt(raw, 10);
-      return Number.isFinite(n) ? clamp(n) : null;
+      const n = decodeWidth(localStorage.getItem(cfg.widthPrefKey), window.innerWidth);
+      return n === null ? null : clamp(n);
     } catch { return null; }
   };
   const writePersisted = (w: number) => {
-    try { localStorage.setItem(cfg.widthPrefKey, String(w)); } catch {}
+    try { localStorage.setItem(cfg.widthPrefKey, encodeWidth(w, window.innerWidth)); } catch {}
   };
 
   const persisted = readPersisted();
   if (persisted !== null) apply(persisted);
-
   let dragging = false;
+  window.addEventListener('resize', () => {
+    if (dragging) return;
+    const w = readPersisted();
+    if (w !== null) apply(w);
+  });
+
   let startX = 0;
   let startWidth = cfg.defaultWidthPx;
 

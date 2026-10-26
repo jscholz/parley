@@ -374,6 +374,9 @@ def actions_for(item: Dict[str, Any]) -> List[Dict[str, Any]]:
         if cfg.get("url") and (cfg.get("auth") == "oauth" or (not cfg.get("headers") and cfg.get("auth") in (None, "", "oauth"))):
             connected = integ_meta.get("connected") is True
             return [{"id": "connect", "label": "Reconnect" if connected else "Connect", "flow": "oauth"}]
+    if kind == "custom":
+        return [{"id": "remove", "label": "Remove", "flow": "confirm", "danger": True,
+                 "message": "Remove this integration from the registry? Its YAML file is deleted; nothing else changes."}]
     return []
 
 
@@ -393,4 +396,9 @@ async def run_action(item_id: str, action: str, body: Dict[str, Any]) -> Dict[st
         raise FlowError(f"'{action}' is not available for this integration", 400)
     if allowed[action]["flow"] == "oauth":
         return await start_oauth(item_id, body.get("origin") if isinstance(body, dict) else None)
+    if allowed[action]["flow"] == "confirm" and action == "remove" and item["integration"].get("kind") == "custom":
+        ok = integ.remove_custom(str(item["integration"].get("provider") or ""))
+        if not ok:
+            raise FlowError("not in the registry any more", 404)
+        return {"flow_id": None, "kind": "confirm", "status": "done", "message": f"'{item['name']}' removed."}
     raise FlowError("unsupported flow", 400)

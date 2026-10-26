@@ -1,6 +1,7 @@
 """parley_integrations — enumeration + on-demand probe, with hermes stubbed."""
 from __future__ import annotations
 
+import asyncio
 import json
 import stat
 import sys
@@ -170,7 +171,7 @@ def test_probe_custom_maps_exit_codes(home, monkeypatch):
     monkeypatch.setenv("LI_RC", "2")
     assert integ.run_item("int-custom-linkedin-harness")["worst"] == "FAIL"
     with pytest.raises(ValueError, match="no test here"):
-        integ.run_item("int-platform-telegram")
+        integ.run_item("int-platform-parley")
     assert integ.run_item("int-mcp-nothing") is None
     assert integ.run_item("hermes") is None
 
@@ -180,7 +181,7 @@ def test_health_routes_merge_integrations(home):
     assert "int-mcp-notion" in ids and "int-custom-linkedin-harness" in ids
     assert hr.run_check("int-custom-linkedin-harness")["worst"] == "OK"
     with pytest.raises(hr.HealthValidationError, match="no test here"):
-        hr.run_check("int-platform-telegram")
+        hr.run_check("int-platform-parley")
     assert hr.run_check("int-mcp-nothing") is None
 
 
@@ -225,3 +226,48 @@ def test_write_custom_registers_a_yaml_the_enumerator_reads(home):
         integ.write_custom({"name": "Not Valid!"})
     with pytest.raises(ValueError):
         integ.write_custom({})
+
+
+def test_platform_and_provider_probes(home, monkeypatch):
+    calls = []
+    def fake_get(url, headers=None, timeout=10.0):
+        calls.append(url)
+        if "api.telegram.org" in url:
+            return {"status": 200, "body": {"ok": True, "result": {"username": "jonbot", "first_name": "Jonbot"}}}
+        if "slack.com" in url:
+            return {"status": 200, "body": {"ok": False, "error": "invalid_auth"}}
+        if url.endswith("/models"):
+            return {"status": 200, "body": {"data": [{"id": "a"}, {"id": "b"}]}}
+        return {"status": 500, "body": {}}
+    monkeypatch.setattr(integ, "_http_get_json", fake_get)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb")
+    items = _by_id(integ.list_items())
+    assert items["int-platform-telegram"]["can_run"] is True and items["int-platform-slack"]["can_run"] is True
+    assert integ.run_item("int-platform-telegram")["worst"] == "OK" and "@jonbot" in integ.run_item("int-platform-telegram")["report"]
+    assert integ.run_item("int-platform-slack")["worst"] == "FAIL"
+    with pytest.raises(ValueError, match="no test here"):
+        integ.run_item("int-platform-parley")
+    # api-key provider with a resolvable base url → /models probe; OAuth provider → no test
+    import sys
+    auth = sys.modules["hermes_cli.auth"]
+    import types as _t
+    auth._registry_lookup = lambda slug: _t.SimpleNamespace(auth_type="api_key", inference_base_url="https://openrouter.ai/api/v1") if slug == "openrouter" else _t.SimpleNamespace(auth_type="oauth_external", inference_base_url="")
+    auth._resolve_api_key_provider_secret = lambda slug, p: ("sk-x", "env")
+    auth._provider_env_base_url = lambda p: ""
+    integ.invalidate_list_cache()
+    items = _by_id(integ.list_items())
+    assert items["int-model-provider-openrouter"]["can_run"] is True and items["int-model-provider-openai-codex"]["can_run"] is False
+    out = integ.run_item("int-model-provider-openrouter")
+    assert out["worst"] == "OK" and "2 model(s)" in out["report"] and calls[-1] == "https://openrouter.ai/api/v1/models"
+    with pytest.raises(ValueError, match="no test here"):
+        integ.run_item("int-model-provider-openai-codex")
+
+
+def test_custom_remove_action(home):
+    from .. import parley_integration_flows as flows
+    integ.write_custom({"name": "tmp-thing", "label": "Tmp", "status_command": "true"})
+    item = {i["id"]: i for i in integ.list_items()}["int-custom-tmp-thing"]
+    assert item["integration"]["actions"][0]["id"] == "remove" and item["integration"]["actions"][0]["flow"] == "confirm"
+    res = asyncio.new_event_loop().run_until_complete(flows.run_action("int-custom-tmp-thing", "remove", {}))
+    assert res["status"] == "done" and not (integ.registry_dir() / "tmp-thing.yaml").exists()
+    assert "int-custom-tmp-thing" not in {i["id"] for i in integ.list_items()}
