@@ -985,7 +985,13 @@ async function handleDebugLogs(req, res) {
   res.writeHead(204); res.end();
 }
 
-function handleConfig(_req, res) {
+async function handleConfig(_req, res) {
+  // Capabilities are probed when the upstream comes up; if that probe found
+  // nothing (gateway restarting, legacy upstream) give a fresh probe a bounded
+  // moment so the FIRST boot after a gateway restart sees them, not the second.
+  if (!parley.getCapabilities()) {
+    await Promise.race([parley.refreshCapabilities(), new Promise((r) => setTimeout(r, 1500))]);
+  }
   res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' });
   res.end(JSON.stringify({
     gwToken: GW_TOKEN,
@@ -1008,7 +1014,7 @@ function handleConfig(_req, res) {
     // per feature as it always did. Refreshed on a TTL in the background.
     agent: { capabilities: parley.getCapabilities() },
   }));
-  void parley.refreshCapabilities();
+  void parley.refreshCapabilities();   // TTL re-probe in the background
 }
 
 // Parley audio bridge — standalone Python aiortc service for WebRTC
