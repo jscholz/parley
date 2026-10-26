@@ -47,6 +47,7 @@ import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
 import { externalLinkTarget } from '../../native/externalLinks.ts';
+import type { DocShelfSnapshot } from '../docStore.ts';
 
 export type DocView = 'reader' | 'list';
 
@@ -79,6 +80,18 @@ export function createDocModule(opts: {
   // "Closed …" status earned on 2026-10-12). Auto-hides; ✕ dismisses;
   // a newer close replaces it.
   const undo = createUndoBar(opts.panel);
+  let lastCtx: RightDrawerModuleContext | null = null;
+  // A close that arrived from another device (docShelfSync) gets an Undo
+  // too; restoring re-shelves the docs here and contributes them back.
+  window.addEventListener('parley:doc-shelf-closed', (ev: Event) => {
+    const d = (ev as CustomEvent).detail as { snapshot: DocShelfSnapshot; titles: string[] } | undefined;
+    if (!d || !d.titles?.length) return;
+    const msg = d.titles.length === 1 ? `Closed "${d.titles[0]}" on another device` : `Closed ${d.titles.length} documents on another device`;
+    undo.show(msg, () => {
+      restoreDocs(d.snapshot);
+      if (lastCtx) rerender(lastCtx);
+    });
+  });
   /** ALL view mutations go through here: the rail's doc tabs tint by
    *  which view the panel shows (docTabs.ts), and they can only stay
    *  honest if every flip — external setView OR an internal list/reader
@@ -105,6 +118,7 @@ export function createDocModule(opts: {
   }, true);
 
   const render = (ctx: RightDrawerModuleContext) => {
+    lastCtx = ctx;
     if (listDragActive) return;
     const doc = currentDoc();
     if (!doc) setViewState('reader');   // empty shelf → empty state, not a list
@@ -505,7 +519,7 @@ export function createDocModule(opts: {
 
 /** How long the Undo stays offered. Long enough to notice a mis-tap and
  *  read the bar; short enough that it is a moment, not chrome. */
-const UNDO_MS = 8_000;
+const UNDO_MS = 12_000;
 
 interface UndoBar {
   show(message: string, onUndo: () => void): void;

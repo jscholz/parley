@@ -91,6 +91,13 @@ export default async function run({ page, log, mock }) {
   const tabsC = await until(async () => { const t = await tabTitles(page); return !t.includes('Alpha doc') ? t : null; }, 6000);
   assert(tabsC && tabsC.join(',') === 'Bravo doc,Charlie doc', `remote close of a KNOWN doc closes here, nothing else moves (got ${JSON.stringify(tabsC)})`);
   log('close-sync: remote close of a known doc → closed here ✓');
+  // …and it is undoable here too (field 2026-10-26): the pop-up names the
+  // other device; a click on its body dismisses it (the undo path itself is
+  // the same restoreDocs the local close uses).
+  const remoteUndo = await page.evaluate(() => { const b = document.querySelector('#doc-drawer-panel .doc-undo-bar'); return { hidden: !b || b.hidden, text: b?.querySelector('.doc-undo-text')?.textContent || '' }; });
+  assert(!remoteUndo.hidden && /Closed "Alpha doc" on another device/.test(remoteUndo.text), `remote close offers Undo: ${JSON.stringify(remoteUndo)}`);
+  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-text').click());
+  log('remote close → Undo offered ✓');
 
   // Charlie is closed here before (d) so the empty-shelf assertion holds.
   await page.evaluate(() => { const t = [...document.querySelectorAll('#doc-rail-tabs .doc-rail-tab')].find((x) => x.getAttribute('aria-label') === 'Charlie doc'); t?.click(); });

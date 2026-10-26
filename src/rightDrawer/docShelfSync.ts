@@ -21,7 +21,7 @@
 import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
 import {
-  listDocs, tabOrderDocs, setDoc, removeDoc, setTabOrder, type DocState,
+  listDocs, tabOrderDocs, setDoc, removeDoc, setTabOrder, snapshotDocs, type DocState,
 } from './docStore.ts';
 import { planInbound } from './docShelfMerge.ts';
 
@@ -160,7 +160,16 @@ async function applyRemote(remote: any): Promise<void> {
       if (!payload) { log(`[doc-shelf] no content for ${id} (${meta.title}) — will retry on the next pull`); continue; }
       setDoc(payload, { autoOpen: false, silent: true });
     }
-    for (const id of plan.toClose) removeDoc(id);
+    if (plan.toClose.length) {
+      // Offer Undo for closes that arrived from ANOTHER device too (field
+      // 2026-10-26: "closed a doc and didn't see an undo" while two
+      // devices were in use). The doc panel listens and restores from
+      // this snapshot; the restore is then contributed back to the shelf.
+      const snapshot = snapshotDocs();
+      const titles = plan.toClose.map((id) => localById.get(id)?.title || id);
+      for (const id of plan.toClose) removeDoc(id);
+      try { window.dispatchEvent(new CustomEvent('parley:doc-shelf-closed', { detail: { snapshot, titles } })); } catch { /* non-browser */ }
+    }
     if (plan.toContribute.length) {
       log(`[doc-shelf] keeping ${plan.toContribute.length} doc(s) the shelf never knew — contributing them`);
     }
