@@ -1,7 +1,19 @@
 import { createDrawer, type DrawerHandle } from '../Drawer.ts';
 
+/** The drawer header's shared Clear button, as each module sees it. A
+ *  module writes what IT wants (hidden / label / aria) at any time — even
+ *  while another module is on screen (pins re-renders on every session
+ *  list reload) — and the host applies only the ACTIVE module's wishes to
+ *  the real button. Field 2026-10-26 (CAP, two pinned messages): the Pins
+ *  module's background re-render un-hid "Clear" over a doc reader. */
+export interface ClearButtonFacade {
+  hidden: boolean;
+  textContent: string;
+  setAttribute(name: string, value: string): void;
+}
+
 export interface RightDrawerModuleContext {
-  clearButton: HTMLElement | null;
+  clearButton: ClearButtonFacade | null;
   isOpen: () => boolean;
   open: () => void;
   close: () => void;
@@ -83,24 +95,51 @@ export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawer
           btn.setAttribute('aria-selected', selected ? 'true' : 'false');
         }
       }
-      mod.onSelect?.(ctx);
+      applyClear(moduleId);
+      mod.onSelect?.(ctxOf(moduleId));
       host.render();
       if (selectOpts.open) host.open();
     },
     render: () => {
       const mod = modules.get(activeId);
       if (!mod) return;
-      mod.render(ctx);
+      mod.render(ctxOf(activeId));
     },
   };
 
-  const ctx: RightDrawerModuleContext = {
-    clearButton: opts.clearButton,
+  // Per-module Clear-button state; the real button mirrors the active one.
+  interface ClearState { hidden: boolean; text: string; attrs: Record<string, string> }
+  const clearStates = new Map<string, ClearState>();
+  const applyClear = (moduleId: string) => {
+    const btn = opts.clearButton;
+    if (!btn) return;
+    const st = clearStates.get(moduleId);
+    if (!st) { btn.hidden = true; return; }
+    btn.hidden = st.hidden;
+    btn.textContent = st.text;
+    for (const [k, v] of Object.entries(st.attrs)) btn.setAttribute(k, v);
+  };
+  const clearFacadeFor = (moduleId: string): ClearButtonFacade | null => {
+    if (!opts.clearButton) return null;
+    const st: ClearState = { hidden: true, text: 'Clear', attrs: {} };
+    clearStates.set(moduleId, st);
+    return {
+      get hidden() { return st.hidden; },
+      set hidden(v: boolean) { st.hidden = !!v; if (activeId === moduleId) applyClear(moduleId); },
+      get textContent() { return st.text; },
+      set textContent(v: string) { st.text = String(v ?? ''); if (activeId === moduleId) applyClear(moduleId); },
+      setAttribute(name: string, value: string) { st.attrs[name] = value; if (activeId === moduleId) applyClear(moduleId); },
+    };
+  };
+  const ctxFor = (moduleId: string): RightDrawerModuleContext => ({
+    clearButton: clearFacadeFor(moduleId),
     isOpen: host.isOpen,
     open: host.open,
     close: host.close,
     render: host.render,
-  };
+  });
+  const ctxByModule = new Map<string, RightDrawerModuleContext>(opts.modules.map((m) => [m.id, ctxFor(m.id)]));
+  const ctxOf = (moduleId: string): RightDrawerModuleContext => ctxByModule.get(moduleId) ?? ctxFor(moduleId);
 
   chrome = createDrawer({
     id: opts.drawerId,
@@ -141,7 +180,7 @@ export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawer
   }
 
   opts.clearButton?.addEventListener('click', () => {
-    modules.get(activeId)?.onClear?.(ctx);
+    modules.get(activeId)?.onClear?.(ctxOf(activeId));
   });
 
   host.select(activeId);

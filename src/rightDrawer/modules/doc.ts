@@ -46,6 +46,7 @@ import {
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
+import { externalLinkTarget } from '../../native/externalLinks.ts';
 
 export type DocView = 'reader' | 'list';
 
@@ -447,6 +448,13 @@ export function createDocModule(opts: {
       const md = document.createElement('div');
       md.className = 'doc-drawer-content';
       md.innerHTML = miniMarkdown(docBody);
+      // Off-origin links leave the app in a NEW window (2026-10-26: a link
+      // in a doc navigated the installed PWA away with no way back). The
+      // web-wide guard (externalLinkGuard.ts) is the belt; this is the
+      // braces for anchors the guard never sees (middle-click, keyboard).
+      md.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+        if (externalLinkTarget(a.getAttribute('href'), window.location.origin)) { a.target = '_blank'; a.rel = 'noopener'; }
+      });
       if (doc.source === 'capture') {
         // Speaker anchors (B2 live-transcript nit): in a diarized wall
         // of text the "**Name:**" runs are the only scan landmarks, and
@@ -504,8 +512,8 @@ interface UndoBar {
   hide(): void;
 }
 
-/** In-flow Undo bar, first child of the panel so it sits ABOVE the body
- *  and the empty state and overlays nothing. */
+
+
 function createUndoBar(panel: HTMLElement): UndoBar {
   if (typeof document === 'undefined') return { show() {}, hide() {} };
   const bar = document.createElement('div');
@@ -525,7 +533,12 @@ function createUndoBar(panel: HTMLElement): UndoBar {
   dismiss.setAttribute('aria-label', 'Dismiss');
   dismiss.textContent = '✕';
   bar.append(text, action, dismiss);
-  panel.insertBefore(bar, panel.firstChild);
+  // Floating pop-up (2026-10-26: "what I wanted was a pop-up that hovers,
+  // and can be dismissed by clicking it"): absolutely positioned at the
+  // BOTTOM of the panel so it shifts nothing and never covers the doc's
+  // title row / × (the 2026-10-12 complaint). A tap anywhere on it that
+  // is not the Undo button dismisses it.
+  panel.appendChild(bar);
   let timer: number | null = null;
   let pending: (() => void) | null = null;
   const hide = () => {
@@ -533,12 +546,14 @@ function createUndoBar(panel: HTMLElement): UndoBar {
     pending = null;
     bar.hidden = true;
   };
-  action.addEventListener('click', () => {
+  action.addEventListener('click', (e) => {
+    e.stopPropagation();
     const fn = pending;
     hide();
     fn?.();
   });
-  dismiss.addEventListener('click', hide);
+  dismiss.addEventListener('click', (e) => { e.stopPropagation(); hide(); });
+  bar.addEventListener('click', hide);
   return {
     show(message, onUndo) {
       text.textContent = message;

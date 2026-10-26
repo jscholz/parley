@@ -1,14 +1,14 @@
 // Closing a doc must not hold the next doc's controls hostage (field
 // 2026-10-12: "the banner that comes up masks the heading of the next
 // message, and isn't dismissable, and doesn't let me click the x of the
-// window below"). Since 2026-10-22 the "Closed …" notice is the doc
-// panel's IN-FLOW Undo bar (.doc-undo-bar): it pushes the reader down
-// rather than floating over it, so it can never cover the next doc's ×;
-// its own ✕ dismisses it.
+// window below"). The "Closed …" notice is the doc panel's Undo pop-up
+// (.doc-undo-bar). Since 2026-10-26 it FLOATS at the panel's bottom —
+// the opposite end from the next doc's title row and × — and both its
+// ✕ and a click on its body dismiss it.
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'doc-close-notice-never-blocks';
-export const DESCRIPTION = 'After closing a doc, the next doc\'s × is tappable at once; the in-flow Undo bar sits clear of it and its ✕ dismisses it';
+export const DESCRIPTION = 'After closing a doc, the next doc\'s × is tappable at once; the floating Undo pop-up sits clear of it and its ✕ dismisses it';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 export const MOBILE = 'both';
