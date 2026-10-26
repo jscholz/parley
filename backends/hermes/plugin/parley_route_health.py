@@ -18,8 +18,8 @@ heartbeat, no Telegram/push):
   PARLEY_HEALTH_RUN_TIMEOUT  seconds (default 300)
 
 Routes:
-  GET  /v1/health              -> {"object":"list","data":[CheckDef…]}
-  POST /v1/health/{id}/run     -> CheckDef (after the run)
+  GET  /v1/health              -> {"object":"list","data":[CheckDef…]}   (system checks + integrations)
+  POST /v1/health/{id}/run     -> CheckDef (after the run; `int-*` ids probe an integration)
 CheckDef: {id, name, worst ("OK"|"WARN"|"FAIL"|"CRASHED"|"UNKNOWN"), last_run_at (iso|null),
            report (str), can_run (bool), counts: {fail, warn, ok}}
 """
@@ -124,10 +124,35 @@ def list_checks() -> List[Dict[str, Any]]:
     return [_check_view(n) for n in sorted(names)]
 
 
+def list_all() -> List[Dict[str, Any]]:
+    """System checks + integrations (parley_integrations) — ONE status
+    surface for Settings › Integrations. An integrations failure never
+    hides the system checks."""
+    out = list_checks()
+    try:
+        from . import parley_integrations as _integ
+    except ImportError:  # pragma: no cover — flat-module import path
+        import parley_integrations as _integ  # type: ignore
+    try:
+        out.extend(_integ.list_items())
+    except Exception:
+        logger.exception("[parley] integrations enumeration failed")
+    return out
+
+
 def run_check(name: str) -> Optional[Dict[str, Any]]:
     """Re-run one check synchronously (blocking; call from an executor). None = unknown check."""
     if not _ID_RE.match(name or ""):
         raise HealthValidationError("invalid check id")
+    if name.startswith("int-"):
+        try:
+            from . import parley_integrations as _integ
+        except ImportError:  # pragma: no cover
+            import parley_integrations as _integ  # type: ignore
+        try:
+            return _integ.run_item(name)
+        except ValueError as e:
+            raise HealthValidationError(str(e))
     runners = _runners()
     if name not in runners:
         if name in {c["id"] for c in list_checks()}:
@@ -171,7 +196,7 @@ async def handle_health_list(adapter, request):
     if _unauthorized(adapter, request):
         return web.Response(status=401, text="invalid token")
     try:
-        data = await _in_executor(list_checks)
+        data = await _in_executor(list_all)
     except Exception as e:
         logger.exception("[parley] health list failed")
         return _err(web, 500, "server_error", str(e))

@@ -201,6 +201,25 @@ Hermes' secret store; Parley never echoes it back (fields are write-only).
 
 ---
 
+## Status
+
+* **Phase 1 — shipped 2026-10-26.** Plugin `parley_integrations.py` enumerates MCP servers
+  (connected = OAuth token on file / env refs resolved), gateway platforms (live state from
+  `gateway_state.json`, stale writers dropped), model providers with a credential (+ the
+  active one; `aws_sdk` skipped unless active — its status walks the AWS chain for 4 s),
+  plugins with `requires_env` or an `auth.json` entry, and the custom registry
+  `$HERMES_HOME/integrations/<name>.yaml` (§5b; `status.command` exit code → worst). Items
+  ride `/v1/health` with the `integration` block; `POST /v1/health/int-…/run` probes (MCP via
+  hermes' `_probe_single_server`, custom via the command); results cached in memory + 
+  `<health state dir>/integrations.json`; the list is memoised 20 s. Parley:
+  `healthSettings.ts` → `statusSettings.ts`, nav "Integrations" (the `health` section id
+  aliases to it), two groups (Integrations + System checks), kind tags, connected text,
+  Test/Docs/setup; skill `integrations-registry` ships with the plugin and the agent guidance
+  points at it. Tests: `test_integrations.py`, `healthModel.test.ts`, smoke
+  `settings-integrations-panel`. Protocol doc: health section documents the `integration`
+  block.
+* Phases 2–4: not started. Open questions in §6 still open.
+
 ## 3. Phases and effort
 
 | Phase | Scope | Buys | Effort |

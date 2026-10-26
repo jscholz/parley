@@ -1,9 +1,11 @@
-// Scenario: Settings › Health renders the agent's health checks from the
-// optional /v1/health extension; Run now re-runs one and re-renders.
+// Scenario: Settings › Integrations › System checks renders the agent's
+// health checks from the optional /v1/health extension; Run now re-runs
+// one and re-renders. (Was Settings › Health; folded under Integrations
+// on 2026-10-26 — the `health` section id still deep-links here.)
 import { waitForReady, openSettingsSection, assert } from './lib.mjs';
 
 export const NAME = 'settings-health-panel';
-export const DESCRIPTION = 'Settings › Health lists checks with coloured report lines; Run now posts /run and re-renders';
+export const DESCRIPTION = 'Settings › Integrations › System checks lists checks with coloured report lines; Run now posts /run and re-renders';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 

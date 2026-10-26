@@ -775,15 +775,19 @@ over hermes' `cron.jobs` store (the same store `hermes cron …` and the
 hermes dashboard mutate). Proxy forwarders: `proxy/parley/jobs.ts`
 (`/api/parley/jobs*`). Renderer: `src/cronSettings.ts`.
 
-## Optional health extension — `/v1/health/*`
+## Optional health extension — `/v1/health/*` (status + integrations)
 
-Lets the agent expose its own health checks so parley can render a
-**Health** section in Settings: each check's latest report, when it ran,
-its worst status, and a "Run now" button. The agent owns the check
-list, the reports and how a check is re-run; parley only renders.
+Lets the agent expose ONE status surface that parley renders as
+Settings › **Integrations**: the agent's integrations (MCP servers, chat
+platforms, model providers, plugins holding credentials, user-made custom
+ones) and its system health checks — each item's latest report, when it
+ran, its worst status, and a "Test" / "Run now" button. The agent owns
+the item list, the reports and how an item is probed; parley only
+renders. Items that carry an `integration` block render as integration
+cards; items without it are system checks.
 
-Strictly optional: agents without health checks return 404 on
-`GET /v1/health` and the section says so.
+Strictly optional: agents without it return 404 on `GET /v1/health` and
+the section says so.
 
 ### `GET /v1/health`
 
@@ -802,6 +806,38 @@ Strictly optional: agents without health checks return 404 on
   colour-coded by the UI, everything else renders verbatim.
 - `can_run` — whether `POST …/run` is available for this check.
 
+**Integration items** (2026-10-26) add an `integration` object:
+
+```json
+  { "id": "int-mcp-notion", "name": "notion", "worst": "UNKNOWN",
+    "last_run_at": null, "report": "stdio · npx\ncredentials present (NOTION_API_KEY)\nnot tested yet",
+    "can_run": true, "counts": { "fail": 0, "warn": 0, "ok": 0 },
+    "integration": { "kind": "mcp", "provider": "notion", "connected": true,
+                     "account": "jonathan@…", "docs_url": "https://…",
+                     "description": "…", "setup_markdown": "…" } }
+```
+
+- `kind` — `mcp` | `platform` | `model-provider` | `plugin` | `custom` | `other`
+  (parley shows it as a tag; unknown kinds render verbatim).
+- `provider` — stable key (server / platform / provider slug / registry name).
+- `connected` — `true` / `false` from configuration and credentials, or
+  `null` when only a probe can tell (press Test).
+- `account`, `docs_url`, `description`, `setup_markdown` — optional;
+  `setup_markdown` is rendered under a "setup" disclosure (custom
+  integrations' instructions).
+- `worst` for an integration is its health: `OK` connected and probed,
+  `WARN` connected but degraded / credential missing, `FAIL` probe failed
+  or credential revoked, `UNKNOWN` never probed. `POST …/run` on an
+  integration id probes it (connect + list tools for MCP, the registry's
+  `status.command` for custom ones); `400` for items whose status comes
+  from configuration only.
+- Ids: `int-<kind>-<name>`, same charset as other checks. Nothing probes
+  on `GET`; the agent caches probe results and re-probes on `run`.
+
+Connect / add flows (OAuth, device code, api-key forms, a catalog of
+addable integrations) are not part of this version of the contract — see
+`docs/INTEGRATIONS_PANE_PLAN.md` phases 2–3.
+
 ### `POST /v1/health/{id}/run`
 
 Re-run the check synchronously (may take minutes) and return the fresh
@@ -809,6 +845,10 @@ check object. `400` when the check is read-only or timed out, `404` for
 an unknown id.
 
 Reference implementation: `backends/hermes/plugin/parley_route_health.py`
+(system checks) + `parley_integrations.py` (integrations: hermes'
+`mcp_servers`, `gateway_state.json` platforms, the provider catalog's auth
+status, installed plugins' manifests + `auth.json`, and the custom registry
+`$HERMES_HOME/integrations/<name>.yaml`). The health module
 reads the digest state written by your OWN health-check scripts
 (`<name>.last-run`, `<name>.report.txt` — an ops-repo concern outside this
 contract; the reference deployment's live at `scripts/lib/health.sh` in a

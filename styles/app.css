@@ -6533,6 +6533,20 @@
 .health-line-fail { color: var(--danger); }
 .health-line-warn { color: #c98a00; }
 .health-line-ok { opacity: .7; }
+/* Settings › Integrations cards (2026-10-26) */
+.int-kind {
+  display: inline-block; margin-right: 8px; padding: 1px 6px; border-radius: 6px;
+  font-size: calc(var(--content-size) - 4px); font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); background: var(--surface-subtle); border: 1px solid var(--border-subtle); vertical-align: 1px;
+}
+.int-kind-custom { color: var(--primary); border-color: var(--primary-soft); background: var(--primary-soft); }
+.int-desc { margin-top: 2px; }
+.int-setup-body { font-size: calc(var(--content-size) - 1px); margin-top: 6px; }
+.int-setup-body p { margin: 4px 0; }
+.int-setup-body code { font-family: var(--font-mono); font-size: calc(var(--content-size) - 2px); }
+.int-summary-row:empty, .int-summary-row .hint:empty { display: none; }
+.int-custom-note .hint code { font-family: var(--font-mono); font-size: calc(var(--content-size) - 3px); }
+a.cron-btn { text-decoration: none; display: inline-flex; align-items: center; }
 @media (max-width: 640px) {
   .cron-job-controls { grid-template-columns: 1fr; }
   .cron-btn-danger { margin-left: 0; }

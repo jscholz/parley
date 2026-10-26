@@ -1,7 +1,24 @@
 /**
- * @fileoverview Pure helpers for Settings › Health (no DOM). Types mirror
+ * @fileoverview Pure helpers for Settings › Integrations (no DOM) — the one
+ * status surface: integrations + system health checks. Types mirror
  * docs/ABSTRACT_AGENT_PROTOCOL.md "Optional health extension".
  */
+/** Present on items that are integrations (MCP servers, chat platforms,
+ *  model providers, credentialed plugins, user-made "custom" ones). Items
+ *  without it are plain system checks. Parley renders what it is told;
+ *  what an MCP server IS lives in the agent (2026-10-26 Integrations pane). */
+export interface IntegrationMeta {
+  kind: 'mcp' | 'platform' | 'model-provider' | 'plugin' | 'custom' | 'other' | string;
+  provider: string;
+  /** null = the agent cannot tell from configuration (press Test). */
+  connected: boolean | null;
+  account?: string;
+  docs_url?: string;
+  /** Markdown shown under "Setup" (custom integrations' instructions). */
+  setup_markdown?: string;
+  description?: string;
+}
+
 export interface HealthCheck {
   id: string;
   name: string;
@@ -10,6 +27,47 @@ export interface HealthCheck {
   report: string;
   can_run: boolean;
   counts: { fail: number; warn: number; ok: number };
+  integration?: IntegrationMeta;
+}
+
+export function isIntegration(c: HealthCheck): boolean {
+  return !!c.integration && typeof c.integration === 'object';
+}
+
+/** One status list → the two groups of Settings › Integrations. */
+export function splitStatus(checks: HealthCheck[]): { integrations: HealthCheck[]; system: HealthCheck[] } {
+  const integrations: HealthCheck[] = [];
+  const system: HealthCheck[] = [];
+  for (const c of checks) (isIntegration(c) ? integrations : system).push(c);
+  return { integrations, system };
+}
+
+const KIND_LABELS: Record<string, string> = {
+  mcp: 'MCP server', platform: 'Chat platform', 'model-provider': 'Model provider', plugin: 'Plugin', custom: 'Custom', other: 'Other',
+};
+
+export function kindLabel(kind: string | undefined): string {
+  return KIND_LABELS[kind || ''] || (kind ? kind : 'Integration');
+}
+
+export function connectedText(c: HealthCheck): 'connected' | 'not connected' | 'unknown' {
+  const v = c.integration?.connected;
+  return v === true ? 'connected' : v === false ? 'not connected' : 'unknown';
+}
+
+/** Sort: needs attention first (FAIL, WARN), then unknown, then OK; stable within. */
+export function attentionOrder(a: HealthCheck, b: HealthCheck): number {
+  const rank = (w: string) => ({ bad: 0, warn: 1, muted: 2, ok: 3 }[worstTone(w)]);
+  return rank(a.worst) - rank(b.worst);
+}
+
+export function integrationSummary(items: HealthCheck[]): { total: number; attention: number; ok: number; unknown: number } {
+  let attention = 0, ok = 0, unknown = 0;
+  for (const c of items) {
+    const t = worstTone(c.worst);
+    if (t === 'bad' || t === 'warn') attention++; else if (t === 'ok') ok++; else unknown++;
+  }
+  return { total: items.length, attention, ok, unknown };
 }
 
 export type Tone = 'ok' | 'warn' | 'bad' | 'muted';

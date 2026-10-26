@@ -375,7 +375,7 @@
       <button type="button" class="settings-nav-btn active" data-target="notifications">Notifications</button>
       <button type="button" class="settings-nav-btn" data-target="display">Display</button>
       <button type="button" class="settings-nav-btn" data-target="agent">Agent</button>
-      <button type="button" class="settings-nav-btn" data-target="health">Health</button>
+      <button type="button" class="settings-nav-btn" data-target="integrations">Integrations</button>
       <button type="button" class="settings-nav-btn" data-target="storage" data-advanced>Storage</button>
       <button type="button" class="settings-nav-btn" data-target="voice">Voice</button>
       <button type="button" class="settings-nav-btn" data-target="interaction" data-advanced>Hotkeys</button>
@@ -534,9 +534,22 @@
          and rendered by agentSettings.ts. -->
   </div>
 
-  <div class="settings-group" id="settings-group-health" data-section="health" hidden>
-    <div class="group-label">Health</div>
-    <!-- Agent health checks over the optional /v1/health extension; rendered by src/healthSettings.ts. -->
+  <!-- Settings › Integrations (2026-10-26): ONE status surface. Two groups
+       under one nav button — the agent's integrations and its system health
+       checks — both from the optional /v1/health extension; rendered by
+       src/statusSettings.ts. The `health` section id is kept for the system
+       group so deep links and smokes keep working. -->
+  <div class="settings-group" id="settings-group-integrations" data-section="integrations" hidden>
+    <div class="group-label">Integrations</div>
+    <div class="row row-wide int-summary-row"><span class="hint" data-role="int-summary"></span></div>
+    <div class="row row-wide" data-health-placeholder><span class="hint">Loading integrations…</span></div>
+    <div id="integrations-host" class="cron-jobs"></div>
+    <div class="row row-wide int-custom-note">
+      <span class="hint">Standard integrations are discovered from the agent's configuration. For anything you built yourself — a Playwright harness, a scraper, a local service — ask your agent to register it: it knows the format (<code>~/.hermes/integrations/&lt;name&gt;.yaml</code>) and can write the status check for you. It then shows up here with a Test button.</span>
+    </div>
+  </div>
+  <div class="settings-group" id="settings-group-health" data-section="health" data-nav-target="integrations" hidden>
+    <div class="group-label">System checks</div>
     <div class="row row-wide" data-health-placeholder><span class="hint">Loading health checks…</span></div>
     <div id="health-checks-host" class="cron-jobs"></div>
   </div>

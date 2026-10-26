@@ -37,7 +37,7 @@ logger = logging.getLogger("hermes_plugins.parley.guidance")
 SECTION_ID = "parley"
 SECTION_MAX_CHARS = 4_000
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
-SKILL_NAMES = ("parley-pdf-rasterize", "meeting-transcript-ingest")
+SKILL_NAMES = ("parley-pdf-rasterize", "meeting-transcript-ingest", "integrations-registry")
 REGISTERED: dict = {"section": False}
 
 
@@ -83,6 +83,8 @@ Uploads from the user: images arrive as vision input (you see them). PDFs arrive
 
 Phone numbers: write them as a markdown tel link whose LABEL is the number written out with spaces, e.g. [+44 20 3974 6690](tel:+442039746690) — Parley makes it tap-to-call and copyable, and rebuilds the link from the label if the target gets masked. Never put a phone number only inside a code block.
 PDF attachments: read the extracted text first. For a REDUCED PDF, when a page's layout, a figure, a table or a signature matters, render just that page from the saved PDF with the `parley-pdf-rasterize` skill (pdftoppm -f P -l P) and look at it — don't render the whole document.
+
+Integrations: Settings › Integrations in Parley lists this agent's MCP servers, chat platforms, model providers and credentialed plugins automatically. For something the user built themselves (a Playwright harness, a scraper, a local service), use the `integrations-registry` skill: one YAML under $HERMES_HOME/integrations/<name>.yaml with a bounded, read-only status command; it appears in the pane with a Test button, no restart needed.
 
 Skills shipped with Parley: {", ".join(SKILL_NAMES)} — under $PARLEY_SKILLS_DIR.
 """

@@ -5,7 +5,7 @@
 import * as backend from './backend.ts';
 import * as agentSettings from './agentSettings.ts';
 import * as cronSettings from './cronSettings.ts';
-import * as healthSettings from './healthSettings.ts';
+import * as statusSettings from './statusSettings.ts';
 import * as storageSettings from './storageSettings.ts';
 import { log } from './util/log.ts';
 import {
@@ -1465,7 +1465,7 @@ export function hydrate(handlers: {
     // what's user-tunable via /v1/settings/schema.
     agentSettings.load().catch(() => {});
     cronSettings.load().catch(() => {});
-    healthSettings.load().catch(() => {});
+    statusSettings.load().catch(() => {});
     storageSettings.load().catch(() => {});
     modelHandlers.reloadKeyterms?.();
   };
@@ -1476,7 +1476,7 @@ export function hydrate(handlers: {
     // doesn't block the dismiss.
     agentSettings.load().catch(() => {});
     cronSettings.load().catch(() => {});
-    healthSettings.load().catch(() => {});
+    statusSettings.load().catch(() => {});
     storageSettings.load().catch(() => {});
     // Suppress toolbar clicks for a brief delay AFTER close to cover the
     // remainder of the iOS touch sequence (touchend → click). 350ms is
@@ -1598,7 +1598,11 @@ export function hydrate(handlers: {
   });
   // Agent rows render asynchronously; re-apply when they land.
   window.addEventListener('agent-schema-loaded', applyAdvanced);
-  const showSection = (target: string) => {
+  // Section ids that moved under another nav button keep working as deep
+  // links: Health became the "System checks" group of Integrations (2026-10-26).
+  const SECTION_ALIASES: Record<string, string> = { health: 'integrations' };
+  const showSection = (rawTarget: string) => {
+    const target = SECTION_ALIASES[rawTarget] || rawTarget;
     // A deep link into an advanced section (/cron, Settings › Storage from a
     // digest) is intent: turn Advanced mode on rather than show nothing.
     const targetBtn = navBtns.find((b) => b.dataset.target === target);

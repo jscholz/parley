@@ -69,7 +69,12 @@ class _Request:
 def _run(c): return asyncio.new_event_loop().run_until_complete(c)
 
 
-def test_handlers(state):
+def test_handlers(state, monkeypatch):
+    # The list now merges integrations (parley_integrations); keep this test
+    # about the system checks by emptying the enumerators.
+    from .. import parley_integrations as integ
+    monkeypatch.setattr(integ, "ENUMERATORS", [])
+    integ.invalidate_list_cache()
     assert _run(hr.handle_health_list(_Adapter(ok=False), _Request())).status == 401
     r = _run(hr.handle_health_list(_Adapter(), _Request()))
     assert r.status == 200 and len(json.loads(r.text)["data"]) == 2

@@ -389,7 +389,7 @@ export async function openSidebar(page, { timeout = 3_000 } = {}) {
  *  voice-output, voice-phrases, interaction. */
 /** Sections that share one nav tab (data-nav-target in index.html). Scenarios
  *  keep addressing the group by its data-section; we click the owning tab. */
-const NAV_TARGET_FOR_SECTION = { 'voice-input': 'voice', 'voice-output': 'voice', 'voice-phrases': 'voice' };
+const NAV_TARGET_FOR_SECTION = { 'voice-input': 'voice', 'voice-output': 'voice', 'voice-phrases': 'voice', health: 'integrations' };
 
 export async function openSettingsSection(page, section, { timeout = 3_000 } = {}) {
   await page.click('#sb-settings');
