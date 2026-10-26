@@ -8,9 +8,8 @@
 
 import * as http from 'node:http';
 import { readEnv } from '../../env.mjs';
+import { upstreamOrDefault } from '../index.ts';
 
-const UPSTREAM_BASE = (readEnv('PARLEY_PLATFORM_URL') || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 export function isPushOwnedByPlugin(): boolean {
   const v = readEnv('PARLEY_PUSH_OWNED_BY_PLUGIN');
@@ -73,20 +72,15 @@ async function forwardRaw(
   method: 'GET' | 'POST' | 'DELETE',
   body: any | null,
 ): Promise<ForwardResult> {
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-  };
-  if (body !== null && body !== undefined) headers['content-type'] = 'application/json';
-  if (UPSTREAM_TOKEN) headers['authorization'] = `Bearer ${UPSTREAM_TOKEN}`;
-  const r = await fetch(`${UPSTREAM_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== null && body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  let parsed: any = null;
-  try { parsed = await r.json(); }
-  catch { parsed = null; }
-  return { status: r.status, body: parsed };
+  // One upstream client (audit phase 2): URL + token live in
+  // HTTPAgentUpstream; an upstream without HTTP extensions (in-process
+  // claude-code) gets an honest 404 so the PWA hides the surface.
+  const up = upstreamOrDefault();
+  if (typeof up.extension !== 'function') {
+    return { status: 404, body: { error: 'unsupported', detail: 'this upstream has no HTTP extensions' } };
+  }
+  const r = await up.extension(method, path, body !== null && body !== undefined ? body : undefined);
+  return { status: r.status, body: r.body };
 }
 
 function sendJson(res: http.ServerResponse, status: number, body: any): void {

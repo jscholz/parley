@@ -19,6 +19,7 @@
 //     return parley.handleParleySessionDelete(req, res, chatId);
 
 import { init as initStream } from './stream.ts';
+import type { AgentCapabilities } from './contract/capabilities.ts';
 import { init as initNotifications } from './notifications/index.ts';
 import { HTTPAgentUpstream, type UpstreamAgent } from './upstream.ts';
 import { readEnv } from '../env.mjs';
@@ -132,6 +133,7 @@ export function init(opts: { token: string; url: string; backend?: string; claud
         const cc = new ClaudeCodeUpstream({ sdk: sdk as any, config });
         upstream = cc.asUpstreamAgent();
         console.log(`[parley] upstream ready (claude-code, cwd=${(opts.claudeCode as any)?.cwd ?? process.cwd()})`);
+        void refreshCapabilities(true);
       } catch (e: any) {
         console.error(`[parley] claude-code backend failed to init: ${e?.message ?? e} — falling back to HTTP upstream`);
         upstream = new HTTPAgentUpstream({ url: opts.url, token: opts.token });
@@ -152,6 +154,8 @@ export function init(opts: { token: string; url: string; backend?: string; claud
     .replace(/\/ws\/?$/, '');
   upstream = new HTTPAgentUpstream({ url: httpUrl, token: opts.token });
   console.log(`[parley] upstream ready (${httpUrl}${opts.token ? '' : ', no auth'})`);
+  capabilities = null; capsProbedAt = 0;
+  void refreshCapabilities(true);
   // Wire the stream fan-out so the /v1/events subscription is in place
   // BEFORE the first PWA tab attaches — we'd otherwise miss any
   // envelope that arrives during the startup window.
@@ -186,6 +190,60 @@ export function whenNotificationsInitSettled(): Promise<void> {
  *  was unset. Handlers gate on this for the configured-vs-not 503. */
 export function getUpstream(): UpstreamAgent | null {
   return upstream;
+}
+
+/** The env-configured HTTP upstream, for modules that run before (or
+ *  without) init() — unit tests that import delegate.ts standalone, and
+ *  the brief init window. Production always has `upstream` set. */
+let fallbackUpstream: HTTPAgentUpstream | null = null;
+export function upstreamOrDefault(): UpstreamAgent {
+  if (upstream) return upstream;
+  if (!fallbackUpstream) fallbackUpstream = new HTTPAgentUpstream();
+  return fallbackUpstream;
+}
+
+// ── Capability discovery (audit phase 2) ────────────────────────────
+// Probed once the upstream is ready and re-probed on a TTL; /config hands
+// the latest answer to the PWA so it gates features instead of 404-probing
+// each one. null = unknown/legacy → everyone probes as before.
+const CAPS_TTL_MS = 5 * 60_000;
+let capabilities: AgentCapabilities | null = null;
+let capsProbedAt = 0;
+let capsInFlight: Promise<AgentCapabilities | null> | null = null;
+
+export function getCapabilities(): AgentCapabilities | null {
+  return capabilities;
+}
+
+export async function refreshCapabilities(force = false): Promise<AgentCapabilities | null> {
+  const up = upstream;
+  if (!up || typeof up.capabilities !== 'function') return null;
+  if (!force && capabilities && Date.now() - capsProbedAt < CAPS_TTL_MS) return capabilities;
+  if (capsInFlight) return capsInFlight;
+  capsInFlight = (async () => {
+    try {
+      const c = await up.capabilities!();
+      capabilities = c;
+      capsProbedAt = Date.now();
+      if (c) console.log(`[parley] upstream capabilities: ${c.extensions.join(', ')}${c.turn_lifecycle ? ' · turn_lifecycle' : ''}`);
+      else console.log('[parley] upstream has no /v1/capabilities (legacy) — probing per feature');
+    } catch (e: any) {
+      console.warn(`[parley] capabilities probe failed: ${e?.message ?? e}`);
+    } finally {
+      capsInFlight = null;
+    }
+    return capabilities;
+  })();
+  return capsInFlight;
+}
+
+export function __resetCapabilitiesForTest(): void {
+  capabilities = null; capsProbedAt = 0; capsInFlight = null; fallbackUpstream = null;
+}
+
+/** Test seam: swap the upstream (e.g. one without extension()). */
+export function __setUpstreamForTest(next: UpstreamAgent | null): void {
+  upstream = next;
 }
 
 /** Status helper — used by health-check tooling. */

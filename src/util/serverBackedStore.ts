@@ -22,12 +22,16 @@
 // `reconcile` hook, not here.
 
 import { apiUrl } from '../apiBase.ts';
+import { supports } from '../capabilities.ts';
 
 export interface ServerBackedStoreConfig<T> {
   /** localStorage key for the perf cache. null disables persistence. */
   storageKey: string | null;
   /** GET endpoint (app-absolute path) for the canonical server snapshot. */
   endpoint: string;
+  /** Capability family (contract/routes.ts name). When the agent declares
+   *  it absent, the store stays local: no refresh, no mirrored writes. */
+  family?: string;
   /** Optional fetch init for the GET (e.g. { cache: 'no-store' }). */
   fetchInit?: RequestInit;
   /** Injection seam so unit tests can hold GET/write responses open and
@@ -200,8 +204,13 @@ export class ServerBackedStore<T> {
   /** Fetch the canonical server snapshot and reconcile. Only persists +
    *  notifies when the reconciled state actually differs (repaint-storm
    *  guard). */
+  private serverOff(): boolean {
+    return !!this.cfg.family && supports(this.cfg.family) === false;
+  }
+
   async refreshFromServer(): Promise<void> {
     this.ensureLocal();
+    if (this.serverOff()) return;
     const epochAtFetch = this.mutationEpoch;
     const settledAtFetch = this.writesSettled;
     try {
@@ -291,6 +300,7 @@ export class ServerBackedStore<T> {
   /** Convenience POST helper for domain mutation paths that mirror to the
    *  server fire-and-forget. */
   async postJson(path: string, body: Record<string, unknown>): Promise<void> {
+    if (this.serverOff()) return;
     await this.trackWrite(async () => {
       try {
         const r = await (this.cfg.fetchImpl ?? fetch)(apiUrl(path), {

@@ -24,6 +24,7 @@
  */
 
 import { apiUrl } from './apiBase.ts';
+import { supports } from './capabilities.ts';
 
 const DB_NAME = 'parley-keyterms';
 const STORE = 'keyterms';
@@ -73,6 +74,9 @@ export function _setIdbForTests(i: typeof idbForTests): void { idbForTests = i; 
 
 async function keytermsFetch(url: string, opts: RequestInit & { timeoutMs: number }): Promise<Response> {
   if (fetchForTests) return fetchForTests(url, opts);
+  // Synced key-terms ride the user-settings surface; an agent that declares
+  // none keeps them local (capabilities, audit phase 2).
+  if (url.includes('/api/parley/prefs') && supports('user-settings') === false) return new Response(null, { status: 404 });
   const { fetchWithTimeout } = await import('./util/fetchWithTimeout.ts');
   return fetchWithTimeout(url, opts);
 }

@@ -11,43 +11,27 @@
 // base64 `content`. That keeps the JSON message body small while big
 // files take the streamed path. See src/attachments.ts toSendPayload.
 
-import { readEnv } from '../env.mjs';
+import { upstreamOrDefault } from './index.ts';
 
-// Same knob server.ts resolves the agent from (PARLEY_PLATFORM_URL); UPSTREAM_URL
-// is the legacy alias. A second tenant on one box sets only the documented
-// name — reading a different one here would route his uploads to the
-// OTHER tenant's gateway (2026-10-10 second-tenant review).
-const UPSTREAM_URL = (process.env.PARLEY_PLATFORM_URL || process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
 
 export async function handleParleyUpload(req, res) {
+  // One upstream client (audit phase 2): URL + token live in HTTPAgentUpstream.
+  const up = upstreamOrDefault();
+  if (typeof up.extension !== 'function') {
+    res.writeHead(404, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'unsupported', detail: 'this upstream has no upload surface' }));
+    return;
+  }
   const headers: Record<string, string> = {};
-  if (UPSTREAM_TOKEN) headers['authorization'] = `Bearer ${UPSTREAM_TOKEN}`;
-  // Forward the body's content-type + length so the upstream's request
-  // stream behaves identically. The plugin reads request.content
-  // regardless, but forwarding keeps the hop transparent.
   const ct = req.headers['content-type'];
   if (typeof ct === 'string') headers['content-type'] = ct;
   const cl = req.headers['content-length'];
   if (typeof cl === 'string') headers['content-length'] = cl;
 
   try {
-    // The body is a one-shot stream, so a 404-then-retry is impossible
-    // here — resolve the prefix up front (upstreamRoutePrefix.ts covers
-    // the new-proxy/pre-rename-plugin window).
-    const upstream = await fetch(`${UPSTREAM_URL}/v1/parley/upload`, {
-      method: 'POST',
-      headers,
-      body: req,
-      // Required by undici when streaming a Node Readable as the body.
-      duplex: 'half',
-    } as any);
-
-    const text = await upstream.text();
-    res.writeHead(upstream.status, {
-      'content-type': upstream.headers.get('content-type') || 'application/json',
-    });
-    res.end(text);
+    const r = await up.extension('POST', '/v1/parley/upload', undefined, { rawBody: req, headers, text: true });
+    res.writeHead(r.status, { 'content-type': r.contentType || 'application/json' });
+    res.end(r.text ?? '');
   } catch (e: any) {
     console.error(`[parley] /api/parley/upload failed: ${e?.message || e}`);
     if (!res.headersSent) {

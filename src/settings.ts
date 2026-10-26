@@ -6,6 +6,7 @@ import * as backend from './backend.ts';
 import * as agentSettings from './agentSettings.ts';
 import * as cronSettings from './cronSettings.ts';
 import * as statusSettings from './statusSettings.ts';
+import { supports } from './capabilities.ts';
 import * as storageSettings from './storageSettings.ts';
 import { log } from './util/log.ts';
 import {
@@ -569,7 +570,9 @@ async function revalidate(): Promise<void> {
     let dbOk = false;
     const dbSettings: Record<string, any> = {};
     try {
-      const r = await fetch(apiUrl('/api/parley/prefs'), { cache: 'no-store' });
+      const r = supports('user-settings') === false
+        ? new Response(null, { status: 404 })      // agent declares no synced settings: local only, no probe
+        : await fetch(apiUrl('/api/parley/prefs'), { cache: 'no-store' });
       if (r.ok) {
         dbOk = true;
         const j = await r.json() as { settings?: Record<string, any> };
@@ -679,6 +682,7 @@ export function get() { return current; }
  *  failure the local cache keeps the user's value and the next load()
  *  resyncs from the DB. */
 function putServerSetting(key: string, value: any): void {
+  if (supports('user-settings') === false) return;   // agent declares no synced settings: local only
   void fetch(apiUrl(`/api/parley/prefs/${encodeURIComponent(key)}`), {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },

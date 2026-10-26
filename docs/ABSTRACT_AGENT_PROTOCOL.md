@@ -775,6 +775,38 @@ over hermes' `cron.jobs` store (the same store `hermes cron …` and the
 hermes dashboard mutate). Proxy forwarders: `proxy/parley/jobs.ts`
 (`/api/parley/jobs*`). Renderer: `src/cronSettings.ts`.
 
+## Optional capability discovery — `GET /v1/capabilities`
+
+Lets an upstream say which route families it implements, so the proxy
+and the PWA gate features instead of discovering each one by 404 or 502.
+
+```json
+{ "object": "capabilities",
+  "extensions": ["responses", "events", "liveness", "conversations", "search", "settings",
+                 "jobs", "health", "integrations", "pins", "unread", "activity", "questions",
+                 "user-settings", "push", "models", "upload", "capabilities"],
+  "turn_lifecycle": true,
+  "timestamp_units": "s",
+  "agent": { "name": "hermes", "version": "0.21.6", "plugin_version": "0.4.0" } }
+```
+
+- `extensions` — route-family names from the contract summary below
+  (`proxy/parley/contract/routes.ts`). The hermes plugin computes the list
+  from the routes it actually registered.
+- `turn_lifecycle` — the upstream emits `turn_start` / `turn_end`; the PWA
+  stops inferring liveness from replies.
+- `timestamp_units` — units of `created_at` / `timestamp` on items.
+
+The proxy probes it once the upstream is ready (and on a 5-minute TTL)
+and hands the answer to the PWA on `/config` as `agent.capabilities`.
+`404` → `null`: everyone falls back to probing per feature, exactly as
+before this endpoint existed. An upstream reachable only in-process (the
+claude-code adapter) answers from a literal and has no HTTP extensions, so
+the proxy answers `404 unsupported` for pins / unread / activity /
+user-settings / push and the PWA hides those surfaces.
+
+---
+
 ## Optional health extension — `/v1/health/*` (status + integrations)
 
 Lets the agent expose ONE status surface that parley renders as

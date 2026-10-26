@@ -20,12 +20,10 @@
 // were dropped (May 2026) in favor of asking the upstream directly.
 
 import http from 'node:http';
-import { readEnv } from '../env.mjs';
+import { upstreamOrDefault } from './index.ts';
 
-// PARLEY_PLATFORM_URL is the documented knob (server.ts); UPSTREAM_URL is the
-// legacy alias — see upload.ts.
-const UPSTREAM_URL = (process.env.PARLEY_PLATFORM_URL || process.env.UPSTREAM_URL || 'http://127.0.0.1:8645').replace(/\/+$/, '');
-const UPSTREAM_TOKEN = (process.env.UPSTREAM_TOKEN || readEnv('PARLEY_PLATFORM_TOKEN') || '').trim();
+// Upstream calls go through the one HTTP client (audit phase 2); an upstream
+// without extension() simply reports no auxiliary model / unknown capabilities.
 
 // ── Auxiliary vision advertisement ────────────────────────────────────
 // Short server-side memo so rapid PWA polls (visibility-change retries,
@@ -38,13 +36,12 @@ let visionMemo: { value: string | null; at: number } | null = null;
 let visionInFlight: Promise<string | null> | null = null;
 
 async function fetchVisionFallbackModelLive(): Promise<string | null> {
-  if (!UPSTREAM_TOKEN) return null;
+  const up = upstreamOrDefault();
+  if (typeof up.extension !== 'function') return null;
   try {
-    const r = await fetch(`${UPSTREAM_URL}/v1/parley/auxiliary-models`, {
-      headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` },
-    });
-    if (!r.ok) return null;
-    const j = await r.json() as { vision?: string | null };
+    const r = await up.extension('GET', '/v1/parley/auxiliary-models');
+    if (r.status !== 200) return null;
+    const j = r.body as { vision?: string | null };
     return typeof j?.vision === 'string' && j.vision ? j.vision : null;
   } catch {
     return null;
@@ -101,17 +98,15 @@ async function fetchCapabilitiesLive(
   provider: string,
   model: string,
 ): Promise<CapabilitiesResponse | null> {
-  if (!UPSTREAM_TOKEN) return null;
+  const up = upstreamOrDefault();
+  if (typeof up.extension !== 'function') return null;
   const qs = new URLSearchParams();
   if (provider) qs.set('provider', provider);
   qs.set('model', model);
   try {
-    const r = await fetch(
-      `${UPSTREAM_URL}/v1/parley/model-capabilities?${qs.toString()}`,
-      { headers: { authorization: `Bearer ${UPSTREAM_TOKEN}` } },
-    );
-    if (!r.ok) return null;
-    return await r.json() as CapabilitiesResponse;
+    const r = await up.extension('GET', `/v1/parley/model-capabilities?${qs.toString()}`);
+    if (r.status !== 200 || !r.body) return null;
+    return r.body as CapabilitiesResponse;
   } catch {
     return null;
   }

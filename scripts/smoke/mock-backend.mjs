@@ -1143,6 +1143,11 @@ export async function installMockBackend(page) {
   // `/api/parley/config`, which silently turned settings.load() into
   // a no-op (the runtime-config payload has no `settings` field) — every
   // mocked-backend test was reading DEFAULTS for every yaml-backed key.
+  // What the mock agent declares (audit phase 2). null = legacy upstream
+  // (the PWA probes per feature); scenarios narrow it via mock.setCapabilities.
+  let capabilities = { extensions: ['responses', 'events', 'liveness', 'conversations', 'search', 'gateway', 'settings', 'commands', 'jobs',
+    'health', 'integrations', 'models', 'upload', 'push', 'unread', 'pins', 'activity', 'questions', 'user-settings', 'capabilities'],
+    turn_lifecycle: false, timestamp_units: 's', agent: { name: 'mock' } };
   await page.route(/^https?:\/\/[^/]+\/config(\?.*)?$/, async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
     await route.fulfill({
@@ -1155,6 +1160,7 @@ export async function installMockBackend(page) {
         agentLabel: 'Clawdian',
         themePrimary: '',
         backend: 'proxy-client',
+        agent: { capabilities },
       }),
     });
   });
@@ -2253,6 +2259,8 @@ export async function installMockBackend(page) {
      *  with an enum-validation pass; getLastSettingsPost() returns
      *  what the PWA most recently sent. */
     /** Health checks served at /api/parley/health (null = 404). */
+    /** Agent capabilities on /config (null = legacy upstream, PWA probes per feature). */
+    setCapabilities(c) { capabilities = c; },
     setHealth(list) { health = list; lastHealthRun = null; },
     getLastHealthRun() { return lastHealthRun; },
     /** Addable integrations served at /api/parley/health/catalog (null = 404). */

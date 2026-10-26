@@ -19,6 +19,22 @@
 // working.
 export type { ParleyEnvelope, EnvelopeType, EnvelopeAttachment } from './contract/envelopes.ts';
 import type { ParleyEnvelope } from './contract/envelopes.ts';
+export type { AgentCapabilities } from './contract/capabilities.ts';
+import type { AgentCapabilities } from './contract/capabilities.ts';
+
+export interface ExtensionOpts {
+  /** Stream the request body as-is (uploads); `body` is ignored. */
+  rawBody?: unknown;
+  headers?: Record<string, string>;
+  /** Return the response as text (`text`), not parsed JSON. */
+  text?: boolean;
+}
+export interface ExtensionResponse {
+  status: number;
+  body: any;
+  text?: string;
+  contentType: string;
+}
 
 /** Drawer-list row, OAI Conversations API shape. */
 export interface ConversationSummary {
@@ -268,6 +284,15 @@ export interface UpstreamAgent {
   runHealth(id: string): Promise<any>;
   /** Integrations flows under /v1/health/… (catalog, actions, flows, oauth callback). Optional. */
   healthCall?(method: 'GET' | 'POST', sub: string, body?: unknown): Promise<{ status: number; body: any }>;
+  /** Capability discovery (GET /v1/capabilities). null = legacy upstream
+   *  without it; callers fall back to probing. Optional. */
+  capabilities?(): Promise<AgentCapabilities | null>;
+  /** The ONE pass-through for upstream-owned extension routes (push, unread,
+   *  pins, activity, questions, user-settings, models, upload, flows): one
+   *  URL + token resolution, the upstream's status kept. Absent on an
+   *  upstream that has no HTTP extensions → the proxy answers 404
+   *  "unsupported" (never 502) and the PWA hides the surface. */
+  extension?(method: 'GET' | 'POST' | 'DELETE' | 'PUT', path: string, body?: unknown, opts?: ExtensionOpts): Promise<ExtensionResponse>;
 
   /** Optional slash-command catalog. Returns null when the upstream
    *  doesn't implement /v1/commands (404); the proxy surfaces 404 to
@@ -559,18 +584,38 @@ export class HTTPAgentUpstream implements UpstreamAgent {
     return this.postJob(`/v1/health/${encodeURIComponent(id)}/run`);
   }
 
-  /** Integrations connect/add flows (health extension, phase 2): a thin
-   *  pass-through of `/v1/health/<sub>` with the upstream's status kept. */
+  /** Integrations connect/add flows (health extension, phase 2). */
   async healthCall(method: 'GET' | 'POST', sub: string, body?: unknown): Promise<{ status: number; body: any }> {
-    const init: RequestInit = { method, headers: this.headers() };
-    if (body !== undefined) {
-      init.headers = { ...this.headers(), 'content-type': 'application/json' };
+    const r = await this.extension(method, `/v1/health/${sub}`, body);
+    return { status: r.status, body: r.body };
+  }
+
+  async capabilities(): Promise<AgentCapabilities | null> {
+    const r = await fetch(`${this.url}/v1/capabilities`, { headers: this.headers() });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`upstream capabilities: HTTP ${r.status}`);
+    const j: any = await r.json();
+    if (!j || !Array.isArray(j.extensions)) return null;
+    return { extensions: j.extensions.map(String), turn_lifecycle: j.turn_lifecycle === true,
+             timestamp_units: j.timestamp_units === 'ms' ? 'ms' : 's', agent: j.agent && typeof j.agent === 'object' ? j.agent : undefined };
+  }
+
+  async extension(method: 'GET' | 'POST' | 'DELETE' | 'PUT', path: string, body?: unknown, opts: ExtensionOpts = {}): Promise<ExtensionResponse> {
+    const headers = this.headers({ accept: 'application/json', ...(opts.headers || {}) });
+    const init: any = { method, headers };
+    if (opts.rawBody !== undefined) {
+      init.body = opts.rawBody;
+      init.duplex = 'half';
+    } else if (body !== undefined && body !== null) {
+      headers['content-type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
-    const r = await fetch(`${this.url}/v1/health/${sub}`, init);
+    const r = await fetch(`${this.url}${path.startsWith('/') ? path : `/${path}`}`, init);
+    const contentType = r.headers.get('content-type') || '';
+    if (opts.text) return { status: r.status, body: null, text: await r.text(), contentType };
     let parsed: any = null;
     try { parsed = await r.json(); } catch { parsed = null; }
-    return { status: r.status, body: parsed };
+    return { status: r.status, body: parsed, contentType };
   }
 
   async listJobRuns(id: string, limit = 20): Promise<any> {

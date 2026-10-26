@@ -629,6 +629,13 @@ def register_routes(app: web.Application, ctx) -> None:
         from parley_route_health import register_health_routes  # type: ignore
     register_health_routes(app, ctx)
     app.router.add_post("/v1/user-settings", lambda r: handle_user_settings(ctx, r))
+    # Capability discovery (audit phase 2): computed from the router at
+    # request time, so it is always what is actually registered.
+    try:
+        from .parley_capabilities import register_capabilities_route
+    except ImportError:
+        from parley_capabilities import register_capabilities_route  # type: ignore
+    register_capabilities_route(app, ctx)
 
     app.router.add_get("/v1/unread", lambda r: handle_unread(ctx, r))
     app.router.add_post("/v1/unread/seen", lambda r: handle_unread_seen(ctx, r))

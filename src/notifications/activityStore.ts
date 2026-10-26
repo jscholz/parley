@@ -62,6 +62,7 @@ function payloadForServer(item: ActivityItem): Record<string, unknown> {
 const store = new ServerBackedStore<ActivityItem>({
   storageKey: STORAGE_KEY,
   endpoint: '/api/parley/activity?limit=200',
+  family: 'activity',
   fetchInit: { cache: 'no-store' },
   extract: (data) => (Array.isArray(data?.items) ? data.items : []),
   parse: normalizeItem,

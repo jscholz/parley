@@ -4,6 +4,7 @@
  */
 
 import { loadConfig, getConfig, gwWsUrl, getAppName, applySkinning, onConfigUnreachable } from './config.ts';
+import { applyCapabilitiesAtBoot } from './capabilities.ts';
 import { log, diag, setDebugElement } from './util/log.ts';
 import { apiUrl, isLocalShell } from './apiBase.ts';
 import { showReconnectModal } from './reconnectModal.ts';
@@ -610,6 +611,9 @@ async function boot() {
   }
   bootMark('loadConfig done');
   const cfg = getConfig();
+  // What the agent declares it implements (audit phase 2): turn
+  // lifecycle etc. apply now; feature modules consult supports() later.
+  applyCapabilitiesAtBoot();
   // Apply per-install skinning (app name, subtitle, theme color) before the
   // rest of the UI renders so branding is consistent from boot.
   applySkinning();

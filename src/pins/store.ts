@@ -24,6 +24,7 @@
 
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
+import { supports } from '../capabilities.ts';
 import { ServerBackedStore } from '../util/serverBackedStore.ts';
 import { isDurableMessageKey } from '../transcript/keys.ts';
 
@@ -105,6 +106,7 @@ const store = new ServerBackedStore<PinnedItem>({
 
 /** Boot-time hydrate. Stable name kept for existing call sites. Idempotent. */
 export async function hydrate(): Promise<void> {
+  if (supports('pins') === false) { log('[pins] upstream declares no pins surface — skipping'); return; }
   store.hydrate();
 }
 
@@ -129,6 +131,7 @@ export async function pinMessage(item: Omit<PinnedItem, 'pinnedAt'>): Promise<vo
   store.items.set(key(item.chatId, item.msgId), full);
   store.commit();
   try {
+    if (supports('pins') === false) return;   // agent declares no pins surface: local only
     const r = await store.trackWrite(() => fetch(apiUrl(PINS_ENDPOINT), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -183,6 +186,7 @@ export async function unpinMessage(chatId: string, msgId: string): Promise<void>
   if (!store.items.delete(key(chatId, msgId))) return;
   store.commit();
   try {
+    if (supports('pins') === false) return;   // agent declares no pins surface: local only
     const r = await store.trackWrite(() => fetch(
       `${apiUrl(PINS_ENDPOINT)}/${encodeURIComponent(chatId)}/${encodeURIComponent(msgId)}`,
       { method: 'DELETE' },
@@ -211,6 +215,7 @@ export async function clearAllPins(): Promise<void> {
   store.items.clear();
   store.commit();
   log(`[pins] clearAllPins — ${entries.length} pin(s)`);
+  if (supports('pins') === false) return;   // agent declares no pins surface: local only
   await store.trackWrite(() => Promise.all(entries.map((p) =>
     fetch(`${apiUrl(PINS_ENDPOINT)}/${encodeURIComponent(p.chatId)}/${encodeURIComponent(p.msgId)}`, {
       method: 'DELETE',

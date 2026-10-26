@@ -110,6 +110,8 @@ export class FakeAgent {
   private health: any[] | null = [];
   public lastHealthRun: string | null = null;
   public lastHealthFlowBody: { route: string; body: any } | null = null;
+  /** null = legacy upstream without GET /v1/capabilities. */
+  public capabilities: any = { object: 'capabilities', extensions: ['responses', 'events', 'liveness', 'conversations', 'search', 'gateway', 'settings', 'commands', 'jobs', 'health', 'integrations', 'models', 'upload', 'push', 'unread', 'pins', 'activity', 'questions', 'user-settings', 'capabilities'], turn_lifecycle: true, timestamp_units: 's', agent: { name: 'fake' } };
   public lastOAuthCallback: { server: string; query: Record<string, string> } | null = null;
   private readJson(req: any): Promise<any> {
     return new Promise((resolve) => {
@@ -206,6 +208,11 @@ export class FakeAgent {
     const url = new URL(req.url || '/', 'http://x');
     const method = req.method || 'GET';
 
+    if (method === 'GET' && url.pathname === '/v1/capabilities') {
+      if (this.capabilities === null) { this.json(res, 404, { error: { message: 'no capabilities' } }); return; }
+      this.json(res, 200, this.capabilities);
+      return;
+    }
     if (method === 'GET' && url.pathname === '/health') {
       this.json(res, 200, { status: 'ok' });
       return;

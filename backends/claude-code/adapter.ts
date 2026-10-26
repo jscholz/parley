@@ -37,6 +37,7 @@ import type {
   SearchResult,
   UpstreamAgent,
 } from '../../proxy/parley/upstream.ts';
+import type { AgentCapabilities } from '../../proxy/parley/contract/capabilities.ts';
 import type {
   AgentSdk,
   SdkCanUseTool,
@@ -621,6 +622,14 @@ export class ClaudeCodeUpstream {
 
   async healthcheck(): Promise<{ ok: boolean }> {
     return { ok: true };
+  }
+
+  /** Capability discovery (audit phase 2): what this in-process upstream
+   *  serves. No `extension()` → the proxy answers 404 for pins / unread /
+   *  activity / user-settings / push and the PWA hides those surfaces. */
+  async capabilities(): Promise<AgentCapabilities> {
+    return { extensions: ['responses', 'events', 'liveness', 'conversations', 'questions', 'capabilities'],
+             turn_lifecycle: false, timestamp_units: 's', agent: { name: 'claude-code' } };
   }
 
   async getSettingsSchema(): Promise<SettingDef[] | null> {

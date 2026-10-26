@@ -19,6 +19,7 @@
 
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
+import { supports } from '../capabilities.ts';
 
 // Read-through cache. The Map values are the per-chat unread counts
 // the server returned at the last refresh. NEVER mutate these
@@ -138,6 +139,7 @@ async function refreshFromServer(): Promise<void> {
   const epochAtFetch = mutationEpoch;
   const settledAtFetch = writesSettled;
   try {
+    if (supports('unread') === false) return null;
     const r = await (fetchImpl ?? fetch)(apiUrl('/api/parley/notifications/unread'));
     if (!r.ok) return;
     const data: any = await r.json();

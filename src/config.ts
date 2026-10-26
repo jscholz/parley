@@ -72,6 +72,16 @@ export function getConfig() {
   return cfg;
 }
 
+/** The loaded config, or the last cached one when nothing is loaded yet
+ *  (boot runs settings.load() before loadConfig(); capability gates use
+ *  this so they work from the second boot on). null on a cold first boot. */
+export function peekConfig(): any | null {
+  return cfg ?? readCachedConfig();
+}
+
+/** Test seam: set the loaded config without a network. */
+export function __setForTest(next: any) { cfg = next; }
+
 /** Gateway WS URL derived from the API host (the remote host in the CAP
  *  local-asset shell; the page hostname in a browser PWA). */
 export function gwWsUrl() {

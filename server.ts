@@ -1003,7 +1003,12 @@ function handleConfig(_req, res) {
     // direct-PWA-to-LLM adapters were removed in step 7. Setting any
     // other value loads hermes-gateway anyway.
     backend: cfgVal('PARLEY_BACKEND', 'backend.type', 'hermes-gateway'),
+    // What the upstream says it implements (contract/capabilities.ts);
+    // null until probed / for a legacy upstream — the PWA then probes
+    // per feature as it always did. Refreshed on a TTL in the background.
+    agent: { capabilities: parley.getCapabilities() },
   }));
+  void parley.refreshCapabilities();
 }
 
 // Parley audio bridge — standalone Python aiortc service for WebRTC
