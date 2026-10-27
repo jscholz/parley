@@ -68,9 +68,10 @@ export function isImageViewerOpen(): boolean {
   return !!document.getElementById('lightbox');
 }
 
-export function openImageViewer(src: string, opts: { alt?: string; kind?: 'image' | 'pdf'; fileName?: string } = {}): void {
+export function openImageViewer(src: string, opts: { alt?: string; kind?: 'image' | 'pdf'; fileName?: string; original?: string } = {}): void {
   closeImageViewer();
   const url = resolveSrc(src);
+  const originalUrl = opts.original ? resolveSrc(opts.original) : url;
   const kind = opts.kind ?? (isPdfHref(src) ? 'pdf' : 'image');
   const overlay = document.createElement('div');
   overlay.id = 'lightbox';
@@ -84,12 +85,12 @@ export function openImageViewer(src: string, opts: { alt?: string; kind?: 'image
     : decodeURIComponent((url.split('/').pop() || '').split(/[?#]/)[0] || 'image'));
   const dl = document.createElement('a');
   dl.className = 'lightbox-btn';
-  dl.href = url;
+  dl.href = originalUrl;
   dl.download = name;
   dl.textContent = 'Download';
   const orig = document.createElement('a');
   orig.className = 'lightbox-btn';
-  orig.href = url;
+  orig.href = originalUrl;
   orig.target = '_blank';
   orig.rel = 'noopener';
   orig.textContent = 'Open original';
@@ -154,7 +155,9 @@ export function installImageViewer(root: HTMLElement): void {
       const img = t as HTMLImageElement;
       e.preventDefault();
       e.stopPropagation();
-      openImageViewer(img.currentSrc || img.src, { alt: img.alt });
+      // A browser-hostile original (HEIC) is shown via its JPEG; Download
+      // and "Open original" still point at the original file.
+      openImageViewer(img.currentSrc || img.src, { alt: img.alt, original: img.dataset.original || undefined, fileName: img.dataset.fileName || undefined });
     }
   }, true);
 }

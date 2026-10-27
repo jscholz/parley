@@ -40,14 +40,15 @@ let rootResolver: () => string = () => path.join(dataHome(), 'uploads');
 export function setUploadsRootForTests(fn: () => string): void { rootResolver = fn; }
 export function uploadsRoot(): string { return rootResolver(); }
 
-export async function resolveUpload(umsg: string, idx: string): Promise<{ file: string; name: string } | null> {
+export async function resolveUpload(umsg: string, idx: string, thumb = false): Promise<{ file: string; name: string } | null> {
   if (!UMSG_RE.test(umsg) || !IDX_RE.test(idx)) return null;
   const root = path.resolve(uploadsRoot());
   const dir = path.join(root, umsg);
   let names: string[];
   try { names = await fs.readdir(dir); } catch { return null; }
   const prefix = `${Number(idx)}-`;
-  const hit = names.find((n) => n.startsWith(prefix));
+  // `/thumb`: the JPEG the plugin wrote beside a HEIC/TIFF upload (2026-10-27).
+  const hit = thumb ? names.find((n) => n === `${Number(idx)}-thumb.jpg`) : names.find((n) => n.startsWith(prefix) && !n.endsWith('-thumb.jpg'));
   if (!hit) return null;
   const file = path.join(dir, hit);
   let real: string;
@@ -58,8 +59,8 @@ export async function resolveUpload(umsg: string, idx: string): Promise<{ file: 
   return { file: real, name: hit.slice(prefix.length) || 'attachment' };
 }
 
-export async function handleUploadGet(req: http.IncomingMessage, res: http.ServerResponse, umsg: string, idx: string): Promise<void> {
-  const hit = await resolveUpload(umsg, idx);
+export async function handleUploadGet(req: http.IncomingMessage, res: http.ServerResponse, umsg: string, idx: string, thumb = false): Promise<void> {
+  const hit = await resolveUpload(umsg, idx, thumb);
   if (!hit) { res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found'); return; }
   const st = await fs.stat(hit.file);
   const ext = path.extname(hit.name).toLowerCase();

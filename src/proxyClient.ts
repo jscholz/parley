@@ -1060,7 +1060,7 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       const isReplay = env?._replay === true;
       const attachments = Array.isArray(env?.attachments)
         ? env.attachments.filter((a: any) => a && typeof a.url === 'string')
-          .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size }))
+          .map((a: any) => ({ url: a.url, mimeType: String(a.mimeType || ''), fileName: a.fileName, size: a.size, ...(typeof a.thumbUrl === 'string' ? { thumbUrl: a.thumbUrl } : {}) }))
         : undefined;
       subs?.onUserMessage?.({ conversation: chatId, text, messageId, isReplay, attachments });
       // Drawer ordering — skip on replay (see reply_final's matching

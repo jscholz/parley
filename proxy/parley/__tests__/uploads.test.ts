@@ -51,3 +51,19 @@ test('Range on an inline file answers 206', async () => {
   const r = res(); await handleUploadGet({ method: 'GET', headers: { range: 'bytes=1-2' } } as any, r, 'umsg_1_ab', '0'); await r.done;
   assert.equal(r.status, 206); assert.equal(r.headers['Content-Range'], 'bytes 1-2/4'); assert.equal(r.body.toString(), 'NG');
 });
+
+// HEIC/TIFF uploads carry a JPEG thumbnail beside the original (2026-10-27):
+// `/thumb` serves it; the plain index never returns the thumbnail file.
+test('serves the plugin-written thumbnail at <idx>/thumb and never as the original', async () => {
+  await fs.writeFile(path.join(dir, 'umsg_1_ab', '3-IMG_1619.HEIC'), 'HEIC!');
+  await fs.writeFile(path.join(dir, 'umsg_1_ab', '3-thumb.jpg'), 'JPEG!');
+  assert.equal((await resolveUpload('umsg_1_ab', '3'))?.name, 'IMG_1619.HEIC');
+  assert.equal((await resolveUpload('umsg_1_ab', '3', true))?.name, 'thumb.jpg');
+  assert.equal(await resolveUpload('umsg_1_ab', '0', true), null);          // no thumbnail for a PNG
+  const r = res();
+  await handleUploadGet({ headers: {}, method: 'GET' } as any, r, 'umsg_1_ab', '3', true);
+  await r.done;
+  assert.equal(r.status, 200);
+  assert.equal(r.headers['Content-Type'], 'image/jpeg');
+  assert.equal(r.body.toString(), 'JPEG!');
+});

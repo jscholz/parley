@@ -39,6 +39,8 @@ export interface EnvelopeAttachment {
   size?: number;
   /** Storage governance swept the file (Settings › Storage). */
   purged?: boolean;
+  /** Browser-viewable JPEG for formats browsers cannot show (HEIC/TIFF). */
+  thumbUrl?: string;
 }
 
 export type ParleyEnvelope =

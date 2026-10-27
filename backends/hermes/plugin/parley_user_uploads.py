@@ -51,6 +51,63 @@ def url_for(user_message_id: str, idx: int) -> str:
     return f"/api/parley/uploads/{user_message_id}/{idx}"
 
 
+def thumb_url_for(user_message_id: str, idx: int) -> str:
+    return f"/api/parley/uploads/{user_message_id}/{idx}/thumb"
+
+
+# Image types browsers (Chrome, Firefox, non-Apple) cannot show inline. The
+# model sees them fine (hermes image_routing re-encodes via Pillow), so the
+# chat renders a JPEG thumbnail written at upload time instead of a broken
+# image (field 2026-10-27: "I don't get thumbnails for HEIC images").
+THUMB_MIMES = frozenset({"image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "image/tiff", "image/bmp"})
+THUMB_EXTS = frozenset({"heic", "heif", "hif", "tif", "tiff", "bmp"})
+THUMB_MAX_PX = 1280
+
+
+def needs_thumbnail(mime: Optional[str], file_name: Optional[str]) -> bool:
+    m = (mime or "").split(";", 1)[0].strip().lower()
+    if m in THUMB_MIMES:
+        return True
+    ext = (file_name or "").rsplit(".", 1)[-1].lower() if "." in (file_name or "") else ""
+    return ext in THUMB_EXTS
+
+
+def thumb_path_for(dest: Path) -> Path:
+    """``<dir>/<idx>-thumb.jpg`` next to ``<dir>/<idx>-<name>``."""
+    idx = dest.name.split("-", 1)[0]
+    return dest.parent / f"{idx}-thumb.jpg"
+
+
+def write_thumbnail(dest: Path) -> Optional[Path]:
+    """Decode with Pillow (+ pillow_heif for HEIC/HEIF) and write a bounded
+    JPEG. None when the decoder is missing or the file is not an image —
+    the chat then falls back to a file chip, never a broken image."""
+    out = thumb_path_for(dest)
+    try:
+        from PIL import Image, ImageOps  # type: ignore
+        try:
+            import pillow_heif  # type: ignore
+            pillow_heif.register_heif_opener()
+        except Exception:
+            pass
+        with Image.open(dest) as im:
+            im = ImageOps.exif_transpose(im)
+            im.thumbnail((THUMB_MAX_PX, THUMB_MAX_PX))
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            tmp = out.with_suffix(".tmp")
+            im.save(tmp, "JPEG", quality=82, optimize=True)
+            os.replace(tmp, out)
+        try:
+            os.chmod(out, 0o600)
+        except OSError:
+            pass
+        return out
+    except Exception as exc:
+        logger.info("[parley] no thumbnail for %s: %s", dest.name, exc)
+        return None
+
+
 def persist_user_attachment(
     parley_db: Any,
     user_message_id: str,
@@ -83,6 +140,8 @@ def persist_user_attachment(
             os.chmod(dest, 0o600)
         except OSError:
             pass
+        if needs_thumbnail(mime, name):
+            write_thumbnail(dest)
         row = {"user_message_id": user_message_id, "idx": idx, "file_name": name,
                "mime": mime or "application/octet-stream", "size": size, "path": str(dest),
                "created_at": time.time()}
@@ -123,6 +182,8 @@ def attachments_for(parley_db: Any, user_message_ids: Iterable[str]) -> Dict[str
                 path = r[5] if len(r) > 5 else None
                 if path and not os.path.exists(path):
                     row["purged"] = True
+                elif path and thumb_path_for(Path(path)).exists():
+                    row["thumbUrl"] = thumb_url_for(umsg, idx)
                 out.setdefault(umsg, []).append(row)
     except Exception as exc:
         logger.debug("[parley] attachments_for failed: %s", exc)
@@ -242,12 +303,18 @@ def attachment_meta(raw_attachments: Any, user_message_id: str) -> List[Dict[str
             size = int(a["size"])
         if not name and not mime and content is None and not (a.get("uploadId") or a.get("upload_id")):
             continue
-        out.append({
+        meta = {
             "idx": idx,
             "fileName": safe_name(name, f"attachment-{idx}"),
             "mimeType": mime or "application/octet-stream",
             "size": size,
             "url": f"/api/parley/uploads/{user_message_id}/{idx}",
-        })
+        }
+        # The durable copy's thumbnail is written as the turn is
+        # materialised; other devices get the url now and fall back to a
+        # chip if it never appears.
+        if needs_thumbnail(mime, name):
+            meta["thumbUrl"] = thumb_url_for(user_message_id, idx)
+        out.append(meta)
         idx += 1
     return out

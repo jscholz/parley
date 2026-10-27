@@ -1346,7 +1346,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   /** Message timestamp; defaults to now. */
   timestamp?: number | Date | string;
   /** Image / video thumbnails rendered under the line. */
-  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number; purged?: boolean }>;
+  attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number; purged?: boolean; thumbUrl?: string }>;
   /** TTS reply id for agent lines — links bubble to playback events
    *  (loading bar + play-icon wiring). */
   replyId?: string;
@@ -1620,10 +1620,24 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       }
       if (att.mimeType?.startsWith('image/')) {
         const img = document.createElement('img');
-        img.src = src;
+        // HEIC/TIFF: browsers can't decode the original; the plugin wrote a
+        // JPEG beside it (2026-10-27). The viewer shows the same JPEG and
+        // keeps the original for Download.
+        const thumb = att?.thumbUrl ? apiUrl(att.thumbUrl) : '';
+        img.src = thumb || src;
+        if (thumb) { img.dataset.original = src; img.dataset.fileName = att.fileName || ''; }
         img.alt = att.fileName || 'attachment';
         img.title = att.fileName || 'attachment';
         img.loading = 'lazy';
+        if (thumb || /^data:image\/hei/.test(src)) {
+          // No decoder (Chrome on a HEIC data: URL, or a thumbnail not written yet): a chip, not a broken image.
+          img.addEventListener('error', () => {
+            const chip = document.createElement('a');
+            chip.className = 'pdf-chip file-chip'; chip.href = src; chip.download = att.fileName || 'image';
+            chip.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 11l4-4 3 3 2-2 3 3"/></svg><span class="pdf-chip-label">${escapeHtml(att.fileName || 'image')}</span>`;
+            img.replaceWith(chip);
+          }, { once: true });
+        }
         attDiv.appendChild(img);
       } else if (att.mimeType?.startsWith('video/') && !/^audio\//.test(att.mimeType)) {
         const vid = document.createElement('video');

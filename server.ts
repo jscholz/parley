@@ -1642,8 +1642,8 @@ const requestHandler: http.RequestListener = async (req, res) => {
   if (req.url === '/api/parley/docs/shelf' && req.method === 'PUT') return docShelf.handleShelfPut(req, res);
   const cachedDoc = req.method === 'GET' && /^\/api\/parley\/docs\/([0-9a-f]{1,8})$/.exec(req.url || '');
   if (cachedDoc) return docShelf.handleDocGet(req, res, cachedDoc[1]);
-  const upl = (req.method === 'GET' || req.method === 'HEAD') && /^\/api\/parley\/uploads\/([^/?]+)\/(\d+)(?:\?.*)?$/.exec(req.url || '');
-  if (upl) return uploads.handleUploadGet(req, res, decodeURIComponent(upl[1]), upl[2]);
+  const upl = (req.method === 'GET' || req.method === 'HEAD') && /^\/api\/parley\/uploads\/([^/?]+)\/(\d+)(\/thumb)?(?:\?.*)?$/.exec(req.url || '');
+  if (upl) return uploads.handleUploadGet(req, res, decodeURIComponent(upl[1]), upl[2], !!upl[3]);
   if (req.url === '/api/parley/diag/playback' && req.method === 'POST') return playbackAudit.handlePlaybackAudit(req, res);
   if (req.url === '/api/parley/diag/client' && (req.method === 'POST' || req.method === 'GET')) {
     const { handleClientDiag } = await import('./proxy/parley/clientDiag.ts');
