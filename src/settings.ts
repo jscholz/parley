@@ -7,6 +7,7 @@ import * as agentSettings from './agentSettings.ts';
 import * as cronSettings from './cronSettings.ts';
 import * as statusSettings from './statusSettings.ts';
 import { supports } from './capabilities.ts';
+import { isDevMode, setDevMode } from './util/devMode.ts';
 import * as storageSettings from './storageSettings.ts';
 import { log } from './util/log.ts';
 import {
@@ -833,6 +834,12 @@ export function hydrate(handlers: {
     if (setAudioFeedbackVal) setAudioFeedbackVal.textContent = audioFeedbackLabel(current.audioFeedbackVolume);
     if (setVoice) setVoice.value = current.voice;
     if (setWake) setWake.checked = current.wakeLock;
+    // Developer mode (util/devMode.ts): module-level flags, so a reload follows.
+    const setDev = $any('set-devmode') as HTMLInputElement | null;
+    if (setDev) {
+      setDev.checked = isDevMode();
+      setDev.onchange = () => { setDevMode(setDev.checked); window.location.reload(); };
+    }
     if (setCommitPhrase) setCommitPhrase.value = current.commitPhrase;
     if (setCommitDelay) setCommitDelay.value = String(current.commitDelaySec);
     if (setCommitDelayVal) setCommitDelayVal.textContent = `${current.commitDelaySec}s`;

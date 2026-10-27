@@ -6823,12 +6823,3 @@ body:not(.settings-advanced) #settings .settings-group [data-advanced] { display
   #settings .settings-nav { order: 99; padding-top: 6px; border-top: 1px solid var(--border); }
 }
 
-/* In-app link viewer (linkViewer.ts): a child pane, clearly still Parley. */
-#link-viewer { position: fixed; inset: 0; z-index: 10060; display: flex; flex-direction: column; background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(3px); padding: max(12px, env(safe-area-inset-top, 0px)) 12px max(12px, env(safe-area-inset-bottom, 0px)); }
-.link-viewer-bar { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; background: var(--surface); border: 1px solid var(--border); border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; min-height: 44px; }
-.link-viewer-brand { font-weight: 700; color: var(--primary); letter-spacing: .02em; }
-.link-viewer-host { font-family: var(--font-mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.link-viewer-hint { font-size: 11px; color: var(--muted); margin-left: auto; opacity: .8; }
-.link-viewer-open { white-space: nowrap; }
-.link-viewer-frame { flex: 1 1 auto; width: 100%; border: 1px solid var(--border); border-radius: 0 0 var(--radius) var(--radius); background: #fff; }
-@media (max-width: 699px) { .link-viewer-hint { display: none; } #link-viewer { padding: max(6px, env(safe-area-inset-top, 0px)) 6px max(6px, env(safe-area-inset-bottom, 0px)); } }

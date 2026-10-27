@@ -676,6 +676,13 @@
       <input type="checkbox" id="set-wake" checked>
       <span class="hint">keep screen on while listening</span>
     </div>
+    <!-- Developer mode: the installed PWA has no URL bar for ?debug=1, so
+         this toggle sets the same flags and reloads (2026-10-27). -->
+    <div class="row" data-advanced>
+      <label for="set-devmode">Developer mode</label>
+      <input type="checkbox" id="set-devmode">
+      <span class="hint">stream diagnostics (timings, scroll, drag) to the server log for debugging — reloads the app</span>
+    </div>
     <!-- TEMPORARY (capture Phase-1 CAP checkpoint): entry point to the
          lock-screen recording probe — CAP has no URL bar, so the page
          needs an in-app link. Remove with capture-probe.html once the

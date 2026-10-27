@@ -53,8 +53,14 @@ export function isDevMode(): boolean {
  *  setting so the various module-level flag reads pick it up. */
 export function setDevMode(on: boolean): void {
   try {
-    if (on) localStorage.setItem('dev_mode', '1');
-    else localStorage.removeItem('dev_mode');
+    // One switch for all three module-level flags: the dev pill (dev_mode),
+    // diag logging (parley_debug, util/log.ts) and the disk relay
+    // (debug_relay) — so the Settings toggle equals ?debug=1&debug-relay=1
+    // in an installed PWA that has no URL bar (field 2026-10-27).
+    for (const k of ['dev_mode', 'parley_debug', 'debug_relay']) {
+      if (on) localStorage.setItem(k, '1');
+      else localStorage.removeItem(k);
+    }
   } catch {}
 }
 
