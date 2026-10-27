@@ -170,7 +170,7 @@ export function project(state: ChatState): BubbleSpec[] {
         userKeys.add(key);
         // Machine-written attachment notes ("[Image attached at: …]",
         // "[screenshot]", "[94 images]") are for the model, not the bubble.
-        const spec: UserBubbleSpec = { kind: 'user', key, text: stripAttachmentNotes(item.content || ''), timestamp: ts };
+        const spec: UserBubbleSpec = { kind: 'user', key, text: stripAttachmentNotes(item.content || ''), timestamp: ts, delivery: 'delivered' };
         const notices = pdfNotices(item.content || '');
         if (notices.length) spec.notices = notices;
         // Durable user attachments (user-upload lane, 2026-10-11): history
@@ -369,6 +369,7 @@ export function project(state: ChatState): BubbleSpec[] {
             key,
             text: env.text || pend?.text || '',
             timestamp: ts,
+            delivery: 'delivered',      // the agent echoed it: it has the message
             source: pend?.source,
             // Our own send: the optimistic pending copy (data: thumbnails).
             // Another device's send: the broadcast's durable metadata
@@ -537,6 +538,7 @@ export function project(state: ChatState): BubbleSpec[] {
       timestamp: Math.max(p.sentAt, causalUserFloor(specs, p.messageId)),
       pending: !p.failed,
       failed: p.failed,
+      delivery: p.accepted ? 'sent' : 'pending',
       source: p.source,
       attachments: p.attachments,
     });

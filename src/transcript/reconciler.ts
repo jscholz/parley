@@ -278,15 +278,34 @@ function createUser(spec: UserBubbleSpec, batch: boolean): HTMLElement | null {
 // reaction — and the "no reply" notice for a turn that failed or was
 // stopped. Self-contained on purpose: one call site per create/update,
 // so the mark can be flagged off or dropped without touching the rest.
-const TURN_ACK_GLYPH: Record<string, { glyph: string; title: string }> = {
-  processing: { glyph: '👀', title: 'Working on it' },
-  success: { glyph: '✓', title: 'Done' },
-  failure: { glyph: '✗', title: 'Failed' },
-  cancelled: { glyph: '✗', title: 'Stopped' },
-};
+// Delivery marks (2026-10-27, WhatsApp-style, following the pipeline's
+// own states rather than forcing the model): ◷ only on this device →
+// ✓ accepted by the proxy → ✓✓ the agent has it (its echo / durable
+// row) → ✓✓ coloured once the agent STARTED on it (turn_start) — "seen"
+// means the turn began, not that the server holds the bytes. A turn that
+// failed or was stopped ends as ✗ (+ the inline "no reply" notice); a
+// successful turn keeps the coloured ticks — the reply is the proof.
+export interface DeliveryMark { glyph: string; title: string; state: string }
+
+export function deliveryMark(spec: Pick<UserBubbleSpec, 'ack' | 'delivery' | 'failed' | 'pending'>): DeliveryMark | null {
+  if (spec.failed) return { glyph: '!', title: 'Not sent — retry', state: 'failed' };
+  switch (spec.ack) {
+    case 'failure': return { glyph: '✗', title: 'The agent failed on this', state: 'failure' };
+    case 'cancelled': return { glyph: '✗', title: 'Stopped', state: 'cancelled' };
+    case 'processing': return { glyph: '✓✓', title: 'Seen — the agent is working on it', state: 'seen' };
+    case 'success': return { glyph: '✓✓', title: 'Seen and answered', state: 'seen' };
+    default: break;
+  }
+  switch (spec.delivery) {
+    case 'delivered': return { glyph: '✓✓', title: 'Received by the agent', state: 'delivered' };
+    case 'sent': return { glyph: '✓', title: 'Sent to Parley', state: 'sent' };
+    case 'pending': return { glyph: '◷', title: 'Sending…', state: 'pending' };
+    default: return null;
+  }
+}
 
 function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
-  const want = spec.ack ? TURN_ACK_GLYPH[spec.ack] : undefined;
+  const want = deliveryMark(spec);
   let mark = el.querySelector(':scope > .turn-ack') as HTMLElement | null;
   if (!want) {
     mark?.remove();
@@ -296,8 +315,9 @@ function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
       mark.className = 'turn-ack';
       el.appendChild(mark);
     }
-    if (mark.dataset.ack !== spec.ack) {
-      mark.dataset.ack = spec.ack!;
+    if (spec.ack) mark.dataset.ack = spec.ack; else delete mark.dataset.ack;
+    if (mark.dataset.state !== want.state) {
+      mark.dataset.state = want.state;
       mark.textContent = want.glyph;
       mark.title = want.title;
       mark.setAttribute('aria-label', want.title);

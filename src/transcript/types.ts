@@ -142,6 +142,9 @@ export interface PendingSend {
   /** Set when the send POST returned a non-2xx; surfaces the Retry
    *  affordance on the bubble. */
   failed?: boolean;
+  /** Set when the send POST was accepted by the proxy (2xx) — the
+   *  single-tick state of the delivery marks (2026-10-27). */
+  accepted?: boolean;
   /** Attachments threaded through atomic-send (Q1). */
   attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
 }
@@ -287,7 +290,14 @@ export interface UserBubbleSpec {
   source?: 'voice' | 'text' | 'sent';
   /** Live echo carries dataUrl; a durable row carries url (user-upload lane). */
   attachments?: Array<{ dataUrl?: string; url?: string; mimeType: string; fileName?: string; size?: number }>;
-  /** hermes' processing mark for this message (👀 / ✓ / ✗). */
+  /** Where the message is (delivery marks, WhatsApp-style, 2026-10-27):
+   *  `pending` = only on this device (POST in flight / queued offline),
+   *  `sent` = accepted by Parley's proxy (one tick), `delivered` = the
+   *  agent has it (its user_message echo / durable row: two ticks).
+   *  `ack` then colours the ticks: processing/success = seen (blue),
+   *  failure/cancelled = ✗. */
+  delivery?: 'pending' | 'sent' | 'delivered';
+  /** The agent's processing state for this message (turn_start/turn_end). */
   ack?: TurnAck;
   /** Set when the turn this message started ended as a failure or was
    *  stopped AND no reply followed — the inline "no reply" notice. */

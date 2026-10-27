@@ -705,6 +705,17 @@ export function getPendingSend(chatId: string, messageId: string): PendingSend |
   return s.pendingSends.find(p => p.messageId === messageId) ?? null;
 }
 
+/** The proxy accepted the POST (2xx): one tick. A later echo clears the
+ *  pending send altogether (two ticks). */
+export function markPendingSendAccepted(chatId: string, messageId: string): void {
+  const s = getState(chatId);
+  const p = s.pendingSends.find(p => p.messageId === messageId);
+  if (!p || p.accepted) return;
+  p.accepted = true;
+  p.failed = false;
+  notify(chatId);
+}
+
 export function markPendingSendFailed(chatId: string, messageId: string): void {
   const s = getState(chatId);
   const p = s.pendingSends.find(p => p.messageId === messageId);

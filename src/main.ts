@@ -493,6 +493,7 @@ function sendOrQueueMessage(
   if (chatId && !sendOpts.chatId) sendOpts.chatId = chatId;
   Promise.resolve()
     .then(() => backend.sendMessage(text, sendOpts))
+    .then(() => { if (chatId) transcriptStore.markPendingSendAccepted(chatId, messageId); })
     .catch((e: unknown) => {
       const msg = (e as Error)?.message || String(e);
       if (!isConnectivitySendError(e)) {
@@ -523,6 +524,7 @@ async function flushQueuedSends(): Promise<void> {
         // sendOrQueueMessage — deliberately not re-resolved here. The
         // user may be in a different chat by now; the message is not.
         await backend.sendMessage(q.text, q.sendOpts);
+        if (q.chatId) transcriptStore.markPendingSendAccepted(q.chatId, q.messageId);
       } catch (e: unknown) {
         const msg = (e as Error)?.message || String(e);
         // A miss against a server we believed reachable spends budget;
@@ -1172,7 +1174,8 @@ async function boot() {
       // (field bug 2026-06-12, CAP).
       const p = backend.sendMessage(cmd, { userMessageId, chatId });
       if (p && typeof (p as any).catch === 'function') {
-        (p as Promise<unknown>).catch((e) => failBubble((e as Error)?.message || String(e)));
+        (p as Promise<unknown>).then(() => transcriptStore.markPendingSendAccepted(chatId, userMessageId))
+          .catch((e) => failBubble((e as Error)?.message || String(e)));
       }
     } catch (e: any) {
       failBubble(e?.message || String(e));

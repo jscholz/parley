@@ -20,7 +20,7 @@
 import { waitForReady, openSidebar, clickRow, assert } from './lib.mjs';
 
 export const NAME = 'turn-lifecycle-authoritative';
-export const DESCRIPTION = 'hermes turn_start/turn_end drive the thinking indicator and the 👀/✓/✗ mark; straggler typing after turn_end cannot resurrect "Thinking"; failed silent turns get a notice';
+export const DESCRIPTION = 'hermes turn_start/turn_end drive the thinking indicator and the delivery marks (✓✓ seen / ✗); straggler typing after turn_end cannot resurrect "Thinking"; failed silent turns get a notice';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 

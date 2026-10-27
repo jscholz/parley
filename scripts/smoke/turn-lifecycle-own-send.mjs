@@ -10,7 +10,7 @@
 import { waitForReady, openSidebar, clickRow, send, assert } from './lib.mjs';
 
 export const NAME = 'turn-lifecycle-own-send';
-export const DESCRIPTION = 'lifecycle backend: own send shows the indicator before turn_start, 👀 → ✓ on the typed message, nothing left after turn_end';
+export const DESCRIPTION = 'lifecycle backend: own send shows the indicator before turn_start, ✓✓ turns coloured (seen) on the typed message on turn_start, stays after turn_end';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -55,7 +55,7 @@ export default async function run({ page, log, mock }) {
   await page.waitForFunction((id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"] > .turn-ack`)?.dataset.ack === 'processing',
     umid, { timeout: 3_000, polling: 50 });
   await page.screenshot({ path: '/tmp/turn-lifecycle-ack.png' });
-  log('turn_start → 👀 on the typed message ✓ (screenshot /tmp/turn-lifecycle-ack.png)');
+  log('turn_start → seen (coloured ✓✓) on the typed message ✓ (screenshot /tmp/turn-lifecycle-ack.png)');
 
   mock.pushEnvelope({ type: 'reply_delta', chat_id: CHAT, message_id: 'msg_s1', text: 'yes it does' });
   mock.pushEnvelope({ type: 'reply_final', chat_id: CHAT, message_id: 'msg_s1' });
@@ -72,5 +72,5 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(800);
   const left = await page.evaluate((sel) => document.querySelectorAll(sel).length, INDICATOR);
   assert(left === 0, `straggler typing after turn_end resurrected the indicator (${left})`);
-  log('turn_end → ✓, indicator gone and stays gone ✓');
+  log('turn_end → ticks stay, indicator gone and stays gone ✓');
 }

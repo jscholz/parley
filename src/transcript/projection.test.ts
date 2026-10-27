@@ -1493,3 +1493,18 @@ describe('project: /steer sent to an idle agent (field 2026-10-20)', () => {
     assert.equal(project(s).filter((x) => x.kind === 'user').length, 2);
   });
 });
+
+describe('project: delivery marks (2026-10-27)', () => {
+  it('pending → sent → delivered follows the pipeline', () => {
+    const p: PendingSend = { messageId: 'umsg_d', text: 'hi', sentAt: T0, source: 'text' };
+    let out = project(state({ pendingSends: [p] }));
+    assert.equal(out[0].kind === 'user' && out[0].delivery, 'pending');
+    out = project(state({ pendingSends: [{ ...p, accepted: true }] }));
+    assert.equal(out[0].kind === 'user' && out[0].delivery, 'sent');
+    out = project(state({ pendingSends: [{ ...p, accepted: true }], inflight: [{ type: 'user_message', chat_id: 'c', message_id: 'umsg_d', text: 'hi' }] }));
+    const u = out.find((s) => s.kind === 'user');
+    assert.equal(u && u.kind === 'user' && u.delivery, 'delivered');
+    const durable = project(state({ durable: [{ id: 1, role: 'user', content: 'hi', parley_id: 'umsg_d', timestamp: T0 / 1000 }] }));
+    assert.equal(durable[0].kind === 'user' && durable[0].delivery, 'delivered');
+  });
+});
