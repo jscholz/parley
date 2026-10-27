@@ -2164,13 +2164,13 @@
      paint-contains, so anything hung outside is clipped. The ✗ for a
      stopped turn stays muted; only a failure is red. */
   .line .turn-ack {
-    position: absolute; top: 7px; right: 28px;
     /* Delivery marks (2026-10-27): ◷ sending · ✓ sent · ✓✓ received ·
        ✓✓ coloured = the agent started on it · ✗ failed/stopped. Double
-       ticks overlap like a chat app's; grey until seen. */
-    font-size: 14px; line-height: 1; font-weight: 600;
-    letter-spacing: -0.38em; padding-right: 0.38em;
-    color: var(--muted); pointer-events: none;
+       ticks overlap like a chat app's; grey until seen. Lives inside
+       .line-ts, left of the time. */
+    font-size: 15px; line-height: 1; font-weight: 700;
+    letter-spacing: -0.4em; padding-right: 0.4em;
+    color: var(--muted); pointer-events: none; align-self: center;
     transition: color 200ms ease;
   }
   .line .turn-ack[data-state="pending"], .line .turn-ack[data-state="sent"],
@@ -3532,16 +3532,21 @@
   .line .line-ts {
     position: absolute; top: 6px; right: 34px;
     font-family: var(--font-mono); font-size: 10.5px;
-    color: var(--muted); opacity: 0.5;
+    color: var(--muted);
     letter-spacing: 0.04em;
-    /* Two-line stack: time on top, date below. Right-align so both
-       sub-lines hang off the same right edge (the narrow meta column),
-       and grow DOWNWARD — since .line-ts is absolutely positioned the
-       date line never reflows the message text or the action buttons. */
-    display: flex; flex-direction: column; align-items: flex-end;
+    /* Two rows hanging off the right edge: [delivery mark] [time] on the
+       first, the date spanning the second. Grows DOWNWARD — since
+       .line-ts is absolutely positioned the date line never reflows the
+       message text or the action buttons. The dimming sits on the time
+       and date spans, not here, so the mark keeps its colour. */
+    display: grid; grid-template-columns: auto auto; justify-content: end; justify-items: end;
+    align-items: baseline; column-gap: 6px;
     line-height: 1.25; text-align: right;
     pointer-events: none;  /* hover-through to the bubble; it's a label */
   }
+  .line .line-ts .line-ts-time { opacity: 0.5; grid-column: 2; }
+  .line .line-ts .turn-ack { grid-column: 1; grid-row: 1; }
+  .line .line-ts .line-ts-date { grid-column: 1 / -1; }
   /* Date sub-line — shown on every bubble (.has-date toggled true by the
      reconciler for each dated row). Smaller + dimmer than the time so it
      reads as a secondary date label rather than competing with the clock.
@@ -3550,7 +3555,7 @@
   .line .line-ts.has-date .line-ts-date {
     display: block;
     font-size: 9px;
-    opacity: 0.8;            /* relative to the parent's 0.5 → ~0.4 net */
+    opacity: 0.4;
     margin-top: 1px;
     letter-spacing: 0.02em;
     white-space: nowrap;

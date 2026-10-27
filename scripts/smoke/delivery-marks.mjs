@@ -27,8 +27,8 @@ export default async function run({ page, log, mock }) {
   await openSidebar(page);
   await clickRow(page, CHAT);
   await page.waitForFunction(() => (document.getElementById('transcript')?.textContent || '').includes('seed answer'), null, { timeout: 5_000, polling: 50 });
-  const markOf = (id) => page.evaluate((i) => { const m = document.querySelector(`#transcript .line.s0[data-message-id="${i}"] > .turn-ack`); return m ? { state: m.dataset.state, glyph: m.textContent, ack: m.dataset.ack || null } : null; }, id);
-  const waitState = (id, st) => page.waitForFunction((i, s) => document.querySelector(`#transcript .line.s0[data-message-id="${i}"] > .turn-ack`)?.dataset.state === s, [id, st], { timeout: 4_000, polling: 50 }).catch(() => null);
+  const markOf = (id) => page.evaluate((i) => { const m = document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`); return m ? { state: m.dataset.state, glyph: m.textContent, ack: m.dataset.ack || null } : null; }, id);
+  const waitState = (id, st) => page.waitForFunction((i, s) => document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`)?.dataset.state === s, [id, st], { timeout: 4_000, polling: 50 }).catch(() => null);
   // Durable rows from history: the agent has them.
   assert((await markOf('umsg_s0'))?.state === 'seen' || (await markOf('umsg_s0'))?.state === 'delivered', `history row: ${JSON.stringify(await markOf('umsg_s0'))}`);
 
@@ -44,14 +44,14 @@ export default async function run({ page, log, mock }) {
   await waitState(umid, 'delivered');
   const delivered = await markOf(umid);
   assert(delivered && delivered.state === 'delivered' && delivered.glyph === '✓✓', `agent echo → two ticks: ${JSON.stringify(delivered)}`);
-  const greyColor = await page.$eval(`#transcript .line.s0[data-message-id="${umid}"] > .turn-ack`, (m) => getComputedStyle(m).color);
+  const greyColor = await page.$eval(`#transcript .line.s0[data-message-id="${umid}"] .turn-ack`, (m) => getComputedStyle(m).color);
   log('✓✓ two ticks once the agent has it');
 
   mock.pushEnvelope({ type: 'turn_start', chat_id: CHAT, turn_id: 'turn_d1', user_message_id: umid });
   await waitState(umid, 'seen');
   await page.waitForTimeout(350);          // the colour transitions over 200 ms
   const seen = await markOf(umid);
-  const seenColor = await page.$eval(`#transcript .line.s0[data-message-id="${umid}"] > .turn-ack`, (m) => getComputedStyle(m).color);
+  const seenColor = await page.$eval(`#transcript .line.s0[data-message-id="${umid}"] .turn-ack`, (m) => getComputedStyle(m).color);
   assert(seen && seen.state === 'seen' && seen.glyph === '✓✓' && seen.ack === 'processing' && seenColor !== greyColor, `turn_start → coloured ticks: ${JSON.stringify(seen)} ${greyColor} → ${seenColor}`);
   log('✓✓ coloured when the agent started the turn (seen)');
 

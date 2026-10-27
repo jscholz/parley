@@ -52,7 +52,7 @@ export default async function run({ page, log, mock }) {
   log('indicator up before turn_start ✓');
 
   mock.pushEnvelope({ type: 'turn_start', chat_id: CHAT, turn_id: 'turn_s1', user_message_id: umid });
-  await page.waitForFunction((id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"] > .turn-ack`)?.dataset.ack === 'processing',
+  await page.waitForFunction((id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"] .turn-ack`)?.dataset.ack === 'processing',
     umid, { timeout: 3_000, polling: 50 });
   await page.screenshot({ path: '/tmp/turn-lifecycle-ack.png' });
   log('turn_start → seen (coloured ✓✓) on the typed message ✓ (screenshot /tmp/turn-lifecycle-ack.png)');
@@ -60,7 +60,7 @@ export default async function run({ page, log, mock }) {
   mock.pushEnvelope({ type: 'reply_delta', chat_id: CHAT, message_id: 'msg_s1', text: 'yes it does' });
   mock.pushEnvelope({ type: 'reply_final', chat_id: CHAT, message_id: 'msg_s1' });
   mock.pushEnvelope({ type: 'turn_end', chat_id: CHAT, turn_id: 'turn_s1', user_message_id: umid, outcome: 'success', replied: true, active_turns: 0 });
-  await page.waitForFunction((id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"] > .turn-ack`)?.dataset.ack === 'success',
+  await page.waitForFunction((id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"] .turn-ack`)?.dataset.ack === 'success',
     umid, { timeout: 3_000, polling: 50 });
   await page.waitForFunction((sel) => document.querySelectorAll(sel).length === 0, INDICATOR, { timeout: 3_000, polling: 50 });
   await page.screenshot({ path: '/tmp/turn-lifecycle-done.png' });

@@ -306,14 +306,19 @@ export function deliveryMark(spec: Pick<UserBubbleSpec, 'ack' | 'delivery' | 'fa
 
 function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
   const want = deliveryMark(spec);
-  let mark = el.querySelector(':scope > .turn-ack') as HTMLElement | null;
+  let mark = el.querySelector(':scope > .line-ts > .turn-ack, :scope > .turn-ack') as HTMLElement | null;
   if (!want) {
     mark?.remove();
   } else {
     if (!mark) {
       mark = document.createElement('span');
       mark.className = 'turn-ack';
-      el.appendChild(mark);
+      // Beside the time, to its LEFT (field 2026-10-27: "the way WhatsApp
+      // does — in our case left rather than right — would leave the caret
+      // menu un-crowded"). Inside .line-ts so the two-line stamp owns it.
+      const tsEl = el.querySelector(':scope > .line-ts') as HTMLElement | null;
+      if (tsEl) tsEl.insertBefore(mark, tsEl.querySelector('.line-ts-time') ?? tsEl.firstChild);
+      else el.appendChild(mark);
     }
     if (spec.ack) mark.dataset.ack = spec.ack; else delete mark.dataset.ack;
     if (mark.dataset.state !== want.state) {
@@ -858,12 +863,14 @@ function updateTimestamp(el: HTMLElement, timestamp: number): void {
   if (!timeSpan || !dateSpan) {
     // First stamp on this element: build the time/date sub-spans. Clear
     // any legacy plain-text content chat.addLine seeded so we don't double
-    // up the time.
+    // up the time — but keep a delivery mark that already sits here.
+    const mark = tsEl.querySelector(':scope > .turn-ack');
     tsEl.textContent = '';
     timeSpan = document.createElement('span');
     timeSpan.className = 'line-ts-time';
     dateSpan = document.createElement('span');
     dateSpan.className = 'line-ts-date';
+    if (mark) tsEl.appendChild(mark);
     tsEl.appendChild(timeSpan);
     tsEl.appendChild(dateSpan);
   }

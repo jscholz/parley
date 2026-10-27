@@ -206,6 +206,13 @@ function initResizer(
     Math.max(cfg.minWidthPx, Math.min(maxWidth(), Math.round(w)));
   const apply = (w: number) =>
     document.documentElement.style.setProperty(cfg.cssVar, `${clamp(w)}px`);
+  // One layout per frame during a drag, however fast the pointer reports.
+  let pendingW: number | null = null;
+  const applySoon = (w: number) => {
+    if (pendingW !== null) { pendingW = w; return; }
+    pendingW = w;
+    requestAnimationFrame(() => { const v = pendingW; pendingW = null; if (v !== null) apply(v); });
+  };
   // Persisted as a share of the viewport (util/panelWidth.ts) so the panel
   // keeps its proportion when the window moves to a different screen.
   const readPersisted = (): number | null => {
@@ -238,7 +245,7 @@ function initResizer(
     // RIGHT drawer: drag handle is on its LEFT edge → drag right
     // DECREASES width (delta > 0 → narrower).
     const signedDelta = side === 'left' ? delta : -delta;
-    apply(startWidth + signedDelta);
+    applySoon(startWidth + signedDelta);
   };
 
   const onUp = (e: PointerEvent) => {

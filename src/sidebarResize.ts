@@ -41,6 +41,13 @@ function clamp(w: number): number {
   return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(w)));
 }
 
+let pendingW: number | null = null;
+function applyWidthSoon(width: number): void {
+  if (pendingW !== null) { pendingW = width; return; }
+  pendingW = width;
+  requestAnimationFrame(() => { const v = pendingW; pendingW = null; if (v !== null) applyWidth(v); });
+}
+
 function applyWidth(width: number): void {
   const w = clamp(width);
   // Single source of truth — both `#sidebar.expanded` and
@@ -70,7 +77,7 @@ export function init(): void {
   const onMove = (e: PointerEvent) => {
     if (!dragging) return;
     const delta = e.clientX - startX;
-    applyWidth(startWidth + delta);
+    applyWidthSoon(startWidth + delta);
   };
 
   const onUp = (e: PointerEvent) => {

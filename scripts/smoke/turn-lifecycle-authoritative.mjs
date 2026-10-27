@@ -43,7 +43,7 @@ export function MOCK_SETUP(mock) {
 
 const snap = (page) => page.evaluate(() => {
   const userLine = (id) => document.querySelector(`#transcript .line.s0[data-message-id="${id}"]`);
-  const ack = (id) => userLine(id)?.querySelector(':scope > .turn-ack')?.dataset.ack ?? null;
+  const ack = (id) => userLine(id)?.querySelector('.turn-ack')?.dataset.ack ?? null;
   const notice = (id) => userLine(id)?.querySelector(':scope > .turn-notice')?.textContent ?? null;
   return {
     statusLine: document.querySelectorAll('#transcript .line.turn-status').length,
@@ -63,7 +63,7 @@ export default async function run({ page, log, mock }) {
   await waitSnap(page, () => (document.getElementById('transcript')?.textContent || '').includes('earlier answer'));
 
   // 1. Items-page mark paints on load.
-  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_a"] > .turn-ack')?.dataset.ack === 'success');
+  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_a"] .turn-ack')?.dataset.ack === 'success');
   let s = await snap(page);
   assert(s.statusLine === 0 && s.placeholder === 0, `idle chat must show no indicator: ${JSON.stringify(s)}`);
   log('items-page ✓ painted on load; idle chat shows no indicator ✓');
@@ -72,7 +72,7 @@ export default async function run({ page, log, mock }) {
   // can be what carries the indicator).
   mock.pushEnvelope({ type: 'user_message', chat_id: CHAT, message_id: 'umsg_b', text: 'second question' });
   mock.pushEnvelope({ type: 'turn_start', chat_id: CHAT, turn_id: 'turn_b', user_message_id: 'umsg_b' });
-  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_b"] > .turn-ack')?.dataset.ack === 'processing');
+  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_b"] .turn-ack')?.dataset.ack === 'processing');
   await waitSnap(page, () => document.querySelectorAll('#transcript .line.turn-status, #transcript .line.agent.streaming').length === 1);
   log('turn_start → 👀 on the message + indicator ✓');
 
@@ -108,7 +108,7 @@ export default async function run({ page, log, mock }) {
   // 5. A turn that fails without replying.
   mock.pushEnvelope({ type: 'user_message', chat_id: CHAT, message_id: 'umsg_c', text: 'third question' });
   mock.pushEnvelope({ type: 'turn_start', chat_id: CHAT, turn_id: 'turn_c', user_message_id: 'umsg_c' });
-  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_c"] > .turn-ack')?.dataset.ack === 'processing');
+  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_c"] .turn-ack')?.dataset.ack === 'processing');
   mock.pushEnvelope({ type: 'turn_end', chat_id: CHAT, turn_id: 'turn_c', user_message_id: 'umsg_c', outcome: 'failure', replied: false, active_turns: 0 });
   await waitSnap(page, () => !!document.querySelector('#transcript .line.s0[data-message-id="umsg_c"] > .turn-notice'));
   s = await snap(page);
@@ -129,7 +129,7 @@ export default async function run({ page, log, mock }) {
   await waitForReady(page);
   await openSidebar(page);
   await clickRow(page, CHAT);
-  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_c"] > .turn-ack')?.dataset.ack === 'failure', null, 5_000);
+  await waitSnap(page, () => document.querySelector('#transcript .line.s0[data-message-id="umsg_c"] .turn-ack')?.dataset.ack === 'failure', null, 5_000);
   s = await snap(page);
   assert(s.ackA === 'success', `✓ on the earlier message survives reload: ${JSON.stringify(s)}`);
   assert(s.statusLine === 0 && s.placeholder === 0, `reloaded idle chat shows no indicator: ${JSON.stringify(s)}`);
