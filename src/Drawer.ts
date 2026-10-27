@@ -208,10 +208,30 @@ function initResizer(
     document.documentElement.style.setProperty(cfg.cssVar, `${clamp(w)}px`);
   // One layout per frame during a drag, however fast the pointer reports.
   let pendingW: number | null = null;
+  // Drag timing probe (field 2026-10-27: "the right panel feels laggy …
+  // correlated with session length"): per drag, the frame cost of the
+  // width change — forced style+layout right after the write — with the
+  // transcript row count, as one diag line the dev relay ships.
+  let probe: { frames: number; maxMs: number; sumMs: number } | null = null;
   const applySoon = (w: number) => {
     if (pendingW !== null) { pendingW = w; return; }
     pendingW = w;
-    requestAnimationFrame(() => { const v = pendingW; pendingW = null; if (v !== null) apply(v); });
+    requestAnimationFrame(() => {
+      const v = pendingW; pendingW = null;
+      if (v === null) return;
+      const t0 = performance.now();
+      apply(v);
+      void document.body.offsetHeight;          // force the style+layout this frame pays for
+      const ms = performance.now() - t0;
+      if (probe) { probe.frames++; probe.sumMs += ms; if (ms > probe.maxMs) probe.maxMs = ms; }
+    });
+  };
+  const probeStart = () => { probe = { frames: 0, maxMs: 0, sumMs: 0 }; };
+  const probeEnd = () => {
+    if (!probe || !probe.frames) { probe = null; return; }
+    const rows = document.querySelectorAll('#transcript .line').length;
+    diag(`[drag] ${cfg.cssVar} ${probe.frames} frames, layout max ${probe.maxMs.toFixed(1)} ms avg ${(probe.sumMs / probe.frames).toFixed(1)} ms, transcript rows=${rows}`);
+    probe = null;
   };
   // Persisted as a share of the viewport (util/panelWidth.ts) so the panel
   // keeps its proportion when the window moves to a different screen.
@@ -254,6 +274,7 @@ function initResizer(
     handleEl.classList.remove('dragging');
     document.body.classList.remove(`${cfg.handleId}-active`);
     handleEl.releasePointerCapture?.(e.pointerId);
+    probeEnd();
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
@@ -272,6 +293,7 @@ function initResizer(
     startWidth = drawer.getBoundingClientRect().width || cfg.defaultWidthPx;
     handleEl.classList.add('dragging');
     document.body.classList.add(`${cfg.handleId}-active`);
+    probeStart();
     handleEl.setPointerCapture?.(e.pointerId);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);

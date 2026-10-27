@@ -2311,7 +2311,10 @@
     /* Hairline border so the bubble reads as a raised surface, not a
        flat tint fading into the background (UX-polish 2026-08-11). */
     border: 1px solid var(--border-subtle);
-    padding: var(--space-3) 44px var(--space-3) var(--space-4);
+    /* Right padding reserves the stamp column (delivery mark + time, two
+       rows, hung at right:10px): 44px fit the time alone; the mark beside
+       it needs ~30px more or the text runs under it (field 2026-10-27). */
+    padding: var(--space-3) 76px var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
   }
   .line.s0 .speaker { display: none; }

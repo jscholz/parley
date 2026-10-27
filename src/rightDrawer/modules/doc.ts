@@ -38,16 +38,13 @@ import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
-import {
-  currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder,
-  snapshotDocs, restoreDocs,
-  type DocState, setDoc,
-} from '../docStore.ts';
+import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs } from '../docStore.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
 import { externalLinkTarget } from '../../native/externalLinks.ts';
 import type { DocShelfSnapshot } from '../docStore.ts';
+import { log } from '../../util/log.ts';
 
 export type DocView = 'reader' | 'list';
 
@@ -324,6 +321,7 @@ export function createDocModule(opts: {
     rm.setAttribute('aria-label', 'Close document (file stays on disk)');
     rm.setAttribute('title', 'Close — file stays on disk');
     rm.onclick = (e: MouseEvent) => {
+      const t0 = performance.now();
       const snap = snapshotDocs();
       removeDoc(doc.id);
       try {
@@ -337,6 +335,10 @@ export function createDocModule(opts: {
         setViewState('reader');
         rerender(ctx);
       }, { y: e.clientY });
+      // Close timing probe (field 2026-10-27: "took a while to refresh the
+      // thing underneath"): sync work, then time to the next painted frame.
+      const sync = performance.now() - t0;
+      requestAnimationFrame(() => requestAnimationFrame(() => log(`[docs] close → next doc painted: sync ${sync.toFixed(1)} ms, paint +${(performance.now() - t0).toFixed(1)} ms, docs=${listDocs().length}`)));
     };
 
     // Option B (UX-pass point 4, approved direction 2026-08-25): ONE
