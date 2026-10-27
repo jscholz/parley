@@ -6661,8 +6661,9 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
    covered. Same ghost + tinted-action language as the toast. */
 #doc-drawer-panel { position: relative; }
 .doc-undo-bar {
-  position: absolute; left: 10px; right: 10px;
-  bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  /* top is set inline by doc.ts (centred on the close click); the right
+     gap keeps the next doc's × and download icons clickable. */
+  position: absolute; left: 10px; right: 64px; top: 8px;
   z-index: 30;
   display: flex; align-items: center; gap: 6px;
   margin: 0; padding: 4px 4px 4px 10px;

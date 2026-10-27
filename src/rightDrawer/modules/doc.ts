@@ -202,7 +202,7 @@ export function createDocModule(opts: {
           restoreDocs(snap);
           setViewState('list');
           rerender(ctx);
-        });
+        }, { y: e.clientY });
       };
       li.appendChild(close);
       ul.appendChild(li);
@@ -323,7 +323,7 @@ export function createDocModule(opts: {
     rm.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
     rm.setAttribute('aria-label', 'Close document (file stays on disk)');
     rm.setAttribute('title', 'Close — file stays on disk');
-    rm.onclick = () => {
+    rm.onclick = (e: MouseEvent) => {
       const snap = snapshotDocs();
       removeDoc(doc.id);
       try {
@@ -336,7 +336,7 @@ export function createDocModule(opts: {
         restoreDocs(snap);          // re-activates this doc
         setViewState('reader');
         rerender(ctx);
-      });
+      }, { y: e.clientY });
     };
 
     // Option B (UX-pass point 4, approved direction 2026-08-25): ONE
@@ -522,7 +522,12 @@ export function createDocModule(opts: {
 const UNDO_MS = 12_000;
 
 interface UndoBar {
-  show(message: string, onUndo: () => void): void;
+  /** `near` = the pointer's client Y at the close click: the pop-up is
+   *  centred on it (field 2026-10-27: "too far away … make it close to
+   *  cursor"). Without it (Clear all, a close from another device) it
+   *  sits at the top of the panel, by the header. It never reaches the
+   *  right edge, so the next doc's × / download stay clickable. */
+  show(message: string, onUndo: () => void, near?: { y: number }): void;
   hide(): void;
 }
 
@@ -548,10 +553,11 @@ function createUndoBar(panel: HTMLElement): UndoBar {
   dismiss.textContent = '✕';
   bar.append(text, action, dismiss);
   // Floating pop-up (2026-10-26: "what I wanted was a pop-up that hovers,
-  // and can be dismissed by clicking it"): absolutely positioned at the
-  // BOTTOM of the panel so it shifts nothing and never covers the doc's
-  // title row / × (the 2026-10-12 complaint). A tap anywhere on it that
-  // is not the Undo button dismisses it.
+  // and can be dismissed by clicking it"; 2026-10-27: "too far away …
+  // close to cursor, just not over the × or download icons of the next
+  // doc"): absolutely positioned, centred on the close click's Y, and
+  // stopping 64px short of the right edge where those controls live. It
+  // shifts nothing. A tap anywhere on it that is not Undo dismisses it.
   panel.appendChild(bar);
   let timer: number | null = null;
   let pending: (() => void) | null = null;
@@ -569,7 +575,24 @@ function createUndoBar(panel: HTMLElement): UndoBar {
   dismiss.addEventListener('click', (e) => { e.stopPropagation(); hide(); });
   bar.addEventListener('click', hide);
   return {
-    show(message, onUndo) {
+    show(message, onUndo, near) {
+      // Vertical placement: centred on the pointer, clamped inside the panel.
+      const pr = panel.getBoundingClientRect();
+      const barH = 34;
+      let top = 8;
+      if (near && Number.isFinite(near.y) && pr.height > 0) {
+        top = Math.round(near.y - pr.top - barH / 2);
+      } else {
+        // No pointer (Clear all, a close from another device): by the
+        // header, but below the empty-state text when that is what shows.
+        const empty = panel.querySelector<HTMLElement>('#doc-drawer-empty');
+        if (empty && !empty.hidden) {
+          const er = empty.getBoundingClientRect();
+          if (er.height > 0) top = Math.round(er.bottom - pr.top) + 8;
+        }
+      }
+      top = Math.max(6, Math.min(Math.max(6, pr.height - barH - 6), top));
+      bar.style.top = `${top}px`;
       text.textContent = message;
       pending = onUndo;
       bar.hidden = false;

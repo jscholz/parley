@@ -57,28 +57,36 @@ export default async function run({ page, log, mock }) {
   // 2. Reader × → Undo pop-up names the doc, floats at the panel's bottom
   //    without moving the content, Undo restores it.
   const contentTopBefore = await page.evaluate(() => Math.round(document.querySelector('#doc-drawer-body .doc-drawer-header, #doc-drawer-body .doc-drawer-content').getBoundingClientRect().top));
-  await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-drawer-remove').click());
+  // A real pointer click on the ×: the pop-up is placed around the pointer.
+  const xBox = await page.$eval('#doc-drawer-body .doc-drawer-remove', (b) => { const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.click(xBox.x, xBox.y);
   await shows('ALPHA-MARK');
   assert(await tabs() === 1, 'Bravo closed');
   const b1 = await bar();
   assert(!b1.hidden && /Closed "Bravo"/.test(b1.text), `Undo pop-up should name the closed doc: ${JSON.stringify(b1)}`);
   const geo = await page.evaluate(() => {
     const b = document.querySelector('#doc-drawer-panel .doc-undo-bar').getBoundingClientRect();
-    const p = document.getElementById('doc-drawer-panel').getBoundingClientRect();
     const h = document.querySelector('#doc-drawer-body .doc-drawer-header, #doc-drawer-body .doc-drawer-content').getBoundingClientRect();
-    return { barTop: Math.round(b.top), barBottom: Math.round(b.bottom), panelBottom: Math.round(p.bottom), contentTop: Math.round(h.top), headerBottom: Math.round(h.bottom), floating: getComputedStyle(document.querySelector('#doc-drawer-panel .doc-undo-bar')).position === 'absolute' };
+    const x = document.querySelector('#doc-drawer-body .doc-drawer-remove')?.getBoundingClientRect();
+    const dl = document.querySelector('#doc-drawer-body [aria-label="Download document"]')?.getBoundingClientRect();
+    const hitX = x ? document.elementFromPoint(x.left + x.width / 2, x.top + x.height / 2)?.closest('.doc-drawer-remove') : null;
+    const hitDl = dl ? document.elementFromPoint(dl.left + dl.width / 2, dl.top + dl.height / 2)?.closest('[aria-label="Download document"]') : null;
+    return { barTop: Math.round(b.top), barBottom: Math.round(b.bottom), barRight: Math.round(b.right), barMid: Math.round((b.top + b.bottom) / 2), contentTop: Math.round(h.top),
+             xLeft: x ? Math.round(x.left) : null, xOnTop: !!hitX, dlOnTop: dl ? !!hitDl : true,
+             floating: getComputedStyle(document.querySelector('#doc-drawer-panel .doc-undo-bar')).position === 'absolute' };
   });
   assert(geo.floating, `the pop-up must float (position:absolute): ${JSON.stringify(geo)}`);
   assert(geo.contentTop === contentTopBefore, `the pop-up must not shift the content (top ${contentTopBefore} → ${geo.contentTop})`);
-  assert(geo.barTop >= geo.headerBottom, `the pop-up must sit clear of the doc's title row: ${JSON.stringify(geo)}`);
-  assert(geo.barBottom <= geo.panelBottom && geo.panelBottom - geo.barBottom <= 24, `the pop-up hugs the panel's bottom edge: ${JSON.stringify(geo)}`);
+  assert(Math.abs(geo.barMid - xBox.y) <= 40, `the pop-up sits by the pointer (bar mid ${geo.barMid}, click y ${Math.round(xBox.y)})`);
+  assert(geo.xLeft === null || geo.barRight <= geo.xLeft, `the pop-up stops short of the next doc's ×: ${JSON.stringify(geo)}`);
+  assert(geo.xOnTop && geo.dlOnTop, `the next doc's × and download stay clickable: ${JSON.stringify(geo)}`);
   await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-action').click());
   await shows('BRAVO-MARK');
   assert(await tabs() === 2, 'Undo re-shelves Bravo');
   assert((await bar()).hidden, 'Undo hides the bar');
   const sel = await page.evaluate(() => [...document.querySelectorAll('#doc-rail-tabs .doc-rail-tab')].map((t) => t.getAttribute('aria-selected')));
   assert(sel[1] === 'true', `restored doc's tab is selected again: ${JSON.stringify(sel)}`);
-  log('reader ×: floating Undo pop-up, content unmoved; Undo restores Bravo in the reader ✓');
+  log('reader ×: Undo pop-up by the pointer, × and download clear, content unmoved; Undo restores Bravo ✓');
 
   // 3. List view: Clear all visible; row ✕ → Undo restores into the list.
   await page.click('#btn-doc-drawer-rail');

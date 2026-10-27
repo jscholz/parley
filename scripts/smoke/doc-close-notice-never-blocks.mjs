@@ -2,8 +2,8 @@
 // 2026-10-12: "the banner that comes up masks the heading of the next
 // message, and isn't dismissable, and doesn't let me click the x of the
 // window below"). The "Closed …" notice is the doc panel's Undo pop-up
-// (.doc-undo-bar). Since 2026-10-26 it FLOATS at the panel's bottom —
-// the opposite end from the next doc's title row and × — and both its
+// (.doc-undo-bar). It floats near the close click (2026-10-27) but stops
+// short of the right edge, so the next doc's × stays clickable; both its
 // ✕ and a click on its body dismiss it.
 import { waitForReady, assert } from './lib.mjs';
 
