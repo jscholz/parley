@@ -42,10 +42,18 @@ function clamp(w: number): number {
 }
 
 let pendingW: number | null = null;
+/** During a drag only the sidebar's own inline width changes; the root
+ *  --sidebar-width (read by the body padding, i.e. the transcript) is
+ *  written once on release. Writing the root custom property per frame
+ *  re-styles every element on the page (custom properties inherit). */
 function applyWidthSoon(width: number): void {
   if (pendingW !== null) { pendingW = width; return; }
   pendingW = width;
-  requestAnimationFrame(() => { const v = pendingW; pendingW = null; if (v !== null) applyWidth(v); });
+  requestAnimationFrame(() => {
+    const v = pendingW; pendingW = null;
+    const el = document.getElementById('sidebar');
+    if (v !== null && el) el.style.width = `${clamp(v)}px`;
+  });
 }
 
 function applyWidth(width: number): void {
@@ -86,9 +94,12 @@ export function init(): void {
     handle.classList.remove('dragging');
     document.body.classList.remove('sidebar-resizing');
     handle.releasePointerCapture?.(e.pointerId);
-    // Commit: the last queued width, then let the transcript re-wrap once.
-    if (pendingW !== null) { applyWidth(pendingW); pendingW = null; }
-    document.documentElement.style.removeProperty('--sidebar-pad');
+    // Commit: the dragged width becomes the root value once; the transcript re-wraps once.
+    const sb = document.getElementById('sidebar');
+    const dragged = pendingW !== null ? pendingW : (sb ? parseFloat(sb.style.width) : NaN);
+    pendingW = null;
+    if (Number.isFinite(dragged)) applyWidth(dragged);
+    sb?.style.removeProperty('width');
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
@@ -107,8 +118,6 @@ export function init(): void {
     startX = e.clientX;
     const sidebar = document.getElementById('sidebar');
     startWidth = sidebar ? sidebar.getBoundingClientRect().width : DEFAULT_WIDTH;
-    // Freeze the transcript's offset for the drag (see --sidebar-pad in app.css).
-    document.documentElement.style.setProperty('--sidebar-pad', `${Math.round(startWidth)}px`);
     handle.classList.add('dragging');
     document.body.classList.add('sidebar-resizing');
     handle.setPointerCapture?.(e.pointerId);

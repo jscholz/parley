@@ -1,8 +1,9 @@
 // Field 2026-10-28: dragging the right panel cost 46 ms per frame (78 max)
 // with 1,097 transcript rows in the DOM — every frame re-wrapped every row
-// because the transcript's width followed the panel live. Now the
-// transcript's offset is frozen for the drag (--pin-drawer-pad) and it
-// re-wraps once on release: per-frame cost no longer scales with rows.
+// because the transcript's width followed the panel live, and the root
+// custom property re-styled every element. Now the panel takes an inline
+// width during the drag and the root variable (body padding → transcript)
+// is written once on release: per-frame cost no longer scales with rows.
 import { waitForReady, assert } from './lib.mjs';
 
 export const NAME = 'drawer-drag-defers-reflow';
@@ -36,7 +37,7 @@ export default async function run({ page, log, mock }) {
   await page.waitForTimeout(100);
   const mid = await geom();
   assert(mid.drawer > before.drawer + 60, `panel resizes live during the drag: ${JSON.stringify({ before, mid })}`);
-  assert(mid.pad === before.pad && mid.transcriptW === before.transcriptW, `transcript keeps its width during the drag: ${JSON.stringify({ before, mid })}`);
+  assert(mid.pad === before.pad && mid.transcriptW === before.transcriptW && mid.widthVar === before.widthVar, `transcript and the root variable stay put during the drag: ${JSON.stringify({ before, mid })}`);
   log(`mid-drag: panel ${before.drawer}→${mid.drawer}px, transcript unchanged at ${mid.transcriptW}px ✓`);
   await page.mouse.up();
   // No easing: the transcript takes its new width in the first frame after
@@ -44,7 +45,7 @@ export default async function run({ page, log, mock }) {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   const after = await geom();
   assert(Math.abs(after.pad - after.widthVar) <= 1 && after.transcriptW < before.transcriptW - 60, `release: transcript takes the new width once: ${JSON.stringify({ before, after })}`);
-  const padVar = await page.evaluate(() => document.documentElement.style.getPropertyValue('--pin-drawer-pad'));
-  assert(padVar === '', `the freeze is cleared on release: "${padVar}"`);
+  const inline = await page.evaluate(() => document.getElementById('pin-drawer').style.width);
+  assert(inline === '', `the drag's inline width is handed to the root variable on release: "${inline}"`);
   log(`release: transcript ${before.transcriptW}→${after.transcriptW}px, padding follows the panel ✓`);
 }

@@ -220,7 +220,11 @@ function initResizer(
       const v = pendingW; pendingW = null;
       if (v === null) return;
       const t0 = performance.now();
-      apply(v);
+      // During a drag only the panel's own inline width changes. Writing the
+      // root custom property instead re-styles EVERY element (custom
+      // properties inherit) — 11 ms/frame at 853 rows even with the
+      // transcript frozen (2026-10-28). The root value is set once on release.
+      drawer.style.width = `${clamp(v)}px`;
       void document.body.offsetHeight;          // force the style+layout this frame pays for
       const ms = performance.now() - t0;
       if (probe) { probe.frames++; probe.sumMs += ms; if (ms > probe.maxMs) probe.maxMs = ms; }
@@ -230,12 +234,16 @@ function initResizer(
   // the body padding rule): only the panel resizes per frame, and the
   // transcript re-wraps ONCE at release. Field 2026-10-28: re-wrapping
   // every frame cost 46 ms/frame (78 max) with 1,097 rows in the DOM.
-  const padVar = cfg.cssVar.replace(/-width$/, '-pad');
-  const freezePad = (px: number) => document.documentElement.style.setProperty(padVar, `${Math.round(px)}px`);
+  // While dragging, nothing the transcript depends on changes: the panel
+  // takes an inline width per frame, and the root variable (which the body
+  // padding reads) is written once at release. Field 2026-10-28: writing
+  // the root variable per frame cost 46 ms/frame (78 max) at 1,097 rows.
   let commitMs = 0;
-  const releasePad = () => {
+  const commitWidth = () => {
+    const w = parseFloat(drawer.style.width);
     const t0 = performance.now();
-    document.documentElement.style.removeProperty(padVar);
+    if (Number.isFinite(w)) apply(w);
+    drawer.style.removeProperty('width');
     void document.body.offsetHeight;
     commitMs = performance.now() - t0;
   };
@@ -287,8 +295,8 @@ function initResizer(
     handleEl.classList.remove('dragging');
     document.body.classList.remove(`${cfg.handleId}-active`);
     handleEl.releasePointerCapture?.(e.pointerId);
-    if (pendingW !== null) { apply(pendingW); pendingW = null; }   // the last frame may still be queued
-    releasePad();
+    if (pendingW !== null) { drawer.style.width = `${clamp(pendingW)}px`; pendingW = null; }   // the last frame may still be queued
+    commitWidth();
     probeEnd();
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
@@ -306,7 +314,6 @@ function initResizer(
     dragging = true;
     startX = e.clientX;
     startWidth = drawer.getBoundingClientRect().width || cfg.defaultWidthPx;
-    freezePad(startWidth);
     handleEl.classList.add('dragging');
     document.body.classList.add(`${cfg.handleId}-active`);
     probeStart();

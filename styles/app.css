@@ -105,11 +105,11 @@
    * exactly behind the panel without overlap. JS sidebarResize updates
    * the variable; CSS reads it. Default 300px matches the no-resize
    * baseline. */
-  /* --sidebar-pad freezes the transcript's offset while the sidebar is being
-     dragged (Drawer.ts / sidebarResize.ts set it at pointerdown, clear it at
-     pointerup): only the panel resizes live, the transcript re-wraps once.
-     Field 2026-10-28: 46 ms per drag frame with 1,097 rows in the DOM. */
-  body.sidebar-expanded { padding-left: var(--sidebar-pad, var(--sidebar-width, var(--drawer-expanded-width))); }
+  /* The root --sidebar-width only changes on drag RELEASE (the panel takes an
+     inline width while dragging — Drawer.ts / sidebarResize.ts), so the
+     transcript re-wraps once per drag. Field 2026-10-28: 46 ms per frame at
+     1,097 rows when it followed the panel live. */
+  body.sidebar-expanded { padding-left: var(--sidebar-width, var(--drawer-expanded-width)); }
 
   /* Shared desktop drawer target. Both drawers can still be resized. Keep
    * the default compact so opening both drawers does not crush the chat on
@@ -654,7 +654,7 @@
   #multi-select-panel {
     position: fixed;
     top: 0; right: 0; bottom: 0;
-    left: var(--sidebar-pad, var(--sidebar-width, 300px));
+    left: var(--sidebar-width, 300px);
     background: var(--bg, #1a1a1a);
     z-index: 4;
     display: flex; align-items: center; justify-content: center;
@@ -2528,8 +2528,8 @@
    *     the discoverable toggle here.
    */
   body { padding-right: 48px; }   /* no transition: see the padding-left note above */
-  /* --pin-drawer-pad: frozen during a drag, like --sidebar-pad above. */
-  body.pin-drawer-open { padding-right: var(--pin-drawer-pad, var(--pin-drawer-width, var(--drawer-expanded-width))); }
+  /* --pin-drawer-width changes on drag release only (see the sidebar note). */
+  body.pin-drawer-open { padding-right: var(--pin-drawer-width, var(--drawer-expanded-width)); }
 
   /* When both drawers are open and overlap (mobile), whichever was
    * opened most recently gets `.front` and rises one z-index layer
