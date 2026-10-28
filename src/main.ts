@@ -808,7 +808,8 @@ async function boot() {
     id: 'sidebar',
     side: 'left',
     bodyClass: 'sidebar-expanded',
-    deferBodyShiftMs: 180,
+    deferBodyShiftMs: 0,
+    glideSelector: '.header > *, .toolbar > *, .main > .chat-column',
     prefKey: 'parley.sidebar.expanded',
     toggleIds: ['sb-toggle', 'sb-toggle-mobile'],
     excludeSwipeWhenTargetIn: ['#pin-drawer'],
@@ -824,7 +825,7 @@ async function boot() {
     // (2026-10-20). Reveal from the painted list at once (after layout),
     // and again once the refresh lands in case the row only arrived then.
     onOpen: () => {
-      // After the slide + content glide (~180 + 160 ms): scrolling the active
+      // After the slide + content glide (~180 ms each, overlapping): scrolling the active
       // row into view forces a layout of the list, and the refresh re-renders
       // it — in the first frames they delayed the panel's motion (2026-10-28).
       window.setTimeout(() => {

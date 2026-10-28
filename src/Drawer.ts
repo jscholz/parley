@@ -36,13 +36,18 @@ export interface DrawerConfig {
   side: 'left' | 'right';
   /** Body class applied when expanded (drives padding shift, etc). */
   bodyClass: string;
-  /** Desktop only: on OPEN, slide the panel first and shift the page
-   *  (bodyClass → body padding) when the slide ends, gliding the content
-   *  across with a compositor-only transform. The shift re-wraps the whole
-   *  transcript once; doing it in the first frame delayed the panel's start
-   *  by ~100 ms on a long session (field 2026-10-28, "clunky"). Close stays
-   *  immediate. Value = the panel's slide duration in ms. */
+  /** Desktop only: on OPEN, let the panel start moving first and shift the
+   *  page (bodyClass → body padding) this many ms later — 0 = one frame
+   *  later — gliding the content with glideSelector. The shift re-wraps the
+   *  whole transcript once; doing it in the click frame, with the list work,
+   *  delayed the panel's start by ~100 ms on a long session (field
+   *  2026-10-28, "clunky"). */
   deferBodyShiftMs?: number;
+  /** Elements that glide (FLIP) from their old to their new position when
+   *  the deferred shift lands — each by its OWN measured offset, so a
+   *  centred column moves by half the shift and right-aligned items don't
+   *  move at all (a uniform translate made them wobble). */
+  glideSelector?: string;
   /** localStorage key for the desktop expanded-state preference. */
   prefKey: string;
   /** Toggle button ids — any of these click toggles the drawer.
@@ -100,24 +105,29 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
 
   // ── State setters ─────────────────────────────────────────────────
   let shiftTimer: number | null = null;
-  /** Add the body class and glide the in-flow page content from where it
-   *  was: FLIP with a transform (no layout per frame). */
+  /** Apply a page-shifting change (`mutate` toggles the body class) and
+   *  glide the page content from where it was: per-element FLIP with
+   *  transforms — the shift's one re-layout, then compositor-only frames. */
+  const flipShift = (mutate: () => void) => {
+    const els = cfg.glideSelector ? Array.from(document.querySelectorAll<HTMLElement>(cfg.glideSelector)) : [];
+    const before = els.map((el) => el.getBoundingClientRect().left);
+    mutate();
+    const moved: Array<{ el: HTMLElement; dx: number }> = [];
+    els.forEach((el, i) => {
+      const dx = before[i] - el.getBoundingClientRect().left;   // the one re-layout we pay
+      if (Math.abs(dx) > 0.5) moved.push({ el, dx });
+    });
+    if (!moved.length) return;
+    for (const { el, dx } of moved) { el.style.transition = 'none'; el.style.transform = `translateX(${dx}px)`; }
+    requestAnimationFrame(() => {
+      for (const { el } of moved) { el.style.transition = 'transform 180ms ease-out'; el.style.transform = ''; }
+      window.setTimeout(() => { for (const { el } of moved) { el.style.removeProperty('transition'); el.style.removeProperty('transform'); } }, 240);
+    });
+  };
   const shiftBody = () => {
     shiftTimer = null;
     if (!drawer.classList.contains('expanded') || document.body.classList.contains(cfg.bodyClass)) return;
-    const body = document.body;
-    const before = parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
-    body.classList.add(cfg.bodyClass);
-    const after = parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
-    const delta = after - before;
-    if (!delta || !Number.isFinite(delta)) return;
-    const movers = Array.from(body.children).filter((el) => el instanceof HTMLElement && el !== drawer
-      && getComputedStyle(el).position !== 'fixed' && (el as HTMLElement).offsetParent !== null) as HTMLElement[];
-    for (const el of movers) { el.style.transition = 'none'; el.style.transform = `translateX(${-delta}px)`; }
-    requestAnimationFrame(() => {
-      for (const el of movers) { el.style.transition = 'transform 160ms ease-out'; el.style.transform = ''; }
-      window.setTimeout(() => { for (const el of movers) { el.style.removeProperty('transition'); el.style.removeProperty('transform'); } }, 220);
-    });
+    flipShift(() => document.body.classList.add(cfg.bodyClass));
   };
   const setExpanded = (exp: boolean, immediate = false) => {
     const wasOpen = isOpen();
@@ -125,9 +135,18 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
     drawer.classList.toggle('collapsed', !exp);
     drawer.setAttribute('aria-expanded', exp ? 'true' : 'false');
     if (shiftTimer !== null) { window.clearTimeout(shiftTimer); shiftTimer = null; }
-    const defer = !immediate && exp && !wasOpen && !!cfg.deferBodyShiftMs && window.innerWidth >= MOBILE_BREAKPOINT_PX;
-    if (defer) shiftTimer = window.setTimeout(shiftBody, cfg.deferBodyShiftMs);
-    else document.body.classList.toggle(cfg.bodyClass, exp);
+    const defer = !immediate && exp && !wasOpen && cfg.deferBodyShiftMs !== undefined && window.innerWidth >= MOBILE_BREAKPOINT_PX;
+    const glideClose = !immediate && !exp && wasOpen && !!cfg.glideSelector && window.innerWidth >= MOBILE_BREAKPOINT_PX;
+    if (defer) {
+      // 0 = one frame after the panel starts moving: content and panel move
+      // together (A/B on his session 2026-10-28: shifting AFTER the slide
+      // started faster but popped half-hidden under the panel).
+      if (cfg.deferBodyShiftMs === 0) {
+        shiftTimer = window.setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(shiftBody)), 0);
+      } else shiftTimer = window.setTimeout(shiftBody, cfg.deferBodyShiftMs);
+    } else if (glideClose) {
+      flipShift(() => document.body.classList.remove(cfg.bodyClass));
+    } else document.body.classList.toggle(cfg.bodyClass, exp);
     if (exp) {
       // Take .front so swipe + clicks land on us when both drawers
       // overlap on mobile. Mutually exclusive across the registry.
