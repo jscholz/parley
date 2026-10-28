@@ -86,6 +86,9 @@ export function init(): void {
     handle.classList.remove('dragging');
     document.body.classList.remove('sidebar-resizing');
     handle.releasePointerCapture?.(e.pointerId);
+    // Commit: the last queued width, then let the transcript re-wrap once.
+    if (pendingW !== null) { applyWidth(pendingW); pendingW = null; }
+    document.documentElement.style.removeProperty('--sidebar-pad');
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onUp);
@@ -104,6 +107,8 @@ export function init(): void {
     startX = e.clientX;
     const sidebar = document.getElementById('sidebar');
     startWidth = sidebar ? sidebar.getBoundingClientRect().width : DEFAULT_WIDTH;
+    // Freeze the transcript's offset for the drag (see --sidebar-pad in app.css).
+    document.documentElement.style.setProperty('--sidebar-pad', `${Math.round(startWidth)}px`);
     handle.classList.add('dragging');
     document.body.classList.add('sidebar-resizing');
     handle.setPointerCapture?.(e.pointerId);

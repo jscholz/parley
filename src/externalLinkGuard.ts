@@ -13,7 +13,7 @@
  * (native/externalLinks.ts → the OS browser).
  */
 import { externalLinkTarget, isNativeShell } from './native/externalLinks.ts';
-import { log } from './util/log.ts';
+import { log, diag } from './util/log.ts';
 
 let installed = false;
 
@@ -22,6 +22,11 @@ let installed = false;
  *  "popup blocked" (the first cut then navigated the app). */
 export function openInBrowser(url: string): void {
   const w = window.open(url, '_blank');
+  let host = url;
+  try { host = new URL(url).host; } catch { /* keep raw */ }
+  // One line per click when Developer mode is on, so "the link didn't
+  // open" can be told apart from "it opened in a Chrome window I can't see".
+  diag(`[external-links] click → ${host}: ${w ? 'window.open gave a tab' : 'window.open returned null → anchor fallback'}`);
   if (w) { try { (w as any).opener = null; } catch { /* cross-origin */ } return; }
   const a = document.createElement('a');
   a.href = url; a.target = '_blank'; a.rel = 'noopener';

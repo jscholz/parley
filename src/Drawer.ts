@@ -226,11 +226,24 @@ function initResizer(
       if (probe) { probe.frames++; probe.sumMs += ms; if (ms > probe.maxMs) probe.maxMs = ms; }
     });
   };
-  const probeStart = () => { probe = { frames: 0, maxMs: 0, sumMs: 0 }; };
+  // While dragging, the transcript's offset is frozen (`--…-pad`, read by
+  // the body padding rule): only the panel resizes per frame, and the
+  // transcript re-wraps ONCE at release. Field 2026-10-28: re-wrapping
+  // every frame cost 46 ms/frame (78 max) with 1,097 rows in the DOM.
+  const padVar = cfg.cssVar.replace(/-width$/, '-pad');
+  const freezePad = (px: number) => document.documentElement.style.setProperty(padVar, `${Math.round(px)}px`);
+  let commitMs = 0;
+  const releasePad = () => {
+    const t0 = performance.now();
+    document.documentElement.style.removeProperty(padVar);
+    void document.body.offsetHeight;
+    commitMs = performance.now() - t0;
+  };
+  const probeStart = () => { probe = { frames: 0, maxMs: 0, sumMs: 0 }; commitMs = 0; };
   const probeEnd = () => {
     if (!probe || !probe.frames) { probe = null; return; }
     const rows = document.querySelectorAll('#transcript .line').length;
-    diag(`[drag] ${cfg.cssVar} ${probe.frames} frames, layout max ${probe.maxMs.toFixed(1)} ms avg ${(probe.sumMs / probe.frames).toFixed(1)} ms, transcript rows=${rows}`);
+    diag(`[drag] ${cfg.cssVar} ${probe.frames} frames, layout max ${probe.maxMs.toFixed(1)} ms avg ${(probe.sumMs / probe.frames).toFixed(1)} ms, release relayout ${commitMs.toFixed(1)} ms, transcript rows=${rows}`);
     probe = null;
   };
   // Persisted as a share of the viewport (util/panelWidth.ts) so the panel
@@ -274,6 +287,8 @@ function initResizer(
     handleEl.classList.remove('dragging');
     document.body.classList.remove(`${cfg.handleId}-active`);
     handleEl.releasePointerCapture?.(e.pointerId);
+    if (pendingW !== null) { apply(pendingW); pendingW = null; }   // the last frame may still be queued
+    releasePad();
     probeEnd();
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
@@ -291,6 +306,7 @@ function initResizer(
     dragging = true;
     startX = e.clientX;
     startWidth = drawer.getBoundingClientRect().width || cfg.defaultWidthPx;
+    freezePad(startWidth);
     handleEl.classList.add('dragging');
     document.body.classList.add(`${cfg.handleId}-active`);
     probeStart();
