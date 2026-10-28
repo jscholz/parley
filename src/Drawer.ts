@@ -36,6 +36,13 @@ export interface DrawerConfig {
   side: 'left' | 'right';
   /** Body class applied when expanded (drives padding shift, etc). */
   bodyClass: string;
+  /** Desktop only: on OPEN, slide the panel first and shift the page
+   *  (bodyClass → body padding) when the slide ends, gliding the content
+   *  across with a compositor-only transform. The shift re-wraps the whole
+   *  transcript once; doing it in the first frame delayed the panel's start
+   *  by ~100 ms on a long session (field 2026-10-28, "clunky"). Close stays
+   *  immediate. Value = the panel's slide duration in ms. */
+  deferBodyShiftMs?: number;
   /** localStorage key for the desktop expanded-state preference. */
   prefKey: string;
   /** Toggle button ids — any of these click toggles the drawer.
@@ -92,12 +99,35 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
   const isOpen = () => drawer.classList.contains('expanded');
 
   // ── State setters ─────────────────────────────────────────────────
-  const setExpanded = (exp: boolean) => {
+  let shiftTimer: number | null = null;
+  /** Add the body class and glide the in-flow page content from where it
+   *  was: FLIP with a transform (no layout per frame). */
+  const shiftBody = () => {
+    shiftTimer = null;
+    if (!drawer.classList.contains('expanded') || document.body.classList.contains(cfg.bodyClass)) return;
+    const body = document.body;
+    const before = parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
+    body.classList.add(cfg.bodyClass);
+    const after = parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
+    const delta = after - before;
+    if (!delta || !Number.isFinite(delta)) return;
+    const movers = Array.from(body.children).filter((el) => el instanceof HTMLElement && el !== drawer
+      && getComputedStyle(el).position !== 'fixed' && (el as HTMLElement).offsetParent !== null) as HTMLElement[];
+    for (const el of movers) { el.style.transition = 'none'; el.style.transform = `translateX(${-delta}px)`; }
+    requestAnimationFrame(() => {
+      for (const el of movers) { el.style.transition = 'transform 160ms ease-out'; el.style.transform = ''; }
+      window.setTimeout(() => { for (const el of movers) { el.style.removeProperty('transition'); el.style.removeProperty('transform'); } }, 220);
+    });
+  };
+  const setExpanded = (exp: boolean, immediate = false) => {
     const wasOpen = isOpen();
     drawer.classList.toggle('expanded', exp);
     drawer.classList.toggle('collapsed', !exp);
     drawer.setAttribute('aria-expanded', exp ? 'true' : 'false');
-    document.body.classList.toggle(cfg.bodyClass, exp);
+    if (shiftTimer !== null) { window.clearTimeout(shiftTimer); shiftTimer = null; }
+    const defer = !immediate && exp && !wasOpen && !!cfg.deferBodyShiftMs && window.innerWidth >= MOBILE_BREAKPOINT_PX;
+    if (defer) shiftTimer = window.setTimeout(shiftBody, cfg.deferBodyShiftMs);
+    else document.body.classList.toggle(cfg.bodyClass, exp);
     if (exp) {
       // Take .front so swipe + clicks land on us when both drawers
       // overlap on mobile. Mutually exclusive across the registry.
@@ -124,7 +154,7 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
   // ── Restore persisted desktop state ──────────────────────────────
   if (window.innerWidth >= MOBILE_BREAKPOINT_PX) {
     try {
-      if (localStorage.getItem(cfg.prefKey) === '1') setExpanded(true);
+      if (localStorage.getItem(cfg.prefKey) === '1') setExpanded(true, true);   // boot restore: no slide/glide
     } catch {}
   }
 

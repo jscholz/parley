@@ -230,6 +230,14 @@
   #sidebar.expanded .sb-label { display: inline; }
   /* Collapsed sessions-list just hides (the rail shows no text anyway). */
   #sidebar.collapsed .sessions-list { display: none; }
+  /* Off-screen session rows skip style + layout (like transcript rows):
+     opening the sidebar laid out every one of ~200 rows from scratch —
+     ~40 ms of a 77 ms first frame on his session list (2026-10-28). */
+  #sessions-list > li { content-visibility: auto; contain-intrinsic-size: auto 60px; }
+  /* The list keeps its expanded width while the panel's width animates,
+     so the slide clips it instead of re-wrapping every visible row per
+     frame. The collapsed rail hides this content anyway. */
+  #sidebar .sidebar-content { min-width: var(--sidebar-width, var(--drawer-expanded-width)); }
   #sidebar.collapsed .sb-section-title { display: none; }
 
   /* Mobile-only toolbar hamburger — hidden on desktop (sidebar rail has its
