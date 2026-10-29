@@ -49,7 +49,10 @@ export default async function run({ page, log, mock }) {
   await openSidebar(page);
 
   await page.waitForSelector(`#sessions-list li[data-chat-id="${CHAT_ID}"]`, { timeout: 3_000 });
-  const rowText = await page.locator(`#sessions-list li[data-chat-id="${CHAT_ID}"]`).innerText();
+  // textContent, not innerText: session rows are content-visibility:auto
+  // (2026-10-28), so a row the browser has not laid out yet reads back as
+  // '' from innerText. The assertion is about the cached DATA surviving.
+  const rowText = await page.locator(`#sessions-list li[data-chat-id="${CHAT_ID}"]`).textContent();
   assert(rowText.includes('Offline Cache Chat'), `cached row missing title after failed sessions fetch: ${rowText}`);
   log('cached session row survived failed /sessions fetch');
 

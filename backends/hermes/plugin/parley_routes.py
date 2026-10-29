@@ -251,7 +251,16 @@ async def handle_user_settings(ctx, request: web.Request) -> web.Response:
     mismatch returns 409 with the row's current {value, updated_at} so
     the client can 3-way-merge and retry. Omitting it keeps plain
     last-write-wins — old clients (stale CAP bundles) stay compatible.
-    Added after the 2026-07-31 keyterms clobber incident."""
+    Added after the 2026-07-31 keyterms clobber incident.
+
+    Bearer-authenticated (2026-10-29): these rows ARE the account's
+    voice and UI behaviour, and any loopback caller could rewrite them —
+    a tokenless smoke sandbox did, leaving silenceSec=1 on the real
+    account. The proxy always sends the token; a ctx without a checker
+    (unit tests, direct use) defers to the app as before."""
+    check = getattr(ctx, "check_http_auth", None)
+    if check is not None and not check(request):
+        return _json({"error": "unauthorized"}, status=401)
     if request.method == "GET":
         return _json({
             "settings": state.list_user_settings(ctx.db),

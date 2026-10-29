@@ -85,6 +85,17 @@ if (FORCE_REAL && MOCKED_ONLY) {
   process.exit(2);
 }
 const filter = argv.filter(a => !a.startsWith('--'));
+// Set by run-smoke-isolated.mjs. Its sandbox has NO agent behind it, by
+// design, so a BACKEND='real' scenario there either fails for want of an
+// agent or — before 2026-10-29, when the sandbox still reached the real
+// one — writes to a real account. Real scenarios are dropped even when a
+// name filter matches them (the filter `turn-` pulled spoken-turn-real
+// in and it rewrote his silenceSec).
+const ISOLATED = process.env.SMOKE_ISOLATED === '1';
+if (ISOLATED && FORCE_REAL) {
+  console.error('[smoke] --real-backend cannot run under smoke:isolated: the sandbox has no agent. Drive the real stack deliberately with `npm run smoke -- --allow-live-server <name>`.');
+  process.exit(2);
+}
 
 function logRunner(msg) { console.log(`[smoke] ${msg}`); }
 
@@ -306,6 +317,13 @@ async function main() {
     });
   }
   if (MOCKED_ONLY) {
+    runnable = runnable.filter(s => s.backend !== 'real');
+  }
+  if (ISOLATED) {
+    const real = runnable.filter(s => s.backend === 'real');
+    if (real.length) {
+      logRunner(`isolated: skipping ${real.length} real-backend scenario(s) — the sandbox has no agent: ${real.map(s => s.name).join(', ')}`);
+    }
     runnable = runnable.filter(s => s.backend !== 'real');
   }
   // Scenarios that export MOBILE='both' run twice — once desktop, once

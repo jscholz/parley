@@ -91,12 +91,32 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'parley-smoke-home-'));
 const config = path.join(home, 'parley.config.yaml');
 copyFileSync(path.join(ROOT, 'example.parley.config.yaml'), config);
 
+// NO REAL AGENT BEHIND THE SANDBOX (2026-10-29). PARLEY_HOME isolates the
+// proxy's own files, but the proxy still forwarded to the agent on its
+// default port — and the plugin serves /v1/user-settings to any loopback
+// caller. A real-backend smoke run here (spoken-turn-real, pulled in by a
+// name filter) PUT silenceSec=1 into Jonathan's ACCOUNT; for two days call
+// mode sent on every one-second pause. So every outward target points at
+// a port nobody listens on, the setup wizard writes inside the sandbox
+// home instead of the repo .env, and verifyNoUpstream() below proves it
+// before a single scenario runs.
+const deadPort = await freePort();
+const DEAD = `http://127.0.0.1:${deadPort}`;
+const sandboxEnv = {
+  ...process.env,
+  PORT: String(port), PARLEY_HOME: home, PARLEY_CONFIG: config,
+  PARLEY_PLATFORM_URL: DEAD, UPSTREAM_URL: DEAD,
+  PARLEY_PLATFORM_TOKEN: 'smoke-isolated-no-agent', UPSTREAM_TOKEN: 'smoke-isolated-no-agent',
+  PARLEY_AUDIO_BRIDGE_URL: DEAD,
+  PARLEY_ENV_FILE: path.join(home, '.env'),
+};
+
 const server = spawn(
   process.execPath,
   ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'server.ts'],
   {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), PARLEY_HOME: home, PARLEY_CONFIG: config },
+    env: sandboxEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,        // own process group, so teardown gets the children too
   },
@@ -117,8 +137,24 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { teardown(); process.exit(130); });
 }
 
+/** The sandbox must not be able to read any account. If the synced
+ *  prefs answer, a real agent is reachable and every settings write in
+ *  the suite would land on a real user. */
+async function verifyNoUpstream(port) {
+  let status = 0; let keys = 0;
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/parley/prefs`);
+    status = r.status;
+    if (r.ok) keys = Object.keys((await r.json())?.settings || {}).length;
+  } catch { return; }
+  if (status >= 200 && status < 300) {
+    throw new Error(`the sandbox reached a real agent: GET /api/parley/prefs answered ${status} with ${keys} synced setting(s). Refusing to run.`);
+  }
+}
+
 try {
   await waitForIsolated(port);
+  await verifyNoUpstream(port);
 } catch (e) {
   console.error(`[smoke:isolated] ${e.message}`);
   console.error(serverLog.join('').split('\n').slice(-20).join('\n'));
@@ -133,7 +169,7 @@ const runner = spawn(
   [path.join(__dirname, 'run-smoke.mjs'), ...process.argv.slice(2)],
   {
     cwd: ROOT,
-    env: { ...process.env, SMOKE_URL: `http://127.0.0.1:${port}` },
+    env: { ...process.env, SMOKE_URL: `http://127.0.0.1:${port}`, SMOKE_ISOLATED: '1' },
     stdio: 'inherit',
   },
 );

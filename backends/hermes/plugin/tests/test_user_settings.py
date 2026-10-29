@@ -233,3 +233,37 @@ def test_cas_updated_at_strictly_increases(db):
 def test_cas_invalid_base_type_is_400(db):
     resp = _post(db, {"key": "k", "value": ["v"], "base_updated_at": "nope"})
     assert resp.status == 400
+
+
+# ── Auth (2026-10-29: a tokenless smoke sandbox rewrote the real
+#    account's silenceSec through this route) ──────────────────────────
+
+class AuthRequest(FakeRequest):
+    def __init__(self, method, body=None, token=None):
+        super().__init__(method, body)
+        self.headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+
+def _ctx_with_auth(db, expected="secret"):
+    def check(request):
+        h = getattr(request, "headers", {}).get("Authorization", "")
+        return h == f"Bearer {expected}"
+    return SimpleNamespace(db=db, check_http_auth=check)
+
+
+@pytest.mark.parametrize("method,body", [("GET", None), ("POST", {"key": "silenceSec", "value": 1})])
+def test_route_rejects_missing_or_wrong_token(db, method, body):
+    state.set_user_setting(db, "silenceSec", 30)
+    ctx = _ctx_with_auth(db)
+    for token in (None, "wrong"):
+        resp = asyncio.run(handle_user_settings(ctx, AuthRequest(method, body, token)))
+        assert resp.status == 401
+    assert state.get_user_setting(db, "silenceSec") == 30
+
+
+def test_route_accepts_the_right_token(db):
+    ctx = _ctx_with_auth(db)
+    resp = asyncio.run(handle_user_settings(
+        ctx, AuthRequest("POST", {"key": "silenceSec", "value": 30}, "secret")))
+    assert resp.status == 200
+    assert state.get_user_setting(db, "silenceSec") == 30

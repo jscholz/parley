@@ -90,7 +90,17 @@ export function init(opts: {
 
   // The button is position:fixed against a selection rect; scrolling or
   // resizing invalidates that rect, so just hide rather than chase it.
-  window.addEventListener('scroll', hide, true);
+  // Only a scroll that MOVES the selection counts: the page, or a
+  // scroller containing it. A side pane scrolling on its own (the session
+  // list revealing its active row after the sidebar opens) left the
+  // selection where it was and must not take the button away.
+  window.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (!(t instanceof Element) || t === document.documentElement || t === document.body) { hide(); return; }
+    const sel = window.getSelection();
+    const node = sel && sel.rangeCount ? sel.getRangeAt(0).commonAncestorContainer : null;
+    if (!node || t.contains(node)) hide();
+  }, true);
   window.addEventListener('resize', hide);
 }
 

@@ -535,6 +535,7 @@ function persistSyncedCache(): void {
   try {
     const slice: Record<string, any> = {};
     for (const k of syncedKeys()) {
+      if (Object.prototype.hasOwnProperty.call(sessionOverrides, k)) continue;
       if (Object.prototype.hasOwnProperty.call(current, k)) {
         slice[k] = (current as any)[k];
       }
@@ -667,6 +668,7 @@ export function save() {
   try {
     const slice: Record<string, any> = {};
     for (const k of PER_DEVICE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(sessionOverrides, k)) continue;
       if (Object.prototype.hasOwnProperty.call(current, k)) {
         slice[k] = (current as any)[k];
       }
@@ -675,8 +677,26 @@ export function save() {
   } catch {}
 }
 
+// Page-lifetime overrides that NEVER persist (2026-10-29). A test URL
+// flag (?listen=1&silence_sec=1) used to call set(), which PUTs to the
+// account's synced prefs; one smoke run wrote silenceSec=1 into the real
+// account and call mode then sent on every pause for two days. Values
+// here win over whatever load()/revalidate() bring in, and are kept out
+// of localStorage and the synced cache.
+const sessionOverrides: Record<string, any> = {};
+
+/** Override a setting for this page load only: no PUT, no localStorage,
+ *  no cache. For test hooks and diagnostics; a reload drops it. */
+export function overrideForSession(key: string, value: any): void {
+  sessionOverrides[key] = value;
+  (current as any)[key] = value;
+}
+
 /** @returns {Readonly<typeof DEFAULTS>} */
-export function get() { return current; }
+export function get() {
+  for (const k in sessionOverrides) (current as any)[k] = sessionOverrides[k];
+  return current;
+}
 
 /** Persist one synced setting to parley.db via the prefs endpoint
  *  (one row per key in the `user_settings` table). Fire-and-forget; on
@@ -702,6 +722,8 @@ function putServerSetting(key: string, value: any): void {
  *  local cache updates synchronously regardless so call sites that read
  *  settings.get() right after set() see the new value. */
 export function set(key: string, value: any) {
+  // A real user change ends any page-lifetime override of the same key.
+  delete sessionOverrides[key];
   (current as any)[key] = value;
   if (PER_DEVICE_KEYS.has(key)) {
     save();

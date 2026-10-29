@@ -55,13 +55,13 @@ export default async function run({ page, log, mock }) {
   // The schema row injects with data-agent-setting="model"; wait for
   // it to render (the static placeholder ships with the same attr,
   // but disabled — schema render replaces it with an enabled select).
-  const sel = await page.waitForSelector(
+  await page.waitForSelector(
     '#settings-group-agent [data-agent-setting="model"] select:not([disabled])',
     { timeout: 3_000 },
   );
   log('model dropdown rendered');
 
-  const initial = await sel.evaluate(
+  const initial = await page.locator('#settings-group-agent [data-agent-setting="model"] select:not([disabled])').evaluate(
     (s) => ({
       value: s.value,
       options: Array.from(s.options).map((o) => ({ value: o.value, label: o.textContent })),
@@ -77,7 +77,12 @@ export default async function run({ page, log, mock }) {
 
   // Change to the other value. The renderer's onchange handler
   // POSTs to /api/parley/settings/model.
-  await sel.selectOption('google/gemini-3-flash-preview');
+  // Through a locator, not the handle: the section legitimately renders
+  // again when synced settings land, and a held handle then points at a
+  // detached <select> ("Element is not attached to the DOM" — load-flaky
+  // in batches since before 2026-10-29). The locator re-resolves.
+  await page.locator('#settings-group-agent [data-agent-setting="model"] select:not([disabled])')
+    .selectOption('google/gemini-3-flash-preview');
 
   // Poll the mock for the POST itself (not the DOM value — selectOption
   // sets the DOM synchronously, so a DOM-value wait is a no-op and the

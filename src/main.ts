@@ -5419,11 +5419,14 @@ async function boot() {
   // Listen on boot when ?listen=1 is present so the smoke can drive
   // synthetic frames in (?listen_mock_mic=1). The flag also accepts
   // ?silence_sec=N to compress the silence window for fast tests.
+  // Page-lifetime ONLY (overrideForSession): set() would PUT it into the
+  // account's synced prefs. On 2026-10-27 a smoke did exactly that and
+  // left real call mode sending on every one-second pause.
   try {
     const qs = new URLSearchParams(location.search);
     if (qs.get('listen') === '1') {
       const sec = Number(qs.get('silence_sec'));
-      if (Number.isFinite(sec) && sec > 0) settings.set('silenceSec', sec);
+      if (Number.isFinite(sec) && sec > 0) settings.overrideForSession('silenceSec', sec);
       // Defer briefly so settings.load() + audio prime can settle.
       setTimeout(() => { void startListen(); }, 50);
     }
