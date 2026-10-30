@@ -25,7 +25,13 @@ export default async function run({ page, log, mock }) {
   await waitForReady(page);
   await openSettingsSection(page, 'integrations');
   await page.waitForSelector('[data-role="int-add"]', { timeout: 5_000 });
-  assert(/No integrations found/.test(await page.$eval('#settings-group-integrations [data-health-placeholder]', (e) => e.textContent)), 'empty state before adding');
+  // The Add button renders before the list resolves; under full-suite load
+  // the placeholder can still read "Loading…" here. Wait for the verdict.
+  const empty = await page.waitForFunction(
+    () => /No integrations found/.test(document.querySelector('#settings-group-integrations [data-health-placeholder]')?.textContent || ''),
+    null, { timeout: 5_000 },
+  ).then(() => true, () => false);
+  assert(empty, 'empty state before adding');
 
   // 1. Picker: entries listed, installed ones disabled, search narrows.
   await page.click('[data-role="int-add"]');
