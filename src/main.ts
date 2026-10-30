@@ -70,6 +70,7 @@ import * as inAppBanner from './notifications/inAppBanner.ts';
 import * as approvalActions from './notifications/approvalActions.ts';
 import { installExternalLinkHandler } from './native/externalLinks.ts';
 import { installExternalLinkGuard } from './externalLinkGuard.ts';
+import { installJitterWatch } from './util/jitterWatch.ts';
 import { parseChatDeepLink } from './util/chatDeepLink.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
@@ -1324,6 +1325,7 @@ async function boot() {
   // off-origin links to the native Browser sheet. No-op in the PWA.
   installExternalLinkHandler();
   installExternalLinkGuard();
+  installJitterWatch();
   // In-app chat links (`/?chat=<id>[&msg=<id>]` — the grammar hermes'
   // /branch reply uses to point at the new chat) switch in place through
   // the notification-tap path instead of reloading the app. Capture phase
