@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import YAML from 'yaml';
 import { readEnv } from './proxy/env.mjs';
-import { isLiveDataHome } from './proxy/dataHome.mjs';
+import { isLiveDataHome, dataHome } from './proxy/dataHome.mjs';
 import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import * as uploads from './proxy/parley/uploads.ts';
 import * as storage from './proxy/parley/storage.ts';
@@ -889,7 +889,13 @@ async function handleParleyConfigSet(req, res, key: string) {
 
 // Per-user: two tenants on one box share /tmp, and the second one's relay
 // POSTs 500'd against a directory the first had created (2026-10-10).
-const DEBUG_LOG_DIR = path.join(os.tmpdir(), `parley-debug-${os.userInfo().username}`);
+// A sandbox (smoke:isolated, any non-live PARLEY_HOME) keeps its relay
+// under its own home: it used to share this directory and its boot-time
+// prune deleted real sessions' files — including a field report a user's
+// browser had just filed (2026-10-31, the transcript-jitter hunt).
+const DEBUG_LOG_DIR = isLiveDataHome()
+  ? path.join(os.tmpdir(), `parley-debug-${os.userInfo().username}`)
+  : path.join(dataHome(), 'debug-logs');
 const DEBUG_LOG_KEEP = 20;
 const DEBUG_LOG_MAX_BODY = 256 * 1024;       // 256 KB per POST
 const DEBUG_LOG_SID_RE = /^[A-Za-z0-9._-]{1,80}$/;
@@ -905,7 +911,9 @@ function pruneDebugLogs(): void {
   try {
     if (!fsSync.existsSync(DEBUG_LOG_DIR)) return;
     const entries = fsSync.readdirSync(DEBUG_LOG_DIR)
-      .filter(f => f.endsWith('.log') && f !== 'latest.log')
+      // jitter-*.log are one-shot field reports (util/jitterWatch.ts);
+      // they are the evidence, never housekeeping.
+      .filter(f => f.endsWith('.log') && f !== 'latest.log' && !f.startsWith('jitter-'))
       .map(f => {
         const p = path.join(DEBUG_LOG_DIR, f);
         try { return { p, mtime: fsSync.statSync(p).mtimeMs }; }
