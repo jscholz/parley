@@ -54,6 +54,9 @@ export interface TranscribeConfig {
   /** Post-stop ingest turn into the linked chat (default on;
    *  the `captureAutoIngest` setting maps here). */
   autoIngest?: boolean;
+  /** Where doc_show pushes go (default: the event stream). Tests
+   *  observe the shelf traffic through this, as they do dispatches. */
+  pushFn?: (env: Record<string, unknown>) => void;
   /** Message dispatch seam — production default is messages.ts
    *  dispatchInternalMessage; tests inject a recorder. */
   dispatchFn?: (chatId: string, text: string) => boolean;
@@ -224,16 +227,10 @@ export function fmtLocalStamp(ms: number): string {
 export async function rebuildTranscript(id: string): Promise<string> {
   const m = await getCapture(id);
   const live = m.status === 'recording' || m.status === 'transcribing';
-  const lines: string[] = [
-    `# ${m.title}`,
-    '',
-    live
-      ? '_Live transcript — recording in progress; updates roughly every minute._'
-      : `_Recorded ${fmtLocalStamp(m.started_at)} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)}_`,
-    '',
-  ];
+  const lines: string[] = [`# ${m.title}`, '', '', ''];
   const marks = [...m.marks].sort((a, b) => a.t_ms - b.t_ms);
   let markIdx = 0;
+  let transcribed = 0;
   for (const seg of m.segments) {
     let text: string;
     try {
@@ -241,6 +238,7 @@ export async function rebuildTranscript(id: string): Promise<string> {
     } catch {
       continue;   // not transcribed yet (or permanently failed + skipped)
     }
+    transcribed += 1;
     while (markIdx < marks.length && marks[markIdx].t_ms <= seg.t0_ms) {
       lines.push(`**[MARK ${fmtOffset(marks[markIdx].t_ms)}]**`, '');
       markIdx += 1;
@@ -251,6 +249,15 @@ export async function rebuildTranscript(id: string): Promise<string> {
     lines.push(`**[MARK ${fmtOffset(marks[markIdx].t_ms)}]**`, '');
     markIdx += 1;
   }
+  // The meta line. The doc exists from the moment the recording goes
+  // live (field 2026-11-02: "when I start recording I should get a
+  // transcript immediately"), so before the first chunk lands it says
+  // honestly what it is waiting for instead of showing a bare title.
+  lines[2] = live
+    ? (transcribed === 0
+      ? '_Live transcript — recording in progress; the first words land in about a minute._'
+      : '_Live transcript — recording in progress; updates roughly every minute._')
+    : `_Recorded ${fmtLocalStamp(m.started_at)} · ${fmtOffset((m.ended_at ?? m.started_at) - m.started_at)}_`;
   const body = lines.join('\n');
   const file = transcriptPath(m);
   const tmp = `${file}.tmp-${process.pid}-${tmpCounter++}`;
@@ -283,7 +290,7 @@ async function pushDoc(id: string, opts?: { immediate?: boolean }): Promise<void
     const m = await getCapture(id);
     const content = await fs.readFile(transcriptPath(m), 'utf8');
     const live = m.status === 'recording' || m.status === 'transcribing';
-    pushEnvelope({
+    (cfg.pushFn ?? pushEnvelope)({
       type: 'doc_show',
       chat_id: m.linked_chat || '',
       title: live ? `${displayTitle(m)} (live)` : displayTitle(m),
@@ -611,6 +618,12 @@ export function initCaptureTranscription(config: TranscribeConfig): void {
       // sessions keep their current title; only the end-of-meeting
       // re-title touches those.
       if (m.minted_session) void renameWithRetry(m.id, m.linked_chat, m.title);
+      // The live transcript doc opens NOW, empty but honest, so the
+      // Docs shelf shows the meeting from the first second rather than
+      // after the first chunk transcribes (~a minute of nothing).
+      void rebuildTranscript(m.id)
+        .then(() => pushDoc(m.id, { immediate: true }))
+        .catch((e) => console.warn(`[capture-transcribe] ${m.id}: initial doc push failed: ${String(e)}`));
     },
     onSegmentStored(m, seg) {
       job(m.id).queue.push(seg);

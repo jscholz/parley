@@ -20,6 +20,7 @@ import {
 } from './recorder.ts';
 import { openPillSheet } from './pillSheet.ts';
 import { getSyncState, type CaptureSyncState } from './syncStatus.ts';
+import { chunkProgress } from './chunkProgress.ts';
 import * as switchCtl from '../switchController.ts';
 import { log } from '../util/log.ts';
 
@@ -60,9 +61,29 @@ function fmtElapsed(st: CaptureUiState): string {
     : `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/** The chunk pie + ring (field 2026-11-02): the wedge fills over the
+ *  running chunk, the ring is the previous chunk's fate. Runs from
+ *  render() and from the 1 s timer tick. */
+function renderChunk(state: CaptureUiState): void {
+  const pill = document.getElementById('capture-pill');
+  const svg = document.getElementById('capture-pill-pie');
+  if (!pill || !svg) return;
+  const p = chunkProgress(state);
+  pill.classList.toggle('chunking', state.active && state.phase === 'recording');
+  svg.setAttribute('data-chunk', p.previous);
+  // Inline style, not the presentation attribute: the stylesheet's
+  // default dash array outranks an attribute and the wedge never drew.
+  const fill = svg.querySelector('.pie-fill') as SVGElement | null;
+  if (fill) fill.style.strokeDasharray = `${Math.round(p.fraction * 100)} 100`;
+  const t = svg.querySelector('title');
+  if (t) t.textContent = p.label;
+  svg.setAttribute('aria-label', p.label);
+}
+
 function render(state: CaptureUiState, sync: CaptureSyncState = getSyncState()): void {
   const pill = document.getElementById('capture-pill');
   if (!pill) return;
+  renderChunk(state);
   const title = document.getElementById('capture-pill-title');
   const timer = document.getElementById('capture-pill-timer');
   // 'starting' shows the pill in its honest gray "Starting microphone…"
@@ -188,6 +209,7 @@ function render(state: CaptureUiState, sync: CaptureSyncState = getSyncState()):
       const s = getCaptureState();
       const t = document.getElementById('capture-pill-timer');
       if (t && s.startedAt) t.textContent = fmtElapsed(s);
+      renderChunk(s);
     }, 1000);
   }
 }

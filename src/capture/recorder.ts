@@ -58,6 +58,14 @@ export interface CaptureUiState {
   marks: number;
   /** Wall-clock ms spent paused/interrupted so far (completed spans). */
   stalledTotalMs: number;
+  /** Chunk feedback (field 2026-11-02, capture/chunkProgress.ts): when the
+   *  running chunk started (0 = none running), how many sealed chunks the
+   *  server has acked, and how many transcript pushes have landed for
+   *  this capture. The pill's pie and ring render from these. */
+  segmentStartedAt: number;
+  segmentMs: number;
+  uploadedSegments: number;
+  landedSegments: number;
   /** The server has acknowledged this capture (create acked). False
    *  from an offline start until the uploader registers it — the
    *  recording is real either way; this only gates server-side extras
@@ -73,7 +81,7 @@ export interface CaptureUiState {
   stalledSince: number | null;
 }
 
-const SEGMENT_MS = 45_000;
+export const SEGMENT_MS = 45_000;
 
 /** How often the running segment's chunks-so-far are rewritten to the
  *  durable buffer (partial row). A page the OS kills mid-segment loses
@@ -122,7 +130,7 @@ const MIC_CONSTRAINTS: MediaTrackConstraints = {
 let state: CaptureUiState = {
   active: false, captureId: null, title: '', chatId: null,
   startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-  stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
+  stalledTotalMs: 0, stalledSince: null, segmentStartedAt: 0, segmentMs: SEGMENT_MS, uploadedSegments: 0, landedSegments: 0, registered: false, offline: false,
 };
 
 let stream: MediaStream | null = null;
@@ -147,6 +155,17 @@ let failedDismissTimer: number | null = null;
 /** How long the 'nothing was saved' pill stays up. */
 const FAILED_PILL_MS = 90_000;
 
+// A transcript push for THIS capture (backendEventHandlers doc.show →
+// 'parley:capture-doc') means a chunk's words reached the shelf.
+if (typeof window !== 'undefined') {
+  window.addEventListener('parley:capture-doc', (ev) => {
+    const id = (ev as CustomEvent<{ captureId?: string }>).detail?.captureId;
+    if (!id || !state.active || id !== state.captureId) return;
+    state.landedSegments = Math.min(state.sealedSegments, state.landedSegments + 1);
+    emit();
+  });
+}
+
 function emit(): void {
   try {
     window.dispatchEvent(new CustomEvent('parley:capture-state', { detail: { ...state } }));
@@ -158,7 +177,7 @@ export function getCaptureState(): CaptureUiState { return { ...state }; }
 function ensureUploader(): Uploader {
   if (uploader) return uploader;
   uploader = createUploader({
-    onDrained: () => { state.uploaderPending = 0; emit(); },
+    onDrained: () => { state.uploaderPending = 0; state.uploadedSegments = state.sealedSegments; emit(); },
     onDropped: () => { syncPending(); },
     onNetwork: (online) => {
       syncStatus.reportNetwork(online);
@@ -209,6 +228,7 @@ function ensureUploader(): Uploader {
  *  cumulative-sealed masquerading as pending). */
 function syncPending(): void {
   state.uploaderPending = uploader?.pendingCount() ?? 0;
+  state.uploadedSegments = Math.max(state.uploadedSegments, state.sealedSegments - state.uploaderPending);
   emit();
 }
 
@@ -256,6 +276,7 @@ function startSegment(): boolean {
   if (!stream || !state.active || !state.captureId) return false;
   const chunks: Blob[] = [];
   segStartMs = nowMs();
+  state.segmentStartedAt = Date.now();
   // The seq is claimed up front so the partial flushes below and the
   // final seal share one durable key. An empty segment hands it back
   // (see onstop) — the server orders by seq and tolerates gaps anyway.
@@ -298,6 +319,8 @@ function startSegment(): boolean {
   rec.onstop = () => {
     if (recorder === rec) recorder = null;
     const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+    // No chunk is running until the next startSegment() stamps one.
+    if (state.captureId === captureId) state.segmentStartedAt = 0;
     if (blob.size > 0 && state.captureId === captureId) {
       void putSegment({ captureId, seq: mySeq, t0Ms, mime: blob.type, blob }).then(() => {
         state.sealedSegments += 1;
@@ -603,7 +626,7 @@ function startResumeReconcile(): void {
 const IDLE_STATE: CaptureUiState = {
   active: false, captureId: null, title: '', chatId: null,
   startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-  stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
+  stalledTotalMs: 0, stalledSince: null, segmentStartedAt: 0, segmentMs: SEGMENT_MS, uploadedSegments: 0, landedSegments: 0, registered: false, offline: false,
 };
 
 /** getUserMedia with a hard deadline. The incident's acquire hung 21
@@ -741,7 +764,7 @@ export async function startMeetingCapture(
     active: true, captureId: capture.id, title: capture.title,
     chatId: capture.linked_chat, startedAt: Date.now(), phase: 'recording',
     uploaderPending: 0, sealedSegments: 0, marks: 0,
-    stalledTotalMs: 0, stalledSince: null, registered: false, offline: state.offline,
+    stalledTotalMs: 0, stalledSince: null, segmentStartedAt: 0, segmentMs: SEGMENT_MS, uploadedSegments: 0, landedSegments: 0, registered: false, offline: state.offline,
   };
   // No emit yet — the pill stays on "Starting microphone…" until the
   // recorder start is VERIFIED below.
@@ -839,7 +862,7 @@ export async function stopMeetingCapture(): Promise<void> {
   state = {
     active: false, captureId: null, title: '', chatId: null,
     startedAt: 0, phase: 'idle', uploaderPending: 0, sealedSegments: 0, marks: 0,
-    stalledTotalMs: 0, stalledSince: null, registered: false, offline: false,
+    stalledTotalMs: 0, stalledSince: null, segmentStartedAt: 0, segmentMs: SEGMENT_MS, uploadedSegments: 0, landedSegments: 0, registered: false, offline: false,
   };
   emit();
   log(`[capture] stopped ${captureId}`);

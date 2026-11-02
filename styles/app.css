@@ -5849,6 +5849,34 @@
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.45; transform: scale(0.8); }
 }
+/* Chunk pie (2026-11-02): the wedge is the running chunk filling over
+   SEGMENT_MS; the ring is the previous chunk's state. Rotated so the
+   wedge grows clockwise from 12 o'clock. Hidden unless a chunk can be
+   running (recording phase) — paused / finishing have their own words. */
+.capture-pill-pie {
+  width: 16px; height: 16px; flex: none;
+  transform: rotate(-90deg);
+  display: none;
+}
+.capture-pill.chunking .capture-pill-pie { display: block; }
+.capture-pill-pie .pie-ring { fill: none; stroke: rgba(255, 255, 255, 0.22); stroke-width: 1.5; }
+.capture-pill-pie .pie-fill {
+  fill: none; stroke: #e8e8e8; stroke-width: 7;
+  stroke-dasharray: 0 100;   /* default; pill.ts drives it inline */
+  transition: stroke-dasharray 0.9s linear;
+}
+.capture-pill-pie[data-chunk="sending"] .pie-ring { stroke: rgba(255, 255, 255, 0.5); }
+.capture-pill-pie[data-chunk="transcribing"] .pie-ring {
+  stroke: #f1c40f; stroke-dasharray: 4 3;
+  animation: capture-pie-ring-spin 1.6s linear infinite;
+  transform-origin: 50% 50%;
+}
+.capture-pill-pie[data-chunk="landed"] .pie-ring { stroke: #5fbf7a; stroke-width: 2; }
+@keyframes capture-pie-ring-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .capture-pill-pie .pie-fill { transition: none; }
+  .capture-pill-pie[data-chunk="transcribing"] .pie-ring { animation: none; }
+}
 .capture-pill-title {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

@@ -809,6 +809,19 @@ export async function installMockBackend(page) {
       if (cap.status !== 'pending') return reply(409, { error: `capture is ${cap.status}; cannot activate` });
       cap.status = 'recording';
       cap.activated_at = Date.now();
+      // Mirror proxy/parley/captureTranscribe.ts onActivated (2026-11-02):
+      // the live transcript doc goes to the shelf the moment the
+      // recording is real, empty but honest about what it waits for.
+      const docPath = `/captures/${cap.id}/transcript.md`;
+      const env = {
+        type: 'doc_show', chat_id: cap.linked_chat || '', title: `${cap.title} (live)`,
+        content: `# ${cap.title}\n\n_Live transcript — recording in progress; the first words land in about a minute._\n`,
+        format: 'markdown', path: docPath, displayed_at: Date.now(), source: 'capture', capture_id: cap.id, duration_ms: 0,
+      };
+      const docId = docIdFor(docPath, env.title);
+      docCache.set(docId, { id: docId, title: env.title, content: env.content, format: 'markdown',
+        path: docPath, chat_id: env.chat_id, source: 'capture', capture_id: cap.id, displayed_at: env.displayed_at });
+      broadcast(env);
       return reply(200, { capture: cap });
     }
     if (verb === 'abort-start') {

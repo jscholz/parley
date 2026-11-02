@@ -547,3 +547,28 @@ test('titling: transient rename failure retries and lands', async () => {
   assert.equal(attempts.length, 3, 'succeeded on the third attempt — no further retries');
   await stopCapture(m.id);
 });
+
+test('activation pushes the live transcript doc at once — empty, honest, then filled by the first chunk', async () => {
+  const { fn } = fakeBridge((seq) => `words of segment ${seq}.`);
+  const pushed: Record<string, any>[] = [];
+  wire(fn, { pushFn: (env: Record<string, unknown>) => { pushed.push(env); } });
+
+  const m = await createCapture({ title: 'Standup', linkedChat: 'parley:mtg', diarize: false });
+  assert.equal(pushed.length, 0, 'a pending capture is not a recording: nothing on the shelf');
+  await activateCapture(m.id);
+  await waitFor(async () => pushed.length >= 1);
+  const first = pushed[0];
+  assert.equal(first.type, 'doc_show');
+  assert.equal(first.title, 'Standup (live)');
+  assert.equal(first.source, 'capture');
+  assert.equal(first.capture_id, m.id);
+  assert.match(String(first.content), /recording in progress/);
+  assert.match(String(first.content), /first words land in about a minute/);
+  assert.doesNotMatch(String(first.content), /words of segment/);
+
+  await seg(m.id, 0, 0);
+  await waitFor(async () => pushed.some((p) => /words of segment 0/.test(String(p.content))));
+  const filled = pushed[pushed.length - 1];
+  assert.match(String(filled.content), /updates roughly every minute/);
+  assert.doesNotMatch(String(filled.content), /first words land/);
+});

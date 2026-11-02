@@ -461,6 +461,15 @@ export function handleToolEvent({ kind, payload, conversation, isReplay }: any) 
       { ...payload, chatId: conversation || undefined },
       { autoOpen: !isReplay },
     );
+    // A live meeting transcript landing is the recorder's "chunk
+    // transcribed" signal (capture/recorder.ts counts these for the pill's
+    // chunk ring). Live pushes only — a replayed ring never means a new
+    // chunk just arrived.
+    if (payload.source === 'capture' && payload.captureId && !isReplay) {
+      try {
+        window.dispatchEvent(new CustomEvent('parley:capture-doc', { detail: { captureId: payload.captureId } }));
+      } catch { /* non-browser */ }
+    }
     return;
   }
   // Drop only for an explicitly DIFFERENT viewed session.
