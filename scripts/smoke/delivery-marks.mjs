@@ -32,13 +32,26 @@ export default async function run({ page, log, mock }) {
   // Durable rows from history: the agent has them.
   assert((await markOf('umsg_s0'))?.state === 'seen' || (await markOf('umsg_s0'))?.state === 'delivered', `history row: ${JSON.stringify(await markOf('umsg_s0'))}`);
 
+  // Record every mark state the new row passes through, from BEFORE the
+  // send: the states are legitimately brief (the mock answers at once and
+  // the durable refresh can land within the sampler's poll), so sampling
+  // an instant for "one tick" flaked under full-suite load (2026-11-02).
+  await page.evaluate(() => {
+    window.__markStates = new Map();
+    const note = (m) => { const row = m.closest('.line.s0'); const id = row?.getAttribute('data-message-id'); if (!id) return; const arr = window.__markStates.get(id) || []; if (arr[arr.length - 1] !== m.dataset.state) arr.push(m.dataset.state); window.__markStates.set(id, arr); };
+    new MutationObserver((muts) => { for (const mu of muts) { const t = mu.target; if (t.nodeType === 1 && t.classList.contains('turn-ack')) note(t); else if (t.nodeType === 1) t.querySelectorAll?.('.turn-ack').forEach(note); } })
+      .observe(document.getElementById('transcript'), { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
+  });
   await send(page, 'tick tick');
   const umid = await page.waitForFunction(() => Array.from(document.querySelectorAll('#transcript .line.s0')).find((l) => (l.textContent || '').includes('tick tick'))?.getAttribute('data-message-id') || null, null, { timeout: 3_000, polling: 50 }).then((h) => h.jsonValue());
-  // The POST returns at once in the mock, so ◷ may be too brief to catch; ✓ (accepted, no echo yet) is the resting state.
-  await waitState(umid, 'sent');
-  const sent = await markOf(umid);
-  assert(sent && sent.state === 'sent' && sent.glyph === '✓', `accepted by the proxy → one tick: ${JSON.stringify(sent)}`);
-  log('✓ one tick after the proxy accepted the send (no echo yet)');
+  await page.waitForFunction((i) => ['sent', 'delivered', 'seen'].includes(document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`)?.dataset.state || ''), umid, { timeout: 4_000, polling: 25 });
+  const seq = await page.evaluate((i) => window.__markStates.get(i) || [], umid);
+  const sentAt = seq.indexOf('sent'); const deliveredAt = seq.indexOf('delivered');
+  assert(sentAt >= 0, `accepted by the proxy → one tick never shown; states seen: ${JSON.stringify(seq)}`);
+  assert(deliveredAt < 0 || sentAt < deliveredAt, `one tick must precede two: ${JSON.stringify(seq)}`);
+  const sentGlyph = await page.evaluate(() => { const m = document.querySelector('#transcript .turn-ack[data-state="sent"]'); return m ? m.textContent : null; });
+  if (sentGlyph !== null) assert(sentGlyph === '✓', `one tick glyph: ${sentGlyph}`);
+  log(`✓ one tick after the proxy accepted the send (states so far: ${seq.join(' → ')})`);
 
   mock.pushEnvelope({ type: 'user_message', chat_id: CHAT, message_id: umid, text: 'tick tick' });
   await waitState(umid, 'delivered');
