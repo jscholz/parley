@@ -94,6 +94,47 @@ export function createDocModule(opts: {
    *  which view the panel shows (docTabs.ts), and they can only stay
    *  honest if every flip — external setView OR an internal list/reader
    *  hop — announces itself. */
+  // Reading position per doc (field 2026-11-03: "retain the scroll
+  // position when I switch docs"). The reader re-renders into the body on
+  // every switch, so the offset has to be remembered by doc id: saved as
+  // the user scrolls, restored right after the next render of that doc.
+  // The scroller is the body in the panel and the column in full screen.
+  const scrollPos = new Map<string, number>();
+  let shownDocId: string | null = null;
+  const scroller = (): HTMLElement =>
+    (opts.body.classList.contains('doc-fullscreen-body') && opts.body.parentElement) ? opts.body.parentElement : opts.body;
+  // A restore is not one write: the panel re-lays out for a few hundred
+  // ms after a switch (drawer width, late content) and scroll anchoring
+  // then moves the offset. So the saved value is re-applied while the
+  // layout settles, our own scroll events are ignored meanwhile, and any
+  // user input ends the restore at once — the reader is never yanked.
+  const RESTORE_MS = 600;
+  let restoringUntil = 0;
+  let lastUserInput = 0;
+  for (const ev of ['wheel', 'touchmove', 'keydown', 'pointerdown']) {
+    window.addEventListener(ev, () => { lastUserInput = performance.now(); }, { capture: true, passive: true });
+  }
+  const rememberScroll = (): void => {
+    if (shownDocId && performance.now() >= restoringUntil) scrollPos.set(shownDocId, scroller().scrollTop);
+  };
+  const restoreScroll = (docId: string): void => {
+    const target = scrollPos.get(docId) ?? 0;
+    const started = performance.now();
+    restoringUntil = started + RESTORE_MS;
+    const apply = (): void => {
+      if (shownDocId !== docId || lastUserInput > started) { restoringUntil = 0; return; }
+      const el = scroller();
+      if (el.scrollTop !== target) el.scrollTop = target;
+      if (performance.now() < restoringUntil) requestAnimationFrame(apply);
+      else restoringUntil = 0;
+    };
+    apply();
+  };
+  opts.body.addEventListener('scroll', rememberScroll, { passive: true });
+  document.addEventListener('scroll', (e) => {
+    if (shownDocId && (e.target as Element | null)?.classList?.contains('doc-fullscreen-column')) rememberScroll();
+  }, true);
+
   const setViewState = (v: DocView): void => {
     if (view === v) return;
     view = v;
@@ -134,8 +175,10 @@ export function createDocModule(opts: {
       ctx.clearButton.setAttribute('aria-label', 'Clear all documents');
       ctx.clearButton.setAttribute('title', 'Clear all');
     }
+    rememberScroll();
     opts.body.innerHTML = '';
     if (!doc) {
+      shownDocId = null;
       opts.empty.hidden = false;
       opts.body.hidden = true;
       // Recently Deleted must stay reachable with an EMPTY shelf — the
@@ -148,8 +191,13 @@ export function createDocModule(opts: {
     opts.empty.hidden = true;
     opts.body.hidden = false;
 
-    if (view === 'list') renderList(ctx);
-    else renderReader(ctx, doc);
+    if (view === 'list') { shownDocId = null; renderList(ctx); return; }
+    renderReader(ctx, doc);
+    shownDocId = doc.id;
+    // Always (re)set it: replacing the body's children leaves the
+    // scroller's old offset in place, so a doc never scrolled would
+    // otherwise open wherever the previous one was.
+    restoreScroll(doc.id);
   };
 
   const rerender = (ctx: RightDrawerModuleContext) => render(ctx);

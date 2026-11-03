@@ -86,11 +86,15 @@ export function openDocFullscreen(): boolean {
   if (!parent) return false;
   placeholder = document.createComment('doc-drawer-body home');
   parent.insertBefore(placeholder, host.body);
+  // Carry the reading position across: the body scrolled in the panel,
+  // the column scrolls here.
+  const offset = host.body.scrollTop;
   column.appendChild(host.body);
   host.body.classList.add('doc-fullscreen-body');
 
   ov.append(bar, column);
   document.body.appendChild(ov);
+  column.scrollTop = offset;
   document.body.classList.add('doc-fullscreen-open');
   overlay = ov;
   renderStrip();
@@ -115,12 +119,14 @@ export function openDocFullscreen(): boolean {
 
 export function closeDocFullscreen(): void {
   if (!overlay || !host) return;
+  const offset = (host.body.parentElement as HTMLElement | null)?.scrollTop ?? 0;
   if (placeholder?.parentNode) {
     placeholder.parentNode.insertBefore(host.body, placeholder);
     placeholder.remove();
   }
   placeholder = null;
   host.body.classList.remove('doc-fullscreen-body');
+  host.body.scrollTop = offset;
   overlay.remove();
   overlay = null;
   strip = null;

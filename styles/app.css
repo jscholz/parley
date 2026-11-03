@@ -2835,7 +2835,7 @@
     display: flex; flex-direction: column;
     gap: 8px;
     overflow-y: auto;
-    padding: 8px 14px 14px;
+    padding: 0 14px 14px;
   }
   .doc-drawer-body[hidden] { display: none; }
   .doc-drawer-header {
@@ -2843,7 +2843,16 @@
     gap: 8px;
     border-bottom: 1px solid var(--border);
     padding-bottom: 6px;
+    /* Sticky (2026-11-03): the doc's actions — Open chat, expand to
+       full screen, download — stay at hand while reading a long doc,
+       instead of living at the top of the content where reaching them
+       costs the reading position. Opaque so text scrolls under it. */
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg);
   }
+  /* The scrollers carry no top padding (it would show content above a
+     pinned header); the first row supplies the breathing room instead. */
+  .doc-drawer-body > :first-child { margin-top: 8px; }
   .doc-drawer-title {
     font-weight: 600; font-size: 13px;
     overflow-wrap: anywhere;
@@ -5695,8 +5704,9 @@ body.doc-fullscreen-open { overflow: hidden; }
 .doc-fullscreen-close:hover { color: var(--fg); background: var(--surface); }
 .doc-fullscreen-column {
   flex: 1; min-height: 0; overflow-y: auto;
-  padding: 20px max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left));
+  padding: 0 max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left));
 }
+.doc-fullscreen-column > .doc-drawer-body > :first-child { margin-top: 20px; }
 /* The borrowed body: a reading column, not a panel. 72ch ≈ a book line;
    on an ultrawide the alternative is a 3,000 px line nobody can read. */
 .doc-fullscreen-column > .doc-drawer-body {
