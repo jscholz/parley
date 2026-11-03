@@ -108,6 +108,8 @@ export type ParleyEnvelope =
   /** Docs shelf (proxy docShelf.ts): the open set changed on another
    *  device — fetch the merged shelf. */
   | { type: 'doc_shelf_changed'; chat_id: string; version?: number; by?: string }
+  // Composer drafts sync (proxy drafts.ts): one chat's draft changed.
+  | { type: 'drafts_changed'; chat_id: string; draft_chat_id: string; version?: number; by?: string; updated_at?: number }
   /** Meeting capture (proxy capture.ts): lifecycle state for
    *  cross-device pills/lists, and the external-trigger control plane. */
   | { type: 'capture_changed'; chat_id: string; [k: string]: unknown }
@@ -134,7 +136,7 @@ export const TRANSLATOR_ENVELOPE_TYPES = ['error'] as const satisfies readonly E
 
 /** Types the proxy itself originates. */
 export const PROXY_ENVELOPE_TYPES = [
-  'doc_shelf_changed', 'capture_changed', 'capture_control',
+  'doc_shelf_changed', 'drafts_changed', 'capture_changed', 'capture_control',
 ] as const satisfies readonly EnvelopeType[];
 
 /** Everything the proxy fans out to PWA tabs = everything the PWA must

@@ -716,6 +716,32 @@ export async function installMockBackend(page) {
     broadcast({ type: 'doc_shelf_changed', chat_id: 'parley:docs', version: docShelf.version, by: docShelf.by });
     return docShelf;
   };
+  // Composer drafts sync (proxy drafts.ts, 2026-11-03): per chat, newest
+  // edit wins; empty text is a tombstone (a send). `setRemoteDraft`
+  // plays another device.
+  let draftsState = { version: 0, drafts: {} };
+  const mergeDraft = (chatId, incoming) => {
+    const now = Date.now();
+    const claimed = Number(incoming.updatedAt);
+    const row = { text: typeof incoming.text === 'string' ? incoming.text : '', updatedAt: Number.isFinite(claimed) && claimed > 0 ? Math.min(claimed, now + 60_000) : now, by: String(incoming.by || '') };
+    const prev = draftsState.drafts[chatId];
+    if (prev && prev.updatedAt > row.updatedAt) return { version: draftsState.version, chat_id: chatId, draft: prev, applied: false };
+    if (prev && prev.updatedAt === row.updatedAt && prev.text === row.text) return { version: draftsState.version, chat_id: chatId, draft: prev, applied: true };
+    draftsState = { version: draftsState.version + 1, drafts: { ...draftsState.drafts, [chatId]: row } };
+    broadcast({ type: 'drafts_changed', chat_id: 'parley:drafts', draft_chat_id: chatId, version: draftsState.version, by: row.by, updated_at: row.updatedAt });
+    return { version: draftsState.version, chat_id: chatId, draft: row, applied: true };
+  };
+  await page.route(/.*\/api\/parley\/drafts$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(draftsState) });
+  });
+  await page.route(/.*\/api\/parley\/drafts\/[^/?]+$/, async (route) => {
+    if (route.request().method() !== 'PUT') return route.fallback();
+    const chatId = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop());
+    let body = {};
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch {}
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mergeDraft(chatId, body)) });
+  });
   await page.route(/.*\/api\/parley\/docs\/shelf$/, async (route) => {
     const method = route.request().method();
     if (method === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(docShelf) });
@@ -1935,6 +1961,10 @@ export async function installMockBackend(page) {
      *  responses-handler write into `unread_state` when an assistant
      *  row lands). The PWA reads this state via the
      *  /api/parley/notifications/unread route mocked above. */
+    /** The synced drafts as the proxy would hold them: {chatId: {text, updatedAt, by}}. */
+    getDrafts() { return JSON.parse(JSON.stringify(draftsState.drafts)); },
+    /** Another device edits a chat's draft (updatedAt defaults to now). */
+    setRemoteDraft(chatId, text, opts = {}) { return mergeDraft(chatId, { text, updatedAt: opts.updatedAt ?? Date.now(), by: opts.by || 'other-device' }); },
     pushEnvelope(env) {
       if (env && (env.type === 'notification' || env.type === 'reply_final')) {
         bumpUnread(env.chat_id);

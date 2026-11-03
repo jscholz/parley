@@ -30,6 +30,7 @@ import * as playbackAudit from './proxy/parley/playbackAudit.ts';
 import * as uploads from './proxy/parley/uploads.ts';
 import * as storage from './proxy/parley/storage.ts';
 import * as docShelf from './proxy/parley/docShelf.ts';
+import * as drafts from './proxy/parley/drafts.ts';
 import { installJsonCompression } from './proxy/compressJson.ts';
 import { resolveConfigPath } from './proxy/configPath.mjs';
 import * as parley from './proxy/parley/index.ts';
@@ -1648,6 +1649,11 @@ const requestHandler: http.RequestListener = async (req, res) => {
   // tab order, and the doc_show content cache behind it.
   if (req.url === '/api/parley/docs/shelf' && req.method === 'GET') return docShelf.handleShelfGet(req, res);
   if (req.url === '/api/parley/docs/shelf' && req.method === 'PUT') return docShelf.handleShelfPut(req, res);
+  // Composer drafts sync (2026-11-03, drafts.ts): per-chat unsent text,
+  // newest edit wins, tombstones for sends.
+  if (req.url === '/api/parley/drafts' && req.method === 'GET') return drafts.handleDraftsGet(req, res);
+  const draftPut = req.method === 'PUT' && /^\/api\/parley\/drafts\/([^/?]+)$/.exec(req.url || '');
+  if (draftPut) return drafts.handleDraftPut(req, res, decodeURIComponent(draftPut[1]));
   const cachedDoc = req.method === 'GET' && /^\/api\/parley\/docs\/([0-9a-f]{1,8})$/.exec(req.url || '');
   if (cachedDoc) return docShelf.handleDocGet(req, res, cachedDoc[1]);
   const upl = (req.method === 'GET' || req.method === 'HEAD') && /^\/api\/parley\/uploads\/([^/?]+)\/(\d+)(\/thumb)?(?:\?.*)?$/.exec(req.url || '');

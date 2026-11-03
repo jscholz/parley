@@ -24,8 +24,8 @@ import {
   listDocs, tabOrderDocs, setDoc, removeDoc, setTabOrder, snapshotDocs, type DocState,
 } from './docStore.ts';
 import { planInbound } from './docShelfMerge.ts';
+import { ensureDeviceId as sharedDeviceId } from '../util/deviceId.ts';
 
-const DEVICE_KEY = 'parley.deviceId';
 /** Ids this device has SEEN on the shared shelf (last applied or last
  *  pushed). Merge-not-intersect (2026-10-24): only a doc the shelf knew
  *  and then dropped is closed here; a doc the shelf never knew is ours to
@@ -53,14 +53,8 @@ let wired = false;
 let primed = false;
 
 function ensureDeviceId(): string {
-  if (deviceId) return deviceId;
-  try {
-    deviceId = localStorage.getItem(DEVICE_KEY) || '';
-    if (!deviceId) {
-      deviceId = `dev_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-      localStorage.setItem(DEVICE_KEY, deviceId);
-    }
-  } catch { deviceId = deviceId || `dev_${Date.now().toString(36)}`; }
+  // Shared with draftSync: one id per browser profile (util/deviceId.ts).
+  deviceId = sharedDeviceId();
   return deviceId;
 }
 

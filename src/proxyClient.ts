@@ -937,6 +937,18 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
       return;
     }
 
+    case 'drafts_changed': {
+      // Another device edited a chat's composer draft (proxy drafts.ts).
+      // Replays are ignored: draftSync pulls the current state on boot.
+      if (env?._replay === true) return;
+      try {
+        window.dispatchEvent(new CustomEvent('parley:drafts-changed', {
+          detail: { chatId: typeof env?.draft_chat_id === 'string' ? env.draft_chat_id : '', by: typeof env?.by === 'string' ? env.by : '', version: Number(env?.version) || 0 },
+        }));
+      } catch { /* non-browser */ }
+      return;
+    }
+
     case 'doc_shelf_changed': {
       // Another device changed the open set / tab order. Replays are
       // ignored: the sync module fetches the current shelf on boot anyway.

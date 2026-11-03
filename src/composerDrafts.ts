@@ -54,6 +54,12 @@ interface DraftRecord {
 }
 
 const cache = new Map<string, string>();
+/** Last LOCAL edit time per chat (ms) — the stamp cross-device sync
+ *  compares (draftSync.ts). Bumped only when the text actually changes:
+ *  a chat switch re-saving unchanged text must not look like a newer
+ *  edit, or it would beat a real edit made on the other device. */
+const stamps = new Map<string, number>();
+let onLocalChangeCb: ((chatId: string) => void) | null = null;
 const clearedCache = new Map<string, string>();
 const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
 let hydrated = false;
@@ -99,7 +105,15 @@ function dbOpen(): Promise<IDBDatabase> {
   });
 }
 
-export async function hydrateDrafts(): Promise<void> {
+let hydratePromise: Promise<void> | null = null;
+/** Idempotent and awaitable: a second caller (draftSync's first pull)
+ *  waits for the same IDB read instead of returning before it lands. */
+export function hydrateDrafts(): Promise<void> {
+  if (!hydratePromise) hydratePromise = doHydrate();
+  return hydratePromise;
+}
+
+async function doHydrate(): Promise<void> {
   if (hydrated) return;
   hydrated = true;
   try {
@@ -109,7 +123,10 @@ export async function hydrateDrafts(): Promise<void> {
       req.onsuccess = () => {
         const rows = (req.result || []) as DraftRecord[];
         for (const r of rows) {
-          if (r?.chatId && typeof r.text === 'string' && r.text) cache.set(r.chatId, r.text);
+          if (r?.chatId && typeof r.text === 'string' && r.text) {
+            cache.set(r.chatId, r.text);
+            if (Number.isFinite(Number(r.savedAt))) stamps.set(r.chatId, Number(r.savedAt));
+          }
         }
         diag(`[drafts] hydrate: ${rows.length} drafts from IDB`);
         resolve();
@@ -202,10 +219,52 @@ export function boundTo(): string | null {
   return boundChatId;
 }
 
+// ── Cross-device sync seams (draftSync.ts owns the rule) ──────────────
+
+/** Register the "a local edit happened to chat X" listener. */
+export function onLocalChange(cb: ((chatId: string) => void) | null): void {
+  onLocalChangeCb = cb;
+}
+
+/** What this device holds for a chat: the text (the composer's, when
+ *  that chat is bound — the cache can lag the box by a keystroke) and
+ *  the last local edit time (0 = never edited here). */
+export function localDraftView(chatId: string): { text: string; stamp: number } {
+  const text = chatId === boundChatId && textareaRef ? textareaRef.value : (cache.get(chatId) ?? '');
+  return { text, stamp: stamps.get(chatId) ?? 0 };
+}
+
+/** Every chat with a local draft or a local stamp (for the first upload). */
+export function localDraftChatIds(): string[] {
+  return Array.from(new Set([...cache.keys(), ...stamps.keys()]));
+}
+
+/** Apply another device's draft WITHOUT treating it as a local edit:
+ *  no onLocalChange, the remote stamp is kept, and if the chat is in
+ *  the composer the box is replaced (the caller decided it is newer). */
+export function writeRemoteDraft(chatId: string, text: string, updatedAt: number): void {
+  if (!chatId) return;
+  if (text) cache.set(chatId, text); else cache.delete(chatId);
+  stamps.set(chatId, updatedAt);
+  if (chatId === boundChatId && textareaRef && textareaRef.value !== text) {
+    textareaRef.value = text;
+    onRestoredCb?.();
+    notifyComposerState();
+  }
+  notifyChanged();
+  flushDraft(chatId);
+  diag(`[drafts] remote draft applied for ${chatId.slice(-12)} (${text.length} chars)`);
+}
+
 function saveDraft(chatId: string, text: string): void {
   if (!chatId) return;
+  const changed = (cache.get(chatId) ?? '') !== text;
   if (text) cache.set(chatId, text);
   else cache.delete(chatId);          // emptied box = draft deliberately gone
+  if (changed) {
+    stamps.set(chatId, Date.now());
+    try { onLocalChangeCb?.(chatId); } catch { /* sync listener */ }
+  }
   notifyChanged();
   const pending = pendingWrites.get(chatId);
   if (pending) clearTimeout(pending);
@@ -479,7 +538,12 @@ async function persistCleared(chatId: string): Promise<void> {
  *  send's explicit chatId (invariant #3), not the visible box. */
 export function clearDraft(chatId: string | null): void {
   if (!chatId) return;
+  const had = cache.has(chatId);
   cache.delete(chatId);
+  // A send is an edit too (to empty): stamp it so the other device's
+  // older copy of the sent text cannot win the merge and come back.
+  stamps.set(chatId, Date.now());
+  if (had) { try { onLocalChangeCb?.(chatId); } catch { /* sync listener */ } }
   // The send is also what spends the undo buffer — the conversation has
   // moved on, so restoring pre-send text into the composer would be
   // offering to un-say something that was already said. This is the
@@ -495,7 +559,7 @@ async function persistOne(chatId: string): Promise<void> {
     const tx = db.transaction(STORE, 'readwrite');
     const text = cache.get(chatId);
     if (text) {
-      tx.objectStore(STORE).put({ chatId, text, savedAt: Date.now() } as DraftRecord);
+      tx.objectStore(STORE).put({ chatId, text, savedAt: stamps.get(chatId) ?? Date.now() } as DraftRecord);
     } else {
       tx.objectStore(STORE).delete(chatId);
     }

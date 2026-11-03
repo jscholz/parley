@@ -32,4 +32,6 @@ export const SUBSCRIBED_ENVELOPE_TYPES = [
   'capture_control', 'capture_changed',
   // Docs shelf sync (proxy docShelf.ts).
   'doc_shelf_changed',
+  // Composer drafts sync (proxy drafts.ts).
+  'drafts_changed',
 ] as const satisfies readonly EnvelopeType[];

@@ -102,6 +102,7 @@ import * as attachments from './attachments.ts';
 import * as draft from './draft.ts';
 import * as composer from './composer.ts';
 import * as composerDrafts from './composerDrafts.ts';
+import { initDraftSync } from './draftSync.ts';
 import * as dictationBinding from './dictationBinding.ts';
 import * as questionPopup from './questionPopup.ts';
 import * as selectToQuote from './selectToQuote.ts';
@@ -2750,6 +2751,9 @@ async function boot() {
     titleFor: (id) => sessionDrawer.getTitleForChat?.(id) ?? null,
   });
   void composerDrafts.hydrateDrafts();
+  // Cross-device drafts (2026-11-03): pulls after the IDB hydrate, pushes
+  // on local edits, follows drafts_changed envelopes.
+  initDraftSync();
   syncComposerEditButtons();
 
   // Agent-question pop-up (unified elicitation): approval answers ride
