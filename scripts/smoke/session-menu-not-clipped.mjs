@@ -26,6 +26,18 @@ export default async function run({ page, log }) {
   await waitForReady(page);
   await openSidebar(page);
   await page.waitForFunction(() => document.querySelectorAll('#sidebar .sess-menu-btn').length >= 20, null, { timeout: 8000, polling: 100 });
+  // Let the list SETTLE first: boot-time refreshes (stale-tail reconcile,
+  // unread, drafts) repaint rows for a while under full-suite load, and a
+  // repaint closes an open menu (null rect, 2026-11-03). Quiet = no
+  // mutations under the list for 500 ms (capped at 4 s).
+  const settle = () => page.evaluate(() => new Promise((done) => {
+    const list = document.getElementById('sessions-list'); if (!list) return done(false);
+    let t = setTimeout(() => { mo.disconnect(); done(true); }, 500);
+    const cap = setTimeout(() => { mo.disconnect(); done(false); }, 4000);
+    const mo = new MutationObserver(() => { clearTimeout(t); t = setTimeout(() => { clearTimeout(cap); mo.disconnect(); done(true); }, 500); });
+    mo.observe(list, { subtree: true, childList: true, attributes: true, characterData: true });
+  }));
+  await settle();
   // Scroll the list to the very bottom and open the LAST row's menu.
   await page.evaluate(() => {
     const sc = document.querySelector('.sidebar-content');
@@ -45,8 +57,12 @@ export default async function run({ page, log }) {
     return r.top >= 0 && r.bottom <= innerHeight;
   });
   assert(anchorVisible, 'the last row must be on screen for this test to mean anything');
-  const geo = await page.evaluate(() => {
+  // Measure in ONE step and retry: under full-suite load a drawer repaint
+  // can close the menu between the wait and the read (null rect,
+  // 2026-11-03). If it is gone, open it again and measure again.
+  const measure = () => page.evaluate(() => {
     const m = document.querySelector('.sess-menu');
+    if (!m) return null;
     const r = m.getBoundingClientRect();
     const info = Array.from(m.querySelectorAll('button')).find((b) => b.textContent === 'Info');
     const ir = info.getBoundingClientRect();
@@ -61,6 +77,23 @@ export default async function run({ page, log }) {
       parentIsBody: m.parentElement === document.body,
     };
   });
+  let geo = await measure();
+  if (!geo) {
+    // A repaint closed it. Open it again only once the list is quiet and
+    // the menu is confirmed absent — never a blind click that could toggle
+    // a menu already on its way in.
+    await settle();
+    await page.waitForFunction(() => !document.querySelector('.sess-menu'), null, { timeout: 2000 });
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('#sidebar .sess-menu-btn'));
+      const last = btns[btns.length - 1];
+      last.scrollIntoView({ block: 'end' });
+      last.click();
+    });
+    await page.waitForSelector('.sess-menu', { timeout: 3000 });
+    geo = await measure();
+  }
+  assert(geo, 'the session menu would not stay open to be measured');
   assert(geo.parentIsBody, 'menu must be portaled to <body>');
   assert(geo.top >= 0 && geo.bottom <= geo.vh && geo.left >= 0 && geo.right <= geo.vw,
     `menu must sit fully inside the viewport: ${JSON.stringify(geo)}`);
