@@ -12,6 +12,7 @@ import { createActivityModule, type ActivityOpenHandler, type ApprovalActionHand
 import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/pins.ts';
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
+import { initDocFullscreen } from '../rightDrawer/docFullscreen.ts';
 import { hydrateDoc, listDocs, selectDoc, docCount, setDoc } from '../rightDrawer/docStore.ts';
 import { initDocShelfSync } from '../rightDrawer/docShelfSync.ts';
 import { apiUrl } from '../apiBase.ts';
@@ -289,6 +290,9 @@ export function initPinDrawer(opts: {
       })
     : null;
   docModuleRef = docModule;
+  // Full-screen reading mode (2026-11-03): borrows the doc body node and
+  // drives the module's view from the overlay's tab strip.
+  if (docModule && docBodyEl) initDocFullscreen({ body: docBodyEl, setView: (v) => docModule.setView(v) });
 
   // The generic Docs rail button opens the LIST view (management home —
   // Clear all lives there): with the rail doc-tabs giving every doc a

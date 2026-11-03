@@ -39,6 +39,7 @@ import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs } from '../docStore.ts';
+import { toggleDocFullscreen, syncExpandButtons } from '../docFullscreen.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
@@ -307,6 +308,16 @@ export function createDocModule(opts: {
     dl.setAttribute('aria-label', 'Download document');
     dl.setAttribute('title', 'Download');
     dl.onclick = () => downloadDoc(doc);
+
+    // Full screen (2026-11-03, docFullscreen.ts): the DOCUMENT, not the
+    // panel, in a reading column; Esc or the same glyph brings it back.
+    const exp = document.createElement('button');
+    exp.className = 'doc-drawer-expand';
+    exp.type = 'button';
+    exp.innerHTML = '<svg class="glyph-expand" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4"/><path d="M13.5 2.5 9 7"/><path d="M6.5 13.5h-4v-4"/><path d="M2.5 13.5 7 9"/></svg>'
+      + '<svg class="glyph-collapse" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5h-4v-4"/><path d="M9.5 6.5 14 2"/><path d="M2.5 9.5h4v4"/><path d="M6.5 9.5 2 14"/></svg>';
+    exp.onclick = () => { toggleDocFullscreen(); };
+    header.appendChild(exp);
     if (!hasStrip) header.appendChild(dl);
 
     // Close-from-shelf — ✕ NEXT TO the doc's own actions so its scope
@@ -428,6 +439,7 @@ export function createDocModule(opts: {
     // navigation chrome dominating and the document's own identity in
     // second place. Same elements, demoted one slot.
     opts.body.appendChild(header);
+    syncExpandButtons();
 
     // Player strip — capture transcripts only (§3.6): stream the
     // stitched audio, tap a transcript timestamp to seek. This is the
