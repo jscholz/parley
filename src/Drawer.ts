@@ -210,6 +210,11 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
     if (window.innerWidth >= MOBILE_BREAKPOINT_PX) return;
     const target = e.target as Element | null;
     if (target?.closest?.(`#${cfg.id}`)) return;
+    // The full-screen reading view (rightDrawer/docFullscreen.ts) covers
+    // the window above every drawer; a tap in it (its tab strip, its
+    // close) is not "outside" in any sense the user means (2026-11-03:
+    // on a phone the strip collapsed the Docs drawer under the reader).
+    if (target?.closest?.('.doc-fullscreen')) return;
     for (const btnId of cfg.toggleIds || []) {
       if (target?.closest?.(`#${btnId}`)) return;
     }

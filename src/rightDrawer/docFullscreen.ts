@@ -29,6 +29,11 @@ interface Host {
   body: HTMLElement;
   /** The doc module's view setter (list ↔ reader). */
   setView: (v: 'list' | 'reader') => void;
+  /** Make the Docs module the active one and render it NOW. The drawer
+   *  only re-renders a doc change while it is open with Docs in front;
+   *  on a phone that is not a given while the overlay is up, and the
+   *  strip must work regardless. */
+  render: () => void;
 }
 
 let host: Host | null = null;
@@ -133,6 +138,7 @@ function onDocsChanged(): void {
   if (!overlay || !host) return;
   if (!currentDoc()) { closeDocFullscreen(); return; }
   host.setView('reader');
+  host.render();
   renderStrip();
 }
 
@@ -148,7 +154,7 @@ function renderStrip(): void {
     b.dataset.docId = d.id;
     b.textContent = d.title;
     b.title = d.title;
-    b.onclick = () => { selectDoc(d.id); host?.setView('reader'); };
+    b.onclick = () => { log(`[docs] full screen: tab → ${d.title}`); selectDoc(d.id); host?.setView('reader'); host?.render(); };
     return b;
   });
   strip.replaceChildren(...tabs);

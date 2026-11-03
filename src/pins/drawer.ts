@@ -292,7 +292,15 @@ export function initPinDrawer(opts: {
   docModuleRef = docModule;
   // Full-screen reading mode (2026-11-03): borrows the doc body node and
   // drives the module's view from the overlay's tab strip.
-  if (docModule && docBodyEl) initDocFullscreen({ body: docBodyEl, setView: (v) => docModule.setView(v) });
+  if (docModule && docBodyEl) {
+    initDocFullscreen({
+      body: docBodyEl,
+      setView: (v) => docModule.setView(v),
+      // select('doc') renders the module even while the drawer is closed
+      // (mobile), without opening it.
+      render: () => drawerHost?.select('doc'),
+    });
+  }
 
   // The generic Docs rail button opens the LIST view (management home —
   // Clear all lives there): with the rail doc-tabs giving every doc a

@@ -208,6 +208,10 @@ export function initDrawerSwipe(opts: DrawerSwipeOptions): void {
     for (const sel of excludes) {
       if (targetEl?.closest?.(sel)) return;
     }
+    // The full-screen reading view (rightDrawer/docFullscreen.ts) covers
+    // the whole window ABOVE both drawers: a swipe there is a reader
+    // gesture (scroll, select), never a drawer drag happening unseen.
+    if (targetEl?.closest?.('.doc-fullscreen')) return;
     if (targetOwnsHorizontalMotion(e.target)) return;
     // Yield to OS-native text-selection drag: if the user has already
     // highlighted text (e.g. iOS long-press-to-select), pointerdown +

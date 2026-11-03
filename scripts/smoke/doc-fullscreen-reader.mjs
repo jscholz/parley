@@ -16,6 +16,8 @@
 //   F5  the glyph toggles: open, then the same glyph closes
 //   F6  closing the last document from inside full screen leaves it
 //       (nothing to read); the panel shows its empty state
+//   M1  (phone variant) a horizontal swipe inside the reading view does
+//       not drag the drawer underneath; the bar's close exits (no Escape)
 
 import { waitForReady, pollUntil, assert } from './lib.mjs';
 
@@ -23,6 +25,10 @@ export const NAME = 'doc-fullscreen-reader';
 export const DESCRIPTION = 'Docs: expand glyph → full-screen reading column; tab strip switches docs without leaving; Esc stacks under the image viewer; glyph and Esc close; last doc closed → exits';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
+// Phone layout too: the panel is already full-width there, but the
+// reading view still drops the rail and chrome; no Escape key on a phone,
+// so the bar's close and the glyph are the way out.
+export const MOBILE = 'both';
 
 const CHAT = 'parley:fullscreen-docs';
 const para = (tag) => Array.from({ length: 14 }, (_, i) => `${tag} paragraph ${i + 1}: ${'words that wrap across a reading column. '.repeat(5)}`).join('\n\n');
@@ -60,8 +66,13 @@ export default async function run({ page, log, mock }) {
   let s = await state(page);
   log(`F1 overlay: body in overlay=${s.bodyInOverlay} column ${s.width}px at x=${s.left} of ${s.vw}; tabs ${JSON.stringify(s.tabs)}`);
   assert(s.bodyInOverlay && !s.bodyInPanel, 'F1: the panel body was not borrowed into the overlay');
-  assert(s.width > 400 && s.width <= 820, `F1: reading column is ${s.width}px wide on a ${s.vw}px window — must be a readable measure`);
-  assert(s.left > 100 && s.left + s.width < s.vw - 100, 'F1: reading column is not centred');
+  const phone = s.vw < 700;
+  if (phone) {
+    assert(s.width >= s.vw - 48 && s.width <= s.vw, `F1: on a ${s.vw}px phone the column should fill the width, got ${s.width}px`);
+  } else {
+    assert(s.width > 400 && s.width <= 820, `F1: reading column is ${s.width}px wide on a ${s.vw}px window — must be a readable measure`);
+    assert(s.left > 100 && s.left + s.width < s.vw - 100, 'F1: reading column is not centred');
+  }
   assert(/BRAVO-MARK/.test(s.text) || true, 'content present');
   assert(s.glyphOpen === '1', `F1: expand glyph should read collapse while open (data-open=${s.glyphOpen})`);
 
@@ -101,6 +112,26 @@ export default async function run({ page, log, mock }) {
   await page.click('.doc-fullscreen .doc-drawer-expand');
   await pollUntil(page, () => !document.querySelector('.doc-fullscreen'), null, { timeout: 2_000, label: 'F5: the same glyph did not close' });
   log('F5 glyph opens and closes ✓');
+
+  // ── M1 (phone) — a swipe inside the reading view must not drive the
+  //    drawer underneath; the bar's close is the way out (no Escape key) ─
+  if (phone) {
+    await page.click('#doc-drawer-body .doc-drawer-expand');
+    await pollUntil(page, () => !!document.querySelector('.doc-fullscreen'), null, { timeout: 2_000, label: 'M1: did not open' });
+    const drawerBefore = await page.evaluate(() => document.body.classList.contains('pin-drawer-open'));
+    await page.mouse.move(300, 500); await page.mouse.down();
+    for (let x = 300; x >= 60; x -= 40) { await page.mouse.move(x, 500); await page.waitForTimeout(16); }
+    await page.mouse.up();
+    await page.waitForTimeout(400);
+    const drawerAfter = await page.evaluate(() => document.body.classList.contains('pin-drawer-open'));
+    assert(drawerBefore === drawerAfter, `M1: a swipe inside full screen changed the drawer underneath (open ${drawerBefore} → ${drawerAfter})`);
+    assert(await page.evaluate(() => !!document.querySelector('.doc-fullscreen')), 'M1: the swipe closed full screen');
+    await page.click('.doc-fullscreen-close');
+    await pollUntil(page, () => !document.querySelector('.doc-fullscreen'), null, { timeout: 2_000, label: 'M1: the bar close did not exit' });
+    s = await state(page);
+    assert(s.bodyInPanel, 'M1: body not back in the panel after the bar close');
+    log('M1 phone: swipe inside the reader left the drawer alone; bar close exits ✓');
+  }
 
   // ── F6 — closing the last doc inside full screen exits ──────────────
   await page.click('#doc-drawer-body .doc-drawer-expand');
