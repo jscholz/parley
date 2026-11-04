@@ -79,6 +79,7 @@ export async function installMockBackend(page) {
    *  mock.setAutoReplyEnabled(false) to suppress the auto-reply
    *  and push their own envelopes via pushEnvelope. */
   let autoReplyEnabled = true;
+  let replier = null;
   // When true, POST /messages skips the user_message envelope echo.
   // Used by smokes that need to assert the PWA's optimistic user-
   // bubble path renders WITHOUT relying on a server-side echo.
@@ -1073,7 +1074,10 @@ export async function installMockBackend(page) {
       // the PWA-supplied user_message_id (if any) so the originating
       // device's renderedMessages.upsert collapses idempotently.
       const userMsgId = incomingUserMsgId || `umsg_mock_${envelopeId + 1}`;
-      const replyText = `[mock] echo: ${text}`;
+      // A smoke can script the agent's reply to a message (e.g. hermes'
+      // /branch answer with its /?chat= link): setReplier((text, chatId) => string | null).
+      const scripted = replier ? replier(text, chatId) : null;
+      const replyText = typeof scripted === 'string' ? scripted : `[mock] echo: ${text}`;
       const messageId = `mock-msg-${envelopeId + 1}`;
       // Persist the user+assistant rows with their SSE-shape ids so a
       // later history-fetch returns parley_id matching what the live
@@ -2211,6 +2215,8 @@ export async function installMockBackend(page) {
      *  reply timing) call setAutoReplyEnabled(false). The
      *  user_message broadcast still fires (cross-device dedup
      *  expects it); the typing + reply envelopes do not. */
+    /** Script the reply text for the next messages: fn(text, chatId) → string, or null for the echo. */
+    setReplier(fn) { replier = typeof fn === 'function' ? fn : null; },
     setAutoReplyEnabled(enabled) {
       autoReplyEnabled = !!enabled;
     },

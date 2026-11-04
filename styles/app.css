@@ -2329,7 +2329,7 @@
     /* Right padding reserves the stamp column (delivery mark + time, two
        rows, hung at right:10px): 44px fit the time alone; the mark beside
        it needs ~30px more or the text runs under it (field 2026-10-27). */
-    padding: var(--space-3) 76px var(--space-3) var(--space-4);
+    padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
   }
   .line.s0 .speaker { display: none; }
@@ -3593,8 +3593,8 @@
      below the bubble. Reserve a little extra bottom room on every bubble
      showing the date (now all of them) so the two-line stamp always sits
      INSIDE the bubble — no overlap with the message text or action buttons. */
-  .line.s0:has(.line-ts.has-date),
-  .line.agent:has(.line-ts.has-date) { padding-bottom: 26px; }
+  /* (The stamp lives in the message footer since 2026-11-04 — no reserved
+     corner, no extra bottom padding.) */
   .line.interim { opacity: 0.45; font-style: italic; }
 
   /* ── Per-message action menu (#154) ──
@@ -3652,6 +3652,70 @@
   .line.menu-open {
     content-visibility: visible !important;
     contain: none !important;
+  }
+
+  /* ── Message footer (2026-11-04) ──
+   * One row at the BOTTOM of every bubble, the way Claude lays it out:
+   * agent — copy · fork · pin · read aloud · ⋯ · time; user — ticks+time ·
+   * copy · rewind · fork. Icons appear on hover (desktop); the time and
+   * ticks stay faint always. Touch: tap the time to reveal the icons.
+   * The old caret dropdown (#154) is gone except as the ⋯ overflow for
+   * rare actions (mark unread). Accidental playback is prevented at the
+   * source (gesture classifier, inert play bar), not by hiding Play. */
+  .line .msg-foot {
+    display: flex; align-items: center; gap: 2px;
+    margin-top: 6px; min-height: 24px;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
+  }
+  .line.s0 .msg-foot { justify-content: flex-end; }
+  .line .msg-foot .act {
+    position: static; display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 24px; padding: 0; margin: 0;
+    background: none; border: none; border-radius: 5px; color: var(--muted);
+    cursor: pointer; opacity: 0; transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+    z-index: auto;
+  }
+  .line .msg-foot .act svg { width: 16px; height: 16px; }
+  .line:hover .msg-foot .act, .line.actions-open .msg-foot .act, .line.menu-open .msg-foot .act { opacity: 0.6; }
+  .line .msg-foot .act:hover { opacity: 1; color: var(--fg); background: var(--surface); }
+  .line .msg-foot .act.pinned, .line.pinned .msg-foot .pin-btn { opacity: 0.9; color: var(--primary); }
+  .line.agent.tts-active .msg-foot .play-btn, .line.agent.tts-playing .msg-foot .play-btn,
+  .line.agent.tts-paused .msg-foot .play-btn { opacity: 1; color: var(--primary); }
+  /* The buttons were absolutely placed in the corner; inside the footer
+     they are ordinary flex items. */
+  .line .msg-foot .copy-btn, .line .msg-foot .pin-btn, .line.agent .msg-foot .play-btn, .line .msg-foot .msg-caret {
+    position: static; display: inline-flex; top: auto; right: auto; left: auto;
+  }
+  .line .msg-foot .copy-btn svg, .line .msg-foot .play-btn svg { width: 16px; height: 16px; }
+  /* The stamp: inline in the row, no longer hung in the corner. */
+  .line .msg-foot .line-ts {
+    position: static; top: auto; right: auto;
+    display: inline-flex; align-items: center; gap: 5px;
+    margin: 0 6px; cursor: default; pointer-events: auto;
+    line-height: 1; text-align: left;
+  }
+  .line.agent .msg-foot .line-ts { margin-left: 8px; }
+  .line .msg-foot .line-ts .line-ts-time { opacity: 0.55; }
+  .line .msg-foot .line-ts.has-date .line-ts-date { display: inline; margin: 0; font-size: 9.5px; opacity: 0.4; }
+  .line .msg-foot .line-ts .line-ts-date::before { content: '·'; margin-right: 5px; }
+  .line .msg-foot .turn-ack {
+    display: inline-flex; align-items: center; font-size: 0; letter-spacing: 0; padding: 0;
+    width: 18px; height: 16px; color: var(--muted);
+  }
+  .line .msg-foot .turn-ack svg { width: 18px; height: 18px; }
+  .line .msg-foot .turn-ack[data-state="pending"] { opacity: 0.6; }
+  .line .msg-foot .turn-ack[data-state="seen"] { color: var(--primary); }
+  .line .msg-foot .turn-ack[data-state="failure"], .line .msg-foot .turn-ack[data-state="failed"] { color: #d55; }
+  /* The ⋯ overflow menu anchors to the footer, not the corner. */
+  .line .msg-foot .msg-caret { opacity: 0; }
+  .line:hover .msg-foot .msg-caret, .line.actions-open .msg-foot .msg-caret, .line.menu-open .msg-foot .msg-caret { opacity: 0.6; }
+  .line .msg-menu { top: auto; bottom: 30px; right: auto; left: 8px; }
+  .line.s0 .msg-menu { left: auto; right: 8px; }
+  @media (hover: none) {
+    /* No hover on a phone: the time is the tap target that reveals the row. */
+    .line .msg-foot .act, .line .msg-foot .msg-caret { opacity: 0; }
+    .line.actions-open .msg-foot .act, .line.actions-open .msg-foot .msg-caret { opacity: 0.7; }
+    .line .msg-foot .line-ts { padding: 4px 0; }
   }
 
   /* ── Draft block: unsent voice transcript ──

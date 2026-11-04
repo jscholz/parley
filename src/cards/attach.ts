@@ -55,7 +55,9 @@ function ensureContainer(bubble) {
   if (!container) {
     container = document.createElement('div');
     container.className = 'line-cards';
-    bubble.appendChild(container);
+    // Above the message footer (2026-11-04), which stays the last row.
+    const foot = bubble.querySelector(':scope > .msg-foot');
+    if (foot) bubble.insertBefore(container, foot); else bubble.appendChild(container);
   }
   return container;
 }

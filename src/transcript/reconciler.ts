@@ -304,9 +304,25 @@ export function deliveryMark(spec: Pick<UserBubbleSpec, 'ack' | 'delivery' | 'fa
   }
 }
 
+/** The tick icons: a clock while sending, one check when the proxy has
+ *  it, two overlapping checks once the agent has it (coloured by CSS once
+ *  the agent started on it), an exclamation for a failed send, a cross
+ *  for a failed or stopped turn. */
+export function deliveryMarkSvg(state: string): string {
+  const open = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+  switch (state) {
+    case 'pending': return `${open}<circle cx="10" cy="10" r="6.5"/><path d="M10 6.5V10l2.5 1.5"/></svg>`;
+    case 'sent': return `${open}<path d="M4 10.5l3.5 3.5L15 6.5"/></svg>`;
+    case 'delivered':
+    case 'seen': return `${open}<path d="M2.5 10.5l3.5 3.5L13 7"/><path d="M8.5 11.5l2 2L18 6.5"/></svg>`;
+    case 'failed': return `${open}<circle cx="10" cy="10" r="6.5"/><path d="M10 6.8v3.7"/><path d="M10 13.2h.01"/></svg>`;
+    default: return `${open}<path d="M6 6l8 8M14 6l-8 8"/></svg>`;   // failure / cancelled
+  }
+}
+
 function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
   const want = deliveryMark(spec);
-  let mark = el.querySelector(':scope > .line-ts > .turn-ack, :scope > .turn-ack') as HTMLElement | null;
+  let mark = el.querySelector(':scope > .msg-foot > .line-ts > .turn-ack, :scope > .line-ts > .turn-ack, :scope > .turn-ack') as HTMLElement | null;
   if (!want) {
     mark?.remove();
   } else {
@@ -316,14 +332,20 @@ function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
       // Beside the time, to its LEFT (field 2026-10-27: "the way WhatsApp
       // does — in our case left rather than right — would leave the caret
       // menu un-crowded"). Inside .line-ts so the two-line stamp owns it.
-      const tsEl = el.querySelector(':scope > .line-ts') as HTMLElement | null;
+      // The stamp lives in the message footer (2026-11-04); older bubble
+      // shapes keep it as a direct child.
+      const tsEl = el.querySelector(':scope > .msg-foot > .line-ts, :scope > .line-ts') as HTMLElement | null;
       if (tsEl) tsEl.insertBefore(mark, tsEl.querySelector('.line-ts-time') ?? tsEl.firstChild);
       else el.appendChild(mark);
     }
     if (spec.ack) mark.dataset.ack = spec.ack; else delete mark.dataset.ack;
     if (mark.dataset.state !== want.state) {
       mark.dataset.state = want.state;
-      mark.textContent = want.glyph;
+      // Drawn ticks, not text glyphs (field 2026-11-04: "use Claude /
+      // WhatsApp style for the checks"). data-glyph keeps the textual
+      // meaning for tests and screen readers.
+      mark.dataset.glyph = want.glyph;
+      mark.innerHTML = deliveryMarkSvg(want.state);
       mark.title = want.title;
       mark.setAttribute('aria-label', want.title);
     }

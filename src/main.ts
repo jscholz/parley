@@ -71,6 +71,7 @@ import * as approvalActions from './notifications/approvalActions.ts';
 import { installExternalLinkHandler } from './native/externalLinks.ts';
 import { installExternalLinkGuard } from './externalLinkGuard.ts';
 import { installJitterWatch } from './util/jitterWatch.ts';
+import { initMessageActions } from './messageActions.ts';
 import { parseChatDeepLink } from './util/chatDeepLink.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
@@ -1327,6 +1328,23 @@ async function boot() {
   installExternalLinkHandler();
   installExternalLinkGuard();
   installJitterWatch();
+  // Rewind / fork from a message (messageActions.ts). Commands they send
+  // go through the slash dispatcher like a typed one; a command aimed at
+  // another chat waits until that chat is on screen.
+  initMessageActions({ viewedTitle: () => (document.getElementById('header-title')?.textContent || document.title || 'Chat').trim() });
+  window.addEventListener('parley:send-command', (ev) => {
+    const d = (ev as CustomEvent<{ text: string; chatId?: string }>).detail;
+    if (!d?.text) return;
+    const fire = () => { diag(`[send-command] ${d.text}`); slashCommands.dispatch(d.text); };
+    if (!d.chatId || switchCtl.viewedId() === d.chatId) { fire(); return; }
+    const t0 = Date.now();
+    const wait = () => {
+      if (switchCtl.viewedId() === d.chatId) { fire(); return; }
+      if (Date.now() - t0 > 15_000) { diag(`[send-command] gave up waiting for ${d.chatId}`); return; }
+      window.setTimeout(wait, 150);
+    };
+    wait();
+  });
   // In-app chat links (`/?chat=<id>[&msg=<id>]` — the grammar hermes'
   // /branch reply uses to point at the new chat) switch in place through
   // the notification-tap path instead of reloading the app. Capture phase

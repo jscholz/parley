@@ -1279,18 +1279,22 @@ function openMsgMenu(line: HTMLElement): void {
     menu.appendChild(b);
   };
 
-  if (isAgent && playBtn) {
+  // Play / Pin / Copy live inline in the footer since 2026-11-04; the
+  // menu is the overflow for the rare action only. (Bubbles without a
+  // footer — none in practice — would still get them here.)
+  const hasFoot = !!line.querySelector(':scope > .msg-foot');
+  if (!hasFoot && isAgent && playBtn) {
     const playing = line.classList.contains('tts-playing');
     const cached = line.classList.contains('tts-cached');
     addItem(playing ? 'Pause' : 'Play', playing ? ICON.pause : ICON.play,
       () => playBtn.click(), cached);
   }
-  if (pinBtn) {
+  if (!hasFoot && pinBtn) {
     const pinned = line.classList.contains('pinned');
     addItem(pinned ? 'Unpin' : 'Pin', pinned ? ICON.pinFilled : ICON.pinOutline,
       () => pinBtn.click(), pinned);
   }
-  if (copyBtn) addItem('Copy', ICON.copy, () => copyBtn.click());
+  if (!hasFoot && copyBtn) addItem('Copy', ICON.copy, () => copyBtn.click());
   // Gated on isDurableMessageKey for the same reason as the pin button
   // above: the thinking-dots placeholder is an agent bubble too, and
   // "Mark unread" would otherwise persist an activity row keyed
@@ -1561,8 +1565,8 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   // copy feedback) keeps working untouched. Only Mark-unread is bespoke.
   const caretBtn = document.createElement('button');
   caretBtn.className = 'msg-caret';
-  caretBtn.title = 'Message actions';
-  caretBtn.setAttribute('aria-label', 'Message actions');
+  caretBtn.title = 'More';
+  caretBtn.setAttribute('aria-label', 'More message actions');
   caretBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>`;
   caretBtn.onclick = (e) => {
     e.stopPropagation();
@@ -1586,7 +1590,63 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       if (div.querySelector('.msg-menu')) scheduleMsgMenuHoverClose();
     });
   }
-  div.appendChild(caretBtn);
+  // ── Message footer (2026-11-04, field: "the exact functionality I
+  // want" — Claude's layout). One row at the BOTTOM of the bubble:
+  //   agent: copy · fork · pin · read aloud · ⋯ · time
+  //   user:  ticks+time · copy · rewind · fork
+  // The copy/pin/play buttons built above move INTO the row (their wiring
+  // — pin store, replyPlayer delegation, copy feedback — is untouched);
+  // the caret becomes the ⋯ overflow and only exists where it has an item
+  // (Mark unread on agent / notification bubbles). Icons reveal on hover;
+  // on touch, tapping the time reveals them.
+  const foot = document.createElement('div');
+  foot.className = 'msg-foot';
+  const isUserLine = div.classList.contains('s0');
+  const durableId = opts.messageId && isDurableMessageKey(String(opts.messageId)) ? String(opts.messageId) : null;
+  const chatIdNow = () => viewedSessionIdRef || backend.getCurrentSessionId?.() || null;
+  const act = (el: HTMLElement | null) => { if (el) { el.classList.add('act'); foot.appendChild(el); } };
+  const svgBtn = (cls: string, title: string, svg: string, onClick: () => void): HTMLButtonElement => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = cls; b.title = title; b.setAttribute('aria-label', title);
+    b.innerHTML = svg;
+    b.onclick = (e) => { e.stopPropagation(); onClick(); };
+    return b;
+  };
+  const FORK_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.7"/><circle cx="12" cy="3.5" r="1.7"/><circle cx="8" cy="12.5" r="1.7"/><path d="M4 5.2v1.3a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V5.2"/><path d="M8 8.5v2.3"/></svg>';
+  const REWIND_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 4.5H11a3 3 0 0 1 0 6H3.5"/><path d="M6 7.5 3.5 10.5 6 13.5"/></svg>';
+  const forkBtn = durableId ? svgBtn('fork-btn', 'Fork the chat from here', FORK_SVG, () => {
+    const chatId = chatIdNow();
+    if (chatId) window.dispatchEvent(new CustomEvent('parley:fork-from', { detail: { chatId, messageId: durableId, role: isUserLine ? 'user' : 'assistant' } }));
+  }) : null;
+  if (isUserLine) {
+    const rewindBtn = durableId ? svgBtn('rewind-btn', 'Rewind to here — undo this send and redirect', REWIND_SVG, () => {
+      const chatId = chatIdNow();
+      const text = div.dataset.text || (div.querySelector('.text') as HTMLElement | null)?.textContent || '';
+      if (chatId) window.dispatchEvent(new CustomEvent('parley:rewind-to', { detail: { chatId, messageId: durableId, text } }));
+    }) : null;
+    foot.appendChild(tsEl);
+    act(div.querySelector(':scope > .copy-btn'));
+    act(rewindBtn);
+    act(forkBtn);
+  } else {
+    act(div.querySelector(':scope > .copy-btn'));
+    act(forkBtn);
+    act(div.querySelector(':scope > .pin-btn'));
+    act(div.querySelector(':scope > .play-btn'));
+    // ⋯ only where the overflow has something to offer (Mark unread).
+    if (durableId && (div.classList.contains('agent') || div.classList.contains('notification'))) {
+      caretBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.5" cy="8" r="1.4"/></svg>';
+      foot.appendChild(caretBtn);
+    }
+    foot.appendChild(tsEl);
+  }
+  // Touch: no hover, so the time is the tap that reveals the row.
+  tsEl.addEventListener('click', (e) => {
+    if (!window.matchMedia?.('(hover: none)').matches) return;
+    e.stopPropagation();
+    div.classList.toggle('actions-open');
+  });
+  div.appendChild(foot);
 
   // All links in rendered markdown open in new tab
   if (opts.markdown) {

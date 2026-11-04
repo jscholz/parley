@@ -27,7 +27,8 @@ export default async function run({ page, log, mock }) {
   await openSidebar(page);
   await clickRow(page, CHAT);
   await page.waitForFunction(() => (document.getElementById('transcript')?.textContent || '').includes('seed answer'), null, { timeout: 5_000, polling: 50 });
-  const markOf = (id) => page.evaluate((i) => { const m = document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`); return m ? { state: m.dataset.state, glyph: m.textContent, ack: m.dataset.ack || null } : null; }, id);
+  // The mark is a drawn icon (2026-11-04); data-glyph carries its textual meaning.
+  const markOf = (id) => page.evaluate((i) => { const m = document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`); return m ? { state: m.dataset.state, glyph: m.dataset.glyph, ack: m.dataset.ack || null, drawn: !!m.querySelector('svg') } : null; }, id);
   const waitState = (id, st) => page.waitForFunction((i, s) => document.querySelector(`#transcript .line.s0[data-message-id="${i}"] .turn-ack`)?.dataset.state === s, [id, st], { timeout: 4_000, polling: 50 }).catch(() => null);
   // Durable rows from history: the agent has them.
   assert((await markOf('umsg_s0'))?.state === 'seen' || (await markOf('umsg_s0'))?.state === 'delivered', `history row: ${JSON.stringify(await markOf('umsg_s0'))}`);
@@ -49,7 +50,7 @@ export default async function run({ page, log, mock }) {
   const sentAt = seq.indexOf('sent'); const deliveredAt = seq.indexOf('delivered');
   assert(sentAt >= 0, `accepted by the proxy → one tick never shown; states seen: ${JSON.stringify(seq)}`);
   assert(deliveredAt < 0 || sentAt < deliveredAt, `one tick must precede two: ${JSON.stringify(seq)}`);
-  const sentGlyph = await page.evaluate(() => { const m = document.querySelector('#transcript .turn-ack[data-state="sent"]'); return m ? m.textContent : null; });
+  const sentGlyph = await page.evaluate(() => { const m = document.querySelector('#transcript .turn-ack[data-state="sent"]'); return m ? m.dataset.glyph : null; });
   if (sentGlyph !== null) assert(sentGlyph === '✓', `one tick glyph: ${sentGlyph}`);
   log(`✓ one tick after the proxy accepted the send (states so far: ${seq.join(' → ')})`);
 
