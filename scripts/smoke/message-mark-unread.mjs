@@ -68,17 +68,9 @@ export default async function run({ page, log, mock }) {
   assert(msgId, 'agent reply bubble should carry a data-message-id');
   log(`agent msgId=${msgId}`);
 
-  // Open the caret menu and click "Mark unread".
-  await page.evaluate((s) => {
-    document.querySelector(`${s} .msg-caret`)
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  }, agentSel);
-  await page.waitForSelector(`${agentSel} .msg-menu`, { timeout: 2_000 });
-  await page.evaluate((s) => {
-    const menu = document.querySelector(`${s} .msg-menu`);
-    const btn = Array.from(menu.querySelectorAll('button')).find((b) => b.textContent === 'Mark unread');
-    btn?.click();
-  }, agentSel);
+  // One click on the footer's Mark unread icon (2026-11-04: no menu).
+  await page.waitForSelector(`${agentSel} .msg-foot .unread-btn`, { timeout: 2_000 });
+  await page.evaluate((s) => { document.querySelector(`${s} .msg-foot .unread-btn`)?.click(); }, agentSel);
 
   // ── A. Confirmation toast ────────────────────────────────────────
   await page.waitForFunction(() => {
@@ -137,19 +129,13 @@ export default async function run({ page, log, mock }) {
   await clickRow(page, CRON_CHAT);
   const cronSel = `#transcript .line.notification[data-message-id="${CRON_MSG_ID}"]`;
   await page.waitForSelector(cronSel, { timeout: 5_000 });
-  await page.evaluate((s) => {
-    document.querySelector(`${s} .msg-caret`)
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-  }, cronSel);
-  await page.waitForSelector(`${cronSel} .msg-menu`, { timeout: 2_000 });
   const hasItem = await page.evaluate((s) => {
-    const menu = document.querySelector(`${s} .msg-menu`);
-    const btn = Array.from(menu.querySelectorAll('button')).find((b) => b.textContent === 'Mark unread');
+    const btn = document.querySelector(`${s} .msg-foot .unread-btn`);
     if (!btn) return false;
     btn.click();
     return true;
   }, cronSel);
-  assert(hasItem, 'cron notification bubble menu must offer "Mark unread"');
+  assert(hasItem, 'cron notification bubble must carry the Mark unread icon');
   const start3 = Date.now();
   let cronItem = null;
   while (Date.now() - start3 < 3_000) {

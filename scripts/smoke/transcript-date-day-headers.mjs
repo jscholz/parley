@@ -1,19 +1,21 @@
-// Transcript timestamp date sub-line (date on every bubble).
+// Transcript timestamp: every bubble carries its date.
 //
-// Each message's timestamp shows HH:MM with the short DATE sub-line below
-// it on EVERY bubble — set by src/transcript/reconciler.ts's reconcile walk
-// via setTimestampDateVisible(el, true). This smoke seeds a chat whose
-// messages straddle THREE calendar days and asserts:
-//   - every message shows a time (.line-ts-time)
-//   - every message carries .line-ts.has-date with a non-empty date
-// Also drops a screenshot for manual layout review (date should sit below
-// the time without crowding the action buttons / message text).
+// Since 2026-11-04 the stamp shown in the message footer is RELATIVE
+// ("8 minutes ago", "yesterday", "15 Oct" — Claude's layout); the HH:MM
+// and short-date spans stay in the DOM, stamped by src/transcript/
+// reconciler.ts's reconcile walk (setTimestampDateVisible(el, true)), for
+// day logic and for this guard. The chat straddles THREE calendar days:
+//   - every message carries HH:MM (.line-ts-time) and .line-ts.has-date
+//     with a non-empty date in the DOM
+//   - every message SHOWS a non-empty relative stamp (.line-ts-rel), and
+//     a message from another day shows a day word or a date, not a bare
+//     clock time
 
 import { waitForReady, openSidebar, clickRow, assert, dumpLines } from './lib.mjs';
 
 export const NAME = 'transcript-date-day-headers';
 export const DESCRIPTION =
-  'short date sub-line shows under the time on every bubble';
+  'every bubble carries its date: HH:MM + short date in the DOM, a relative stamp shown that names the day for older messages';
 export const STATUS = 'implemented';
 export const BACKEND = 'mocked';
 
@@ -68,19 +70,22 @@ export default async function run({ page, log }) {
       const ts = el.querySelector('.line-ts');
       const time = ts.querySelector('.line-ts-time');
       const date = ts.querySelector('.line-ts-date');
-      const dateVisible = date ? getComputedStyle(date).display !== 'none' : false;
+      const rel = ts.querySelector('.line-ts-rel');
+      const relVisible = rel ? getComputedStyle(rel).display !== 'none' && parseFloat(getComputedStyle(rel).opacity) > 0 : false;
       return {
         text: (el.querySelector('.text')?.textContent || '').slice(0, 40),
         hasDateClass: ts.classList.contains('has-date'),
         timeText: (time?.textContent || '').trim(),
         dateText: (date?.textContent || '').trim(),
-        dateVisible,
+        relText: (rel?.textContent || '').trim(),
+        relVisible,
+        stamp: Number(ts.dataset.ts) || 0,
       };
     });
   });
 
   for (const p of probe) {
-    log(`row time=${JSON.stringify(p.timeText)} hasDate=${p.hasDateClass} dateVisible=${p.dateVisible} date=${JSON.stringify(p.dateText)} :: ${JSON.stringify(p.text)}`);
+    log(`row time=${JSON.stringify(p.timeText)} hasDate=${p.hasDateClass} date=${JSON.stringify(p.dateText)} shown=${JSON.stringify(p.relText)} :: ${JSON.stringify(p.text)}`);
   }
 
   // Every dated row must show a time.
@@ -94,48 +99,19 @@ export default async function run({ page, log }) {
     probe.length === 6,
     `expected 6 dated rows, got ${probe.length}. rows=${JSON.stringify(probe, null, 2)}`,
   );
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   for (const p of probe) {
     assert(p.hasDateClass, `every bubble should carry .has-date: ${JSON.stringify(p)}`);
-    assert(p.dateVisible, `every bubble should render its date (display!=none): ${JSON.stringify(p)}`);
     assert(p.dateText.length > 0, `date text empty: ${JSON.stringify(p)}`);
+    assert(p.relVisible && p.relText.length > 0, `every bubble should show its relative stamp: ${JSON.stringify(p)}`);
+    if (p.stamp && p.stamp < todayStart.getTime()) {
+      assert(!/^\d{2}:\d{2}$/.test(p.relText) && !/ago$/.test(p.relText) || /days ago$/.test(p.relText),
+        `a message from another day must name the day, got ${JSON.stringify(p.relText)}: ${JSON.stringify(p)}`);
+    }
   }
 
-  // Geometry guard: the date sub-line must not overflow its bubble's
-  // bottom edge (= crowding the text/buttons) on a SHORT user bubble,
-  // which is the tightest case (single text line, timestamp stacked below
-  // the copy icon). Measure the first user (.line.s0) day-header row.
-  const geom = await page.evaluate(() => {
-    const t = document.getElementById('transcript');
-    const row = Array.from(t.querySelectorAll('.line.s0')).find(
-      (el) => el.querySelector('.line-ts.has-date'),
-    );
-    if (!row) return null;
-    const date = row.querySelector('.line-ts-date');
-    const rb = row.getBoundingClientRect();
-    const db = date.getBoundingClientRect();
-    const textEl = row.querySelector('.text');
-    const tb = textEl.getBoundingClientRect();
-    return {
-      rowBottom: Math.round(rb.bottom),
-      rowRight: Math.round(rb.right),
-      dateBottom: Math.round(db.bottom),
-      dateTop: Math.round(db.top),
-      textBottom: Math.round(tb.bottom),
-      // overflow past bubble bottom (px); <=0 means it fits inside.
-      overflowPx: Math.round(db.bottom - rb.bottom),
-      // does the date sub-line start below the message text? (stacked, not
-      // overlapping the text vertically)
-      clearsTextPx: Math.round(db.top - tb.bottom),
-    };
-  });
-  if (geom) {
-    log(`user-bubble geom: ${JSON.stringify(geom)}`);
-    assert(
-      geom.overflowPx <= 2,
-      `date sub-line overflows the user bubble's bottom by ${geom.overflowPx}px — crowding. ` +
-      `Tighten line-height / font-size or reserve more bottom padding.`,
-    );
-  }
+  // (The old in-bubble geometry guard went with the corner stamp: the
+  // footer smoke pins the row's placement below the bubble.)
 
   // Screenshot for manual layout review.
   try {
@@ -147,5 +123,5 @@ export default async function run({ page, log }) {
     log(`screenshot skipped: ${e.message}`);
   }
 
-  log('OK: every bubble shows its short date below the time');
+  log('OK: every bubble carries its date; older messages name the day in the stamp');
 }

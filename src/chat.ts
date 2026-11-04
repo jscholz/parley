@@ -1207,137 +1207,6 @@ function formatTime(ts: number | Date | string): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
-// Desktop-only hover open/close for the caret menu. Gated on pointer
-// capability (same pattern as the copy-icon hover gate) so touch stays
-// click-only. Close is delayed so the pointer can travel caret → menu.
-const msgMenuHoverCapable = () => typeof window !== 'undefined'
-  && window.matchMedia?.('(hover: hover) and (pointer: fine)').matches === true;
-const MSG_MENU_HOVER_OPEN_MS = 120;
-const MSG_MENU_HOVER_CLOSE_MS = 250;
-let msgMenuHoverOpenTimer: number | null = null;
-let msgMenuHoverCloseTimer: number | null = null;
-
-function cancelMsgMenuHoverOpen(): void {
-  if (msgMenuHoverOpenTimer !== null) { clearTimeout(msgMenuHoverOpenTimer); msgMenuHoverOpenTimer = null; }
-}
-function cancelMsgMenuHoverClose(): void {
-  if (msgMenuHoverCloseTimer !== null) { clearTimeout(msgMenuHoverCloseTimer); msgMenuHoverCloseTimer = null; }
-}
-function scheduleMsgMenuHoverClose(): void {
-  cancelMsgMenuHoverClose();
-  msgMenuHoverCloseTimer = window.setTimeout(() => {
-    msgMenuHoverCloseTimer = null;
-    closeAllMsgMenus();
-  }, MSG_MENU_HOVER_CLOSE_MS);
-}
-
-/** Open the per-message action menu anchored to `line`. The menu reuses the
- *  existing copy/pin/play buttons (kept in the DOM but hidden via CSS) by
- *  synthesizing `.click()` on them — so all their handler logic, the
- *  pins-changed listener, and the replyPlayer delegation keep working
- *  untouched. Only "Mark unread" carries its own logic. */
-function openMsgMenu(line: HTMLElement): void {
-  closeAllMsgMenus();
-  cancelMsgMenuHoverClose();
-  const menu = document.createElement('div');
-  menu.className = 'msg-menu';
-  const isAgent = line.classList.contains('agent');
-  const playBtn = line.querySelector<HTMLButtonElement>('.play-btn');
-  const pinBtn = line.querySelector<HTMLButtonElement>('.pin-btn');
-  const copyBtn = line.querySelector<HTMLButtonElement>('.copy-btn');
-  const msgId = line.dataset.messageId || '';
-
-  // The menu overflows the bubble box; `.line { content-visibility: auto }`
-  // (a scroll-jank mitigation) implies paint containment that would clip it
-  // to the bubble. `.menu-open` lifts that containment for the open bubble
-  // only. Cleared on every close path via closeMsgMenu.
-  const closeMsgMenu = () => { menu.remove(); line.classList.remove('menu-open'); };
-
-  // Icon glyphs mirror the in-bubble buttons so the menu reads with the
-  // same visual vocabulary. `active` paints the icon sage (--primary) to
-  // carry the same state the standalone buttons did: a cached/playable
-  // reply and a pinned message go green; everything else stays muted grey.
-  const ICON = {
-    play: `<svg viewBox="0 0 16 16" fill="none"><polygon points="5 3 13 8 5 13 5 3" fill="currentColor"/></svg>`,
-    pause: `<svg viewBox="0 0 16 16" fill="none"><rect x="4" y="3" width="3" height="10" fill="currentColor"/><rect x="9" y="3" width="3" height="10" fill="currentColor"/></svg>`,
-    pinOutline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76V4h6v6.76l3 1.74v2.5H6v-2.5z"/></svg>`,
-    pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 17v5" stroke-linecap="round"/><path d="M9 10.76V4h6v6.76l3 1.74v2.5H6v-2.5z"/></svg>`,
-    copy: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M3.5 10.5V3.5a1.5 1.5 0 0 1 1.5-1.5h7"/></svg>`,
-    unread: `<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="4" fill="currentColor"/></svg>`,
-  };
-
-  const addItem = (label: string, iconSvg: string, onClick: () => void, active = false) => {
-    const b = document.createElement('button');
-    const icon = document.createElement('span');
-    icon.className = active ? 'mi-icon mi-active' : 'mi-icon';
-    icon.innerHTML = iconSvg;
-    const text = document.createElement('span');
-    text.className = 'mi-label';
-    text.textContent = label;
-    b.append(icon, text);
-    b.onclick = (e) => { e.stopPropagation(); closeMsgMenu(); onClick(); };
-    menu.appendChild(b);
-  };
-
-  // Play / Pin / Copy live inline in the footer since 2026-11-04; the
-  // menu is the overflow for the rare action only. (Bubbles without a
-  // footer — none in practice — would still get them here.)
-  const hasFoot = !!line.querySelector(':scope > .msg-foot');
-  if (!hasFoot && isAgent && playBtn) {
-    const playing = line.classList.contains('tts-playing');
-    const cached = line.classList.contains('tts-cached');
-    addItem(playing ? 'Pause' : 'Play', playing ? ICON.pause : ICON.play,
-      () => playBtn.click(), cached);
-  }
-  if (!hasFoot && pinBtn) {
-    const pinned = line.classList.contains('pinned');
-    addItem(pinned ? 'Unpin' : 'Pin', pinned ? ICON.pinFilled : ICON.pinOutline,
-      () => pinBtn.click(), pinned);
-  }
-  if (!hasFoot && copyBtn) addItem('Copy', ICON.copy, () => copyBtn.click());
-  // Gated on isDurableMessageKey for the same reason as the pin button
-  // above: the thinking-dots placeholder is an agent bubble too, and
-  // "Mark unread" would otherwise persist an activity row keyed
-  // `pending:turn:…` — the exact shape the field bug this comment
-  // describes elsewhere in this file already hit once.
-  // Notification bubbles (cron / reminder rows — class `notification`,
-  // not `agent`) carry a durable plugin id too; field 2026-09-19: "can
-  // you enable marking cron messages unread? seems not to be an option".
-  const isNotification = line.classList.contains('notification');
-  if ((isAgent || isNotification) && msgId && isDurableMessageKey(msgId)) {
-    addItem('Mark unread', ICON.unread, () => {
-      const chatId = viewedSessionIdRef || backend.getCurrentSessionId?.() || null;
-      // Unread FROM this message: pointer + "New" divider (markUnreadFrom.ts).
-      if (markUnreadFromLine(line, chatId)) toast('Marked unread from here');
-    });
-  }
-
-  menu.addEventListener('click', (e) => e.stopPropagation());
-  if (msgMenuHoverCapable()) {
-    menu.addEventListener('pointerenter', cancelMsgMenuHoverClose);
-    menu.addEventListener('pointerleave', scheduleMsgMenuHoverClose);
-  }
-  line.classList.add('menu-open');
-  line.appendChild(menu);
-  setTimeout(() => {
-    const closer = (e: MouseEvent) => {
-      if (menu.contains(e.target as Node)) return;
-      closeMsgMenu();
-      document.removeEventListener('click', closer);
-    };
-    document.addEventListener('click', closer);
-  }, 0);
-}
-
-/** Remove any open per-message menus and clear their `.menu-open` flag.
- *  Used on open (to dismiss a sibling menu) and by the caret toggle. */
-function closeAllMsgMenus(): void {
-  document.querySelectorAll('.msg-menu').forEach((m) => {
-    m.closest('.line')?.classList.remove('menu-open');
-    m.remove();
-  });
-}
-
 /** Append (or prepend) a line to the transcript. Returns the rendered
  *  `<div>` so callers can attach pending/failed state. Returns `null`
  *  if the transcript element hasn't been wired via `init()` yet. */
@@ -1406,6 +1275,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
   tsEl.className = 'line-ts';
   tsEl.textContent = formatTime(ts);
   tsEl.title = new Date(ts).toLocaleString();
+  tsEl.dataset.ts = String(ts);
   div.appendChild(tsEl);
 
   // Copy button — standard overlapping-rectangles icon
@@ -1558,38 +1428,6 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     div.appendChild(bar);
   }
 
-  // Action caret — a single hover affordance in the bubble corner that
-  // opens a popover (Play/Pin/Copy/Mark-unread). The copy/pin/play buttons
-  // above stay in the DOM but are hidden via CSS; the menu synthesizes
-  // clicks on them so all their wiring (pin store, replyPlayer delegation,
-  // copy feedback) keeps working untouched. Only Mark-unread is bespoke.
-  const caretBtn = document.createElement('button');
-  caretBtn.className = 'msg-caret';
-  caretBtn.title = 'More';
-  caretBtn.setAttribute('aria-label', 'More message actions');
-  caretBtn.innerHTML = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>`;
-  caretBtn.onclick = (e) => {
-    e.stopPropagation();
-    cancelMsgMenuHoverOpen();
-    const existing = div.querySelector('.msg-menu');
-    if (existing) { closeAllMsgMenus(); return; }  // toggle closed
-    openMsgMenu(div);
-  };
-  if (msgMenuHoverCapable()) {
-    caretBtn.addEventListener('pointerenter', () => {
-      cancelMsgMenuHoverClose();
-      if (div.querySelector('.msg-menu')) return;
-      cancelMsgMenuHoverOpen();
-      msgMenuHoverOpenTimer = window.setTimeout(() => {
-        msgMenuHoverOpenTimer = null;
-        if (!div.querySelector('.msg-menu')) openMsgMenu(div);
-      }, MSG_MENU_HOVER_OPEN_MS);
-    });
-    caretBtn.addEventListener('pointerleave', () => {
-      cancelMsgMenuHoverOpen();
-      if (div.querySelector('.msg-menu')) scheduleMsgMenuHoverClose();
-    });
-  }
   // ── Message footer (2026-11-04, field: "the exact functionality I
   // want" — Claude's layout). One row at the BOTTOM of the bubble:
   //   agent: copy · fork · pin · read aloud · ⋯ · time
@@ -1633,10 +1471,15 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     act(forkBtn);
     act(div.querySelector(':scope > .pin-btn'));
     act(div.querySelector(':scope > .play-btn'));
-    // ⋯ only where the overflow has something to offer (Mark unread).
+    // Mark unread, one click (field 2026-11-04: "singleton menus are
+    // weird"). Agent and notification bubbles with a durable id only —
+    // the thinking placeholder would persist a bogus activity row.
     if (durableId && (div.classList.contains('agent') || div.classList.contains('notification'))) {
-      caretBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="12.5" cy="8" r="1.4"/></svg>';
-      foot.appendChild(caretBtn);
+      const UNREAD_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5h12v8H2z"/><path d="M2 5l6 4 6-4"/><circle cx="12.5" cy="4" r="2.2" fill="currentColor" stroke="none"/></svg>';
+      act(svgBtn('unread-btn', 'Mark unread from here', UNREAD_SVG, () => {
+        const chatId = chatIdNow();
+        if (markUnreadFromLine(div, chatId)) toast('Marked unread from here');
+      }));
     }
     foot.appendChild(tsEl);
   }
@@ -1646,6 +1489,16 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     e.stopPropagation();
     div.classList.toggle('actions-open');
   });
+  if (isUserLine) {
+    // Claude's layout (field 2026-11-04): the user's row sits BELOW the
+    // tinted bubble, not inside it. The tint moves to a .bubble wrapper
+    // around everything built so far; the footer is its sibling. (The
+    // .line box itself stays the keyed, content-visibility row.)
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    while (div.firstChild) bubble.appendChild(div.firstChild);
+    div.appendChild(bubble);
+  }
   div.appendChild(foot);
 
   // All links in rendered markdown open in new tab
@@ -1775,7 +1628,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       }
       attDiv.appendChild(row);
     }
-    if (attDiv.children.length > 0) div.appendChild(attDiv);
+    if (attDiv.children.length > 0) (div.querySelector(':scope > .bubble') || div).appendChild(attDiv);
   }
 
   // Long-bubble fold. Bubbles whose source text exceeds the threshold

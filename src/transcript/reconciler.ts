@@ -24,6 +24,7 @@
  */
 
 import * as chat from '../chat.ts';
+import { formatRelative } from '../util/relativeTime.ts';
 import { miniMarkdown, renderUserText, linkifyCaptureDocs } from '../util/markdown.ts';
 import { escapeHtml } from '../util/dom.ts';
 import * as settings from '../settings.ts';
@@ -882,7 +883,8 @@ function updateTimestamp(el: HTMLElement, timestamp: number): void {
 
   let timeSpan = tsEl.querySelector('.line-ts-time') as HTMLElement | null;
   let dateSpan = tsEl.querySelector('.line-ts-date') as HTMLElement | null;
-  if (!timeSpan || !dateSpan) {
+  let relSpan = tsEl.querySelector('.line-ts-rel') as HTMLElement | null;
+  if (!timeSpan || !dateSpan || !relSpan) {
     // First stamp on this element: build the time/date sub-spans. Clear
     // any legacy plain-text content chat.addLine seeded so we don't double
     // up the time — but keep a delivery mark that already sits here.
@@ -892,12 +894,21 @@ function updateTimestamp(el: HTMLElement, timestamp: number): void {
     timeSpan.className = 'line-ts-time';
     dateSpan = document.createElement('span');
     dateSpan.className = 'line-ts-date';
+    // The footer shows the relative form ("8 minutes ago", Claude's
+    // layout, 2026-11-04); the absolute spans stay for day headers and
+    // everything that reads them. util/relativeTime.ts re-ticks it.
+    relSpan = document.createElement('span');
+    relSpan.className = 'line-ts-rel';
     if (mark) tsEl.appendChild(mark);
+    tsEl.appendChild(relSpan);
     tsEl.appendChild(timeSpan);
     tsEl.appendChild(dateSpan);
   }
   if (timeSpan.textContent !== timeText) timeSpan.textContent = timeText;
   if (dateSpan.textContent !== dateText) dateSpan.textContent = dateText;
+  const relText = formatRelative(timestamp);
+  if (relSpan.textContent !== relText) relSpan.textContent = relText;
+  if (tsEl.dataset.ts !== String(timestamp)) tsEl.dataset.ts = String(timestamp);
 
   const title = d.toLocaleString();
   if (tsEl.title !== title) tsEl.title = title;

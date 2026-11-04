@@ -72,6 +72,7 @@ import { installExternalLinkHandler } from './native/externalLinks.ts';
 import { installExternalLinkGuard } from './externalLinkGuard.ts';
 import { installJitterWatch } from './util/jitterWatch.ts';
 import { initMessageActions } from './messageActions.ts';
+import { startRelativeStampTicker } from './util/relativeTime.ts';
 import { parseChatDeepLink } from './util/chatDeepLink.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
@@ -1332,10 +1333,22 @@ async function boot() {
   // go through the slash dispatcher like a typed one; a command aimed at
   // another chat waits until that chat is on screen.
   initMessageActions({ viewedTitle: () => (document.getElementById('header-title')?.textContent || document.title || 'Chat').trim() });
+  startRelativeStampTicker(() => document.getElementById('transcript'));
   window.addEventListener('parley:send-command', (ev) => {
     const d = (ev as CustomEvent<{ text: string; chatId?: string }>).detail;
     if (!d?.text) return;
-    const fire = () => { diag(`[send-command] ${d.text}`); slashCommands.dispatch(d.text); };
+    const fire = () => {
+      diag(`[send-command] ${d.text}`);
+      // The typed-command path empties the composer (the command sat in
+      // it); a programmatic command must leave the user's draft alone —
+      // a rewind has just put the rewound text there to edit.
+      const keep = composerInput.value;
+      slashCommands.dispatch(d.text);
+      if (keep && composerInput.value !== keep) {
+        composerInput.value = keep;
+        composerInput.dispatchEvent(new Event('input'));
+      }
+    };
     if (!d.chatId || switchCtl.viewedId() === d.chatId) { fire(); return; }
     const t0 = Date.now();
     const wait = () => {

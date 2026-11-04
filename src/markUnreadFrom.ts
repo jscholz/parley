@@ -56,7 +56,7 @@ export function installUnreadDividerRetire(transcriptEl: HTMLElement, viewedChat
   // on the next task, so no layout change ever lands mid-gesture.
   transcriptEl.addEventListener('click', (e) => {
     const t = e.target as HTMLElement | null;
-    if (t?.closest?.('.msg-menu, .msg-caret, .play-bar')) return;
+    if (t?.closest?.('.msg-foot, .play-bar')) return;   // the footer's own buttons, not a read-here tap
     const chatId = viewedChat();
     if (!chatId) return;
     if (transcriptStore.peekState(chatId)?.unreadFrom == null) return;

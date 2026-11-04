@@ -1,19 +1,21 @@
 // FIELD, Jonathan 2026-11-04: message controls the way Claude lays them
 // out — one footer row at the bottom of each bubble, revealed on hover:
-// agent: copy · fork · pin · read aloud · ⋯ · time; user: ticks+time ·
+// agent: copy · fork · pin · read aloud · mark unread · time; user: ticks+time ·
 // copy · rewind · fork. Plus rewind (hermes /undo N, text back to the
 // composer) and fork (hermes /branch, follow the link, /undo the turns
 // after the fork point in the copy).
 //
 //   L1  every bubble has exactly one footer; agent and user rows carry
 //       the right controls in the right order; the stamp is inside it;
-//       the corner caret dropdown is gone (only the ⋯ overflow remains,
-//       on agent bubbles, holding Mark unread)
+//       the corner caret dropdown and its menu are gone; Mark unread is
+//       a one-click icon on agent bubbles
 //   L2  icons are hidden at rest and visible on hover; time stays
 //   L3  the user bubble's ticks are drawn icons beside the time
-//   R1  rewind on the FIRST user message → confirm → "/undo 2" reaches
-//       the proxy (that message + one later user turn) and the message
-//       text lands in the composer
+//   R0  rewind is held behind an Undo toast after the confirm; Undo
+//       drops it and nothing reaches the proxy
+//   R1  rewind on the FIRST user message → confirm → window elapses →
+//       "/undo 3" reaches the proxy (that message + two later user turns)
+//       and the message text lands in the composer
 //   F1  fork from the first agent reply → "/branch <title> (fork)" goes
 //       up; the staged reply's /?chat= link is followed (chat switches)
 //       and "/undo 1" is sent in the copy (one user turn came after)
@@ -73,8 +75,12 @@ export default async function run({ page, log, mock }) {
   assert(u.feet === 1 && a.feet === 1, 'L1: exactly one footer per bubble');
   assert(!u.cornerCaret && !a.cornerCaret, 'L1: the corner caret must be gone');
   assert(u.stampInFoot && a.stampInFoot, 'L1: the time stamp belongs in the footer');
+  // Claude's layout: the user's row hangs BELOW the tinted bubble.
+  const shape = await page.evaluate((s) => { const l = document.querySelector(s); const b = l?.querySelector(':scope > .bubble'); const f = l?.querySelector(':scope > .msg-foot'); return { bubbleHasText: !!b?.querySelector('.text'), footBelow: !!(b && f) && f.getBoundingClientRect().top >= b.getBoundingClientRect().bottom - 1, rel: f?.querySelector('.line-ts-rel')?.textContent || '' }; }, userSel);
+  assert(shape.bubbleHasText && shape.footBelow, `L1: user footer must hang below the tinted bubble: ${JSON.stringify(shape)}`);
+  assert(/ago|just now|yesterday/.test(shape.rel), `L1: relative time expected, got ${JSON.stringify(shape.rel)}`);
   assert(u.order.join(',') === 'line-ts,copy-btn,rewind-btn,fork-btn', `L1: user order ${u.order.join(',')}`);
-  assert(a.order.join(',') === 'copy-btn,fork-btn,pin-btn,play-btn,msg-caret,line-ts', `L1: agent order ${a.order.join(',')}`);
+  assert(a.order.join(',') === 'copy-btn,fork-btn,pin-btn,play-btn,unread-btn,line-ts', `L1: agent order ${a.order.join(',')}`);
 
   // ── L2 — hover reveals ──────────────────────────────────────────────
   assert(u.iconOpacity === 0 && a.iconOpacity === 0, `L2: icons should be hidden at rest (user ${u.iconOpacity}, agent ${a.iconOpacity})`);
@@ -88,8 +94,23 @@ export default async function run({ page, log, mock }) {
   const fresh = await pollUntil(page, () => { const l = Array.from(document.querySelectorAll('#transcript .line.s0')).find((x) => /a fresh send/.test(x.textContent || '')); const m = l?.querySelector('.msg-foot .turn-ack'); return m && m.querySelector('svg') ? { state: m.dataset.state, glyph: m.dataset.glyph } : false; }, null, { timeout: 5_000, label: 'L3: no drawn tick on the new send' });
   log(`L3 drawn tick on a fresh send: ${JSON.stringify(fresh)}`);
 
-  // ── R1 — rewind ─────────────────────────────────────────────────────
-  await pollUntil(page, () => !!document.querySelector('#transcript .line.agent') && !document.querySelector('.line.agent.streaming'), null, { timeout: 5_000, label: 'R1: the fresh turn never settled' });
+  // ── R0 — rewind is held behind Undo; Undo drops it ──────────────────
+  await pollUntil(page, () => !!document.querySelector('#transcript .line.agent') && !document.querySelector('.line.agent.streaming'), null, { timeout: 5_000, label: 'R0: the fresh turn never settled' });
+  await page.evaluate(() => import('/build/messageActions.mjs').then((m) => m.__setRewindUndoWindowMsForTests(1_500)));
+  await page.hover(userSel);
+  await page.click(`${userSel} .msg-foot .rewind-btn`);
+  await page.waitForSelector('.sk-confirm-overlay', { timeout: 3_000 });
+  await page.click('.sk-confirm-overlay button.danger, .sk-confirm-overlay [data-confirm], .sk-confirm-overlay button:has-text("Rewind")');
+  await page.waitForSelector('.rewind-undo', { timeout: 2_000 });
+  await page.click('.rewind-undo-action');
+  await page.waitForTimeout(2_000);
+  const none = (mock.getChat(CHAT)?.messages || []).find((m) => m.role === 'user' && /^\/undo /.test(m.content));
+  assert(!none, `R0: Undo must stop the rewind, but the proxy got ${JSON.stringify(none?.content)}`);
+  assert(!(await page.evaluate(() => !!document.querySelector('.rewind-undo'))), 'R0: the undo toast should be gone');
+  log('R0 Undo within the window → nothing sent ✓');
+  await page.evaluate(() => { const c = document.getElementById('composer-input'); if (c) { c.value = ''; c.dispatchEvent(new Event('input')); } });
+
+  // ── R1 — rewind: confirm, window elapses, /undo goes up ─────────────
   await page.hover(userSel);
   await page.click(`${userSel} .msg-foot .rewind-btn`);
   await page.waitForSelector('.sk-confirm-overlay', { timeout: 3_000 });

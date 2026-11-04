@@ -117,12 +117,62 @@ export async function requestRewind(opts: { chatId: string; messageId: string; t
     danger: true,
   });
   if (!ok) return false;
-  log(`[rewind] chat=${opts.chatId.slice(-12)} msg=${opts.messageId.slice(-12)} → /undo ${n}`);
-  sendCommand(`/undo ${n}`);
   // Non-clobbering: whatever is in the box stays, the rewound text follows.
   composerDrafts.appendDraft(opts.chatId, opts.text);
+  // Irreversible on the backend (hermes soft-deletes, no restore for
+  // gateway clients), so the command is HELD for a few seconds behind an
+  // Undo — the mail-client undo-send pattern — on top of the dialog.
+  holdRewind(n, opts.chatId);
   return true;
 }
+
+let rewindUndoWindowMs = 6_000;
+/** Test hook: shorten the undo window. */
+export function __setRewindUndoWindowMsForTests(ms: number): void { rewindUndoWindowMs = ms; }
+
+let heldRewind: { timer: number; tick: number; el: HTMLElement } | null = null;
+
+function holdRewind(n: number, chatId: string): void {
+  cancelHeldRewind(false);
+  const el = document.createElement('div');
+  el.className = 'rewind-undo';
+  el.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.className = 'rewind-undo-text';
+  const undo = document.createElement('button');
+  undo.type = 'button';
+  undo.className = 'rewind-undo-action';
+  undo.textContent = 'Undo';
+  el.append(text, undo);
+  document.body.appendChild(el);
+  const startedAt = Date.now();
+  const render = () => {
+    const left = Math.max(0, Math.ceil((startedAt + rewindUndoWindowMs - Date.now()) / 1000));
+    text.textContent = `Rewinding ${n === 1 ? 'the last turn' : `${n} turns`} in ${left} s`;
+  };
+  render();
+  const tick = window.setInterval(render, 250);
+  const timer = window.setTimeout(() => {
+    cancelHeldRewind(false);
+    log(`[rewind] chat=${chatId.slice(-12)} → /undo ${n}`);
+    sendCommand(`/undo ${n}`);
+  }, rewindUndoWindowMs);
+  undo.onclick = () => { cancelHeldRewind(true); };
+  heldRewind = { timer, tick, el };
+}
+
+/** True when a rewind was pending and is now dropped. */
+export function cancelHeldRewind(announce: boolean): boolean {
+  if (!heldRewind) return false;
+  window.clearTimeout(heldRewind.timer);
+  window.clearInterval(heldRewind.tick);
+  heldRewind.el.remove();
+  heldRewind = null;
+  if (announce) { log('[rewind] cancelled by Undo'); toast('Rewind cancelled — nothing was removed'); }
+  return true;
+}
+
+export function __hasHeldRewindForTests(): boolean { return heldRewind !== null; }
 
 interface PendingFork { chatId: string; undoCount: number; startedAt: number; unsubscribe: () => void; timer: number }
 let pendingFork: PendingFork | null = null;
