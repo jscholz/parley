@@ -70,8 +70,19 @@ export default async function run({ page, log, mock }) {
   if (phone) {
     assert(s.width >= s.vw - 48 && s.width <= s.vw, `F1: on a ${s.vw}px phone the column should fill the width, got ${s.width}px`);
   } else {
-    assert(s.width > 400 && s.width <= 820, `F1: reading column is ${s.width}px wide on a ${s.vw}px window — must be a readable measure`);
-    assert(s.left > 100 && s.left + s.width < s.vw - 100, 'F1: reading column is not centred');
+    // The column is the "Reading width" setting (% of the window, default
+    // 65, Settings › Advanced). Field 2026-11-04: configurable.
+    const pct = await page.evaluate(() => import('/build/settings.mjs').then((m) => m.get().readerWidthPct));
+    const expected = Math.round((s.vw - 32) * pct / 100);
+    assert(Math.abs(s.width - expected) <= 12, `F1: reading column is ${s.width}px on a ${s.vw}px window; the ${pct}% setting means ~${expected}px`);
+    assert(Math.abs((s.left + s.width / 2) - s.vw / 2) <= 12, 'F1: reading column is not centred');
+    // Widen it to the full window and the column follows at once.
+    await page.evaluate(() => import('/build/settings.mjs').then((m) => { m.set('readerWidthPct', 100); m.applyVisuals(); }));
+    await page.waitForTimeout(100);
+    const wide = await state(page);
+    assert(wide.width >= s.vw - 60, `F1: at 100% the column should fill the window, got ${wide.width}px of ${s.vw}`);
+    await page.evaluate(() => import('/build/settings.mjs').then((m) => { m.set('readerWidthPct', 65); m.applyVisuals(); }));
+    log(`F1 reading width: ${pct}% → ${s.width}px; 100% → ${wide.width}px`);
   }
   assert(/BRAVO-MARK/.test(s.text) || true, 'content present');
   assert(s.glyphOpen === '1', `F1: expand glyph should read collapse while open (data-open=${s.glyphOpen})`);

@@ -5707,12 +5707,18 @@ body.doc-fullscreen-open { overflow: hidden; }
   padding: 0 max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left));
 }
 .doc-fullscreen-column > .doc-drawer-body > :first-child { margin-top: 20px; }
-/* The borrowed body: a reading column, not a panel. 72ch ≈ a book line;
-   on an ultrawide the alternative is a 3,000 px line nobody can read. */
+/* The borrowed body: a reading column, not a panel. Its width is the
+   per-device "Reading width" setting (Settings › Advanced, % of the
+   window; --reader-width from settings.ts applyVisuals). Field 2026-11-04:
+   72ch read as "pretty big gutters" on his wide display; default 65%,
+   adjustable up to the full width. Phones always use the full width. */
 .doc-fullscreen-column > .doc-drawer-body {
-  max-width: 72ch; margin: 0 auto;
+  max-width: 100%; margin: 0 auto;
   flex: none; overflow: visible; min-height: auto;
   padding: 0; font-size: calc(var(--content-size, 14px) + 1px);
+}
+@media (min-width: 700px) {
+  .doc-fullscreen-column > .doc-drawer-body { max-width: var(--reader-width, 65%); }
 }
 .doc-shelf-back {
   background: none; border: none; cursor: pointer; font: inherit;

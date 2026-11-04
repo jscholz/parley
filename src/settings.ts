@@ -268,6 +268,7 @@ const DEFAULTS = {
   bargeVadThreshold: 0.5,
   contentSize: 15,
   transcriptGutter: 12,  // per-side empty margin of the chat column, in %; lower = wider transcript
+  readerWidthPct: 65,    // full-screen document reading column, in % of the window (phones ignore it)
   panelMaxWidthPct: 60,
   // Meeting-capture defaults (fed into POST /captures at start time).
   captureDiarize: true,
@@ -374,6 +375,7 @@ const PER_DEVICE_KEYS = new Set<string>([
   // Transcript gutter is per-device: it only applies on wide (desktop)
   // viewports — phones override it to zero — so it's form-factor-bound.
   'transcriptGutter',
+  'readerWidthPct',
   // Panel max width is per-device for the same reason: it only governs the
   // desktop side-panel drag ceiling — phones override panels to a full-width
   // overlay — so a laptop and a 4K external monitor each want their own value.
@@ -736,6 +738,7 @@ export function set(key: string, value: any) {
 export function applyVisuals() {
   document.documentElement.style.setProperty('--content-size', current.contentSize + 'px');
   document.documentElement.style.setProperty('--transcript-gutter', current.transcriptGutter + '%');
+  document.documentElement.style.setProperty('--reader-width', Math.min(100, Math.max(40, Number(current.readerWidthPct) || 65)) + '%');
 }
 
 /**
@@ -800,6 +803,8 @@ export function hydrate(handlers: {
   const setFontSizeVal = $any('set-fontsize-val');
   const setGutter = $inp('set-gutter');
   const setGutterVal = $any('set-gutter-val');
+  const setReaderWidth = $inp('set-reader-width');
+  const setReaderWidthVal = $any('set-reader-width-val');
   const setPanelWidth = $inp('set-panel-width');
   const setPanelWidthVal = $any('set-panel-width-val');
   const setTheme = $sel('set-theme');
@@ -879,6 +884,8 @@ export function hydrate(handlers: {
     if (setFontSizeVal) setFontSizeVal.textContent = `${current.contentSize}px`;
     if (setGutter) setGutter.value = String(current.transcriptGutter);
     if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
+    if (setReaderWidth) setReaderWidth.value = String(current.readerWidthPct);
+    if (setReaderWidthVal) setReaderWidthVal.textContent = `${current.readerWidthPct}%`;
     const setCapDiar = document.getElementById('set-capture-diarize') as HTMLInputElement | null;
     if (setCapDiar) {
       setCapDiar.checked = current.captureDiarize;
@@ -1352,6 +1359,11 @@ export function hydrate(handlers: {
     set('transcriptGutter', parseInt(setGutter.value, 10));
     if (setGutterVal) setGutterVal.textContent = `${current.transcriptGutter}%`;
     applyVisuals();
+  };
+  if (setReaderWidth) setReaderWidth.oninput = () => {
+    set('readerWidthPct', parseInt(setReaderWidth.value, 10));
+    if (setReaderWidthVal) setReaderWidthVal.textContent = `${current.readerWidthPct}%`;
+    applyVisuals();   // live: the open full-screen column follows the slider
   };
   if (setPanelWidth) setPanelWidth.oninput = () => {
     set('panelMaxWidthPct', parseInt(setPanelWidth.value, 10));

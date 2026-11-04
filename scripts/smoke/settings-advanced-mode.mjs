@@ -49,7 +49,8 @@ export default async function run({ page, log }) {
   assert(!basic.advanced && basic.toggleChecked === false, `basic mode by default: ${JSON.stringify(basic)}`);
   assert(!basic.navHotkeys && !basic.navCron && !basic.navStorage && basic.navAgent, `advanced-only sections hidden from the nav, Agent stays: ${JSON.stringify(basic)}`);
   assert(basic.fontRow && !basic.gutterRow, `Display: text size stays, transcript margin hidden: ${JSON.stringify(basic)}`);
-  assert(/2 more in Advanced mode/.test(basic.hintDisplay), `Display section hints at hidden rows (got ${JSON.stringify(basic.hintDisplay)})`);
+  // Transcript margin, Reading width (2026-11-04), Developer mode.
+  assert(/3 more in Advanced mode/.test(basic.hintDisplay), `Display section hints at hidden rows (got ${JSON.stringify(basic.hintDisplay)})`);
   log('basic: sections + rows hidden, hint shown ✓');
 
   await page.click('.settings-nav-btn[data-target="agent"]');
