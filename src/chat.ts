@@ -1462,11 +1462,15 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       const text = div.dataset.text || (div.querySelector('.text') as HTMLElement | null)?.textContent || '';
       if (chatId) window.dispatchEvent(new CustomEvent('parley:rewind-to', { detail: { chatId, messageId: durableId, text } }));
     }) : null;
-    foot.appendChild(tsEl);
+    // Time flush against the bubble's edge (field 2026-11-05: at rest the
+    // stamp "floated out in space" leaving room for hover-only icons);
+    // the icons grow away from it, into the empty side.
     act(div.querySelector(':scope > .copy-btn'));
     act(rewindBtn);
     act(forkBtn);
+    foot.appendChild(tsEl);
   } else {
+    foot.appendChild(tsEl);
     act(div.querySelector(':scope > .copy-btn'));
     act(forkBtn);
     act(div.querySelector(':scope > .pin-btn'));
@@ -1481,7 +1485,6 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
         if (markUnreadFromLine(div, chatId)) toast('Marked unread from here');
       }));
     }
-    foot.appendChild(tsEl);
   }
   // Touch: no hover, so the time is the tap that reveals the row.
   tsEl.addEventListener('click', (e) => {

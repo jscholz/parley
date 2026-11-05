@@ -79,8 +79,18 @@ export default async function run({ page, log, mock }) {
   const shape = await page.evaluate((s) => { const l = document.querySelector(s); const b = l?.querySelector(':scope > .bubble'); const f = l?.querySelector(':scope > .msg-foot'); return { bubbleHasText: !!b?.querySelector('.text'), footBelow: !!(b && f) && f.getBoundingClientRect().top >= b.getBoundingClientRect().bottom - 1, rel: f?.querySelector('.line-ts-rel')?.textContent || '' }; }, userSel);
   assert(shape.bubbleHasText && shape.footBelow, `L1: user footer must hang below the tinted bubble: ${JSON.stringify(shape)}`);
   assert(/ago|just now|yesterday/.test(shape.rel), `L1: relative time expected, got ${JSON.stringify(shape.rel)}`);
-  assert(u.order.join(',') === 'line-ts,copy-btn,rewind-btn,fork-btn', `L1: user order ${u.order.join(',')}`);
-  assert(a.order.join(',') === 'copy-btn,fork-btn,pin-btn,play-btn,unread-btn,line-ts', `L1: agent order ${a.order.join(',')}`);
+  // Time anchored against the bubble (2026-11-05): last under the user's
+  // bubble, first under a reply; icons on the far side of it.
+  assert(u.order.join(',') === 'copy-btn,rewind-btn,fork-btn,line-ts', `L1: user order ${u.order.join(',')}`);
+  assert(a.order.join(',') === 'line-ts,copy-btn,fork-btn,pin-btn,play-btn,unread-btn', `L1: agent order ${a.order.join(',')}`);
+  const anchored = await page.evaluate(({ us, as }) => {
+    const u = document.querySelector(us); const a = document.querySelector(as);
+    const ub = u.querySelector(':scope > .bubble').getBoundingClientRect(); const ut = u.querySelector('.msg-foot .line-ts').getBoundingClientRect();
+    const at = a.querySelector('.text').getBoundingClientRect(); const att = a.querySelector('.msg-foot .line-ts').getBoundingClientRect();
+    return { userGap: Math.round(ub.right - ut.right), agentGap: Math.round(att.left - at.left) };
+  }, { us: userSel, as: agentSel });
+  assert(anchored.userGap >= 0 && anchored.userGap <= 12, `L1: the user's time should sit flush with the bubble's right edge (gap ${anchored.userGap}px)`);
+  assert(anchored.agentGap >= -2 && anchored.agentGap <= 12, `L1: the reply's time should sit flush with the text's left edge (gap ${anchored.agentGap}px)`);
 
   // ── L2 — hover reveals ──────────────────────────────────────────────
   assert(u.iconOpacity === 0 && a.iconOpacity === 0, `L2: icons should be hidden at rest (user ${u.iconOpacity}, agent ${a.iconOpacity})`);
@@ -88,6 +98,48 @@ export default async function run({ page, log, mock }) {
   await page.hover(agentSel);
   await pollUntil(page, (s) => { const f = document.querySelector(s)?.querySelector('.msg-foot .fork-btn'); return !!f && parseFloat(getComputedStyle(f).opacity) > 0.3; }, agentSel, { timeout: 2_000, label: 'L2: hover did not reveal the icons' });
   log('L2 icons hidden at rest, shown on hover ✓');
+
+  // ── L2b — hover survives a scroll (field 2026-11-05) ────────────────
+  // Park the pointer over the top of the transcript, then scroll a
+  // different message under it WITHOUT moving the mouse: :hover goes
+  // stale in the browser, so the app marks the message itself.
+  for (let i = 0; i < 12; i++) mock.pushEnvelope({ type: 'reply_final', chat_id: CHAT, message_id: `msg_pad${i}`, text: `padding reply ${i} ${'words. '.repeat(30)}` });
+  await page.waitForTimeout(600);
+  const tr = await page.evaluate(() => { const r = document.getElementById('transcript').getBoundingClientRect(); return { x: r.left + r.width * 0.3, y: r.top + 120 }; });
+  await page.mouse.move(tr.x, tr.y);
+  await page.evaluate(() => { document.getElementById('transcript').scrollTop = 0; });
+  await page.waitForTimeout(300);
+  const before = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.line')?.getAttribute('data-message-id') || null, tr);
+  await page.evaluate(() => { const t = document.getElementById('transcript'); t.scrollTop = t.scrollHeight / 2; t.dispatchEvent(new Event('scroll')); });
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(({ x, y }) => { const l = document.elementFromPoint(x, y)?.closest('.line'); if (!l) return null; const act = l.querySelector('.msg-foot .act'); return { id: l.getAttribute('data-message-id'), opacity: act ? parseFloat(getComputedStyle(act).opacity) : -1, sim: l.classList.contains('hover-sim') }; }, tr);
+  log(`L2b after scroll with a still pointer: under it ${JSON.stringify(after)} (was ${before})`);
+  assert(after && after.opacity > 0.3, `L2b: the message that scrolled under the pointer shows no actions: ${JSON.stringify(after)}`);
+  await page.mouse.move(tr.x + 3, tr.y);
+  await page.waitForTimeout(100);
+  assert(!(await page.evaluate(() => !!document.querySelector('.line.hover-sim'))), 'L2b: a real pointer move must hand back to :hover');
+  log('L2b hover survives a scroll, hands back on movement ✓');
+
+  // ── T1 — tooltips on the footer are reliable (field 2026-11-05) ─────
+  // The stamp's tooltip appears after the app's 300 ms delay, survives a
+  // scroll of an UNRELATED scroller (the session list) and a reconcile
+  // (a store change re-stamps the row), and the tick has its own.
+  await page.hover(`${userSel} .msg-foot .line-ts-rel`);
+  await pollUntil(page, () => !!document.querySelector('.app-tooltip'), null, { timeout: 2_000, label: 'T1: no tooltip on the stamp after the delay' });
+  const tipText = await page.evaluate(() => document.querySelector('.app-tooltip')?.textContent || '');
+  assert(/\d{4}/.test(tipText) || /\d{1,2}:\d{2}/.test(tipText), `T1: the stamp tooltip should be the full date-time, got ${JSON.stringify(tipText)}`);
+  await page.evaluate(() => { const l = document.getElementById('sessions-list'); l?.dispatchEvent(new Event('scroll', { bubbles: true })); });
+  await page.waitForTimeout(100);
+  assert(await page.evaluate(() => !!document.querySelector('.app-tooltip')), 'T1: a scroll of the session list must not kill a tooltip on a message');
+  mock.pushEnvelope({ type: 'session_changed', chat_id: CHAT, title: 'Footer room' });
+  await page.waitForTimeout(300);
+  assert(await page.evaluate(() => !!document.querySelector('.app-tooltip')), 'T1: a reconcile must not kill the tooltip');
+  const dup = await page.evaluate((s) => { const t = document.querySelector(`${s} .msg-foot .line-ts`); return t.hasAttribute('title') && t.hasAttribute('data-tip'); }, userSel);
+  assert(!dup, 'T1: the stamp carries both title and data-tip — the native tooltip will double ours');
+  await page.hover(`${userSel} .msg-foot .turn-ack`);
+  await pollUntil(page, () => /Seen|Received|Sent/.test(document.querySelector('.app-tooltip')?.textContent || ''), null, { timeout: 2_000, label: 'T1: the tick has no tooltip of its own' });
+  log(`T1 stamp tooltip ${JSON.stringify(tipText)}, survives unrelated scroll + reconcile; tick tooltip ✓`);
+  await page.mouse.move(5, 5);
 
   // ── L3 — drawn ticks ────────────────────────────────────────────────
   await send(page, 'a fresh send');

@@ -23,7 +23,9 @@
 //   - The bubble auto-flips above/below the target based on viewport
 //     edges, and clamps to the viewport horizontally so it never goes
 //     offscreen.
-//   - Hides on scroll / resize (stale bounding rect).
+//   - Re-placed on a scroll of its own scroller, hidden on resize or
+//     when the target scrolls off screen (2026-11-05: it used to hide on
+//     ANY scroll, and the transcript scrolls itself).
 //   - Hides on pointerdown / touchstart (the iOS-tap regression
 //     pinned by scripts/smoke/tooltip-hide-on-pointerdown.mjs).
 
@@ -32,6 +34,8 @@ const TOOLTIP_DELAY_MS = 300;
 let tipEl: HTMLDivElement | null = null;
 let tipTarget: HTMLElement | null = null;
 let tipShowTimer: number | null = null;
+/** The element whose tooltip is scheduled but not yet shown. */
+let pendingTarget: HTMLElement | null = null;
 
 function clearShowTimer(): void {
   if (tipShowTimer != null) {
@@ -42,19 +46,17 @@ function clearShowTimer(): void {
 
 function hideTip(): void {
   clearShowTimer();
+  pendingTarget = null;
   if (tipEl) { tipEl.remove(); tipEl = null; }
   tipTarget = null;
 }
 
-function showTip(target: HTMLElement, text: string): void {
-  if (tipEl) tipEl.remove();
-  const el = document.createElement('div');
-  el.className = 'app-tooltip';
-  el.textContent = text;
-  document.body.appendChild(el);
+/** Place (or re-place) the bubble against its target's current rect. */
+function placeTip(el: HTMLElement, target: HTMLElement): void {
   const r = target.getBoundingClientRect();
   const er = el.getBoundingClientRect();
   let top = r.top - er.height - 6;
+  el.classList.remove('below');
   if (top < 4) {
     el.classList.add('below');
     top = r.bottom + 6;
@@ -66,8 +68,22 @@ function showTip(target: HTMLElement, text: string): void {
   }
   el.style.top = `${top}px`;
   el.style.left = `${left}px`;
+}
+
+function showTip(target: HTMLElement, text: string): void {
+  if (tipEl) tipEl.remove();
+  const el = document.createElement('div');
+  el.className = 'app-tooltip';
+  el.textContent = text;
+  document.body.appendChild(el);
+  placeTip(el, target);
   tipEl = el;
   tipTarget = target;
+}
+
+function targetOnScreen(t: HTMLElement): boolean {
+  const r = t.getBoundingClientRect();
+  return r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
 }
 
 let wired = false;
@@ -90,9 +106,13 @@ export function initAppTooltip(): void {
     t.setAttribute('data-tip', v);
     t.removeAttribute('title');
     clearShowTimer();
+    pendingTarget = t;
     tipShowTimer = window.setTimeout(() => {
       tipShowTimer = null;
-      showTip(t, v);
+      pendingTarget = null;
+      // The title may have been refreshed while we waited (a reconcile
+      // re-stamps timestamps and delivery marks): show the current text.
+      showTip(t, t.getAttribute('data-tip') || v);
     }, TOOLTIP_DELAY_MS) as unknown as number;
   }, true);
 
@@ -106,8 +126,25 @@ export function initAppTooltip(): void {
     if (tipTarget === t || tipShowTimer != null) hideTip();
   }, true);
 
-  // Hide tip on scroll/resize since the bounding rect we computed is stale.
-  window.addEventListener('scroll', hideTip, true);
+  // Hide tip on scroll/resize since the bounding rect we computed is
+  // stale — but only a scroll of something that CONTAINS the target
+  // (field 2026-11-05, "the tooltips aren't appearing consistently": the
+  // session list, the Docs panel and the transcript's own programmatic
+  // scroll writes were all killing a pending tooltip on a message footer).
+  // A scroll of the target's own scroller no longer kills the tooltip
+  // either: the transcript writes its own scroll position (bottom
+  // follow, settle compensation) with the user's hand still, which was
+  // the "tooltips don't appear consistently" of 2026-11-05. A shown
+  // bubble is re-placed; a pending one keeps its timer; only a target
+  // that scrolled off screen loses it.
+  window.addEventListener('scroll', (e) => {
+    const t = tipTarget ?? pendingTarget;
+    if (!t) return;
+    const src = e.target as Node | null;
+    if (!(src === document || (src instanceof Node && src.contains(t)))) return;
+    if (!targetOnScreen(t)) { hideTip(); return; }
+    if (tipEl && tipTarget) placeTip(tipEl, tipTarget);
+  }, true);
   window.addEventListener('resize', hideTip);
 
   // Hide tip on any pointerdown / touchstart — iOS synthesizes mouseover

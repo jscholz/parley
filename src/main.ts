@@ -73,6 +73,7 @@ import { installExternalLinkGuard } from './externalLinkGuard.ts';
 import { installJitterWatch } from './util/jitterWatch.ts';
 import { initMessageActions } from './messageActions.ts';
 import { startRelativeStampTicker } from './util/relativeTime.ts';
+import { installHoverAfterScroll } from './util/hoverAfterScroll.ts';
 import { parseChatDeepLink } from './util/chatDeepLink.ts';
 import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
@@ -1334,6 +1335,7 @@ async function boot() {
   // another chat waits until that chat is on screen.
   initMessageActions({ viewedTitle: () => (document.getElementById('header-title')?.textContent || document.title || 'Chat').trim() });
   startRelativeStampTicker(() => document.getElementById('transcript'));
+  installHoverAfterScroll(() => document.getElementById('transcript'));
   window.addEventListener('parley:send-command', (ev) => {
     const d = (ev as CustomEvent<{ text: string; chatId?: string }>).detail;
     if (!d?.text) return;

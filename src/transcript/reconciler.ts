@@ -347,7 +347,7 @@ function applyTurnAck(el: HTMLElement, spec: UserBubbleSpec): void {
       // meaning for tests and screen readers.
       mark.dataset.glyph = want.glyph;
       mark.innerHTML = deliveryMarkSvg(want.state);
-      mark.title = want.title;
+      setTip(mark, want.title);
       mark.setAttribute('aria-label', want.title);
     }
   }
@@ -910,8 +910,16 @@ function updateTimestamp(el: HTMLElement, timestamp: number): void {
   if (relSpan.textContent !== relText) relSpan.textContent = relText;
   if (tsEl.dataset.ts !== String(timestamp)) tsEl.dataset.ts = String(timestamp);
 
-  const title = d.toLocaleString();
-  if (tsEl.title !== title) tsEl.title = title;
+  setTip(tsEl, d.toLocaleString());
+}
+
+/** Set an element's tooltip text without fighting util/tooltip.ts: while
+ *  a tooltip is pending or shown it parks `title` in `data-tip`, and
+ *  re-setting `title` then brought the browser's own tooltip back beside
+ *  ours (2026-11-05). */
+function setTip(el: HTMLElement, text: string): void {
+  if (el.hasAttribute('data-tip')) { if (el.getAttribute('data-tip') !== text) el.setAttribute('data-tip', text); return; }
+  if (el.title !== text) el.title = text;
 }
 
 /** Toggle whether the date sub-line shows for this bubble. The reconcile

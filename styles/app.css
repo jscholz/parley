@@ -3652,11 +3652,17 @@
   .line .msg-foot .line-ts {
     position: static; top: auto; right: auto;
     display: inline-flex; align-items: center; gap: 5px;
-    margin: 0 6px; cursor: default; pointer-events: auto;
-    line-height: 1; text-align: left;
+    margin: 0; cursor: default; pointer-events: auto;
+    line-height: 1; text-align: left; white-space: nowrap;
   }
-  .line.agent .msg-foot .line-ts { margin-left: 6px; }
-  .line.agent .msg-foot { margin-left: -4px; }
+  /* Anchored: flush left under a reply, flush right under the user's
+     bubble; the icons sit on the far side of the time. */
+  .line.agent .msg-foot .line-ts { margin: 0 6px 0 0; }
+  .line.s0 .msg-foot .line-ts { margin: 0 2px 0 6px; }
+  /* Hover after a scroll settles (hoverAfterScroll.ts): the browser does
+     not re-evaluate :hover for a stationary pointer, so the message that
+     scrolled under it is marked by hand until the mouse moves. */
+  .line.hover-sim .msg-foot .act { opacity: 0.6; }
   /* "8 minutes ago" (the tooltip holds the full date-time); the HH:MM and
      date spans stay in the DOM for day headers and tests, unseen here. */
   .line .msg-foot .line-ts .line-ts-rel { opacity: 0.55; font-family: var(--font-sans, inherit); font-size: 11px; letter-spacing: 0; }
@@ -3664,6 +3670,7 @@
   .line .msg-foot .turn-ack {
     display: inline-flex; align-items: center; font-size: 0; letter-spacing: 0; padding: 0;
     width: 18px; height: 16px; color: var(--muted);
+    pointer-events: auto;   /* its own tooltip ("Seen — …") must be reachable */
   }
   .line .msg-foot .turn-ack svg { width: 18px; height: 18px; }
   .line .msg-foot .turn-ack[data-state="pending"] { opacity: 0.6; }
