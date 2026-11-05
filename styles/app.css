@@ -26,6 +26,7 @@
     --font-mono: ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace;
     --content-size: 15px;          /* main readable text; slider-adjustable */
     --transcript-gutter: 12%;      /* per-side empty margin of the chat column; slider-adjustable */
+    --pin-gutter: 18px;            /* room beside every message for the pinned bar; the column keeps at least this much gutter */
     /* ── Design scale (2026-08-11 UX-polish experiment, branch
        jscholz/ux-polish) ──────────────────────────────────────────
        Consistent rhythm tokens so message layout stops relying on
@@ -2461,7 +2462,19 @@
   /* Pinned bubble — subtle left border so the user can scan and find
    * pinned content in a long transcript at a glance, without it being
    * loud enough to disrupt reading. */
-  .line.pinned { border-left: 2px solid var(--primary); padding-left: 6px; }
+  /* Pinned: a bar in the GUTTER beside the message, not a border that
+     re-flows it (field 2026-11-05: "pinning shifts the entire message
+     — feels like click-jacking"). The row's painted box is extended
+     into the gutter by the same amount it is padded, so the text does
+     not move and the bar stays inside paint containment. */
+  .line.agent { margin-left: calc(-1 * var(--pin-gutter)); padding-left: var(--pin-gutter); }
+  .line.s0 { margin-right: calc(-1 * var(--pin-gutter)); padding-right: var(--pin-gutter); }
+  .line.pinned::before {
+    content: ''; position: absolute; top: 8px; bottom: 8px; width: 3px; border-radius: 2px;
+    background: var(--primary); pointer-events: none;
+  }
+  .line.agent.pinned::before { left: 4px; }
+  .line.s0.pinned::before { right: 4px; }
   /* Keyboard-driven highlight (transcriptHighlight.ts): empty composer
    * + Up arrow enters highlight mode; Up/Down navigates; P toggles
    * pin; C copies. Visual is a sage-tinted background + thicker
@@ -3677,9 +3690,11 @@
   .line .msg-foot .turn-ack[data-state="seen"] { color: var(--primary); }
   .line .msg-foot .turn-ack[data-state="failure"], .line .msg-foot .turn-ack[data-state="failed"] { color: #d55; }
   @media (hover: none) {
-    /* No hover on a phone: the time is the tap target that reveals the row. */
-    .line .msg-foot .act { opacity: 0; }
-    .line.actions-open .msg-foot .act { opacity: 0.7; }
+    /* No hover on a phone: the row is always on, dimmed — the convention
+       of the Claude and ChatGPT apps (field 2026-11-05: tap-to-reveal
+       "is probably not obvious to people"). The row hangs below the
+       message, so it costs no space inside the bubble. */
+    .line .msg-foot .act { opacity: 0.45; }
     .line .msg-foot .line-ts { padding: 4px 0; }
   }
 
@@ -4906,7 +4921,7 @@
     /* Center the column within the main area; the per-side gutter is a
        user-adjustable percentage (Settings → Display → Transcript width).
        max-width caps the grown flex item; margin auto centers the slack. */
-    width: 100%; max-width: calc(100% - 2 * var(--transcript-gutter)); margin: 0 auto;
+    width: 100%; max-width: calc(100% - 2 * max(var(--transcript-gutter), var(--pin-gutter) + 6px)); margin: 0 auto;
     position: relative;  /* anchor for the jump-to-bottom button */
   }
   /* Phone: never apply the desktop gutter percentage — the column already

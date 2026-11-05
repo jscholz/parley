@@ -1,6 +1,6 @@
 // FIELD, Jonathan 2026-11-04: message controls the way Claude lays them
 // out — one footer row at the bottom of each bubble, revealed on hover:
-// agent: copy · fork · pin · read aloud · mark unread · time; user: ticks+time ·
+// agent: time · copy · fork · pin · read aloud · mark unread; user: copy · pin ·
 // copy · rewind · fork. Plus rewind (hermes /undo N, text back to the
 // composer) and fork (hermes /branch, follow the link, /undo the turns
 // after the fork point in the copy).
@@ -81,7 +81,7 @@ export default async function run({ page, log, mock }) {
   assert(/ago|just now|yesterday/.test(shape.rel), `L1: relative time expected, got ${JSON.stringify(shape.rel)}`);
   // Time anchored against the bubble (2026-11-05): last under the user's
   // bubble, first under a reply; icons on the far side of it.
-  assert(u.order.join(',') === 'copy-btn,rewind-btn,fork-btn,line-ts', `L1: user order ${u.order.join(',')}`);
+  assert(u.order.join(',') === 'copy-btn,pin-btn,rewind-btn,fork-btn,line-ts', `L1: user order ${u.order.join(',')}`);
   assert(a.order.join(',') === 'line-ts,copy-btn,fork-btn,pin-btn,play-btn,unread-btn', `L1: agent order ${a.order.join(',')}`);
   const anchored = await page.evaluate(({ us, as }) => {
     const u = document.querySelector(us); const a = document.querySelector(as);
@@ -140,6 +140,29 @@ export default async function run({ page, log, mock }) {
   await pollUntil(page, () => /Seen|Received|Sent/.test(document.querySelector('.app-tooltip')?.textContent || ''), null, { timeout: 2_000, label: 'T1: the tick has no tooltip of its own' });
   log(`T1 stamp tooltip ${JSON.stringify(tipText)}, survives unrelated scroll + reconcile; tick tooltip ✓`);
   await page.mouse.move(5, 5);
+
+  // ── P1 — pinning decorates beside the message, never moves it ───────
+  const geo = (sel) => page.evaluate((s) => { const l = document.querySelector(s); const t = l.querySelector('.text').getBoundingClientRect(); const f = l.querySelector('.msg-foot .copy-btn').getBoundingClientRect(); return { textLeft: Math.round(t.left), textTop: Math.round(t.top), copyLeft: Math.round(f.left), pinned: l.classList.contains('pinned') }; }, sel);
+  const g0 = await geo(agentSel);
+  await page.hover(agentSel);
+  await page.click(`${agentSel} .msg-foot .pin-btn`);
+  await pollUntil(page, (s) => document.querySelector(s)?.classList.contains('pinned'), agentSel, { timeout: 3_000, label: 'P1: pin did not take' });
+  const g1 = await geo(agentSel);
+  log(`P1 pin: text ${g0.textLeft}→${g1.textLeft}px, copy icon ${g0.copyLeft}→${g1.copyLeft}px`);
+  assert(g1.textLeft === g0.textLeft && g1.textTop === g0.textTop && g1.copyLeft === g0.copyLeft, `P1: pinning moved the message or its icons: ${JSON.stringify({ g0, g1 })}`);
+  const bar = await page.evaluate((s) => { const l = document.querySelector(s); const cs = getComputedStyle(l, '::before'); const lb = l.getBoundingClientRect(); const tb = l.querySelector('.text').getBoundingClientRect(); return { width: cs.width, visible: cs.content !== 'none' && cs.content !== 'normal', insideRow: parseFloat(cs.left) >= 0, leftOfText: lb.left + parseFloat(cs.left) + parseFloat(cs.width) <= tb.left }; }, agentSel);
+  assert(bar.visible && bar.insideRow && bar.leftOfText, `P1: the pinned bar should sit in the gutter beside the text, inside the row: ${JSON.stringify(bar)}`);
+  await page.click(`${agentSel} .msg-foot .pin-btn`);   // unpin, leave the chat as found
+  // The user's bubble: bar on the RIGHT, in the gutter, bubble unmoved.
+  const ug0 = await page.evaluate((s) => { const l = document.querySelector(s); const b = l.querySelector(':scope > .bubble').getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top) }; }, userSel);
+  await page.hover(userSel);
+  await page.click(`${userSel} .msg-foot .pin-btn`);
+  await pollUntil(page, (s) => document.querySelector(s)?.classList.contains('pinned'), userSel, { timeout: 3_000, label: 'P1: user pin did not take' });
+  const ug1 = await page.evaluate((s) => { const l = document.querySelector(s); const b = l.querySelector(':scope > .bubble').getBoundingClientRect(); const cs = getComputedStyle(l, '::before'); const lb = l.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top), barVisible: cs.content !== 'none' && cs.content !== 'normal', barRightOfBubble: lb.right - parseFloat(cs.right) - parseFloat(cs.width) >= b.right, barInsideRow: parseFloat(cs.right) >= 0 }; }, userSel);
+  assert(ug1.left === ug0.left && ug1.right === ug0.right && ug1.top === ug0.top, `P1: pinning moved the user's bubble: ${JSON.stringify({ ug0, ug1 })}`);
+  assert(ug1.barVisible && ug1.barRightOfBubble && ug1.barInsideRow, `P1: the user's pin bar should sit in the right gutter inside the row: ${JSON.stringify(ug1)}`);
+  await page.click(`${userSel} .msg-foot .pin-btn`);
+  log('P1 pin bar stands beside the message (left for replies, right for yours); nothing shifts ✓');
 
   // ── L3 — drawn ticks ────────────────────────────────────────────────
   await send(page, 'a fresh send');

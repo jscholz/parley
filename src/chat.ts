@@ -1466,6 +1466,7 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
     // stamp "floated out in space" leaving room for hover-only icons);
     // the icons grow away from it, into the empty side.
     act(div.querySelector(':scope > .copy-btn'));
+    act(div.querySelector(':scope > .pin-btn'));   // Parley pins user messages too (Pinned drawer)
     act(rewindBtn);
     act(forkBtn);
     foot.appendChild(tsEl);
