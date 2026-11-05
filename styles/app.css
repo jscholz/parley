@@ -2793,13 +2793,11 @@
   #pin-drawer.collapsed .pin-drawer-top {
     border-bottom: 0;
   }
-  #pin-drawer.collapsed .pin-drawer-toggle {
-    /* Override sb-icon-btn's 36px min-height so the toggle fits inside
-     * the now-shorter pin-drawer-top (which matches .header's height).
-     * Use a tight square that still hits the 28px hover target. */
-    min-height: 0;
-    padding: 4px;
-  }
+  /* The rail buttons keep ONE size in both drawer states (2026-11-05).
+     They used to shrink while collapsed (a leftover from when they lived
+     in the header-height strip), which moved the document tabs below by
+     24 px on every open/close — so a double-click on a tab (open, then
+     close) landed its second click on the NEXT tab. */
   /* Count banner sits at the icon's upper-LEFT corner — mirror of
    * how the sidebar's icon-buttons would carry a badge in their
    * upper-right (badge sits on the "outer" corner relative to the
