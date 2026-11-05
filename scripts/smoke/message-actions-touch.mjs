@@ -39,5 +39,7 @@ export default async function run({ page, log }) {
     assert(r.acts.length >= 3 && r.min > 0.2, `phone: action icons must be visible at rest, got ${JSON.stringify(r.acts)}`);
     assert(r.stamp > 0, 'phone: the stamp must stay visible');
   }
-  log('phone: actions always on, dimmed ✓');
+  const tall = await page.evaluate(() => Array.from(document.querySelectorAll('#transcript .msg-foot')).map((f) => Math.round(f.getBoundingClientRect().height)).filter((h) => h > 28));
+  assert(tall.length === 0, `phone: a footer wrapped to a second line (heights ${JSON.stringify(tall)}) — row heights must not depend on the stamp text`);
+  log('phone: actions always on, dimmed; footers single-line ✓');
 }

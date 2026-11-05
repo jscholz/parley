@@ -2326,7 +2326,8 @@
        (ticks · time · copy · rewind · fork) hangs beneath it. */
     max-width: 72%;
     margin-left: auto;
-    background: none; border: none; padding: 0;
+    background: none; border: none;
+    padding: 0 var(--pin-gutter) 0 0;   /* keep the pin gutter (the generic .line rule sets both sides) */
     display: flex; flex-direction: column; align-items: flex-end;
   }
   .line.s0 > .bubble {
@@ -2338,7 +2339,7 @@
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
   }
-  .line.s0 > .msg-foot { order: 99; margin-top: 4px; padding-right: 2px; }
+  .line.s0 > .msg-foot { order: 99; margin-top: 4px; padding-right: 2px; max-width: none; }   /* may run left past a narrow bubble rather than wrap */
   .line.s0 > .send-failed-row, .line.s0 > .turn-notice { align-self: flex-end; }
   .line.s0 .speaker { display: none; }
   .line.s0 .line-ts { top: 28px; right: 10px; }
@@ -2467,8 +2468,12 @@
      — feels like click-jacking"). The row's painted box is extended
      into the gutter by the same amount it is padded, so the text does
      not move and the bar stays inside paint containment. */
-  .line.agent { margin-left: calc(-1 * var(--pin-gutter)); padding-left: var(--pin-gutter); }
-  .line.s0 { margin-right: calc(-1 * var(--pin-gutter)); padding-right: var(--pin-gutter); }
+  /* Padding only — never a negative margin (2026-11-05: rows hanging past
+     the column made the phone's mid-scroll reconcile jump). The column is
+     widened by the same amount on desktop (rule below); on phones the
+     transcript's edge padding moves onto the rows instead. */
+  .line { padding-left: var(--pin-gutter); padding-right: var(--pin-gutter); }
+  .line.s0 { max-width: calc(72% + var(--pin-gutter)); }
   .line.pinned::before {
     content: ''; position: absolute; top: 8px; bottom: 8px; width: 3px; border-radius: 2px;
     background: var(--primary); pointer-events: none;
@@ -3637,8 +3642,8 @@
    * caret dropdown (#154) is gone. Accidental playback is prevented at the
    * source (gesture classifier, inert play bar), not by hiding Play. */
   .line .msg-foot {
-    display: flex; align-items: center; gap: 2px;
-    margin-top: 6px; min-height: 24px;
+    display: flex; align-items: center; gap: 2px; flex-wrap: nowrap;
+    margin-top: 6px; min-height: 24px; height: 24px;   /* a footer never changes a row's height (phone reconcile jump, 2026-11-05) */
     font-family: var(--font-mono); font-size: 10.5px; color: var(--muted);
   }
   .line.s0 .msg-foot { justify-content: flex-end; }
@@ -4921,7 +4926,7 @@
     /* Center the column within the main area; the per-side gutter is a
        user-adjustable percentage (Settings → Display → Transcript width).
        max-width caps the grown flex item; margin auto centers the slack. */
-    width: 100%; max-width: calc(100% - 2 * max(var(--transcript-gutter), var(--pin-gutter) + 6px)); margin: 0 auto;
+    width: 100%; max-width: calc(100% - 2 * max(var(--transcript-gutter), var(--pin-gutter) + 6px) + 2 * var(--pin-gutter)); margin: 0 auto;
     position: relative;  /* anchor for the jump-to-bottom button */
   }
   /* Phone: never apply the desktop gutter percentage — the column already
@@ -4931,6 +4936,10 @@
    * specificity, so on equal specificity the later source rule wins. */
   @media (max-width: 699px) {
     .chat-column { max-width: none; }
+    /* The rows carry the edge inset (their pin gutter equals it); other
+       transcript children keep theirs as a margin. */
+    .transcript { padding-left: 0; padding-right: 0; }
+    .transcript > :not(.line) { margin-left: var(--pin-gutter); margin-right: var(--pin-gutter); }
   }
 
   /* Jump-to-bottom button — appears when the user scrolls up during
