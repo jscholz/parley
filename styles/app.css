@@ -124,7 +124,10 @@
     background: var(--surface);
     border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
-    transition: width 0.18s ease;
+    /* No width transition (2026-11-05): the panel takes its final width at
+       once and Drawer.ts reveals it with a composited clip-path slide —
+       one layout per toggle instead of one per frame. Phones keep their
+       transform overlay transition below. */
     overflow: hidden;
   }
   /* Desktop expand: no shadow — content shifts right so the panel isn't
@@ -2587,7 +2590,7 @@
     display: flex; flex-direction: column;
     z-index: 50;
     overflow: hidden;
-    transition: width 0.18s ease;
+    /* No width transition — same flat slide as #sidebar (Drawer.ts). */
   }
   #pin-drawer:not(.collapsed) { width: var(--pin-drawer-width, var(--drawer-expanded-width)); }
 
@@ -5190,7 +5193,10 @@
     display: flex; align-items: center; gap: 10px;
     font: 500 13px/1 var(--font-mono); color: var(--muted);
     letter-spacing: 0.04em; opacity: 0.55;
-    transition: opacity .15s ease, border-radius .2s ease, padding .2s ease;
+    /* No padding transition (2026-11-05): animating it re-laid-out the
+       right drawer every frame of the open; the clip reveal hides the
+       padding change anyway. */
+    transition: opacity .15s ease, border-radius .2s ease;
     cursor: pointer; pointer-events: auto; z-index: 20;
     user-select: none;
   }

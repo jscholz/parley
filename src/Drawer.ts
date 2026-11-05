@@ -101,7 +101,45 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
     return null;
   }
 
-  const isOpen = () => drawer.classList.contains('expanded');
+  // Logical open state. During a close the `expanded` class stays on until
+  // the slide finishes (the panel keeps its width while it is uncovered /
+  // covered), so the class alone would lie for ~180 ms.
+  let open = drawer.classList.contains('expanded');
+  const isOpen = () => open;
+
+  // ── Flat slide (2026-11-05) ────────────────────────────────────────
+  // Field: "expanding and collapsing the sidebar is slow and clunky in
+  // heavy sessions". The slide used to be a `width` transition: every one
+  // of its ~18 frames re-laid-out and repainted the page (the trace on
+  // Raise Materials: Layout 72 ms + Paint 53 ms per open, scaling with
+  // the session). Now the panel takes its final width at once — ONE
+  // layout, ONE paint — and the reveal is a composited clip-path
+  // animation that uncovers it from the rail, which looks the same and
+  // costs the same on every machine. Phones keep their transform overlay.
+  const RAIL_PX = 48;
+  const SLIDE_MS = 180;
+  let slideEnd: number | null = null;
+  const clearSlide = () => {
+    if (slideEnd !== null) { window.clearTimeout(slideEnd); slideEnd = null; }
+    drawer.style.removeProperty('clip-path');
+    drawer.style.removeProperty('transition');
+    drawer.style.removeProperty('will-change');
+  };
+  const inset = (hiddenPx: number) => (cfg.side === 'right' ? `inset(0 0 0 ${hiddenPx}px)` : `inset(0 ${hiddenPx}px 0 0)`);
+  /** Animate the reveal/cover of the part beyond the rail; `after` runs
+   *  when it has finished (or at once when not animating). */
+  const slide = (reveal: boolean, after?: () => void) => {
+    clearSlide();
+    const hidden = Math.max(0, drawer.getBoundingClientRect().width - RAIL_PX);
+    if (hidden < 1) { after?.(); return; }
+    drawer.style.transition = 'none';
+    drawer.style.willChange = 'clip-path';
+    drawer.style.clipPath = reveal ? inset(hidden) : inset(0);
+    void drawer.offsetWidth;   // commit the start state
+    drawer.style.transition = `clip-path ${SLIDE_MS}ms ease`;
+    drawer.style.clipPath = reveal ? inset(0) : inset(hidden);
+    slideEnd = window.setTimeout(() => { slideEnd = null; clearSlide(); after?.(); }, SLIDE_MS + 40);
+  };
 
   // ── State setters ─────────────────────────────────────────────────
   let shiftTimer: number | null = null;
@@ -131,12 +169,24 @@ export function createDrawer(cfg: DrawerConfig): DrawerHandle | null {
   };
   const setExpanded = (exp: boolean, immediate = false) => {
     const wasOpen = isOpen();
-    drawer.classList.toggle('expanded', exp);
-    drawer.classList.toggle('collapsed', !exp);
+    open = exp;
+    const desktop = window.innerWidth >= MOBILE_BREAKPOINT_PX;
+    const animate = !immediate && desktop && exp !== wasOpen;
+    if (exp || !animate) {
+      drawer.classList.toggle('expanded', exp);
+      drawer.classList.toggle('collapsed', !exp);
+      if (!animate) clearSlide();
+    }
     drawer.setAttribute('aria-expanded', exp ? 'true' : 'false');
+    if (animate && exp) slide(true);
+    if (animate && !exp) {
+      // Keep the expanded width (and the list) while the panel is covered;
+      // collapse the classes when the cover has landed on the rail.
+      slide(false, () => { if (!open) { drawer.classList.remove('expanded'); drawer.classList.add('collapsed'); } });
+    }
     if (shiftTimer !== null) { window.clearTimeout(shiftTimer); shiftTimer = null; }
-    const defer = !immediate && exp && !wasOpen && cfg.deferBodyShiftMs !== undefined && window.innerWidth >= MOBILE_BREAKPOINT_PX;
-    const glideClose = !immediate && !exp && wasOpen && !!cfg.glideSelector && window.innerWidth >= MOBILE_BREAKPOINT_PX;
+    const defer = !immediate && exp && !wasOpen && cfg.deferBodyShiftMs !== undefined && desktop;
+    const glideClose = !immediate && !exp && wasOpen && !!cfg.glideSelector && desktop;
     if (defer) {
       // 0 = one frame after the panel starts moving: content and panel move
       // together (A/B on his session 2026-10-28: shifting AFTER the slide
