@@ -38,6 +38,7 @@ import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
+import { stripLeadingTitleHeading } from '../docTitleDedupe.ts';
 import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs } from '../docStore.ts';
 import { toggleDocFullscreen, syncExpandButtons } from '../docFullscreen.ts';
 import { loadSortable } from '../sortableLoader.ts';
@@ -233,11 +234,18 @@ export function createDocModule(opts: {
       main.appendChild(title);
       main.appendChild(meta);
       main.onclick = () => { selectDoc(d.id); setViewState('reader'); rerender(ctx); };
+      // Drag hint (hover-only, CSS): the rows reorder — whole row drags.
+      const grip = document.createElement('span');
+      grip.className = 'doc-shelf-item-grip';
+      grip.setAttribute('aria-hidden', 'true');
+      grip.innerHTML = '<svg viewBox="0 0 12 16" fill="currentColor"><circle cx="4" cy="4" r="1.1"/><circle cx="8" cy="4" r="1.1"/><circle cx="4" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="4" cy="12" r="1.1"/><circle cx="8" cy="12" r="1.1"/></svg>';
+      li.appendChild(grip);
       li.appendChild(main);
 
       const close = document.createElement('button');
       close.className = 'doc-shelf-item-close';
-      close.textContent = '✕';
+      close.type = 'button';
+      close.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
       close.setAttribute('aria-label', `Remove "${d.title}"`);
       close.onclick = (e) => {
         e.stopPropagation();
@@ -312,8 +320,20 @@ export function createDocModule(opts: {
 
   function renderReader(ctx: RightDrawerModuleContext, doc: DocState): void {
     const hasStrip = doc.source === 'capture' && !!doc.captureId && !isLiveCaptureDoc(doc);
+    // ONE sticky head, two lines (design pass 2026-11-06, field nit: "I
+    // have to scroll all the way to the top to close it … that header
+    // looks cobbled together"). Before this the title+✕ row scrolled
+    // away while a separate action row stuck, and the document's own
+    // heading repeated the title underneath — four rows of chrome.
+    //   line 1  .doc-drawer-title    title · (✎ on captures) · ✕
+    //   line 2  .doc-drawer-actions  format tag · file · age · [chat] [expand] [download]
+    // Every control is the same 28 px icon button; the identity text is
+    // quiet mono. The head is the body's FIRST child so it sticks as a
+    // unit — in the panel and inside the full-screen column alike.
     const header = document.createElement('div');
     header.className = 'doc-drawer-header';
+    const actions = document.createElement('div');
+    actions.className = 'doc-drawer-actions';
 
     // No `‹ All docs (n)` breadcrumb here (field report 2026-08-26):
     // it navigated to the list "in the current tab" with no rail tint
@@ -322,31 +342,44 @@ export function createDocModule(opts: {
     // toggle), and when the rail is cramped the tab strip's "+N"
     // overflow chip opens the list too — the breadcrumb only duplicated
     // them. The reader instead offers "Open chat" (companion session).
-    if (doc.chatId) {
-      const openChat = document.createElement('button');
+    const openChat = doc.chatId ? document.createElement('button') : null;
+    if (openChat) {
       openChat.className = 'doc-drawer-openchat';
-      openChat.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
-      openChat.appendChild(document.createTextNode('Open chat'));
+      openChat.type = 'button';
+      openChat.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>';
       openChat.setAttribute('aria-label', 'Open the companion chat session');
-      openChat.title = 'Open the chat session this document belongs to';
+      openChat.title = 'Open chat';
       openChat.onclick = () => {
         opts.onOpenChat?.(doc.chatId!);
         // Mobile: the main view is what the user asked for — same
         // close-on-drill the pin jump uses (pins.ts).
         if (window.innerWidth < 700) ctx.close();
       };
-      header.appendChild(openChat);
     }
 
-    const spacer = document.createElement('span');
-    spacer.className = 'doc-drawer-header-spacer';
-    header.appendChild(spacer);
-
+    // Identity line: format tag · file name · age. `.doc-drawer-meta`
+    // stays the age alone (doc-timestamp-survives-replay reads it).
+    const ident = document.createElement('span');
+    ident.className = 'doc-drawer-ident';
+    const tag = document.createElement('span');
+    tag.className = 'doc-drawer-tag';
+    tag.textContent = doc.format === 'markdown' ? 'md' : doc.format === 'html' ? 'html' : 'txt';
+    ident.appendChild(tag);
+    const base = (doc.path || '').split('/').filter(Boolean).pop() || '';
+    if (base) {
+      const file = document.createElement('span');
+      file.className = 'doc-drawer-file';
+      file.textContent = base;
+      file.title = doc.path || '';
+      ident.appendChild(file);
+    }
     const meta = document.createElement('span');
     meta.className = 'doc-drawer-meta';
     meta.textContent = formatRelativeTime(doc.updatedAt);
     if (doc.path) meta.title = doc.path;
-    header.appendChild(meta);
+    ident.appendChild(meta);
+    actions.appendChild(ident);
+    if (openChat) actions.appendChild(openChat);
 
     // Download — single file, filename from the path basename else a
     // slugified title, mime by format. No zip/PDF by design.
@@ -365,8 +398,8 @@ export function createDocModule(opts: {
     exp.innerHTML = '<svg class="glyph-expand" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h4v4"/><path d="M13.5 2.5 9 7"/><path d="M6.5 13.5h-4v-4"/><path d="M2.5 13.5 7 9"/></svg>'
       + '<svg class="glyph-collapse" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 6.5h-4v-4"/><path d="M9.5 6.5 14 2"/><path d="M2.5 9.5h4v4"/><path d="M6.5 9.5 2 14"/></svg>';
     exp.onclick = () => { toggleDocFullscreen(); };
-    header.appendChild(exp);
-    if (!hasStrip) header.appendChild(dl);
+    actions.appendChild(exp);
+    if (!hasStrip) actions.appendChild(dl);
 
     // Close-from-shelf — ✕ NEXT TO the doc's own actions so its scope
     // (this document) is unmistakable; never in the drawer header. An ✕,
@@ -462,7 +495,11 @@ export function createDocModule(opts: {
       titleEl.appendChild(rename);
     }
     titleEl.appendChild(rm);
-    opts.body.appendChild(titleEl);
+    header.appendChild(titleEl);
+    header.appendChild(actions);
+    // First child of the body: the head sticks as one unit (CSS
+    // position: sticky on .doc-drawer-header).
+    opts.body.appendChild(header);
 
     // A leading `_…_` line is METADATA wearing markdown italics —
     // captureTranscribe mints `_Recorded 2026-08-18 10:35 · 1:34:39 ·
@@ -482,11 +519,6 @@ export function createDocModule(opts: {
       opts.body.appendChild(sub);
     }
 
-    // Document first, chrome second (UX-pass point 4): the breadcrumb/
-    // actions row used to sit ABOVE the title, so the reader opened with
-    // navigation chrome dominating and the document's own identity in
-    // second place. Same elements, demoted one slot.
-    opts.body.appendChild(header);
     syncExpandButtons();
 
     // Player strip — capture transcripts only (§3.6): stream the
@@ -523,7 +555,10 @@ export function createDocModule(opts: {
     } else if (doc.format === 'markdown') {
       const md = document.createElement('div');
       md.className = 'doc-drawer-content';
-      md.innerHTML = miniMarkdown(docBody);
+      // The head already names the document; an agent-written doc that
+      // opens with `# <same title>` would print it twice (design pass
+      // 2026-11-06). Presentation-only — downloadDoc writes doc.content.
+      md.innerHTML = miniMarkdown(stripLeadingTitleHeading(docBody, doc.title));
       // Off-origin links leave the app in a NEW window (2026-10-26: a link
       // in a doc navigated the installed PWA away with no way back). The
       // web-wide guard (externalLinkGuard.ts) is the belt; this is the

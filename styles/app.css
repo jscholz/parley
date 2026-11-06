@@ -2864,30 +2864,66 @@
     padding: 0 14px 14px;
   }
   .doc-drawer-body[hidden] { display: none; }
+  /* The reader head (design pass 2026-11-06): ONE sticky block, two
+     lines — title · ✎ · ✕ over tag · file · age · [chat][expand][download].
+     It is the body's first child and sticks as a unit, in the panel and
+     inside the full-screen column, so the close is always at hand
+     (field nit: "I have to scroll all the way to the top to close it").
+     Opaque so text scrolls under it. */
   .doc-drawer-header {
-    display: flex; align-items: baseline; justify-content: space-between;
-    gap: 8px;
+    display: flex; flex-direction: column; gap: 2px;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 6px;
-    /* Sticky (2026-11-03): the doc's actions — Open chat, expand to
-       full screen, download — stay at hand while reading a long doc,
-       instead of living at the top of the content where reaching them
-       costs the reading position. Opaque so text scrolls under it. */
+    padding: 6px 0 6px;
     position: sticky; top: 0; z-index: 2;
     background: var(--bg);
   }
   /* The scrollers carry no top padding (it would show content above a
-     pinned header); the first row supplies the breathing room instead. */
+     pinned header); the first row supplies the breathing room instead —
+     the sticky head carries its own padding, so no margin there (a
+     margin would show content scrolling through the gap above it). */
   .doc-drawer-body > :first-child { margin-top: 8px; }
+  .doc-drawer-body > .doc-drawer-header:first-child { margin-top: 0; }
   .doc-drawer-title {
-    font-weight: 600; font-size: 13px;
-    overflow-wrap: anywhere;
-    display: flex; align-items: flex-start; gap: 8px;
+    font-weight: 600; font-size: 14px; line-height: 1.3;
+    display: flex; align-items: center; gap: 4px; min-height: 28px;
   }
-  .doc-drawer-title-text { flex: 1; min-width: 0; }
+  .doc-drawer-title-text {
+    flex: 1; min-width: 0; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .doc-drawer-actions {
+    display: flex; align-items: center; gap: 2px; min-height: 28px;
+  }
+  .doc-drawer-ident {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted); font-family: var(--font-mono);
+    white-space: nowrap; overflow: hidden;
+  }
+  .doc-drawer-tag {
+    flex: none; border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 5px; line-height: 16px;
+  }
+  .doc-drawer-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .doc-drawer-file + .doc-drawer-meta::before { content: '·'; margin-right: 6px; }
+  /* One button grammar for every head control (and the list rows' ✕):
+     28 px box, 16 px 1.5-stroke glyph, muted → fg on hover with the
+     same tint the session rows use. */
+  .doc-drawer-openchat, .doc-drawer-expand, .doc-drawer-download,
+  .doc-drawer-remove, .doc-drawer-rename, .doc-shelf-item-close {
+    flex: none; width: 28px; height: 28px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: none; border: none; border-radius: 6px;
+    color: var(--muted); cursor: pointer; line-height: 0;
+    touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
+  }
+  .doc-drawer-openchat svg, .doc-drawer-expand svg, .doc-drawer-download svg,
+  .doc-drawer-remove svg, .doc-shelf-item-close svg { width: 16px; height: 16px; }
+  .doc-drawer-openchat:hover, .doc-drawer-expand:hover, .doc-drawer-download:hover,
+  .doc-drawer-remove:hover, .doc-drawer-rename:hover, .doc-shelf-item-close:hover {
+    color: var(--fg); background: color-mix(in srgb, var(--fg) 8%, transparent);
+  }
   /* Rename (2026-10-09): ✎ on capture docs; the title swaps for an input. */
-  .doc-drawer-rename { flex: none; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 6px; }
-  .doc-drawer-rename:hover { color: var(--primary); }
+  .doc-drawer-rename { font-size: 14px; line-height: 1; }
   .doc-drawer-title-input {
     flex: 1; min-width: 0; font: inherit; font-weight: 600;
     background: var(--bg); color: var(--fg); border: 1px solid var(--primary); border-radius: 6px; padding: 2px 6px;
@@ -5699,35 +5735,13 @@
  * it jumped views "in the current tab" with no rail tint change) — the
  * Docs rail button / "+N" chip are the list entries; its header slot now
  * hosts the Open-chat companion-session link below. */
-.doc-drawer-openchat {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: none; border: none; cursor: pointer; font: inherit;
-  font-size: 12px; color: var(--muted); padding: 2px 4px 2px 0;
-  border-radius: 4px; white-space: nowrap;
-  transition: color 0.12s;
-}
-.doc-drawer-openchat:hover { color: var(--fg); text-decoration: underline; }
-.doc-drawer-openchat svg { flex-shrink: 0; }
-.doc-drawer-header-spacer { flex: 1; }
-.doc-drawer-download {
-  background: none; border: none; cursor: pointer; color: var(--muted);
-  padding: 4px; display: inline-flex; align-items: center;
-  border-radius: 5px; line-height: 0;
-}
-.doc-drawer-download svg { width: 16px; height: 16px; }
-.doc-drawer-download:hover { color: var(--fg); background: var(--surface); }
+/* .doc-drawer-openchat / -download / -expand / -remove: one icon-button
+   rule set with the reader head, see ".doc-drawer-header" above. */
 /* Full-screen reading mode (2026-11-03, rightDrawer/docFullscreen.ts).
    The expand glyph sits with the doc's own actions; the overlay borrows
    #doc-drawer-body into a centred reading column. z-index below the
    image viewer (10000), Settings (9998) and confirm dialogs, so each of
    those stacks on top and owns Escape while it is up. */
-.doc-drawer-expand {
-  background: none; border: none; cursor: pointer; color: var(--muted);
-  padding: 4px; display: inline-flex; align-items: center;
-  border-radius: 5px; line-height: 0;
-}
-.doc-drawer-expand svg { width: 16px; height: 16px; }
-.doc-drawer-expand:hover { color: var(--fg); background: var(--surface); }
 .doc-drawer-expand[data-open="1"] .glyph-expand { display: none; }
 .doc-drawer-expand:not([data-open="1"]) .glyph-collapse { display: none; }
 .doc-fullscreen {
@@ -5764,6 +5778,9 @@ body.doc-fullscreen-open { overflow: hidden; }
   padding: 0 max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left));
 }
 .doc-fullscreen-column > .doc-drawer-body > :first-child { margin-top: 20px; }
+/* The sticky head keeps no margin in the column either (content would
+   scroll through the gap); it carries the breathing room as padding. */
+.doc-fullscreen-column > .doc-drawer-body > .doc-drawer-header:first-child { margin-top: 0; padding-top: 14px; }
 /* The borrowed body: a reading column, not a panel. Its width is the
    per-device "Reading width" setting (Settings › Advanced, % of the
    window; --reader-width from settings.ts applyVisuals). Field 2026-11-04:
@@ -5777,13 +5794,18 @@ body.doc-fullscreen-open { overflow: hidden; }
 @media (min-width: 700px) {
   .doc-fullscreen-column > .doc-drawer-body { max-width: var(--reader-width, 65%); }
 }
+/* Quiet navigation, not a green link (design pass 2026-11-06): muted
+   text that lifts to fg on hover, same voice as the head's identity line. */
 .doc-shelf-back {
   background: none; border: none; cursor: pointer; font: inherit;
-  font-size: 13px; color: var(--primary); padding: 4px 0 8px;
+  font-size: 12px; color: var(--muted); padding: 6px 0 8px;
   text-align: left;
 }
-.doc-shelf-back:hover { text-decoration: underline; }
-.doc-shelf-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+.doc-shelf-back:hover { color: var(--fg); }
+/* The rows bleed 6px into the panel gutter (see .doc-shelf-item); the
+   list carries that bleed as its own padding so the scroller's overflow
+   clip never cuts the accent bar or the grip off the row's left edge. */
+.doc-shelf-list { list-style: none; margin: 0 -6px; padding: 0 6px; overflow-y: auto; flex: 1; }
 /* Separated by rhythm, not rules — the .pin-drawer-item lesson applied
    to the docs shelf (B3). Ten open docs drew ten full-width hairlines
    down a phone screen, which is the same "visually cluttered" note the
@@ -5797,32 +5819,46 @@ body.doc-fullscreen-open { overflow: hidden; }
 .doc-shelf-item {
   display: flex; align-items: center; gap: 6px;
   margin: 0 -6px 1px; padding: 0 6px;
-  border-radius: 6px;
+  border-radius: 6px; position: relative;
   transition: background 0.12s ease;
 }
 .doc-shelf-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.doc-shelf-item.active { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+/* Active = the accent bar the rail tabs use, not a grey block (design
+   pass 2026-11-06); the green title stays as the second cue. */
+.doc-shelf-item.active::before {
+  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px;
+  border-radius: 2px; background: var(--primary);
+}
 .doc-shelf-item.active .doc-shelf-item-title { color: var(--primary); }
+/* Drag grip: a hint that the rows reorder (the whole row drags, as
+   before). Sits in the row's own left padding so titles keep their x;
+   visible only under a hovering pointer. */
+.doc-shelf-item-grip {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 8px; height: 16px; color: var(--muted); opacity: 0; pointer-events: none;
+}
+.doc-shelf-item-grip svg { width: 8px; height: 16px; }
+.doc-shelf-item.active .doc-shelf-item-grip { display: none; }   /* the bar owns that edge */
+@media (hover: hover) {
+  .doc-shelf-item:hover .doc-shelf-item-grip { opacity: .55; }
+  /* Close shows on hover (and on keyboard focus) where a pointer can
+     hover; on touch it is always there — nothing to hover. */
+  .doc-shelf-item-close { opacity: 0; }
+  .doc-shelf-item:hover .doc-shelf-item-close, .doc-shelf-item-close:focus-visible { opacity: 1; }
+}
 .doc-shelf-item-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
   background: none; border: none; cursor: pointer; font: inherit;
   text-align: left; padding: 10px 4px 10px 2px; color: var(--fg);
 }
-.doc-shelf-item-main:hover .doc-shelf-item-title { text-decoration: underline; }
 .doc-shelf-item-title {
   font-size: calc(var(--content-size) - 1px); font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .doc-shelf-item-meta { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
-.doc-shelf-item-close {
-  background: none; border: none; cursor: pointer; color: var(--muted);
-  font-size: 13px; padding: 8px; border-radius: 5px;
-  /* Comfortable tap target on mobile (same hardening as other touch
-     controls in this file). */
-  min-width: 32px; min-height: 32px;
-  touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0);
-}
-.doc-shelf-item-close:hover { color: var(--fg); background: var(--surface); }
+/* .doc-shelf-item-close: the reader head's icon-button rule set; a
+   roomier tap target where there is no pointer to aim with. */
+@media (hover: none) { .doc-shelf-item-close { width: 32px; height: 32px; } }
 /* Unread dot on the Docs rail button — a doc arrived without being
  * shown (replay for another chat / boot). Cleared on tab select. */
 .doc-drawer-dot {
@@ -5852,13 +5888,7 @@ body.doc-fullscreen-open { overflow: hidden; }
 /* Close-from-shelf (reader header) — an ✕ scoped to THIS doc, beside
  * the doc's own actions. Non-destructive (the file stays on disk; only
  * the shelf entry goes), so the hover is neutral, not danger-red. */
-.doc-drawer-remove {
-  background: none; border: none; cursor: pointer; color: var(--muted);
-  padding: 4px; display: inline-flex; align-items: center;
-  border-radius: 5px; line-height: 0;
-}
-.doc-drawer-remove svg { width: 16px; height: 16px; }
-.doc-drawer-remove:hover { color: var(--fg); background: var(--surface); }
+/* .doc-drawer-remove: styled with the reader head's icon buttons. */
 
 /* ── Recently Deleted (rightDrawer/modules/recentlyDeleted.ts; B2 —
    2026-08-18 incident lineage). A collapsed disclosure section at the

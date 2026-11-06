@@ -63,7 +63,9 @@ export default async function run({ page, log, mock }) {
   );
   const link = await page.evaluate(() => {
     const el = document.querySelector('#doc-drawer-body .doc-drawer-openchat');
-    return el ? { label: el.getAttribute('aria-label'), text: el.textContent } : null;
+    // Icon button since the 2026-11-06 head redesign: the words live in
+    // the tooltip (title) and the accessible name.
+    return el ? { label: el.getAttribute('aria-label'), text: el.title || el.textContent } : null;
   });
   assert(link, 'capture doc reader must render the Open-chat link');
   assert(/open chat/i.test(link.text || ''), `link should read "Open chat", got "${link.text}"`);
