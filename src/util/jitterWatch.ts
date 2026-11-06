@@ -157,7 +157,13 @@ export function installJitterWatch(): void {
       diag(`[jitter] transcript wobbled ${verdict.reversals} reversals, ${verdict.amplitude}px — report captured (window.__parleyJitterReports)`);
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const sid = `jitter-${stamp}-${Math.random().toString(36).slice(2, 8)}`;
+        // A headless probe (my own Playwright runs page the transcript
+        // programmatically, which is "uncommanded" by definition) files
+        // under `jitter-probe-…` so a real field report is never confused
+        // with one — nine of those landed on 2026-11-05. The smoke that
+        // exercises the watch still sees the POST (it needs it).
+        const probe = /HeadlessChrome/.test(navigator.userAgent) ? 'probe-' : '';
+        const sid = `jitter-${probe}${stamp}-${Math.random().toString(36).slice(2, 8)}`;
         const body = JSON.stringify({ sid, lines: [JSON.stringify(report, null, 1) + '\n'] });
         void fetch('/api/debug/logs', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: body.length < 60_000 });
       } catch { /* best effort */ }
