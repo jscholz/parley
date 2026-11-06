@@ -816,6 +816,32 @@ def _is_compaction_seed(content) -> bool:
     return any(text.startswith(p) for p in _COMPACTION_SEED_PREFIXES)
 
 
+# A mid-turn /steer (a message that arrives while the agent is already
+# working) is delivered to the MODEL as its own ``role:user`` row:
+# hermes wraps the text in its self-describing out-of-band marker
+# (agent/prompt_builder.py STEER_MARKER_OPEN) and the gateway prefixes a
+# "Gateway message origin" JSON block (gateway/run_busy.py
+# _steer_text_with_origin) so the model knows where to reply. That row is
+# the model-facing COPY of a message Parley already holds as the user's
+# own bubble (its user_message envelope → parley_msg_links). Field
+# 2026-11-06: the copy was served to the PWA as a second user bubble —
+# the preamble, the ids, and "Do not guess a reply destination…" all
+# rendered as if he had typed them, right above his actual words.
+# Content-based on purpose: hermes also tags the row
+# ``display_kind='steer'``, but that column is newer than some state.db
+# files and than the test fixtures, and the marker texts are the
+# contract the model itself reads.
+_STEER_INJECTION_PREFIXES = (
+    "[OUT-OF-BAND USER MESSAGE",
+    "Gateway message origin (JSON data",
+)
+
+
+def _is_steer_injection(content) -> bool:
+    text = (content or "").lstrip()
+    return any(text.startswith(p) for p in _STEER_INJECTION_PREFIXES)
+
+
 # hermes-core stores a MULTIMODAL user turn (text + N images) as a
 # NUL-sentinel-prefixed JSON content-parts array rather than a plain
 # string: ``\x00json:[{"type":"text",...},{"type":"image_url",...}]``.

@@ -77,6 +77,7 @@ from .parley_ids import PARLEY_SOURCE
 from .parley_state import (
     _classify_replay_duplicate_state_ids,
     _is_compaction_seed,
+    _is_steer_injection,
     insert_legacy_twin,
 )
 from .parley_turn_linker import _CHAIN_CTE, _connect_state_ro, _row_get
@@ -175,6 +176,8 @@ def _collect_sync(
             continue  # /undo soft-delete — retracted, not missing.
         if _is_compaction_seed(content):
             continue  # machinery — never served, never missing.
+        if (r["role"] or "") == "user" and _is_steer_injection(content):
+            continue  # model-facing /steer copy — never served, never missing.
         if rid in dup_ids:
             continue  # compaction-replay copy — its original represents it.
         if (r["role"] or "") == "session_meta":

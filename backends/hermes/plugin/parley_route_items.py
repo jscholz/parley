@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
-from .parley_state import _is_compaction_seed
+from .parley_state import _is_compaction_seed, _is_steer_injection
 
 
 # Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
@@ -321,6 +321,12 @@ def _items_by_user_id(
         # _is_compaction_seed; this read path — the one the PWA
         # actually hits — was the only place still open-coding it.
         if _is_compaction_seed(text):
+            continue
+        # The model-facing copy of a mid-turn /steer (see
+        # parley_state._is_steer_injection): the user's words already
+        # exist as their own bubble; this row would render the origin
+        # preamble as a second one.
+        if role == "user" and _is_steer_injection(text):
             continue
         if drop_through is not None and row_id <= drop_through:
             continue

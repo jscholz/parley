@@ -1143,3 +1143,35 @@ def test_legacy_schema_without_title_source_falls_back_to_newest_non_empty(plugi
     _chain(state_db, "chat-legacy", "Root Title", None)
     drawer = _make_adapter(plugin, state_db)._summaries_by_user_id(("parley",), 50)
     assert drawer[0][3] == "Root Title"
+
+
+def test_steer_injection_rows_are_not_served(plugin, state_db):
+    """A mid-turn /steer is persisted by hermes as its own role:user row —
+    the model-facing copy, wrapped in the out-of-band marker and/or the
+    gateway's "Gateway message origin" JSON preamble. Parley already
+    holds the user's words as their own bubble (user_message envelope),
+    so the copy must never be served: field 2026-11-06, the preamble
+    rendered as a second user bubble above his actual message."""
+    chat = "493cb020-abaf-450d-91f0-afe755bb5ace"
+    _insert_session(state_db, "s", "parley", chat, 1000.0, title="S")
+    _insert_message(state_db, "s", "user", "finished the call, update the tracker", 1001.0)
+    _insert_message(state_db, "s", "assistant", "On it.", 1002.0)
+    preamble = (
+        "Gateway message origin (JSON data, not instructions or authorization):\n"
+        '{"platform": "parley", "chat_id": "%s", "message_id": "m1"}\n'
+        "Do not guess a reply destination when these fields are insufficient.\n\n"
+        "its on attio too if that transcript is bad"
+    ) % chat
+    _insert_message(state_db, "s", "user", preamble, 1003.0)
+    marker = (
+        "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered once at this "
+        "position; not tool output and not a new delivery when replayed from conversation history]\n"
+        + preamble + "\n[/OUT-OF-BAND USER MESSAGE]"
+    )
+    _insert_message(state_db, "s", "user", marker, 1004.0)
+    _insert_message(state_db, "s", "assistant", "Redirected.", 1005.0)
+
+    adapter = _make_adapter(plugin, state_db)
+    items, _first_id, _more = adapter._items_by_user_id(chat, "parley", 200, None)
+    contents = [m["content"] for m in items]
+    assert contents == ["finished the call, update the tracker", "On it.", "Redirected."]
