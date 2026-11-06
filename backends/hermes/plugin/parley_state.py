@@ -757,6 +757,12 @@ def list_messages_for_chat(
             params = (chat_id, before_rowid, before_rowid, boundary_rowid)
     rows = db.fetchall(sql, params)
     rows_list = [dict(r) for r in rows]
+    # Twins of a mid-turn /steer's model-facing row that an earlier
+    # reconcile imported before insert_legacy_twin learned to refuse
+    # them (field 2026-11-06). Filtered before the page is cut so paging
+    # stays consistent; the PWA never sees them.
+    rows_list = [r for r in rows_list
+                 if not ((r.get("role") or "") == "user" and _is_steer_injection(r.get("content")))]
     first_id: Optional[int] = None
     has_more = False
     # Both directions keep the rows NEAREST the cursor, i.e. the tail of
@@ -1996,6 +2002,13 @@ def insert_legacy_twin(db, chat_id: str, row) -> bool:
     propagate; callers own their best-effort policy.
     """
     state_id = str(_legacy_row_get(row, "id"))
+    # The model-facing copy of a mid-turn /steer is never a transcript
+    # row of its own (see _is_steer_injection): the user's words already
+    # have their user_message twin. Refusing it HERE covers every
+    # importer at once — reconcile's Pass 2, the linker's mint and the
+    # orphan-adopt all funnel through this one insert.
+    if (_legacy_row_get(row, "role") or "") == "user" and _is_steer_injection(_legacy_row_get(row, "content")):
+        return False
     ts_raw = _legacy_row_get(row, "timestamp")
     ts = float(ts_raw) if ts_raw is not None else time.time()
     cur = db.exec(
