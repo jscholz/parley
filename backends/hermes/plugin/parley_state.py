@@ -1468,6 +1468,8 @@ def _build_chronological_items(
     surviving = [
         r for r in rows
         if not _is_compaction_seed(r["content"])
+        # the model-facing copy of a mid-turn /steer (_is_steer_injection)
+        and not ((r["role"] or "") == "user" and _is_steer_injection(r["content"]))
         and not (
             (drop_through := compaction_head_end_per_session.get(r["session_id"])) is not None
             and r["id"] <= drop_through
