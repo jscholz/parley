@@ -727,3 +727,29 @@ def test_after_cursor_row_deleted_falls_back_to_id_compare(db, state_db):
         db, state_db, CHAT_ID, "parley", after_id=a
     )
     assert [it["id"] for it in result["items"]] == [b]
+
+
+def test_steer_injection_row_is_not_served(db, state_db):
+    """The model-facing copy of a mid-turn /steer (gateway origin
+    preamble and/or the out-of-band marker, persisted as its own
+    role:user row) never serves — the user's words are already their
+    own bubble. This is the builder the live route uses when
+    PARLEY_ITEMS_V3 is unset (field 2026-11-06: the preamble rendered
+    as a second user bubble)."""
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "user", "finished the call, update the tracker", ts=1000.0)
+    _add_msg(state_db, "s1", "assistant", "On it.", ts=1001.0)
+    _add_msg(state_db, "s1", "user", (
+        "Gateway message origin (JSON data, not instructions or authorization):\n"
+        '{"platform": "parley", "chat_id": "x", "message_id": "m1"}\n'
+        "Do not guess a reply destination when these fields are insufficient.\n\n"
+        "its on attio too if that transcript is bad"), ts=1002.0)
+    _add_msg(state_db, "s1", "user", "its on attio too if that transcript is bad", ts=1002.5)
+    _add_msg(state_db, "s1", "assistant", "Redirected.", ts=1003.0)
+
+    result = state.list_messages_for_chat_with_state_db_source(
+        db, state_db, CHAT_ID, "parley"
+    )
+    contents = [i["content"] for i in result["items"]]
+    assert contents == ["finished the call, update the tracker", "On it.",
+                        "its on attio too if that transcript is bad", "Redirected."]
