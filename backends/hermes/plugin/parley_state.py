@@ -1000,6 +1000,8 @@ def _classify_replay_duplicate_state_ids(state_rows) -> tuple:
         content = r["content"] or ""
         if _is_compaction_seed(content):
             continue
+        if (r["role"] or "") == "user" and _is_steer_injection(content):
+            continue  # model-facing /steer copy (see _is_steer_injection)
         role = r["role"]
         tool_call_id = r["tool_call_id"] or ""
         tool_calls = (r["tool_calls"] if "tool_calls" in r.keys() else None) or ""
@@ -1811,8 +1813,11 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
     for r in rows:
         content = r["content"] or ""
         # Machinery bodies never serve regardless of linkage (a pre-
-        # filter-era legacy import could carry one).
+        # filter-era legacy import could carry one). Same for the
+        # model-facing copy of a mid-turn /steer (_is_steer_injection).
         if _is_compaction_seed(content):
+            continue
+        if (r["role"] or "") == "user" and _is_steer_injection(content):
             continue
         ts = float(r["created_at"]) if r["created_at"] is not None else 0.0
         arid = r["agent_row_id"]
