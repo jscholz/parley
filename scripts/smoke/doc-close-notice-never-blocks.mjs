@@ -43,7 +43,7 @@ export default async function run({ page, log, mock }) {
   await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-drawer-remove').click());
   await shows('FIRST-MARK');
   const geo = await page.evaluate(() => {
-    const st = document.querySelector('#doc-drawer-panel .doc-undo-bar');
+    const st = document.querySelector('.doc-undo-bar');
     const x = document.querySelector('#doc-drawer-body .doc-drawer-remove');
     const s = st.getBoundingClientRect(), r = x.getBoundingClientRect();
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
@@ -64,8 +64,8 @@ export default async function run({ page, log, mock }) {
   log('next doc\'s × closes it right away ✓');
 
   // Its ✕ → gone.
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-dismiss').click());
-  const gone = await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-bar').hidden);
+  await page.evaluate(() => document.querySelector('.doc-undo-dismiss').click());
+  const gone = await page.evaluate(() => document.querySelector('.doc-undo-bar').hidden);
   assert(gone, 'the ✕ must dismiss the Undo bar');
   log('✕ dismisses the Undo bar ✓');
 }

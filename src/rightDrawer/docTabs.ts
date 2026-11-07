@@ -161,13 +161,14 @@ function render(): void {
   // The generic Docs button's tooltip carries its hotkey (⌘0 → all
   // docs) the same way each tab's title carries ⌘n — recomputed per
   // render so a Settings rebind shows on the next paint. The label
-  // says "All docs": with the tabs owning per-doc entry, this button
+  // says "All artifacts": with the tabs owning per-doc entry, this button
   // means the shelf/list, and the tooltip should say so.
   const docsBtn = document.getElementById('btn-doc-drawer-rail');
   if (docsBtn) {
     const prefix = hotkeyGlyph();
-    docsBtn.title = prefix ? `All docs — ${prefix}0` : 'All docs';
-    docsBtn.setAttribute('aria-label', 'All docs');
+    // ⌘⇧A toggles the pane (main.ts), ⌘0 jumps to the list.
+    docsBtn.title = prefix ? `Artifacts — ${prefix}0 list` : 'Artifacts';
+    docsBtn.setAttribute('aria-label', 'Artifacts');
   }
   const docs = tabOrderDocs();
   const empty = docs.length === 0;

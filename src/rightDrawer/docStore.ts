@@ -166,7 +166,27 @@ export function listDocs(): DocState[] {
  *  one sequence so "tab position" means the same thing everywhere. */
 export function tabOrderDocs(): DocState[] {
   const byId = new Map(docs.map(d => [d.id, d]));
-  return order.map(id => byId.get(id)).filter((d): d is DocState => !!d);
+  const ordered = order.map(id => byId.get(id)).filter((d): d is DocState => !!d);
+  // Grouped by Kind (the list's default, design pass 2026-11-07): the
+  // ONE order every consumer reads — rail tabs, ⌘n hotkeys, the list's
+  // sections, the full-screen strip — is Documents first, then
+  // Meetings, each keeping its relative order. A stable partition here
+  // keeps "position n" meaning the same thing everywhere.
+  if (listGroup() !== 'kind') return ordered;
+  return [...ordered.filter(d => d.source !== 'capture'), ...ordered.filter(d => d.source === 'capture')];
+}
+
+/** How the Artifacts list groups its rows — per device. 'kind' =
+ *  Documents / Meetings sections (and the tab order above follows it),
+ *  'recent' = one flat list in the stored order. */
+export type ListGroup = 'kind' | 'recent';
+const LIST_GROUP_KEY = 'parley.artifacts.listGroup';
+export function listGroup(): ListGroup {
+  try { return localStorage.getItem(LIST_GROUP_KEY) === 'recent' ? 'recent' : 'kind'; } catch { return 'kind'; }
+}
+export function setListGroup(g: ListGroup): void {
+  try { localStorage.setItem(LIST_GROUP_KEY, g); } catch { /* per-device nicety only */ }
+  notify(false);   // the tab order may have changed with it
 }
 
 /** Commit a drag-reorder (Sortable onEnd hands us the DOM order).

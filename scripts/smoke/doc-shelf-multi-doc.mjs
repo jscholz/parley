@@ -38,7 +38,7 @@ export default async function run({ page, log, mock }) {
   });
 
   // Shelf size observable: one rail tab per doc (the reader's
-  // `‹ All docs (n)` count label was removed with the breadcrumb,
+  // `‹ All artifacts (n)` count label was removed with the breadcrumb,
   // 2026-08-26 — the tab strip is the always-visible count now).
   const tabCount = () => page.evaluate(
     () => document.querySelectorAll('#doc-rail-tabs .doc-rail-tab').length,

@@ -39,7 +39,7 @@ import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import { stripLeadingTitleHeading } from '../docTitleDedupe.ts';
-import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs } from '../docStore.ts';
+import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs, listGroup, setListGroup } from '../docStore.ts';
 import { toggleDocFullscreen, syncExpandButtons } from '../docFullscreen.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
@@ -208,15 +208,37 @@ export function createDocModule(opts: {
     back.className = 'doc-shelf-back';
     back.textContent = '‹ Back to document';
     back.onclick = () => { setViewState('reader'); rerender(ctx); };
-    opts.body.appendChild(back);
 
-    const ul = document.createElement('ul');
-    ul.className = 'doc-shelf-list';
+    // Group by: Kind (Documents / Meetings sections, Arc-sidebar style)
+    // or Recent (one flat list). Design pass 2026-11-07. Per device.
+    const toolbar = document.createElement('div');
+    toolbar.className = 'doc-shelf-toolbar';
+    const seg = document.createElement('div');
+    seg.className = 'doc-shelf-seg';
+    seg.setAttribute('role', 'tablist');
+    seg.setAttribute('aria-label', 'Group artifacts by');
+    for (const [key, label] of [['kind', 'Kind'], ['recent', 'Recent']] as const) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'doc-shelf-seg-btn' + (listGroup() === key ? ' on' : '');
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', listGroup() === key ? 'true' : 'false');
+      b.dataset.group = key;
+      b.textContent = label;
+      b.onclick = () => { setListGroup(key); rerender(ctx); };
+      seg.appendChild(b);
+    }
+    toolbar.appendChild(back);
+    toolbar.appendChild(seg);
+    opts.body.appendChild(toolbar);
+
     // TAB order, not newest-activity order (doc-tabs 2026-08-26): the
     // rail tabs, this list, and the ⌘⇧n hotkeys must agree on what
     // "position n" means, and the list rows drag-commit into the same
-    // order the tabs read.
-    for (const d of tabOrderDocs()) {
+    // order the tabs read. Grouped by kind, that order is the Documents
+    // section followed by the Meetings section; a drag reorders within
+    // its section and the commit reads every section's rows in turn.
+    const buildRow = (d: DocState): HTMLElement => {
       const li = document.createElement('li');
       li.className = 'doc-shelf-item' + (d.id === currentDoc()?.id ? ' active' : '');
       li.dataset.docId = d.id;
@@ -238,7 +260,7 @@ export function createDocModule(opts: {
       const grip = document.createElement('span');
       grip.className = 'doc-shelf-item-grip';
       grip.setAttribute('aria-hidden', 'true');
-      grip.innerHTML = '<svg viewBox="0 0 12 16" fill="currentColor"><circle cx="4" cy="4" r="1.1"/><circle cx="8" cy="4" r="1.1"/><circle cx="4" cy="8" r="1.1"/><circle cx="8" cy="8" r="1.1"/><circle cx="4" cy="12" r="1.1"/><circle cx="8" cy="12" r="1.1"/></svg>';
+      grip.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><circle cx="5.5" cy="3.5" r="1.4"/><circle cx="10.5" cy="3.5" r="1.4"/><circle cx="5.5" cy="8" r="1.4"/><circle cx="10.5" cy="8" r="1.4"/><circle cx="5.5" cy="12.5" r="1.4"/><circle cx="10.5" cy="12.5" r="1.4"/></svg>';
       li.appendChild(grip);
       li.appendChild(main);
 
@@ -259,10 +281,29 @@ export function createDocModule(opts: {
         }, { y: e.clientY });
       };
       li.appendChild(close);
-      ul.appendChild(li);
+      return li;
+    };
+
+    const all = tabOrderDocs();
+    const sections: Array<{ label: string | null; docs: DocState[] }> = listGroup() === 'kind'
+      ? [
+          { label: 'Documents', docs: all.filter((d) => d.source !== 'capture') },
+          { label: 'Meetings', docs: all.filter((d) => d.source === 'capture') },
+        ].filter((s) => s.docs.length > 0)
+      : [{ label: null, docs: all }];
+    for (const section of sections) {
+      if (section.label) {
+        const h = document.createElement('div');
+        h.className = 'doc-shelf-group';
+        h.textContent = section.label;
+        opts.body.appendChild(h);
+      }
+      const ul = document.createElement('ul');
+      ul.className = 'doc-shelf-list';
+      for (const d of section.docs) ul.appendChild(buildRow(d));
+      opts.body.appendChild(ul);
+      installListDragReorder(ul, ctx);
     }
-    opts.body.appendChild(ul);
-    installListDragReorder(ul, ctx);
 
     // Recently Deleted (B2, 2026-08-18 incident lineage) — discarded
     // captures' management home. The LIST view is where it belongs:
@@ -308,7 +349,8 @@ export function createDocModule(opts: {
           // change event repaints the list (and the rail tabs).
           listDragActive = false;
           suppressClickUntil = Date.now() + 350;
-          const ids = (Array.from(ul.querySelectorAll('li.doc-shelf-item')) as HTMLElement[])
+          // Every section's rows in turn — the one tab order.
+          const ids = (Array.from(opts.body.querySelectorAll('.doc-shelf-list li.doc-shelf-item')) as HTMLElement[])
             .map((li) => li.dataset.docId || '')
             .filter(Boolean);
           setTabOrder(ids);
@@ -586,7 +628,10 @@ export function createDocModule(opts: {
 
   return {
     id: 'doc',
-    title: 'Docs',
+    // "Artifacts" (2026-11-07): what lands here is broader than documents
+    // — transcripts, memos, anything the agent displays — and it is the
+    // word people know from other coding agents.
+    title: 'Artifacts',
     panel: opts.panel,
     toggleIds: ['btn-doc-drawer-rail'],
     // View aim for out-of-panel callers (rail tabs → reader on a doc,
@@ -650,12 +695,14 @@ function createUndoBar(panel: HTMLElement): UndoBar {
   dismiss.textContent = '✕';
   bar.append(text, action, dismiss);
   // Floating pop-up (2026-10-26: "what I wanted was a pop-up that hovers,
-  // and can be dismissed by clicking it"; 2026-10-27: "too far away …
-  // close to cursor, just not over the × or download icons of the next
-  // doc"): absolutely positioned, centred on the close click's Y, and
-  // stopping 64px short of the right edge where those controls live. It
-  // shifts nothing. A tap anywhere on it that is not Undo dismisses it.
-  panel.appendChild(bar);
+  // and can be dismissed by clicking it"). 2026-11-07: "it's not centred,
+  // it overwrites text a person would want to look at … centred and
+  // higher up in the overall app rather than in the right column" — so
+  // it lives on the BODY as a fixed, centred toast near the top of the
+  // app, clear of the reader head, the transcript and every panel
+  // control. It shifts nothing. A tap anywhere on it that is not Undo
+  // dismisses it.
+  document.body.appendChild(bar);
   let timer: number | null = null;
   let pending: (() => void) | null = null;
   const hide = () => {
@@ -673,23 +720,9 @@ function createUndoBar(panel: HTMLElement): UndoBar {
   bar.addEventListener('click', hide);
   return {
     show(message, onUndo, near) {
-      // Vertical placement: centred on the pointer, clamped inside the panel.
-      const pr = panel.getBoundingClientRect();
-      const barH = 34;
-      let top = 8;
-      if (near && Number.isFinite(near.y) && pr.height > 0) {
-        top = Math.round(near.y - pr.top - barH / 2);
-      } else {
-        // No pointer (Clear all, a close from another device): by the
-        // header, but below the empty-state text when that is what shows.
-        const empty = panel.querySelector<HTMLElement>('#doc-drawer-empty');
-        if (empty && !empty.hidden) {
-          const er = empty.getBoundingClientRect();
-          if (er.height > 0) top = Math.round(er.bottom - pr.top) + 8;
-        }
-      }
-      top = Math.max(6, Math.min(Math.max(6, pr.height - barH - 6), top));
-      bar.style.top = `${top}px`;
+      // Placement is CSS (fixed, centred near the top of the app); the
+      // pointer position callers still pass is no longer used.
+      void near; void panel;
       text.textContent = message;
       pending = onUndo;
       bar.hidden = false;

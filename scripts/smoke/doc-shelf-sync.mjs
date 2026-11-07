@@ -94,9 +94,9 @@ export default async function run({ page, log, mock }) {
   // …and it is undoable here too (field 2026-10-26): the pop-up names the
   // other device; a click on its body dismisses it (the undo path itself is
   // the same restoreDocs the local close uses).
-  const remoteUndo = await page.evaluate(() => { const b = document.querySelector('#doc-drawer-panel .doc-undo-bar'); return { hidden: !b || b.hidden, text: b?.querySelector('.doc-undo-text')?.textContent || '' }; });
+  const remoteUndo = await page.evaluate(() => { const b = document.querySelector('.doc-undo-bar'); return { hidden: !b || b.hidden, text: b?.querySelector('.doc-undo-text')?.textContent || '' }; });
   assert(!remoteUndo.hidden && /Closed "Alpha doc" on another device/.test(remoteUndo.text), `remote close offers Undo: ${JSON.stringify(remoteUndo)}`);
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-text').click());
+  await page.evaluate(() => document.querySelector('.doc-undo-text').click());
   log('remote close → Undo offered ✓');
 
   // Charlie is closed here before (d) so the empty-shelf assertion holds.

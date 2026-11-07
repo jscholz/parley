@@ -12,7 +12,7 @@
 //   5. The generic Docs rail button now opens the LIST view (management
 //      home) — the tabs are the reader entry points.
 //   6. Rail honesty (field report 2026-08-26): the reader carries NO
-//      `‹ All docs` breadcrumb, and while the LIST view is showing the
+//      `‹ All artifacts` breadcrumb, and while the LIST view is showing the
 //      Docs rail button is the selected element with ZERO doc tabs
 //      aria-selected; selecting a doc from the list restores its tab's
 //      tint.
@@ -101,7 +101,7 @@ export default async function run({ page, log, mock }) {
   // no panel tint highlight change") — the rail button/+N chip are the
   // list entries now.
   const crumb = await page.evaluate(() => !!document.querySelector('.doc-drawer-listbtn'));
-  if (crumb) throw new Error('reader must not render the `‹ All docs` breadcrumb (removed 2026-08-26)');
+  if (crumb) throw new Error('reader must not render the `‹ All artifacts` breadcrumb (removed 2026-08-26)');
   log('reader carries no All-docs breadcrumb');
 
   // 4. Active-tab toggle: clicking Alpha's tab again (reader up, drawer

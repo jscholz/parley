@@ -28,7 +28,7 @@ export default async function run({ page, log, mock }) {
   const shows = (mark) => page.waitForFunction((m) => document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent?.includes(m), mark, { timeout: 6000, polling: 50 });
   const tabs = () => page.evaluate(() => document.querySelectorAll('#doc-rail-tabs .doc-rail-tab').length);
   const bar = () => page.evaluate(() => {
-    const b = document.querySelector('#doc-drawer-panel .doc-undo-bar');
+    const b = document.querySelector('.doc-undo-bar');
     const r = b?.getBoundingClientRect();
     return { hidden: !b || b.hidden, text: b?.querySelector('.doc-undo-text')?.textContent ?? '', bottom: r?.bottom ?? 0 };
   });
@@ -65,7 +65,7 @@ export default async function run({ page, log, mock }) {
   const b1 = await bar();
   assert(!b1.hidden && /Closed "Bravo"/.test(b1.text), `Undo pop-up should name the closed doc: ${JSON.stringify(b1)}`);
   const geo = await page.evaluate(() => {
-    const b = document.querySelector('#doc-drawer-panel .doc-undo-bar').getBoundingClientRect();
+    const b = document.querySelector('.doc-undo-bar').getBoundingClientRect();
     const h = document.querySelector('#doc-drawer-body .doc-drawer-header, #doc-drawer-body .doc-drawer-content').getBoundingClientRect();
     const x = document.querySelector('#doc-drawer-body .doc-drawer-remove')?.getBoundingClientRect();
     const dl = document.querySelector('#doc-drawer-body [aria-label="Download document"]')?.getBoundingClientRect();
@@ -73,14 +73,14 @@ export default async function run({ page, log, mock }) {
     const hitDl = dl ? document.elementFromPoint(dl.left + dl.width / 2, dl.top + dl.height / 2)?.closest('[aria-label="Download document"]') : null;
     return { barTop: Math.round(b.top), barBottom: Math.round(b.bottom), barRight: Math.round(b.right), barMid: Math.round((b.top + b.bottom) / 2), contentTop: Math.round(h.top),
              xLeft: x ? Math.round(x.left) : null, xOnTop: !!hitX, dlOnTop: dl ? !!hitDl : true,
-             floating: getComputedStyle(document.querySelector('#doc-drawer-panel .doc-undo-bar')).position === 'absolute' };
+             floating: getComputedStyle(document.querySelector('.doc-undo-bar')).position === 'fixed' };
   });
   assert(geo.floating, `the pop-up must float (position:absolute): ${JSON.stringify(geo)}`);
   assert(geo.contentTop === contentTopBefore, `the pop-up must not shift the content (top ${contentTopBefore} → ${geo.contentTop})`);
   assert(Math.abs(geo.barMid - xBox.y) <= 40, `the pop-up sits by the pointer (bar mid ${geo.barMid}, click y ${Math.round(xBox.y)})`);
   assert(geo.xLeft === null || geo.barRight <= geo.xLeft, `the pop-up stops short of the next doc's ×: ${JSON.stringify(geo)}`);
   assert(geo.xOnTop && geo.dlOnTop, `the next doc's × and download stay clickable: ${JSON.stringify(geo)}`);
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-action').click());
+  await page.evaluate(() => document.querySelector('.doc-undo-action').click());
   await shows('BRAVO-MARK');
   assert(await tabs() === 2, 'Undo re-shelves Bravo');
   assert((await bar()).hidden, 'Undo hides the bar');
@@ -96,7 +96,7 @@ export default async function run({ page, log, mock }) {
   await page.evaluate(() => document.querySelector('#doc-drawer-body .doc-shelf-item .doc-shelf-item-close').click());
   await page.waitForFunction(() => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 1, null, { timeout: 4000, polling: 50 });
   assert(!(await bar()).hidden, 'row ✕ offers Undo');
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-action').click());
+  await page.evaluate(() => document.querySelector('.doc-undo-action').click());
   await page.waitForFunction(() => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 2, null, { timeout: 4000, polling: 50 });
   log('list ✕: Undo restores the row, list stays ✓');
 
@@ -107,14 +107,14 @@ export default async function run({ page, log, mock }) {
   const b2 = await bar();
   assert(!b2.hidden && /Closed 2 documents/.test(b2.text), `clear-all Undo bar: ${JSON.stringify(b2)}`);
   const geo2 = await page.evaluate(() => {
-    const b = document.querySelector('#doc-drawer-panel .doc-undo-bar').getBoundingClientRect();
+    const b = document.querySelector('.doc-undo-bar').getBoundingClientRect();
     const e = document.getElementById('doc-drawer-empty').getBoundingClientRect();
     const cx = e.left + e.width / 2, cy = e.top + Math.min(20, e.height / 2);
     return { barTop: Math.round(b.top), emptyTop: Math.round(e.top), emptyTextClear: !document.elementFromPoint(cx, cy)?.closest('.doc-undo-bar') };
   });
   assert(geo2.emptyTextClear, `the pop-up must not cover the empty-state text: ${JSON.stringify(geo2)}`);
   // A click on the pop-up's BODY (not Undo) dismisses it; the docs stay closed.
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-text').click());
+  await page.evaluate(() => document.querySelector('.doc-undo-text').click());
   assert((await bar()).hidden, 'clicking the pop-up body dismisses it');
   assert(await tabs() === 0, 'dismissing is not undoing');
   log('clear-all: pop-up clear of the empty state; body click dismisses ✓');
@@ -126,7 +126,7 @@ export default async function run({ page, log, mock }) {
   await page.waitForFunction(() => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 2, null, { timeout: 4000, polling: 50 });
   await page.click('#pin-drawer-clear');
   await page.waitForFunction(() => !document.getElementById('doc-drawer-empty')?.hidden, null, { timeout: 4000, polling: 50 });
-  await page.evaluate(() => document.querySelector('#doc-drawer-panel .doc-undo-action').click());
+  await page.evaluate(() => document.querySelector('.doc-undo-action').click());
   await page.waitForFunction(() => document.querySelectorAll('#doc-drawer-body .doc-shelf-item').length === 2, null, { timeout: 4000, polling: 50 });
   assert(await tabs() === 2, 'both tabs back');
   assert((await bar()).hidden, 'bar gone after Undo');

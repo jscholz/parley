@@ -4853,10 +4853,15 @@ async function boot() {
       const el = document.getElementById(id);
       if (el) setTooltip(el, pinHotkeyLabel);
     }
-    const activityHotkeyLabel = 'Activity  ·  ' + formatHotkey('Cmd+Shift+A');
+    const activityHotkeyLabel = 'Activity  ·  ' + formatHotkey('Cmd+Shift+E');
     for (const id of ['btn-activity-drawer-rail', 'btn-activity-drawer']) {
       const el = document.getElementById(id);
       if (el) setTooltip(el, activityHotkeyLabel);
+    }
+    const artifactsHotkeyLabel = 'Artifacts  ·  ' + formatHotkey('Cmd+Shift+A');
+    {
+      const el = document.getElementById('btn-doc-drawer-rail');
+      if (el) setTooltip(el, artifactsHotkeyLabel);
     }
     // Sidebar toggle gets its existing Cmd+Shift+S hint here too so
     // we don't have a tooltip-symmetry gap between the two drawers.
@@ -5313,7 +5318,17 @@ async function boot() {
       btn?.click();
       return;
     }
+    // ⌘⇧A = Artifacts (2026-11-07: "I use that hotkey, but it does it
+    // via the notifications pane … I want to toggle that bar with my
+    // left hand"). Activity moved to ⌘⇧E: left-hand, and free in Chrome
+    // and Safari (⌘⇧N is a new window, ⌘⇧Z is redo in a field).
     if (matches('Cmd+Shift+A')) {
+      claim();
+      const btn = document.getElementById('btn-doc-drawer-rail') as HTMLButtonElement | null;
+      btn?.click();
+      return;
+    }
+    if (matches('Cmd+Shift+E')) {
       claim();
       const btn = document.getElementById('btn-activity-drawer-rail') as HTMLButtonElement | null;
       btn?.click();

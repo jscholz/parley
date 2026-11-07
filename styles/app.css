@@ -2873,7 +2873,10 @@
   .doc-drawer-header {
     display: flex; flex-direction: column; gap: 2px;
     border-bottom: 1px solid var(--border);
-    padding: 6px 0 6px;
+    /* Full column width (field nit 2026-11-07: "not full width … justified
+       against the text … no padding around the word"): bleed across the
+       body's 14px gutters and give the text that gutter back as padding. */
+    margin: 0 -14px; padding: 8px 14px 6px;
     position: sticky; top: 0; z-index: 2;
     background: var(--bg);
   }
@@ -5780,7 +5783,7 @@ body.doc-fullscreen-open { overflow: hidden; }
 .doc-fullscreen-column > .doc-drawer-body > :first-child { margin-top: 20px; }
 /* The sticky head keeps no margin in the column either (content would
    scroll through the gap); it carries the breathing room as padding. */
-.doc-fullscreen-column > .doc-drawer-body > .doc-drawer-header:first-child { margin-top: 0; padding-top: 14px; }
+.doc-fullscreen-column > .doc-drawer-body > .doc-drawer-header:first-child { margin: 0; padding: 14px 0 6px; }
 /* The borrowed body: a reading column, not a panel. Its width is the
    per-device "Reading width" setting (Settings › Advanced, % of the
    window; --reader-width from settings.ts applyVisuals). Field 2026-11-04:
@@ -5805,7 +5808,7 @@ body.doc-fullscreen-open { overflow: hidden; }
 /* The rows bleed 6px into the panel gutter (see .doc-shelf-item); the
    list carries that bleed as its own padding so the scroller's overflow
    clip never cuts the accent bar or the grip off the row's left edge. */
-.doc-shelf-list { list-style: none; margin: 0 -6px; padding: 0 6px; overflow-y: auto; flex: 1; }
+.doc-shelf-list { list-style: none; margin: 0 -6px; padding: 0 6px; flex: none; }   /* the body scrolls; sections stack */
 /* Separated by rhythm, not rules — the .pin-drawer-item lesson applied
    to the docs shelf (B3). Ten open docs drew ten full-width hairlines
    down a phone screen, which is the same "visually cluttered" note the
@@ -5816,10 +5819,30 @@ body.doc-fullscreen-open { overflow: hidden; }
    give the shelf a real ACTIVE state, which the green title alone never
    was. Negative margin + matching padding so the tint bleeds toward the
    panel edge while the title stays on the same x as the header. */
+/* Group toggle at the top of the list: Kind | Recent (design pass
+   2026-11-07). A quiet segmented control, muted until chosen. */
+.doc-shelf-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0 4px; }
+.doc-shelf-toolbar .doc-shelf-back { padding: 4px 0; }
+.doc-shelf-seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--border); border-radius: 7px;
+}
+.doc-shelf-seg-btn {
+  background: none; border: none; cursor: pointer; font: inherit;
+  font-size: 11px; color: var(--muted); padding: 2px 9px; border-radius: 5px;
+}
+.doc-shelf-seg-btn:hover { color: var(--fg); }
+.doc-shelf-seg-btn.on { color: var(--fg); background: color-mix(in srgb, var(--fg) 10%, transparent); }
+/* Section headers, Arc-sidebar style: small caps, a rule between sections. */
+.doc-shelf-group {
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin: 10px 0 2px;
+}
+.doc-shelf-group ~ .doc-shelf-group { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
 .doc-shelf-item {
   display: flex; align-items: center; gap: 6px;
-  margin: 0 -6px 1px; padding: 0 6px;
-  border-radius: 6px; position: relative;
+  margin: 0 -6px 1px; padding: 0 6px 0 24px;   /* 24 px gutter = the grip's slot */
+  border-radius: 8px; position: relative;
   transition: background 0.12s ease;
 }
 .doc-shelf-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
@@ -5833,11 +5856,14 @@ body.doc-fullscreen-open { overflow: hidden; }
 /* Drag grip: a hint that the rows reorder (the whole row drags, as
    before). Sits in the row's own left padding so titles keep their x;
    visible only under a hovering pointer. */
+/* 16 px six-dot grip (Atlassian's compact handle size, Notion's hover
+   reveal) in the row's own 24 px gutter, so titles never move. */
 .doc-shelf-item-grip {
-  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 8px; height: 16px; color: var(--muted); opacity: 0; pointer-events: none;
+  position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; color: var(--muted); opacity: 0; pointer-events: none;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.doc-shelf-item-grip svg { width: 8px; height: 16px; }
+.doc-shelf-item-grip svg { width: 16px; height: 16px; }
 .doc-shelf-item.active .doc-shelf-item-grip { display: none; }   /* the bar owns that edge */
 @media (hover: hover) {
   .doc-shelf-item:hover .doc-shelf-item-grip { opacity: .55; }
@@ -6885,11 +6911,14 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
    down instead of floating over them, so nothing underneath is ever
    covered. Same ghost + tinted-action language as the toast. */
 #doc-drawer-panel { position: relative; }
+/* 2026-11-07: a fixed, centred toast near the top of the app (on the
+   body, see doc.ts createUndoBar) — out of the right column, so it never
+   covers the reader head, the transcript or a panel control. */
 .doc-undo-bar {
-  /* top is set inline by doc.ts (centred on the close click); the right
-     gap keeps the next doc's × and download icons clickable. */
-  position: absolute; left: 10px; right: 64px; top: 8px;
-  z-index: 30;
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: calc(env(safe-area-inset-top, 0px) + 64px);
+  width: max-content; max-width: min(520px, calc(100vw - 32px));
+  z-index: 9000;
   display: flex; align-items: center; gap: 6px;
   margin: 0; padding: 4px 4px 4px 10px;
   border: 1px solid var(--border);
@@ -6901,6 +6930,12 @@ a.phone-link { text-decoration: underline dotted; text-underline-offset: 3px; cu
   cursor: pointer;
 }
 .doc-undo-bar[hidden] { display: none; }
+/* Phones: the artifacts drawer is a full-screen overlay whose head sits
+   right under the top edge, so the toast goes to the bottom instead,
+   above the composer — the usual snackbar slot. */
+@media (max-width: 699px) {
+  .doc-undo-bar { top: auto; bottom: calc(env(safe-area-inset-bottom, 0px) + 96px); }
+}
 .doc-undo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-undo-action {
   flex: 0 0 auto; border: none; cursor: pointer;

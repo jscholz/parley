@@ -33,7 +33,7 @@ let drawerHost: RightDrawerHost | null = null;
 let docModuleRef: DocModule | null = null;
 let activePanel: 'pins' | 'activity' | 'doc' = 'pins';
 
-/** ⌘0 → All docs (main.ts hotkey dispatcher, 2026-08-26): open the doc
+/** ⌘0 → All artifacts (main.ts hotkey dispatcher, 2026-08-26): open the doc
  *  panel on the LIST view — the same aim-then-select routing the Docs
  *  rail button's click runs. Toggle parity like the ⌘1…9 tab hotkeys:
  *  with the list already in front the press closes the drawer. False
