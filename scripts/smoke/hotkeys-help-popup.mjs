@@ -52,8 +52,11 @@ export default async function run({ page, log }) {
       hasMessageNav: !!Array.from(dlg.querySelectorAll('.hotkeys-help-row')).find(
         r => /highlight the most recent message/i.test(r.textContent || ''),
       ),
+      // 2026-11-07: ⌘⇧A became Artifacts; Activity moved to ⌘⇧E.
       hasActivityDrawer: !!Array.from(dlg.querySelectorAll('.hotkeys-help-row')).find(
-        r => /Toggle Activity drawer/i.test(r.textContent || '') && /⌘⇧A|Ctrl\+Shift\+A/.test(r.textContent || ''),
+        r => /Toggle Artifacts panel/i.test(r.textContent || '') && /⌘⇧A|Ctrl\+Shift\+A/.test(r.textContent || ''),
+      ) && !!Array.from(dlg.querySelectorAll('.hotkeys-help-row')).find(
+        r => /Toggle Activity panel/i.test(r.textContent || '') && /⌘⇧E|Ctrl\+Shift\+E/.test(r.textContent || ''),
       ),
     };
   });
@@ -72,7 +75,7 @@ export default async function run({ page, log }) {
   assert(snapshot.hasComposerEnter, 'expected a row describing the Send message binding');
   assert(snapshot.hasSlashSlash, 'expected a row describing the slash-popover binding');
   assert(snapshot.hasMessageNav, 'expected a row describing the message-navigation entry binding');
-  assert(snapshot.hasActivityDrawer, 'expected a row describing the Activity drawer hotkey');
+  assert(snapshot.hasActivityDrawer, 'expected rows for the Artifacts (⌘⇧A) and Activity (⌘⇧E) panel hotkeys');
   assert(snapshot.rowCount >= 12, `expected ≥12 binding rows total, got ${snapshot.rowCount}`);
   log('categories + key rows present ✓');
 
