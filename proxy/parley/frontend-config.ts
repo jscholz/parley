@@ -62,6 +62,9 @@ export const FRONTEND_SETTINGS = {
   // rule stated in the note above — not optional.)
   hotkeyFocusComposer:    { category: 'hotkeys',         default: 'Cmd+Shift+Enter' },
   hotkeyFocusSessions:    { category: 'hotkeys',         default: 'Cmd+Shift+J' },
+  hotkeyToggleArtifacts:  { category: 'hotkeys',         default: 'Cmd+Shift+A' },
+  hotkeyToggleActivity:   { category: 'hotkeys',         default: 'Cmd+Shift+E' },
+  hotkeyTogglePins:       { category: 'hotkeys',         default: 'Cmd+Shift+P' },
   // Agent-activity surfacing (tool-call + tool-result row rendering)
   agentActivity:          { category: 'agent_activity',  default: 'summary' },
   // Display

@@ -54,9 +54,11 @@ export default async function run({ page, log }) {
       ),
       // 2026-11-07: ⌘⇧A became Artifacts; Activity moved to ⌘⇧E.
       hasActivityDrawer: !!Array.from(dlg.querySelectorAll('.hotkeys-help-row')).find(
-        r => /Toggle Artifacts panel/i.test(r.textContent || '') && /⌘⇧A|Ctrl\+Shift\+A/.test(r.textContent || ''),
+        // One configurable binding per row now; "Cmd" prints ⌘ on mac and
+        // "Win" elsewhere (headless Linux here), so match the Shift+key tail.
+        r => /Toggle Artifacts panel/i.test(r.textContent || '') && /⇧A|Shift\+A/.test(r.textContent || ''),
       ) && !!Array.from(dlg.querySelectorAll('.hotkeys-help-row')).find(
-        r => /Toggle Activity panel/i.test(r.textContent || '') && /⌘⇧E|Ctrl\+Shift\+E/.test(r.textContent || ''),
+        r => /Toggle Activity panel/i.test(r.textContent || '') && /⇧E|Shift\+E/.test(r.textContent || ''),
       ),
     };
   });

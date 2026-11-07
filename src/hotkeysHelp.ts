@@ -90,6 +90,9 @@ function buildCatalog(): Category[] {
   const hkMeeting = (s as any).hotkeyToggleMeeting || 'Cmd+Shift+M';
   const hkComposer = (s as any).hotkeyFocusComposer || 'Cmd+Shift+Enter';
   const hkSessions = (s as any).hotkeyFocusSessions || 'Cmd+Shift+J';
+  const hkPins = (s as any).hotkeyTogglePins || 'Cmd+Shift+P';
+  const hkArtifacts = (s as any).hotkeyToggleArtifacts || 'Cmd+Shift+A';
+  const hkActivity = (s as any).hotkeyToggleActivity || 'Cmd+Shift+E';
   return [
     {
       title: 'Composer',
@@ -127,9 +130,9 @@ function buildCatalog(): Category[] {
         { keys: ['Cmd+K', 'Ctrl+K'], label: 'Open search palette (sessions + messages)' },
         { keys: ['Cmd+Shift+S', 'Ctrl+Shift+S'], label: 'Toggle sessions sidebar' },
         { keys: ['Cmd+Shift+O', 'Ctrl+Shift+O'], label: 'New chat' },
-        { keys: ['Cmd+Shift+P', 'Ctrl+Shift+P'], label: 'Toggle pinned-messages drawer' },
-        { keys: ['Cmd+Shift+A', 'Ctrl+Shift+A'], label: 'Toggle Artifacts panel' },
-        { keys: ['Cmd+Shift+E', 'Ctrl+Shift+E'], label: 'Toggle Activity panel' },
+        { keys: [hkPins], label: 'Toggle pinned-messages drawer' },
+        { keys: [hkArtifacts], label: 'Toggle Artifacts panel' },
+        { keys: [hkActivity], label: 'Toggle Activity panel' },
         { keys: ['↑', '↓'], label: 'Navigate sessions while the sidebar search has focus' },
         { keys: [hkSessions], label: 'Focus the session list (↑/↓ then move between sessions)' },
         { keys: ['Enter'], label: 'From the session list: jump into that session\u2019s composer' },

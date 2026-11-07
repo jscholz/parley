@@ -166,8 +166,11 @@ function render(): void {
   const docsBtn = document.getElementById('btn-doc-drawer-rail');
   if (docsBtn) {
     const prefix = hotkeyGlyph();
-    // ⌘⇧A toggles the pane (main.ts), ⌘0 jumps to the list.
-    docsBtn.title = prefix ? `Artifacts — ${prefix}0 list` : 'Artifacts';
+    // The tooltip ("Artifacts · ⌘⇧A", the configurable pane hotkey) is
+    // main.ts's — a title set here overrode it on every render (field
+    // 2026-11-07: "tooltipped at Command-0 again"). ⌘0 still opens the
+    // list; the hotkeys help says so.
+    void prefix;
     docsBtn.setAttribute('aria-label', 'Artifacts');
   }
   const docs = tabOrderDocs();

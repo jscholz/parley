@@ -4848,17 +4848,18 @@ async function boot() {
     // branch in the global hotkey handler. Mobile suppresses titles
     // via util/mobileTooltips.ts anyway so the toolbar setTooltip is
     // mostly belt-and-suspenders for tablet/landscape edge cases.
-    const pinHotkeyLabel = `Pinned messages  ·  ${formatHotkey('Cmd+Shift+P')}`;
+    const paneHk = (key: string, dflt: string) => String((settings.get() as any)[key] || dflt);
+    const pinHotkeyLabel = `Pinned messages  ·  ${formatHotkey(paneHk('hotkeyTogglePins', 'Cmd+Shift+P'))}`;
     for (const id of ['btn-pin-drawer-rail', 'btn-pin-drawer']) {
       const el = document.getElementById(id);
       if (el) setTooltip(el, pinHotkeyLabel);
     }
-    const activityHotkeyLabel = 'Activity  ·  ' + formatHotkey('Cmd+Shift+E');
+    const activityHotkeyLabel = 'Activity  ·  ' + formatHotkey(paneHk('hotkeyToggleActivity', 'Cmd+Shift+E'));
     for (const id of ['btn-activity-drawer-rail', 'btn-activity-drawer']) {
       const el = document.getElementById(id);
       if (el) setTooltip(el, activityHotkeyLabel);
     }
-    const artifactsHotkeyLabel = 'Artifacts  ·  ' + formatHotkey('Cmd+Shift+A');
+    const artifactsHotkeyLabel = 'Artifacts  ·  ' + formatHotkey(paneHk('hotkeyToggleArtifacts', 'Cmd+Shift+A'));
     {
       const el = document.getElementById('btn-doc-drawer-rail');
       if (el) setTooltip(el, artifactsHotkeyLabel);
@@ -5307,7 +5308,9 @@ async function boot() {
       composerInput.focus();
       return;
     }
-    if (matches('Cmd+Shift+P')) {
+    // Right-drawer panes — configurable since 2026-11-07 (Settings ›
+    // Hotkeys); defaults ⌘⇧P pins, ⌘⇧A Artifacts, ⌘⇧E Activity.
+    if (matches((s as any).hotkeyTogglePins)) {
       claim();
       // Toggle the right drawer on its Pins tab. The per-tab header
       // buttons were removed in the 2026-07-09 consolidation (these
@@ -5322,13 +5325,13 @@ async function boot() {
     // via the notifications pane … I want to toggle that bar with my
     // left hand"). Activity moved to ⌘⇧E: left-hand, and free in Chrome
     // and Safari (⌘⇧N is a new window, ⌘⇧Z is redo in a field).
-    if (matches('Cmd+Shift+A')) {
+    if (matches((s as any).hotkeyToggleArtifacts)) {
       claim();
       const btn = document.getElementById('btn-doc-drawer-rail') as HTMLButtonElement | null;
       btn?.click();
       return;
     }
-    if (matches('Cmd+Shift+E')) {
+    if (matches((s as any).hotkeyToggleActivity)) {
       claim();
       const btn = document.getElementById('btn-activity-drawer-rail') as HTMLButtonElement | null;
       btn?.click();

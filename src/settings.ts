@@ -308,6 +308,13 @@ const DEFAULTS = {
   // Cmd+Shift+S is taken (toggle sidebar) — J for "jump to sessions".
   hotkeyFocusComposer: 'Cmd+Shift+Enter',
   hotkeyFocusSessions: 'Cmd+Shift+J',
+  // Right-drawer panes (2026-11-07, his ask: "I'd expect to see
+  // Command-Shift-A, E, and P there"). ⌘⇧A = Artifacts (left hand;
+  // was Activity), Activity moved to ⌘⇧E (free in Chrome and Safari;
+  // ⌘⇧N is a new window, ⌘⇧Z is redo in a field), Pins stays ⌘⇧P.
+  hotkeyToggleArtifacts: 'Cmd+Shift+A',
+  hotkeyToggleActivity: 'Cmd+Shift+E',
+  hotkeyTogglePins: 'Cmd+Shift+P',
   agentActivity: 'summary' as 'off' | 'summary' | 'full',
   // Voice-call transport selector. The `realtime` flag is the mic-menu
   // toggle: when ON, a mic-button tap opens a WebRTC realtime call
@@ -781,6 +788,9 @@ export function hydrate(handlers: {
   const setHotkeyMeeting = $inp('set-hotkey-meeting');
   const setHotkeyFocusComposer = $inp('set-hotkey-focus-composer');
   const setHotkeyFocusSessions = $inp('set-hotkey-focus-sessions');
+  const setHotkeyToggleArtifacts = $inp('set-hotkey-toggle-artifacts');
+  const setHotkeyToggleActivity = $inp('set-hotkey-toggle-activity');
+  const setHotkeyTogglePins = $inp('set-hotkey-toggle-pins');
   const setTtsEngine = $sel('set-tts-engine');
   const setVoice = $sel('set-voice');
   const setWake = $inp('set-wake');
@@ -906,6 +916,9 @@ export function hydrate(handlers: {
     if (setHotkeyMeeting) setHotkeyMeeting.value = (current as any).hotkeyToggleMeeting;
     if (setHotkeyFocusComposer) setHotkeyFocusComposer.value = (current as any).hotkeyFocusComposer;
     if (setHotkeyFocusSessions) setHotkeyFocusSessions.value = (current as any).hotkeyFocusSessions;
+    if (setHotkeyToggleArtifacts) setHotkeyToggleArtifacts.value = (current as any).hotkeyToggleArtifacts;
+    if (setHotkeyToggleActivity) setHotkeyToggleActivity.value = (current as any).hotkeyToggleActivity;
+    if (setHotkeyTogglePins) setHotkeyTogglePins.value = (current as any).hotkeyTogglePins;
   }
   applyToDOM();
 
@@ -1378,7 +1391,7 @@ export function hydrate(handlers: {
   // combination, and we format it as a string and save. Cmd is used as
   // the conventional Mac modifier name; the matcher accepts either Cmd
   // (metaKey) or Ctrl (ctrlKey) at runtime.
-  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic' | 'hotkeyToggleMeeting' | 'hotkeyDocTabs' | 'hotkeyFocusComposer' | 'hotkeyFocusSessions') {
+  function attachHotkeyCapture(el: HTMLInputElement | null, settingsKey: 'hotkeyToggleCall' | 'hotkeyToggleMic' | 'hotkeyToggleMeeting' | 'hotkeyDocTabs' | 'hotkeyFocusComposer' | 'hotkeyFocusSessions' | 'hotkeyToggleArtifacts' | 'hotkeyToggleActivity' | 'hotkeyTogglePins') {
     if (!el) return;
     el.addEventListener('keydown', (e: KeyboardEvent) => {
       // Don't capture lone modifier keypresses; wait until a "real" key
@@ -1436,6 +1449,9 @@ export function hydrate(handlers: {
   attachHotkeyCapture(setHotkeyDocTabs, 'hotkeyDocTabs');
   attachHotkeyCapture(setHotkeyFocusComposer, 'hotkeyFocusComposer');
   attachHotkeyCapture(setHotkeyFocusSessions, 'hotkeyFocusSessions');
+  attachHotkeyCapture(setHotkeyToggleArtifacts, 'hotkeyToggleArtifacts');
+  attachHotkeyCapture(setHotkeyToggleActivity, 'hotkeyToggleActivity');
+  attachHotkeyCapture(setHotkeyTogglePins, 'hotkeyTogglePins');
 
   if (setTheme) setTheme.onchange = () => {
     set('theme', setTheme.value);
