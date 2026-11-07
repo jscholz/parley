@@ -37,13 +37,20 @@ export interface ShelfDoc {
   updatedAt: number;
 }
 
+/** A shelf entry that was closed (or evicted by the shelf cap) — the
+ *  "Recently closed" section (2026-11-07). Proxy-owned, derived in
+ *  mergeShelf from what each merge drops; newest first, capped. */
+export interface ClosedDoc extends ShelfDoc { closedAt: number }
+
 export interface ShelfState {
   version: number;
   updatedAt: number;
   by: string;
   order: string[];
   docs: Record<string, ShelfDoc>;
+  closed: ClosedDoc[];
 }
+export const MAX_CLOSED_DOCS = 10;
 
 export interface CachedDoc {
   id: string;
@@ -77,16 +84,28 @@ export function docIdFor(p: string | undefined, title: string): string {
   return (h >>> 0).toString(16);
 }
 
-const EMPTY: ShelfState = { version: 0, updatedAt: 0, by: '', order: [], docs: {} };
+const EMPTY: ShelfState = { version: 0, updatedAt: 0, by: '', order: [], docs: {}, closed: [] };
+
+function sanitizeClosed(raw: unknown): ClosedDoc[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ClosedDoc[] = [];
+  for (const r of raw) {
+    const d = sanitizeDoc(r);
+    if (!d) continue;
+    const closedAt = Number((r as any)?.closedAt);
+    out.push({ ...d, closedAt: Number.isFinite(closedAt) ? closedAt : d.updatedAt });
+  }
+  return out.slice(0, MAX_CLOSED_DOCS);
+}
 
 export async function readShelf(): Promise<ShelfState> {
   try {
     const raw = JSON.parse(await fs.readFile(shelfPath(), 'utf8'));
     if (raw && typeof raw.version === 'number' && Array.isArray(raw.order) && raw.docs && typeof raw.docs === 'object') {
-      return { version: raw.version, updatedAt: Number(raw.updatedAt) || 0, by: String(raw.by || ''), order: raw.order.filter((x: any) => typeof x === 'string'), docs: raw.docs };
+      return { version: raw.version, updatedAt: Number(raw.updatedAt) || 0, by: String(raw.by || ''), order: raw.order.filter((x: any) => typeof x === 'string'), docs: raw.docs, closed: sanitizeClosed(raw.closed) };
     }
   } catch { /* first run */ }
-  return { ...EMPTY, order: [], docs: {} };
+  return { ...EMPTY, order: [], docs: {}, closed: [] };
 }
 
 async function writeShelf(s: ShelfState): Promise<void> {
@@ -149,7 +168,39 @@ export function mergeShelf(
     order = order.filter((id) => keep.has(id));
     docs = Object.fromEntries(Object.entries(docs).filter(([id]) => keep.has(id)));
   }
-  return { version: current.version + 1, updatedAt: now, by, order, docs };
+  // Recently closed (2026-11-07): whatever this merge dropped — a close
+  // from a device that knew the current version, or an eviction by the
+  // shelf cap — goes to the front of the closed list; anything reopened
+  // (back in `docs`) leaves it. Newest first, capped, proxy-owned: the
+  // devices never send it. It is a history of what the agent showed and
+  // the user put away, not a file browser (design note, same date).
+  const prevClosed = Array.isArray(current.closed) ? current.closed : [];
+  const dropped: ClosedDoc[] = Object.values(current.docs || {})
+    .filter((d) => !docs[d.id])
+    .map((d) => ({ ...d, closedAt: now }));
+  const seen = new Set<string>();
+  const closed: ClosedDoc[] = [];
+  for (const c of [...dropped, ...prevClosed]) {
+    if (docs[c.id] || seen.has(c.id)) continue;
+    seen.add(c.id);
+    closed.push(c);
+    if (closed.length >= MAX_CLOSED_DOCS) break;
+  }
+  return { version: current.version + 1, updatedAt: now, by, order, docs, closed };
+}
+
+/** Drop closed entries whose file no longer exists on this host. Only
+ *  an absolute path is checked (a relative or virtual path cannot be
+ *  judged here); capture transcripts are rebuilt from the capture API,
+ *  so they are never judged by path. Read-time only — the record is
+ *  left as is, so a file that comes back comes back. */
+export async function pruneMissingClosed(closed: ClosedDoc[]): Promise<ClosedDoc[]> {
+  const out: ClosedDoc[] = [];
+  for (const c of closed) {
+    if (c.source === 'capture' || !c.path || !path.isAbsolute(c.path)) { out.push(c); continue; }
+    try { await fs.access(c.path); out.push(c); } catch { /* gone */ }
+  }
+  return out;
 }
 
 /** Serialized writer: PUTs from two devices in the same tick must not
@@ -236,7 +287,8 @@ function readJson(req: IncomingMessage, maxBytes = 512 * 1024): Promise<any> {
 }
 
 export async function handleShelfGet(_req: IncomingMessage, res: ServerResponse): Promise<void> {
-  sendJson(res, 200, await readShelf());
+  const s = await readShelf();
+  sendJson(res, 200, { ...s, closed: await pruneMissingClosed(s.closed) });
 }
 
 export async function handleShelfPut(req: IncomingMessage, res: ServerResponse): Promise<void> {

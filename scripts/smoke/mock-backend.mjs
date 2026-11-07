@@ -713,7 +713,13 @@ export async function installMockBackend(page) {
       for (const id of docShelf.order) if (docs[id] && !order.includes(id)) order.push(id);
       for (const id of Object.keys(docs)) if (!order.includes(id)) order.push(id);
     }
-    docShelf = { version: docShelf.version + 1, updatedAt: Date.now(), by: String(incoming.by || ''), order, docs };
+    // Recently closed (proxy docShelf.ts 2026-11-07): what this merge
+    // dropped, newest first, capped at 10; reopened ids leave.
+    const now = Date.now();
+    const dropped = Object.values(docShelf.docs || {}).filter((d) => !docs[d.id]).map((d) => ({ ...d, closedAt: now }));
+    const seen = new Set(); const closed = [];
+    for (const c of [...dropped, ...(docShelf.closed || [])]) { if (docs[c.id] || seen.has(c.id)) continue; seen.add(c.id); closed.push(c); if (closed.length >= 10) break; }
+    docShelf = { version: docShelf.version + 1, updatedAt: now, by: String(incoming.by || ''), order, docs, closed };
     broadcast({ type: 'doc_shelf_changed', chat_id: 'parley:docs', version: docShelf.version, by: docShelf.by });
     return docShelf;
   };

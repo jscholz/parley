@@ -78,3 +78,56 @@ test('doc_show content is cached under the client id and served back', async () 
   assert.equal(await readCachedDoc('nope'), null);
   assert.equal(await readCachedDoc('../etc/passwd'), null, 'id shape is enforced');
 });
+
+// ── Recently closed (2026-11-07) ─────────────────────────────────────
+
+test('closed: what a merge drops goes to the front of the closed list; reopening removes it; cap 10', () => {
+  const v1 = mergeShelf(empty(), { base_version: 0, by: 'a', order: ['1', '2', '3'], docs: [doc('1'), doc('2'), doc('3')] }, 100);
+  assert.deepEqual(v1.closed, []);
+  const v2 = mergeShelf(v1, { base_version: 1, by: 'a', order: ['2', '3'], docs: [doc('2'), doc('3')] }, 200);
+  assert.deepEqual(v2.closed.map((c) => [c.id, c.closedAt]), [['1', 200]]);
+  const v3 = mergeShelf(v2, { base_version: 2, by: 'a', order: ['3'], docs: [doc('3')] }, 300);
+  assert.deepEqual(v3.closed.map((c) => c.id), ['2', '1'], 'newest first');
+  // Reopen 1 → it leaves the closed list.
+  const v4 = mergeShelf(v3, { base_version: 3, by: 'a', order: ['3', '1'], docs: [doc('3'), doc('1', 400)] }, 400);
+  assert.deepEqual(v4.closed.map((c) => c.id), ['2']);
+  // Cap: close fourteen, keep ten.
+  let s = mergeShelf(empty(), { base_version: 0, by: 'a', order: [], docs: [] }, 500);
+  for (let i = 0; i < 14; i++) {
+    const id = `d${i}`;
+    s = mergeShelf(s, { base_version: s.version, by: 'a', order: [id], docs: [doc(id)] }, 600 + i * 2);
+    s = mergeShelf(s, { base_version: s.version, by: 'a', order: [], docs: [] }, 601 + i * 2);
+  }
+  assert.equal(s.closed.length, 10);
+  assert.equal(s.closed[0].id, 'd13');
+});
+
+test('closed: a stale writer that still lists a doc does not close it; the shelf cap eviction does', () => {
+  const v1 = mergeShelf(empty(), { base_version: 0, by: 'a', order: ['1', '2'], docs: [doc('1'), doc('2')] }, 100);
+  // Stale writer (base 0) sends only doc 2 → union keeps 1 open, nothing closed.
+  const v2 = mergeShelf(v1, { base_version: 0, by: 'b', order: ['2'], docs: [doc('2', 150)] }, 200);
+  assert.deepEqual(Object.keys(v2.docs).sort(), ['1', '2']);
+  assert.deepEqual(v2.closed, []);
+});
+
+test('closed: round-trips through the shelf file', async () => {
+  await updateShelf({ base_version: 0, by: 'a', order: ['1'], docs: [doc('1')] });
+  await updateShelf({ base_version: 1, by: 'a', order: [], docs: [] });
+  const s = await readShelf();
+  assert.deepEqual(s.closed.map((c) => c.id), ['1']);
+  assert.equal(typeof s.closed[0].closedAt, 'number');
+});
+
+test('closed: entries whose absolute path is gone are pruned on read; captures and relative paths are kept', async () => {
+  const { pruneMissingClosed } = await import('../docShelf.ts');
+  const present = path.join(dir, 'present.md');
+  await fs.writeFile(present, '# here');
+  const out = await pruneMissingClosed([
+    { ...doc('a'), path: present, closedAt: 1 },
+    { ...doc('b'), path: path.join(dir, 'gone.md'), closedAt: 2 },
+    { ...doc('c'), path: 'relative/x.md', closedAt: 3 },
+    { ...doc('d'), path: path.join(dir, 'gone-cap.md'), source: 'capture', captureId: 'cap', closedAt: 4 },
+    { ...doc('e'), closedAt: 5 },
+  ]);
+  assert.deepEqual(out.map((c) => c.id), ['a', 'c', 'd', 'e']);
+});

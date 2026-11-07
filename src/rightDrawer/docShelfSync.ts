@@ -22,6 +22,7 @@ import { apiUrl } from '../apiBase.ts';
 import { log } from '../util/log.ts';
 import {
   listDocs, tabOrderDocs, setDoc, removeDoc, setTabOrder, snapshotDocs, type DocState,
+  closedDocs, setClosedDocs, type ClosedDocMeta,
 } from './docStore.ts';
 import { planInbound } from './docShelfMerge.ts';
 import { ensureDeviceId as sharedDeviceId } from '../util/deviceId.ts';
@@ -85,6 +86,7 @@ async function push(): Promise<void> {
       // A merge against a concurrent writer may have added docs we lack;
       // apply the answer so both devices converge without another hop.
       if (next.by === deviceId) await applyRemote(next);
+      else setClosedDocs(Array.isArray(next.closed) ? next.closed : []);
     }
   } catch (e) {
     log(`[doc-shelf] push failed: ${String((e as Error)?.message || e)}`);
@@ -173,6 +175,7 @@ async function applyRemote(remote: any): Promise<void> {
     if (order.length) setTabOrder(order);
     lastSeenVersion = Math.max(lastSeenVersion, remote.version);
     saveKnown(remoteIds);
+    setClosedDocs(Array.isArray(remote.closed) ? remote.closed : []);
   } finally {
     applying = false;
   }
@@ -235,3 +238,15 @@ export function __docShelfSyncState(): { deviceId: string; lastSeenVersion: numb
   return { deviceId, lastSeenVersion, primed };
 }
 export function __pullDocShelfForTest(): Promise<void> { return pull('test'); }
+
+/** Put a recently closed entry back on the shelf (2026-11-07): content
+ *  from the proxy's doc cache (or the capture API), opened in the
+ *  reader. The push that follows drops it from the proxy's closed list;
+ *  the local mirror drops it at once so the row does not linger. */
+export async function reopenClosedDoc(meta: ClosedDocMeta): Promise<boolean> {
+  const payload = await fetchContent(meta);
+  if (!payload) { log(`[doc-shelf] reopen: no content for ${meta.id} (${meta.title})`); return false; }
+  setClosedDocs(closedDocs().filter((c) => c.id !== meta.id));
+  setDoc(payload, { autoOpen: true });
+  return true;
+}

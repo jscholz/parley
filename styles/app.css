@@ -5921,7 +5921,7 @@ body.doc-fullscreen-open { overflow: hidden; }
    bottom of the Docs LIST view (and under the empty state): quiet,
    muted chrome — a trash drawer, not a feature — that self-hides when
    nothing is deleted. */
-.recently-deleted {
+.recently-deleted, .recently-closed {
   flex: none;
   border-top: 1px solid var(--border);
   margin-top: 10px; padding-top: 4px;
@@ -5948,6 +5948,11 @@ body.doc-fullscreen-open { overflow: hidden; }
   transform: rotate(90deg);
 }
 .recently-deleted-hint { margin-left: auto; font-weight: 400; font-size: 11px; }
+/* Recently closed (2026-11-07) shares the section's grammar; its rows
+   are buttons (click = reopen) and dim while the content is fetched. */
+.recently-closed-item-main { background: none; border: none; cursor: pointer; font: inherit; color: inherit; text-align: left; padding: 0; }
+.recently-closed-item-main:hover .recently-deleted-item-title { color: var(--fg); }
+.recently-closed-item.busy { opacity: .5; pointer-events: none; }
 .recently-deleted-list { list-style: none; margin: 0; padding: 0; }
 /* Same rhythm-not-rules treatment as .doc-shelf-item above — this list
    sits directly under the shelf, so a ruled trash list next to an

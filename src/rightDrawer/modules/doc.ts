@@ -44,6 +44,8 @@ import { toggleDocFullscreen, syncExpandButtons } from '../docFullscreen.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
 import { mountRecentlyDeletedSection } from './recentlyDeleted.ts';
+import { closedDocs, type ClosedDocMeta } from '../docStore.ts';
+import { reopenClosedDoc } from '../docShelfSync.ts';
 import { externalLinkTarget } from '../../native/externalLinks.ts';
 import type { DocShelfSnapshot } from '../docStore.ts';
 import { log } from '../../util/log.ts';
@@ -186,6 +188,11 @@ export function createDocModule(opts: {
       // likeliest moment to need it is right after discarding your only
       // meeting doc (its shelf entry leaves with the discard). Same
       // self-hiding section the list view carries; zero chrome at n=0.
+      // Recently closed likewise: an empty shelf is exactly when you
+      // want the thing you just put away back. Re-mounted each render
+      // (idempotent), newest first.
+      opts.empty.querySelector('.recently-closed')?.remove();
+      mountRecentlyClosedSection(opts.empty, ctx);
       mountRecentlyDeletedSection(opts.empty);
       return;
     }
@@ -312,7 +319,83 @@ export function createDocModule(opts: {
     // shelf docs), and a collapsed bottom section adds no new chrome —
     // it self-hides when nothing is deleted. Full rationale + the
     // rejected session-drawer-lens alternative: recentlyDeleted.ts.
+    mountRecentlyClosedSection(opts.body, ctx);
     mountRecentlyDeletedSection(opts.body);
+  }
+
+  // Recently closed (2026-11-07): the last ten shelf entries put away,
+  // from the proxy's shelf record (docShelfSync mirrors it into the
+  // store). A collapsed section at the foot of the list, same shape as
+  // Recently Deleted — a history of what the agent showed and you
+  // closed, not a file browser (the mainstream apps draw the line
+  // there too: Claude's Artifacts tab, canvas inside its chat).
+  let recentlyClosedExpanded = false;
+  function mountRecentlyClosedSection(host: HTMLElement, ctx: RightDrawerModuleContext): void {
+    const rows = closedDocs();
+    if (!rows.length) return;
+    const section = document.createElement('div');
+    // Own root class: recentlyDeleted's idempotent re-mount removes the
+    // first `.recently-deleted` under the host, which must not be us.
+    section.className = 'recently-closed';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'recently-deleted-toggle';
+    toggle.setAttribute('aria-expanded', String(recentlyClosedExpanded));
+    const caret = document.createElement('span');
+    caret.className = 'recently-deleted-caret';
+    caret.textContent = '›';
+    const label = document.createElement('span');
+    label.className = 'recently-deleted-label';
+    label.textContent = `Recently closed (${rows.length})`;
+    toggle.append(caret, label);
+    section.appendChild(toggle);
+    const ul = document.createElement('ul');
+    ul.className = 'recently-deleted-list';
+    ul.hidden = !recentlyClosedExpanded;
+    section.appendChild(ul);
+    toggle.onclick = () => {
+      recentlyClosedExpanded = !recentlyClosedExpanded;
+      toggle.setAttribute('aria-expanded', String(recentlyClosedExpanded));
+      ul.hidden = !recentlyClosedExpanded;
+    };
+    for (const c of rows) {
+      const li = document.createElement('li');
+      li.className = 'recently-deleted-item recently-closed-item';
+      li.dataset.docId = c.id;
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.className = 'recently-deleted-item-main recently-closed-item-main';
+      const title = document.createElement('span');
+      title.className = 'recently-deleted-item-title';
+      appendCaptureGlyph(title, { source: c.source, title: c.title });
+      title.appendChild(document.createTextNode(c.title));
+      const meta = document.createElement('span');
+      meta.className = 'recently-deleted-item-meta';
+      const chip = c.format === 'markdown' ? 'md' : c.format === 'html' ? 'html' : 'txt';
+      meta.textContent = `${chip} · closed ${formatRelativeTime(c.closedAt)}`;
+      if (c.path) meta.title = c.path;
+      main.append(title, meta);
+      const reopen = async (ev: Event) => {
+        ev.stopPropagation();
+        li.classList.add('busy');
+        const ok = await reopenClosedDoc(c as ClosedDocMeta);
+        if (ok) { setViewState('reader'); rerender(ctx); }
+        else {
+          li.classList.remove('busy');
+          window.dispatchEvent(new CustomEvent('parley:pin-error', { detail: { message: `Could not reopen "${c.title}" — its content is no longer available` } }));
+        }
+      };
+      main.onclick = reopen;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'recently-deleted-restore';
+      btn.textContent = 'Reopen';
+      btn.setAttribute('aria-label', `Reopen "${c.title}"`);
+      btn.onclick = reopen;
+      li.append(main, btn);
+      ul.appendChild(li);
+    }
+    host.appendChild(section);
   }
 
   /** Drag-reorder for the list rows — the same order the rail tabs

@@ -189,6 +189,25 @@ export function setListGroup(g: ListGroup): void {
   notify(false);   // the tab order may have changed with it
 }
 
+/** Recently closed (2026-11-07): the proxy's record of shelf entries put
+ *  away — the last ten, newest first, pruned of files that are gone.
+ *  Mirrored here from each shelf pull/push (docShelfSync); never
+ *  persisted locally. A history of what the agent showed, not a browser. */
+export interface ClosedDocMeta {
+  id: string; title: string; path?: string; format: string;
+  source?: string; captureId?: string; chatId?: string;
+  updatedAt: number; closedAt: number;
+}
+let closed: ClosedDocMeta[] = [];
+export function closedDocs(): ClosedDocMeta[] { return closed; }
+export function setClosedDocs(list: ClosedDocMeta[]): void {
+  const open = new Set(docs.map(d => d.id));
+  const next = (Array.isArray(list) ? list : []).filter(c => c && typeof c.id === 'string' && !open.has(c.id));
+  if (JSON.stringify(next) === JSON.stringify(closed)) return;
+  closed = next;
+  notify(false);
+}
+
 /** Commit a drag-reorder (Sortable onEnd hands us the DOM order).
  *  Reconciled, not trusted: a mid-drag push/remove may have changed the
  *  doc set since the DOM was painted. */
