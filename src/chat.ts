@@ -1669,7 +1669,9 @@ export function addLine(speaker: string, text: string, cls = '', opts: {
       foldBtn.textContent = expanded ? 'Show less' : 'Show more';
       if (opts.messageId) foldStateByMsgId.set(String(opts.messageId), expanded ? 'expanded' : 'collapsed');
     };
-    div.appendChild(foldBtn);
+    // Inside the tinted bubble when there is one (user rows), as its
+    // last line, not a row of its own under it (field nit 2026-11-07).
+    (div.querySelector(':scope > .bubble') || div).appendChild(foldBtn);
   }
 
   // Under virtualization, target the virtualizer's slot so the line

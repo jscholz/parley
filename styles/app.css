@@ -2263,6 +2263,19 @@
   }
   .bubble-fold-toggle:hover { opacity: 1; }
   .line.foldable .bubble-fold-toggle { display: inline-block; }
+  /* User bubble (2026-11-07 nit: "bring the show more button inside the
+     bubble rather than occupying its own row"): the toggle is the
+     bubble's last line — quiet text, no box — and the fade blends into
+     the bubble's own tint rather than the page background. */
+  .line.s0 > .bubble > .bubble-fold-toggle {
+    display: block; margin: 2px 0 -2px; padding: 4px 0 0; min-height: 0;
+    border: none; background: none; font: inherit; font-size: 12px;
+    color: var(--muted); opacity: 1; text-align: left;
+  }
+  .line.s0 > .bubble > .bubble-fold-toggle:hover { color: var(--fg); text-decoration: underline; }
+  .line.s0.foldable > .bubble .text::after {
+    background: linear-gradient(to bottom, transparent, var(--primary-soft) 95%);
+  }
   /* Agent reply: sage speaker label + sage accents, no bubble fill,
      no left gutter. Identity carried by the label + play-bar up top.
      Right-padding reserves a column for the top-right icon stack
