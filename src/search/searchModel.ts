@@ -184,3 +184,34 @@ export function hitMetaParts(h: SearchMessageHit, when: string): string[] {
   if (more > 0) parts.push(`+${more} more in this chat`);
   return parts;
 }
+
+// ── Scope + stable repaint (2026-11-08) ───────────────────────────────
+
+import type { SearchScope } from '../proxyClientTypes.ts';
+export const SCOPES: SearchScope[] = ['all', 'sessions', 'artifacts', 'messages'];
+
+/** Per-scope caps. `all` keeps every category short; a single scope
+ *  lifts its cap (the palette convention: narrowing shows more).
+ *  `sessionsInstant` is the instant local paint's cap in `all` — kept
+ *  small so a late server answer is never buried under local rows. */
+export function scopeCaps(scope: SearchScope): { limit: number; sessions: number; sessionsInstant: number } {
+  switch (scope) {
+    case 'sessions': return { limit: 50, sessions: 30, sessionsInstant: 30 };
+    case 'artifacts': return { limit: 30, sessions: 0, sessionsInstant: 0 };
+    case 'messages': return { limit: 50, sessions: 0, sessionsInstant: 0 };
+    default: return { limit: 20, sessions: 10, sessionsInstant: 3 };
+  }
+}
+
+/** The stable repaint rule: rows already painted keep their order and
+ *  position; newcomers from `ranked` are appended in rank order; painted
+ *  rows that the ranking dropped are removed. Nothing the user may be
+ *  about to click moves; the full ranking is one explicit action away. */
+export function stableOrder(painted: readonly string[], ranked: readonly string[]): string[] {
+  const keep = new Set(ranked);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const id of painted) if (keep.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  for (const id of ranked) if (!seen.has(id)) { out.push(id); seen.add(id); }
+  return out;
+}

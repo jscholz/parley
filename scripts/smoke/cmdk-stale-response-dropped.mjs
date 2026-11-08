@@ -82,7 +82,7 @@ export default async function run({ page, log, mock }) {
     (await page.locator(`.cmdk-row[data-kind="message"][data-session-id="${BETA}"]`).count()) === 1,
     'beta message hit still present',
   );
-  const status = await page.textContent('.cmdk-status');
+  const status = await page.textContent('.cmdk-messages-status');
   assert(status.trim() === '', `status settled on beta's answer, got "${status}"`);
   assert((await page.inputValue('.cmdk-input')) === 'beta', 'input still reads beta');
   log('late alpha answer dropped; beta results untouched ✓');

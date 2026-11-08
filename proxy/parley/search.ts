@@ -26,6 +26,7 @@
 
 import http from 'node:http';
 import { getUpstream } from './index.ts';
+import { searchArtifacts } from './artifactSearch.ts';
 
 export async function handleParleySearch(
   req: http.IncomingMessage,
@@ -41,7 +42,7 @@ export async function handleParleySearch(
   const q = (url.searchParams.get('q') || '').trim();
   if (!q) {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ sessions: [], hits: [] }));
+    res.end(JSON.stringify({ sessions: [], hits: [], artifacts: [] }));
     return;
   }
   let limit = 20;
@@ -50,22 +51,36 @@ export async function handleParleySearch(
     const n = Number(rawLimit);
     if (Number.isFinite(n) && n > 0) limit = Math.min(50, Math.floor(n));
   }
-  let result;
-  try {
-    result = await upstream.searchConversations(q, limit);
-  } catch (e: any) {
-    console.warn('[parley] search fetch failed:', e?.message);
+  // Scope (2026-11-08): `all` runs every category; a single category
+  // skips the others and lifts its cap (the palette's chips).
+  const scopeRaw = url.searchParams.get('scope') || 'all';
+  const scope = (['all', 'sessions', 'artifacts', 'messages'] as const).includes(scopeRaw as any) ? scopeRaw as 'all' | 'sessions' | 'artifacts' | 'messages' : 'all';
+  const wantUpstream = scope !== 'artifacts';
+  const wantArtifacts = scope === 'all' || scope === 'artifacts';
+  const artifactLimit = scope === 'artifacts' ? limit : Math.min(8, limit);
+
+  const [upstreamOutcome, artifacts] = await Promise.all([
+    wantUpstream
+      ? upstream.searchConversations(q, limit).then((r) => ({ ok: true as const, r })).catch((e: any) => ({ ok: false as const, e }))
+      : Promise.resolve({ ok: true as const, r: { sessions: [], hits: [] } }),
+    wantArtifacts ? searchArtifacts(q, artifactLimit).catch((e: any) => { console.warn('[parley] artifact search failed:', e?.message); return []; }) : Promise.resolve([]),
+  ]);
+  if (!upstreamOutcome.ok) {
+    const err = (upstreamOutcome as { e?: any }).e;
+    console.warn('[parley] search fetch failed:', err?.message);
     res.writeHead(502, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: e?.message || 'upstream error' }));
+    res.end(JSON.stringify({ error: err?.message || 'upstream error' }));
     return;
   }
+  const result = upstreamOutcome.r;
   if (result === null) {
-    res.writeHead(404, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({
-      error: { message: 'agent does not implement /v1/conversations/search' },
-    }));
+    // The agent has no message index. Artifacts still answer (they are
+    // the proxy's own), so this is a 200 with the sessions/messages
+    // side marked unavailable rather than the old blanket 404.
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ sessions: [], hits: [], artifacts, error: 'agent does not implement /v1/conversations/search' }));
     return;
   }
   res.writeHead(200, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(result));
+  res.end(JSON.stringify({ ...result, artifacts }));
 }

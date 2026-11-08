@@ -226,7 +226,7 @@ export async function deleteSession(id) {
  *  fall back to the cached client-side filter without special-casing. */
 export async function search(q, kind, opts) {
   const a = await loadAdapter();
-  if (!a.search) return { sessions: [], hits: [] };
+  if (!a.search) return { sessions: [], hits: [], artifacts: [] };
   return a.search(q, kind, opts);
 }
 

@@ -2050,22 +2050,25 @@ export const proxyClientAdapter = {
     log(`proxy-client: deleted session ${id}`);
   },
 
-  async search(q: string, _kind: 'sessions' | 'messages' | 'both', opts?: { limit?: number; signal?: AbortSignal }) {
+  async search(q: string, _kind: 'sessions' | 'messages' | 'both', opts?: { limit?: number; signal?: AbortSignal; scope?: 'all' | 'sessions' | 'artifacts' | 'messages' }) {
     const trimmed = (q || '').trim();
     if (!trimmed) return { sessions: [], hits: [] };
     const params = new URLSearchParams({ q: trimmed });
     if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.scope && opts.scope !== 'all') params.set('scope', opts.scope);
     try {
       const r = await fetch(`${apiBase()}/search?${params}`, { signal: opts?.signal });
-      if (r.status === 404) return { sessions: [], hits: [] };
+      if (r.status === 404) return { sessions: [], hits: [], artifacts: [] };
       if (!r.ok) {
         diag(`proxy-client.search: HTTP ${r.status}`);
-        return { sessions: [], hits: [], error: `HTTP ${r.status}` };
+        return { sessions: [], hits: [], artifacts: [], error: `HTTP ${r.status}` };
       }
       const body = await r.json();
       return {
         sessions: Array.isArray(body?.sessions) ? body.sessions : [],
         hits: Array.isArray(body?.hits) ? body.hits : [],
+        artifacts: Array.isArray(body?.artifacts) ? body.artifacts : [],
+        ...(typeof body?.error === 'string' && body.error ? { error: body.error } : {}),
       };
     } catch (e: any) {
       if (e?.name === 'AbortError') throw e;

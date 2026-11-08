@@ -230,9 +230,32 @@ export interface SearchMessageHit {
   more_in_session?: number;
 }
 
+/** One artifact hit (2026-11-08): a document the agent displayed, from
+ *  the proxy's content cache. Same excerpt/highlight contract as a
+ *  message hit so one renderer paints both. */
+export interface SearchArtifactHit {
+  id: string;
+  title: string;
+  path?: string;
+  format: string;
+  source?: string;
+  capture_id?: string;
+  chat_id?: string;
+  /** Epoch ms when the agent displayed it. */
+  displayed_at?: number;
+  match: 'title' | 'path' | 'content';
+  snippet: string;
+  highlights?: number[][];
+  title_highlights?: number[][];
+}
+
+export type SearchScope = 'all' | 'sessions' | 'artifacts' | 'messages';
+
 export interface SearchResult {
   sessions: SearchSessionRow[];
   hits: SearchMessageHit[];
+  /** Absent on backends without the proxy's artifact index. */
+  artifacts?: SearchArtifactHit[];
   /** Index/FTS error (sessions still populated). Only set on the messages path. */
   error?: string;
 }
@@ -242,6 +265,8 @@ export interface SearchOpts {
   limit?: number;
   /** Cancellation token for typing-debounced calls. */
   signal?: AbortSignal;
+  /** Which categories to run; a single category lifts its cap. */
+  scope?: SearchScope;
 }
 
 /**

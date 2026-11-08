@@ -398,7 +398,43 @@ export async function installMockBackend(page) {
         });
       }
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions, hits }) });
+    // Artifacts (proxy artifactSearch.ts, 2026-11-08): the doc_show
+    // content cache, every term in title/path/content; title > path >
+    // content, newest first within a tier; excerpt + highlights.
+    const scope = url.searchParams.get('scope') || 'all';
+    const artifacts = [];
+    if (terms.length && (scope === 'all' || scope === 'artifacts')) {
+      const tiers = [];
+      for (const d of docCache.values()) {
+        const titleR = ranges(d.title || '');
+        const pathR = titleR ? null : ranges(d.path || '');
+        const contentR = (titleR || pathR) ? null : ranges(String(d.content || ''));
+        if (!titleR && !pathR && !contentR) continue;
+        const content = String(d.content || '');
+        const cr = ranges(content);
+        let snippet = '', highlights = [];
+        if (cr) {
+          const start = Math.max(0, cr[0][0] - 50); const end = Math.min(content.length, start + 160);
+          const prefix = start > 0 ? '…' : '';
+          snippet = prefix + content.slice(start, end).replace(/\s+/g, ' ').replace(/(^|\s)#{1,6}\s+/g, '$1').trim() + (end < content.length ? '…' : '');
+          highlights = ranges(snippet) || [];
+        } else {
+          snippet = (content.split('\n').find((l) => l.trim() && !/^#/.test(l.trim())) || '').trim().slice(0, 160);
+        }
+        tiers.push({ tier: titleR ? 0 : pathR ? 1 : 2, when: d.displayed_at || 0, hit: {
+          id: d.id, title: d.title || 'Document', format: d.format || 'text',
+          ...(d.path ? { path: d.path } : {}), ...(d.source ? { source: d.source } : {}),
+          ...(d.capture_id ? { capture_id: d.capture_id } : {}), ...(d.chat_id ? { chat_id: d.chat_id } : {}),
+          ...(d.displayed_at ? { displayed_at: d.displayed_at } : {}),
+          match: titleR ? 'title' : pathR ? 'path' : 'content', snippet, highlights, title_highlights: titleR || [],
+        } });
+      }
+      tiers.sort((a, b) => a.tier - b.tier || b.when - a.when);
+      for (const t of tiers.slice(0, scope === 'artifacts' ? limit : Math.min(8, limit))) artifacts.push(t.hit);
+    }
+    const sessionsOut = scope === 'artifacts' || scope === 'messages' ? [] : sessions;
+    const hitsOut = scope === 'artifacts' || scope === 'sessions' ? [] : hits;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sessions: sessionsOut, hits: hitsOut, artifacts }) });
   });
 
   // GET /api/parley/sessions/<chat_id>/messages — canned transcript.

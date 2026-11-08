@@ -75,6 +75,14 @@ let rootResolver: () => string = () => dataHome();
 export function setDocShelfRootForTests(fn: () => string): void { rootResolver = fn; }
 const shelfPath = () => path.join(rootResolver(), 'doc-shelf.json');
 const docsDir = () => path.join(rootResolver(), 'docs');
+/** The content cache directory — the Artifacts search index reads it
+ *  (artifactSearch.ts). */
+export function cachedDocsDir(): string { return docsDir(); }
+/** Fires after every cache write with the doc as written, so the
+ *  Artifacts index stays current without importing this module's
+ *  internals (and without a circular import). */
+const cacheListeners: Array<(doc: CachedDoc) => void> = [];
+export function onDocCached(cb: (doc: CachedDoc) => void): void { cacheListeners.push(cb); }
 
 /** Same djb2 the client uses (docStore.docIdFor) — keep byte-identical. */
 export function docIdFor(p: string | undefined, title: string): string {
@@ -253,6 +261,7 @@ export function cacheDocShow(env: any): void {
   void fs.mkdir(docsDir(), { recursive: true })
     .then(() => fs.writeFile(`${file}.tmp`, raw))
     .then(() => fs.rename(`${file}.tmp`, file))
+    .then(() => { for (const cb of cacheListeners) { try { cb(doc); } catch { /* listener's problem */ } } })
     .catch((e) => console.warn(`[parley] doc cache write failed for ${id}: ${String((e as Error)?.message || e)}`));
 }
 

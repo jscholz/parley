@@ -29,7 +29,9 @@ import * as backend from './backend.ts';
 import * as sessionDrawer from './sessionDrawer.ts';
 import * as switchCtl from './switchController.ts';
 import { parseQuery, matchSession, displayLabel } from './sessionFilter.ts';
-import type { SearchMessageHit as ServerMessageHit, SearchSessionRow } from './proxyClientTypes.ts';
+import type { SearchMessageHit as ServerMessageHit, SearchSessionRow, SearchArtifactHit, SearchScope, SearchResult } from './proxyClientTypes.ts';
+import { reopenClosedDoc } from './rightDrawer/docShelfSync.ts';
+import { stableOrder, scopeCaps, SCOPES } from './search/searchModel.ts';
 import {
   QuerySequence, reconcileSessions, viewFromServer, highlightRanges, segments,
   sessionsEmptyText, messagesStatusText, hitMetaParts,
@@ -54,13 +56,28 @@ type MessageHit = {
   session_title?: string;
   session_source?: string;
 };
-type Hit = SessionHit | MessageHit;
+type ArtifactHit = { kind: 'artifact' } & SearchArtifactHit;
+type Hit = SessionHit | MessageHit | ArtifactHit;
 
 let dialogEl: HTMLDialogElement | null = null;
 let inputEl: HTMLInputElement | null = null;
 let sessionsListEl: HTMLElement | null = null;
 let messagesListEl: HTMLElement | null = null;
 let messagesStatusEl: HTMLElement | null = null;
+let artifactsListEl: HTMLElement | null = null;
+let artifactsStatusEl: HTMLElement | null = null;
+let resultsEl: HTMLElement | null = null;
+let pillEl: HTMLButtonElement | null = null;
+/** Scope chips (2026-11-08): All runs every category; one category
+ *  skips the others and lifts its cap. Tab cycles. */
+let scope: SearchScope = 'all';
+/** The server answer that is waiting for the pointer to leave the
+ *  results, or the full ranking a "re-rank" would apply — the stable
+ *  repaint rule: nothing moves under the pointer, and painted rows never
+ *  reorder except on a keystroke or an explicit re-rank. */
+let deferred: { q: string; result: SearchResult } | null = null;
+let rerankable: { q: string; result: SearchResult } | null = null;
+let pointerOverResults = false;
 
 /** Flat array of Hits used for keyboard navigation. Re-derived every time
  *  results re-render, so arrow up/down can always land on the right row. */
@@ -148,6 +165,13 @@ export function open() {
   if (messagesStatusEl) messagesStatusEl.textContent = '';
   // Render an initial sessions snapshot (no filter = full list, top 10)
   // so the modal isn't empty before the user types.
+  // Every open starts in All (a remembered narrow scope would hide
+  // results with no visible reason).
+  scope = 'all';
+  deferred = null; rerankable = null; hidePill();
+  if (artifactsListEl) artifactsListEl.innerHTML = '';
+  if (artifactsStatusEl) artifactsStatusEl.textContent = '';
+  applyScopeChrome();
   paintSessions('', null, true);
   dialogEl.showModal();
   // showModal() autofocuses the first focusable element, which is the
@@ -167,12 +191,22 @@ function ensureDialog() {
   dlg.className = 'cmdk-dialog';
   dlg.innerHTML = `
     <div class="cmdk-input-row">
-      <input type="text" class="cmdk-input" placeholder="Search sessions and messages…" spellcheck="false" autocomplete="off" />
+      <input type="text" class="cmdk-input" placeholder="Search sessions, artifacts and messages…" spellcheck="false" autocomplete="off" />
+      <div class="cmdk-scopes" role="tablist" aria-label="Search scope">
+        <button type="button" class="cmdk-scope on" data-scope="all" role="tab" aria-selected="true">All</button>
+        <button type="button" class="cmdk-scope" data-scope="sessions" role="tab" aria-selected="false">Sessions</button>
+        <button type="button" class="cmdk-scope" data-scope="artifacts" role="tab" aria-selected="false">Artifacts</button>
+        <button type="button" class="cmdk-scope" data-scope="messages" role="tab" aria-selected="false">Messages</button>
+        <span class="cmdk-scope-hint">Tab</span>
+      </div>
     </div>
     <div class="cmdk-results">
-      <div class="cmdk-section-title">Sessions</div>
+      <button type="button" class="cmdk-pill" hidden></button>
+      <div class="cmdk-section-title" data-section-title="sessions">Sessions</div>
       <ul class="cmdk-list" data-section="sessions"></ul>
-      <div class="cmdk-section-title cmdk-messages-title">Messages <span class="cmdk-status"></span></div>
+      <div class="cmdk-section-title cmdk-artifacts-title" data-section-title="artifacts">Artifacts <span class="cmdk-status cmdk-artifacts-status"></span></div>
+      <ul class="cmdk-list" data-section="artifacts"></ul>
+      <div class="cmdk-section-title cmdk-messages-title" data-section-title="messages">Messages <span class="cmdk-status cmdk-messages-status"></span></div>
       <ul class="cmdk-list" data-section="messages"></ul>
     </div>
     <form method="dialog" class="cmdk-close-row"><button>Close</button></form>
@@ -182,7 +216,21 @@ function ensureDialog() {
   inputEl = dlg.querySelector('.cmdk-input') as HTMLInputElement;
   sessionsListEl = dlg.querySelector('ul[data-section="sessions"]') as HTMLElement;
   messagesListEl = dlg.querySelector('ul[data-section="messages"]') as HTMLElement;
-  messagesStatusEl = dlg.querySelector('.cmdk-status') as HTMLElement;
+  messagesStatusEl = dlg.querySelector('.cmdk-messages-status') as HTMLElement;
+  artifactsListEl = dlg.querySelector('ul[data-section="artifacts"]') as HTMLElement;
+  artifactsStatusEl = dlg.querySelector('.cmdk-artifacts-status') as HTMLElement;
+  resultsEl = dlg.querySelector('.cmdk-results') as HTMLElement;
+  pillEl = dlg.querySelector('.cmdk-pill') as HTMLButtonElement;
+  dlg.querySelectorAll<HTMLButtonElement>('.cmdk-scope').forEach((b) => {
+    b.addEventListener('click', () => { setScope(b.dataset.scope as SearchScope); inputEl?.focus(); });
+  });
+  pillEl.addEventListener('click', () => applyPill());
+  // The pointer's presence over the results is what a late server
+  // answer must not disturb (the "clickjacking" of 2026-11-08).
+  resultsEl.addEventListener('pointerenter', () => { pointerOverResults = true; });
+  resultsEl.addEventListener('pointerleave', () => { pointerOverResults = false; flushDeferred(); });
+  resultsEl.addEventListener('pointermove', () => { if (deferred) flushDeferred(); });
+  applyScopeChrome();
 
   // Click outside (on the ::backdrop / dialog itself, not children) closes.
   // Same pattern as session-info-dialog.
@@ -212,18 +260,22 @@ function ensureDialog() {
     // list. Without a server index this IS the answer, so it may claim
     // "No matching sessions" right away; with one, the empty state waits
     // for the authoritative reply.
-    paintSessions(q, null, !backend.hasSearch());
+    // A keystroke is the one moment the list may re-rank freely (the
+    // user caused it): drop any deferred / re-rankable answer.
+    deferred = null; rerankable = null; hidePill();
+    const caps = scopeCaps(scope);
+    paintSessions(q, null, !backend.hasSearch(), caps.sessionsInstant);
     if (messagesListEl) messagesListEl.innerHTML = '';
+    if (artifactsListEl) artifactsListEl.innerHTML = '';
     if (!q.trim() || !backend.hasSearch()) {
       if (messagesStatusEl) messagesStatusEl.textContent = '';
+      if (artifactsStatusEl) artifactsStatusEl.textContent = '';
       rebuildVisibleHits();
       return;
     }
-    if (messagesStatusEl) {
-      messagesStatusEl.textContent = messagesStatusText({
-        query: q, hitCount: 0, serverAnswered: false, hasSearch: true,
-      });
-    }
+    const pending = messagesStatusText({ query: q, hitCount: 0, serverAnswered: false, hasSearch: true });
+    if (messagesStatusEl) messagesStatusEl.textContent = scope === 'all' || scope === 'messages' ? pending : '';
+    if (artifactsStatusEl) artifactsStatusEl.textContent = scope === 'all' || scope === 'artifacts' ? pending : '';
     rebuildVisibleHits();
     // Debounce the backend round-trip — one request per type-and-pause,
     // not one per keystroke.
@@ -240,6 +292,15 @@ function ensureDialog() {
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       moveActive(-1);
+    } else if (e.key === 'Tab') {
+      // Cycle the scope chips (the palette convention); Shift+Tab backwards.
+      e.preventDefault();
+      const i = SCOPES.indexOf(scope);
+      setScope(SCOPES[(i + (e.shiftKey ? -1 : 1) + SCOPES.length) % SCOPES.length]);
+    } else if (e.key === 'ArrowRight' && pillEl && !pillEl.hidden) {
+      // The explicit re-rank / apply: the only other moment rows may move.
+      e.preventDefault();
+      applyPill();
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const hit = visibleHits[activeIdx];
@@ -247,6 +308,95 @@ function ensureDialog() {
     }
     // Esc is built-in on <dialog> — fires the close event.
   });
+}
+
+// ── Scope chips ───────────────────────────────────────────────────────
+
+function setScope(next: SearchScope) {
+  if (!SCOPES.includes(next) || next === scope) return;
+  scope = next;
+  applyScopeChrome();
+  // Re-run as if the query had been typed again (a user action — the
+  // list may re-rank).
+  if (inputEl) inputEl.dispatchEvent(new Event('input'));
+}
+
+function applyScopeChrome() {
+  if (!dialogEl) return;
+  dialogEl.querySelectorAll<HTMLButtonElement>('.cmdk-scope').forEach((b) => {
+    const on = b.dataset.scope === scope;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  dialogEl.dataset.scope = scope;
+  for (const s of ['sessions', 'artifacts', 'messages'] as const) {
+    const show = scope === 'all' || scope === s;
+    (dialogEl.querySelector(`[data-section-title="${s}"]`) as HTMLElement | null)?.toggleAttribute('hidden', !show);
+    (dialogEl.querySelector(`ul[data-section="${s}"]`) as HTMLElement | null)?.toggleAttribute('hidden', !show);
+  }
+  if (inputEl) {
+    inputEl.placeholder = scope === 'all' ? 'Search sessions, artifacts and messages…'
+      : scope === 'sessions' ? 'Search sessions…' : scope === 'artifacts' ? 'Search artifacts…' : 'Search messages…';
+  }
+}
+
+// ── Stable repaint: the pill, deferral, re-rank ───────────────────────
+
+function showPill(text: string) {
+  if (!pillEl) return;
+  pillEl.textContent = text;
+  pillEl.hidden = false;
+}
+function hidePill() { if (pillEl) pillEl.hidden = true; }
+
+/** A deferred answer lands once the pointer leaves the rows (or moves —
+ *  a moving pointer is not about to click). */
+function flushDeferred() {
+  if (!deferred) return;
+  const d = deferred; deferred = null;
+  if (inputEl && inputEl.value !== d.q) return;
+  paintServerResult(d.q, d.result, { stable: true });
+}
+
+/** The pill's action: apply the deferred answer, or the full ranking. */
+function applyPill() {
+  hidePill();
+  if (deferred) { const d = deferred; deferred = null; if (inputEl && inputEl.value === d.q) paintServerResult(d.q, d.result, { stable: false }); return; }
+  if (rerankable) { const r = rerankable; rerankable = null; if (inputEl && inputEl.value === r.q) paintServerResult(r.q, r.result, { stable: false }); }
+}
+
+/** Paint one server answer. `stable` keeps painted session rows where
+ *  they are and appends the rest; when the full ranking would differ,
+ *  the pill offers it. `stable: false` paints the ranking outright. */
+function paintServerResult(q: string, result: SearchResult, opts: { stable: boolean }) {
+  if (!messagesListEl || !messagesStatusEl || !sessionsListEl || !artifactsListEl || !artifactsStatusEl) return;
+  const caps = scopeCaps(scope);
+  const terms = parseQuery(q).terms;
+  const painted = Array.from(sessionsListEl.querySelectorAll<HTMLElement>('li.cmdk-row')).map((li) => li.dataset.id || '');
+  const ranked = paintSessions(q, result.sessions, true, caps.sessions, { dryRun: true });
+  const rankedIds = ranked.map((r) => r.id);
+  const order = opts.stable ? stableOrder(painted, rankedIds) : rankedIds;
+  paintSessions(q, result.sessions, true, caps.sessions, { order });
+  artifactsListEl.innerHTML = '';
+  const artifacts = Array.isArray(result.artifacts) ? result.artifacts : [];
+  for (const a of artifacts) artifactsListEl.appendChild(renderArtifactRow(a, terms));
+  artifactsStatusEl.textContent = (scope === 'all' || scope === 'artifacts')
+    ? (artifacts.length ? '' : 'no matches') : '';
+  messagesListEl.innerHTML = '';
+  if (!result.error) {
+    for (const h of result.hits) messagesListEl.appendChild(renderMessageRow(h, terms));
+  }
+  messagesStatusEl.textContent = (scope === 'all' || scope === 'messages')
+    ? messagesStatusText({ query: q, hitCount: result.hits.length, serverAnswered: true, hasSearch: true, error: result.error || null })
+    : '';
+  rebuildVisibleHits();
+  if (opts.stable && order.join('|') !== rankedIds.join('|')) {
+    rerankable = { q, result };
+    showPill('Better matches arrived — press → to re-rank');
+  } else {
+    rerankable = null;
+    hidePill();
+  }
 }
 
 /** Client-side session views for `q` over the cached drawer list: the
@@ -277,13 +427,24 @@ function clientSessionViews(q: string): SessionView[] {
 /** Paint the sessions section. `serverRows === null` is the instant
  *  client paint; otherwise the server answer is reconciled INTO the
  *  client rows (add/merge, never remove). */
-function paintSessions(q: string, serverRows: SearchSessionRow[] | null, serverAnswered: boolean) {
-  if (!sessionsListEl) return;
+function paintSessions(
+  q: string, serverRows: SearchSessionRow[] | null, serverAnswered: boolean, cap = 10,
+  opts: { dryRun?: boolean; order?: string[] } = {},
+): SessionView[] {
+  if (!sessionsListEl) return [];
   const terms = parseQuery(q).terms;
   const client = clientSessionViews(q);
-  const rows = serverRows
-    ? reconcileSessions(client, serverRows.map((r) => viewFromServer(r, terms)), 10)
-    : client.slice(0, 10);
+  let rows = serverRows
+    ? reconcileSessions(client, serverRows.map((r) => viewFromServer(r, terms)), cap)
+    : client.slice(0, cap);
+  if (opts.dryRun) return rows;
+  if (opts.order) {
+    // The stable order: painted rows first in their painted order, then
+    // the newcomers — see paintServerResult.
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    rows = opts.order.map((id) => byId.get(id)).filter((r): r is SessionView => !!r);
+  }
+  if (scope !== 'all' && scope !== 'sessions') rows = [];
   sessionsListEl.innerHTML = '';
   for (const v of rows) sessionsListEl.appendChild(renderSessionRow(v));
   const empty = sessionsEmptyText({ query: q, rowCount: rows.length, serverAnswered });
@@ -294,6 +455,7 @@ function paintSessions(q: string, serverRows: SearchSessionRow[] | null, serverA
     sessionsListEl.appendChild(li);
   }
   rebuildVisibleHits();
+  return rows;
 }
 
 /** Fill `el` with `text`, wrapping each highlight range in <mark>. */
@@ -357,21 +519,19 @@ async function runUnifiedSearch(q: string, seq: number) {
   const ctl = new AbortController();
   messagesAbortCtl = ctl;
   try {
-    const result = await backend.search(q, 'both', { limit: 20, signal: ctl.signal });
+    const caps = scopeCaps(scope);
+    const result = await backend.search(q, 'both', { limit: caps.limit, signal: ctl.signal, scope });
     if (!querySeq.isCurrent(seq) || ctl.signal.aborted) return;
     if (!messagesListEl || !messagesStatusEl || !sessionsListEl) return;
     if (inputEl && inputEl.value !== q) return;
-    paintSessions(q, result.sessions, true);
-    messagesListEl.innerHTML = '';
-    if (!result.error) {
-      const terms = parseQuery(q).terms;
-      for (const h of result.hits) messagesListEl.appendChild(renderMessageRow(h, terms));
+    if (pointerOverResults) {
+      // Nothing moves under the pointer: hold the answer until it leaves
+      // or moves, and say so where the rows would have landed.
+      deferred = { q, result };
+      showPill('Results updated — move the mouse or press → to show');
+      return;
     }
-    messagesStatusEl.textContent = messagesStatusText({
-      query: q, hitCount: result.hits.length, serverAnswered: true,
-      hasSearch: true, error: result.error || null,
-    });
-    rebuildVisibleHits();
+    paintServerResult(q, result, { stable: true });
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
     if (!querySeq.isCurrent(seq)) return;
@@ -438,6 +598,42 @@ function renderMessageRow(h: ServerMessageHit, terms: string[]): HTMLLIElement {
   return li;
 }
 
+/** Artifact hits by id for the keyboard list (the DOM row carries only
+ *  the id; activation needs the whole hit). */
+const artifactById = new Map<string, SearchArtifactHit>();
+
+function renderArtifactRow(a: SearchArtifactHit, terms: string[]): HTMLLIElement {
+  artifactById.set(a.id, a);
+  const li = document.createElement('li');
+  li.className = 'cmdk-row';
+  li.dataset.kind = 'artifact';
+  li.dataset.id = a.id;
+  const title = document.createElement('div');
+  title.className = 'cmdk-row-title';
+  const tRanges = Array.isArray(a.title_highlights) && a.title_highlights.length ? a.title_highlights : highlightRanges(a.title, terms);
+  paintHighlighted(title, a.title, tRanges);
+  li.appendChild(title);
+  if (a.snippet) {
+    const ex = document.createElement('div');
+    ex.className = 'cmdk-row-excerpt';
+    const ranges = Array.isArray(a.highlights) && a.highlights.length ? a.highlights : highlightRanges(a.snippet, terms);
+    paintHighlighted(ex, a.snippet, ranges);
+    li.appendChild(ex);
+  }
+  const meta = document.createElement('div');
+  meta.className = 'cmdk-row-meta';
+  const parts: string[] = [];
+  parts.push(a.source === 'capture' ? 'meeting' : (a.format === 'markdown' ? 'md' : a.format === 'html' ? 'html' : 'txt'));
+  const base = (a.path || '').split('/').filter(Boolean).pop();
+  if (base) parts.push(base);
+  if (typeof a.displayed_at === 'number' && a.displayed_at > 0) parts.push(formatHitTime(a.displayed_at / 1000));
+  meta.textContent = parts.join(' · ');
+  li.appendChild(meta);
+  li.addEventListener('mouseenter', () => setActiveByElement(li));
+  li.addEventListener('click', () => { activate({ kind: 'artifact', ...a }); });
+  return li;
+}
+
 function rebuildVisibleHits() {
   visibleHits = [];
   if (sessionsListEl) {
@@ -449,6 +645,13 @@ function rebuildVisibleHits() {
         title: li.querySelector('.cmdk-row-title')?.textContent || '',
         meta: li.querySelector('.cmdk-row-meta')?.textContent || '',
       });
+    });
+  }
+  if (artifactsListEl) {
+    artifactsListEl.querySelectorAll('li.cmdk-row').forEach((el) => {
+      const li = el as HTMLLIElement;
+      const a = artifactById.get(li.dataset.id || '');
+      if (a) visibleHits.push({ kind: 'artifact', ...a });
     });
   }
   if (messagesListEl) {
@@ -497,6 +700,20 @@ function setActiveByElement(el: HTMLLIElement) {
 }
 
 async function activate(hit: Hit) {
+  if (hit.kind === 'artifact') {
+    // An artifact hit re-shelves the cached doc and opens it in the
+    // reader — the same path Recently closed uses (docShelfSync).
+    close();
+    const { kind: _k, ...meta } = hit;
+    void _k;
+    const ok = await reopenClosedDoc({
+      id: meta.id, title: meta.title, path: meta.path, format: meta.format, source: meta.source,
+      captureId: meta.capture_id, chatId: meta.chat_id,
+      updatedAt: meta.displayed_at ?? Date.now(), closedAt: meta.displayed_at ?? Date.now(),
+    });
+    if (!ok) diag(`cmdk: artifact ${meta.id} (${meta.title}) has no content to open`);
+    return;
+  }
   // Session-hit activations resume via backend.resumeSession + the
   // standard onResume callback (replaySessionMessages in main.ts).
   // Message-hit activations route through onDrillToMessageCb so they

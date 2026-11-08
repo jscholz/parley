@@ -116,7 +116,7 @@ export default async function run({ page, log, mock }) {
   assert(firstMeta.includes('Daily recap'), `hit meta names the chat: "${firstMeta}"`);
   assert(firstMeta.includes('user'), `hit meta names the role: "${firstMeta}"`);
   assert(firstMeta.includes('+2 more in this chat'), `hit meta reports collapsed hits: "${firstMeta}"`);
-  const status = await page.textContent('.cmdk-status');
+  const status = await page.textContent('.cmdk-messages-status');
   assert(status.trim() === '', `messages status clears when hits exist, got "${status}"`);
   log('message hits: marked excerpts, chat/role/+N meta ✓');
 
@@ -131,7 +131,7 @@ export default async function run({ page, log, mock }) {
     null,
     { timeout: 5_000, polling: 100 },
   );
-  const status2 = await page.textContent('.cmdk-status');
+  const status2 = await page.textContent('.cmdk-messages-status');
   assert(status2.trim() === 'no matches', `messages status reads "no matches", got "${status2}"`);
   log('empty states arrive with the server answer ✓');
 }
