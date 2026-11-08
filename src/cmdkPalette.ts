@@ -324,6 +324,11 @@ function renderSessionRow(v: SessionView): HTMLLIElement {
   const parts: string[] = [];
   if (v.source) parts.push(v.source);
   if (typeof v.messageCount === 'number') parts.push(`${v.messageCount} msgs`);
+  // When the chat was last active (2026-11-08: "include dates on search
+  // results so I can see what's most recent") — same compact form as the
+  // message hits below.
+  const when = typeof v.lastMessageAt === 'number' ? formatHitTime(v.lastMessageAt) : '';
+  if (when) parts.push(when);
   meta.textContent = parts.join(' · ');
   if (v.match === 'id') {
     // The reason badge lives on the meta line so `.cmdk-row-title` stays

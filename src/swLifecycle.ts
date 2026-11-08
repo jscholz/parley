@@ -152,6 +152,52 @@ export function initPassiveUpdateDetector(): void {
   }).catch(() => {});
 }
 
+/** Watch the BUILD stamp, not just the service worker (2026-11-08). A
+ *  plain deploy rebuilds /build/* under new hashes but leaves sw.js
+ *  byte-identical, so the passive detector above never fires and the
+ *  open tab shows the old bundle with no hint — field: "not on desktop
+ *  it's not", after a change the live server already served. This
+ *  re-reads build/version.json (the About panel's stamp) whenever the
+ *  tab becomes visible and every POLL_MS while it is, and flags
+ *  "· update ready" when builtAt moves. Refresh then reloads into the
+ *  new index (network-first for /build/*). Best effort: any fetch
+ *  failure is silence, never a false hint. */
+const BUILD_STAMP_POLL_MS = 10 * 60_000;
+let knownBuiltAt: string | null = null;
+type BuildStamp = { sha?: string; builtAt?: string } | null;
+async function readBuildStamp(): Promise<BuildStamp> {
+  const r = await fetch('build/version.json', { cache: 'no-store' });
+  if (!r.ok) return null;
+  return r.json();
+}
+/** `read` is a test seam: the smoke feeds stamps directly because the
+ *  service worker answers this fetch (network-first for /build/*), and
+ *  Playwright's request routing never sees SW-served requests. */
+export async function checkBuildStamp(read: () => Promise<BuildStamp> = readBuildStamp): Promise<boolean> {
+  try {
+    const v = await read();
+    const builtAt = typeof v?.builtAt === 'string' ? v.builtAt : null;
+    if (!builtAt) return false;
+    if (knownBuiltAt === null) { knownBuiltAt = builtAt; return false; }
+    if (builtAt === knownBuiltAt) return false;
+    knownBuiltAt = builtAt;
+    log(`[refresh] newer build on the server (${v?.sha || '?'} @ ${builtAt}) — update ready`);
+    markUpdateAvailable();
+    return true;
+  } catch { return false; }
+}
+export function __resetBuildStampForTests(): void { knownBuiltAt = null; }
+export function initBuildStampWatch(): void {
+  if (typeof document === 'undefined') return;
+  void checkBuildStamp();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void checkBuildStamp();
+  });
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') void checkBuildStamp();
+  }, BUILD_STAMP_POLL_MS);
+}
+
 /** Expose `__forceUpdate()` on `window` for DevTools. When the normal
  *  refresh flow gets stuck ("update ready" toast but reload doesn't
  *  pick up the new code), the user can type

@@ -96,6 +96,12 @@ export default async function run({ page, log, mock }) {
     `session title marks the matched terms, got ${JSON.stringify(titleMarks)}`,
   );
   log('session row survives with marked terms ✓');
+  // (4) The meta line says when the chat was last active (2026-11-08:
+  // "include dates on search results so I can see what's most recent").
+  const sessMeta = await page.locator(`${sessRow(TITLED)} .cmdk-row-meta`).textContent();
+  // Locale-agnostic: "Nov 8, 1:01 PM" or "8 Nov, 13:01".
+  assert(/(?:[A-Z][a-z]{2} \d{1,2}|\d{1,2} [A-Z][a-z]{2}), \d{1,2}:\d{2}/.test(sessMeta || ''), `session meta carries the last-active date+time, got "${sessMeta}"`);
+  log('session row shows its last-active date ✓');
 
   // (3) Message hits: capped at 3 for the chat, marked excerpt, meta.
   const hitRows = page.locator(`.cmdk-row[data-kind="message"][data-session-id="${BODIES}"]`);

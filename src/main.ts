@@ -12,6 +12,7 @@ import { mountDevPill, isDevMode } from './util/devMode.ts';
 import {
   waitForSwActivation,
   initPassiveUpdateDetector,
+  initBuildStampWatch,
   installForceUpdateConsoleHook,
 } from './swLifecycle.ts';
 import { handleNotification, handleUserMessage } from './backendEvents.ts';
@@ -5471,6 +5472,7 @@ async function boot() {
 
   // SW passive-update detector — see swLifecycle.ts.
   initPassiveUpdateDetector();
+  initBuildStampWatch();
 
   // Listen mode bootstrap — URL flag for headless smoke tests. Auto-arms
   // Listen on boot when ?listen=1 is present so the smoke can drive
