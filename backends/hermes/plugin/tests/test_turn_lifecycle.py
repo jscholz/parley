@@ -268,3 +268,28 @@ def test_nameless_complete_closes_the_oldest_anonymous_turn_only():
     assert lc.is_active("c1") is True              # real-b still runs
     lc.complete("c1", "real-b", "success")
     assert lc.is_active("c1") is False
+
+
+# ── metadata must stay EMPTY on inbound events (field report 2026-11-10) ──
+#
+# hermes ≥ 298a96d51c refuses admission of any non-WhatsApp event that
+# carries metadata ("Native admission refused: invalid_params (metadata)"),
+# so the old {"parley_user_message_id": …} tag dropped every message on a
+# current hermes. The id rides the lifecycle's event→umid map instead.
+
+def test_user_message_id_resolves_from_the_remembered_event_when_metadata_is_empty():
+    lc = TurnLifecycle()
+    lc.remember_event("evt-9", "umsg_9")
+    assert lc.user_message_id_for(_event(message_id="evt-9")) == "umsg_9"
+    assert lc.user_message_id_for(_event(message_id="evt-unknown")) == ""
+
+
+def test_dispatch_never_tags_inbound_events_with_metadata():
+    import pathlib, re
+    src = (pathlib.Path(__file__).resolve().parents[1] / "__init__.py").read_text()
+    # The MessageEvent built in _dispatch_message must pass metadata={}.
+    m = re.search(r"event = MessageEvent\((.*?)\n\s*\)\n", src, re.S)
+    assert m, "MessageEvent construction not found"
+    body = "\n".join(l for l in m.group(1).splitlines() if not l.strip().startswith("#"))
+    assert re.search(r"metadata=\{\}", body), "inbound MessageEvent must carry empty metadata"
+    assert "parley_user_message_id" not in body, "never tag inbound events — hermes refuses non-WhatsApp metadata"

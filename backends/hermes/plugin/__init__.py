@@ -1003,7 +1003,16 @@ class ParleyAdapter(BasePlatformAdapter):
             message_id=str(uuid.uuid4()),
             media_urls=media_urls,
             media_types=media_types,
-            metadata={"parley_user_message_id": user_message_id} if user_message_id else {},
+            # EMPTY on purpose. hermes ≥ 298a96d51c (2026-10-11) refuses
+            # admission of any event carrying non-empty metadata unless the
+            # platform is WhatsApp (gateway/session_envelope._native_metadata
+            # → "Native admission refused: invalid_params (metadata)"), so
+            # the old {"parley_user_message_id": …} tag silently dropped
+            # EVERY message on a current hermes (field report, Tom R.,
+            # 2026-11-10, B5). The id travels through the lifecycle's
+            # event→user_message_id map instead (remember_event below;
+            # user_message_id_for reads it when metadata is empty).
+            metadata={},
         )
         self._lifecycle.remember_event(event.message_id, user_message_id)
         await self.handle_message(event)
