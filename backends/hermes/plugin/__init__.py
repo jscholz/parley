@@ -86,9 +86,12 @@ repo for design notes.
 
 Install
 -------
-This adapter requires a hermes patch that registers
-the Platform entry and the adapter-factory branch. See
-``0001-add-parley-platform.patch`` and ``README.md`` next to this file.
+No hermes patch: since v0.2.0 the platform registers through hermes'
+plugin-driven platform registry. Symlink this directory into
+``~/.hermes/plugins/parley``, opt in with ``hermes plugins enable
+parley`` (hermes skips user plugins that are not in ``plugins.enabled``),
+set ``PARLEY_PLATFORM_TOKEN``, add the platform toolsets, restart the
+gateway. Step list: ``../README.md`` (Install).
 
 Plugin shape note
 -----------------

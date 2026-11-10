@@ -49,7 +49,6 @@ modifying the plugin.
 | `parley_dispatcher.py` | Plugin-owned web-push dispatch (engagement gate, kind toggles, body shaping). |
 | `parley_turn_buffer.py` | In-memory mid-turn buffer for mid-flight reload (transient). |
 | `plugin.yaml` | Hermes plugin manifest. |
-| `0001-add-parley-platform.patch` | Required `hermes-agent` patch (see below). |
 
 ## Message store (`~/.hermes/parley.db`)
 
@@ -103,35 +102,36 @@ view. They're kept in sync by:
 
 ## Install
 
-Hermes' plugin loader doesn't currently support registering a new
-platform adapter via `PluginContext` (the API exposes hooks, tools, slash
-commands, etc — not platform registration). Until upstream issue
-[hermes-agent#3823](https://github.com/.../issues/3823) lands, the
-adapter must be registered by patching the gateway directly. The plugin
-files still load through the normal plugin loader; only the
-`Platform` entry + `_create_adapter` factory branch live in the
-patch.
+No hermes patch is needed: since v0.2.0 the plugin registers the
+`parley` platform through hermes' plugin-driven platform registry
+(`gateway/platform_registry.py`). The canonical step list lives in
+[`../README.md`](../README.md#install); in short:
 
 ```bash
-# 1. Patch hermes-agent.
-cd <your hermes-agent install>
-patch -p1 < <path-to-this-dir>/0001-add-parley-platform.patch
-
-# 2. Install the plugin (symlink so edits in the parley repo land
+# 1. Install the plugin (symlink so edits in the parley repo land
 #    immediately in ~/.hermes/plugins/ without a re-copy).
+mkdir -p ~/.hermes/plugins
 rm -rf ~/.hermes/plugins/parley
 ln -s <path-to-this-dir> ~/.hermes/plugins/parley
 
-# 3. Enable in ~/.hermes/config.yaml:
-#    plugins:
-#      enabled:
-#        - parley
+# 2. Opt in — hermes skips user plugins that are not listed here
+#    (silently, DEBUG log only):
+hermes plugins enable parley
+#    (= plugins.enabled: [parley] in ~/.hermes/config.yaml)
 
-# 4. Auth token + (optional) port in ~/.hermes/.env:
+# 3. Auth token + (optional) port in ~/.hermes/.env:
 echo "PARLEY_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 # echo 'PARLEY_PLATFORM_PORT=8645' >> ~/.hermes/.env  # default
 
-# 5. Restart the gateway.
+# 4. Toolsets for the parley platform in ~/.hermes/config.yaml
+#    (both entries — see ../README.md for why the second is explicit):
+#    platform_toolsets:
+#      parley:
+#        - hermes-parley
+#        - parley
+
+# 5. Restart the gateway, then:
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8645/v1/health   # 401 = up
 ```
 
 The same `PARLEY_PLATFORM_TOKEN` value goes into the parley proxy

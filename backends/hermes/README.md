@@ -9,7 +9,6 @@ agent-declared model picker, openrouter-backed catalog).
 | Path | What |
 |---|---|
 | `plugin/__init__.py` | The hermes plugin. Exposes the agent contract (`/v1/responses`, `/v1/conversations*`, `/v1/events`) plus the optional `/v1/gateway/conversations` (cross-platform drawer) and `/v1/settings/*` (model picker) extensions. Loads into hermes-agent's process via the plugin loader. |
-| `plugin/0001-add-parley-platform.patch` | One-time patch against hermes-core that registered the platform (obsolete since v0.2.0 plugin-driven registration; kept for old installs). |
 | `plugin/plugin.yaml` | Hermes plugin manifest. |
 | `plugin/README.md` | Plugin-specific install + protocol notes. |
 | `config.example.yaml` | Hermes-side config keys the plugin reads/writes — annotated subset of `~/.hermes/config.yaml`. |
@@ -17,20 +16,32 @@ agent-declared model picker, openrouter-backed catalog).
 ## Install
 
 ```bash
-# 1. Install hermes-agent itself per its docs:
+# 1. Install hermes-agent itself per its docs (no patching needed —
+#    the plugin registers the platform through hermes' own plugin API):
 #    https://github.com/NousResearch/hermes-agent
 
-# 2. (pre-v0.2.0 installs only) Apply the one-time hermes-core patch:
-cd <your hermes-agent install>
-patch -p1 < <parley-repo>/backends/hermes/plugin/0001-add-parley-platform.patch
-
-# 3. Symlink the plugin into hermes's plugin search path:
+# 2. Put the plugin where hermes looks (a symlink, so a `git pull` of
+#    this repo updates it in place):
+mkdir -p ~/.hermes/plugins
 ln -s "<parley-repo>/backends/hermes/plugin" ~/.hermes/plugins/parley
+
+# 3. OPT IN. hermes loads a user plugin only when it is listed under
+#    plugins.enabled — otherwise it is skipped silently (DEBUG log
+#    only), the parley port never opens, and the proxy reports its
+#    agent as unreachable. Either:
+hermes plugins enable parley
+#    …or by hand in ~/.hermes/config.yaml:
+#      plugins:
+#        enabled:
+#          - parley
 
 # 4. Set the shared bearer token on the hermes side:
 echo "PARLEY_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 
-# 5. Enable BOTH parley toolsets in ~/.hermes/config.yaml.
+# 5. Enable BOTH parley toolsets in ~/.hermes/config.yaml — add the
+#    `parley:` entry UNDER THE EXISTING `platform_toolsets:` key (a fresh
+#    hermes config already has one; a second copy of the key is a YAML
+#    duplicate and hermes then ignores the whole file).
 #    hermes-parley = the auto-generated core-tools composite (file,
 #    terminal, web, ...). parley = the plugin's own tools
 #    (display_doc). The second entry must be explicit: hermes'
@@ -41,8 +52,12 @@ echo "PARLEY_PLATFORM_TOKEN=$(openssl rand -hex 32)" >> ~/.hermes/.env
 #        - hermes-parley
 #        - parley
 
-# 6. Restart hermes-gateway to load the plugin.
-systemctl --user restart hermes-gateway
+# 6. (Re)start the gateway to load the plugin:
+systemctl --user restart hermes-gateway     # or: hermes gateway run
+
+# 7. Verify the plugin is up (401 = up, token required; a refused
+#    connection means step 3 was skipped):
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8645/v1/health
 ```
 
 Then in parley's `.env`:

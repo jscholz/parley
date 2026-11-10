@@ -273,3 +273,15 @@ via `releaseCaptureIfActive` in `main.ts`.
 
 By contributing you agree that your contributions will be licensed under the
 Apache License 2.0 (see `LICENSE`).
+
+## Clean-install check
+
+The install docs are code too. `scripts/virgin-install/virgin-install.sh`
+runs the README's install paths (clone + `install.sh`, `npx parleyvoo`,
+and the hermes backend guide) inside a throwaway `ubuntu:24.04`
+container, as a brand-new user would, and prints what broke. Run it
+before changing anything under `backends/hermes/README.md`,
+`backends/hermes/plugin/README.md`, `install.sh` or `bin/cli.mjs`.
+`proxy/parley/__tests__/hermesInstallDocs.test.ts` guards the hermes
+guide's load-bearing lines (the `plugins.enabled` opt-in, no references
+to deleted files) in the ordinary unit run.
