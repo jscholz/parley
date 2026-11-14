@@ -541,6 +541,8 @@ def build_push_health(db, dispatcher: Optional["PushDispatcher"] = None) -> Dict
     }
     if dispatcher is not None and getattr(dispatcher, "health", None) is not None:
         out["monitor"] = dispatcher.health.snapshot()
+    if dispatcher is not None:
+        out["badge_sync"] = getattr(dispatcher, "badge_sync_last", None)
     return out
 
 
@@ -603,6 +605,9 @@ class PushDispatcher:
         self._badge_sync_timer: Optional[threading.Timer] = None
         self._badge_sync_lock = threading.Lock()
         self._last_badge_sent: Dict[str, int] = {}
+        # Last sync outcome for /v1/push/health (the gateway logs at
+        # WARNING, so this is how a field check sees the sync happened).
+        self.badge_sync_last: Optional[Dict] = None
         # Native (APNs) lane for the iOS shell. Config is read lazily on the first
         # dispatch (env may be completed after the gateway started); tests inject
         # a fake sender via ``apns_send``.
@@ -747,10 +752,12 @@ class PushDispatcher:
             except Exception as err:
                 logger.warning("badge sync send error: %s", err)
         if delivered or pruned:
-            logger.info("badge sync total=%d reason=%s delivered=%d same=%d pruned=%d",
-                        total, reason or "-", delivered, skipped_same, pruned)
-        return {"badge": total, "delivered": delivered, "skipped_same": skipped_same,
-                "pruned": pruned, "tokens": len(tokens)}
+            logger.warning("badge sync total=%d reason=%s delivered=%d same=%d pruned=%d",
+                           total, reason or "-", delivered, skipped_same, pruned)
+        out = {"badge": total, "delivered": delivered, "skipped_same": skipped_same,
+               "pruned": pruned, "tokens": len(tokens)}
+        self.badge_sync_last = {**out, "reason": reason, "at": time.time()}
+        return out
 
     def dispatch_envelope(self, env: Dict, *, body_override: Optional[str] = None) -> Dict:
         """Fire push for a single envelope. Synchronous (called inside

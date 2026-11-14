@@ -158,6 +158,8 @@ def test_badge_sync_sends_server_total_dedupes_and_clears_with_zero(dispatcher, 
     out = dispatcher.sync_native_badge(reason="seen")
     assert out["badge"] == 0 and out["delivered"] == 1
     assert dispatcher._sent_native[-1][1] == {"badge": 0, "badge_only": True}
+    health = sd.build_push_health(db, dispatcher)["badge_sync"]
+    assert health["badge"] == 0 and health["delivered"] == 1 and health["reason"] == "seen" and health["at"] > 0
 
 
 def test_alert_push_badge_counts_as_sent_so_sync_does_not_repeat_it(dispatcher, db):
