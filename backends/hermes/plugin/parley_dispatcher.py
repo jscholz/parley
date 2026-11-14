@@ -212,11 +212,23 @@ _APPROVAL_REPLY_RE = re.compile(r"^\**Reply\s+`?/approve", re.IGNORECASE | re.MU
 # reply — send() turns it into an ephemeral `status` envelope instead of a
 # bubble. KEEP IN SYNC with src/util/progressHeartbeat.ts and
 # proxy/parley/notifications/dispatch.ts isProgressHeartbeat.
-_PROGRESS_HEARTBEAT_RE = re.compile(r"^\s*⏳\s*(Working|Still working)\b", re.IGNORECASE)
+# Every ⏳ pulse the gateway emits through send() on a 15 s cadence:
+#   * progress heartbeat        "⏳ Working — N min — iteration i/n, tool"
+#                               "⏳ Still working… (N min elapsed …)"
+#   * cross-process lease wait  "⏳ Another Hermes process is using this session; …"
+#                               "⏳ Still waiting for the other Hermes process on this session (Ns)..."
+#     (agent/turn_facade_lease.py — a turn queued behind a running async
+#     delegation child). Field 2026-11-13 21:06–21:26: the wait ran 20 min
+#     and only the first two forms were matched, so 80 lease pulses became
+#     80 bubbles, 80 alert pushes and 80 unread rows (the icon's "96").
+_PROGRESS_HEARTBEAT_RE = re.compile(
+    r"^\s*⏳\s*(Working|Still working|Still waiting|Another Hermes process)\b", re.IGNORECASE,
+)
 
 
 def is_progress_heartbeat(text: str) -> bool:
-    """True for the gateway's mid-turn "⏳ Working — …" progress pulse."""
+    """True for a gateway mid-turn ⏳ pulse (progress heartbeat or lease wait):
+    a working indicator, never a bubble, never a push, never unread."""
     return bool(isinstance(text, str) and _PROGRESS_HEARTBEAT_RE.search(text or ""))
 
 

@@ -53,7 +53,13 @@ def test_heartbeat_regex_matches_both_gateway_formats(plugin):
     assert disp.is_progress_heartbeat("⏳ Working — 3 min — iteration 4/60, terminal")
     assert disp.is_progress_heartbeat("⏳ Working — 1 min")
     assert disp.is_progress_heartbeat("⏳ Still working… (3 min elapsed — iteration 4/60, tool)")
+    # Cross-process lease wait (turn queued behind an async delegation child):
+    # the same 15 s cadence, the same ephemeral treatment.
+    assert disp.is_progress_heartbeat("⏳ Another Hermes process is using this session; waiting for it to finish before starting your turn...")
+    assert disp.is_progress_heartbeat("⏳ Still waiting for the other Hermes process on this session (435s)...")
     assert not disp.is_progress_heartbeat("Working on it, back shortly.")
+    assert not disp.is_progress_heartbeat("⚡ Interrupting current task (14 min elapsed, iteration 0/60). I'll respond to your message shortly.")
+    assert not disp.is_progress_heartbeat("⚠️ I seem to be stuck (no activity for 15 min).")
     assert not disp.is_progress_heartbeat("⚠️ No activity for 5 min.")
     assert not disp.is_progress_heartbeat("")
     assert not disp.is_progress_heartbeat(None)  # type: ignore[arg-type]
@@ -83,6 +89,29 @@ def test_heartbeat_becomes_status_envelope_not_a_bubble(plugin):
     # same key, so the PWA replaces the indicator text in place.
     asyncio.run(adapter.send("c1", "⏳ Working — 4 min — iteration 5/60, terminal"))
     assert sent[1]["message_id"] == "status_c1"
+
+
+def test_lease_wait_pulses_become_one_status_line_not_bubbles(plugin):
+    """Field 2026-11-13: 80 lease-wait pulses over 20 min each rendered as a
+    bubble + alert push + unread row. They are a pulse: one status key per
+    chat, replaced in place, no reserved id consumed, no push."""
+    adapter, sent = _adapter(plugin)
+    adapter._reserve_response_message_id("c1", "msg_reserved")
+    first = asyncio.run(adapter.send(
+        "c1", "⏳ Another Hermes process is using this session; waiting for it to finish before starting your turn...",
+        metadata={"_interim_send": True},
+    ))
+    for n in (15, 30, 45):
+        asyncio.run(adapter.send(
+            "c1", f"⏳ Still waiting for the other Hermes process on this session ({n}s)...",
+            metadata={"_interim_send": True},
+        ))
+    assert first.success and first.message_id == "status_c1"
+    assert [e["type"] for e in sent] == ["status"] * 4
+    assert {e["message_id"] for e in sent} == {"status_c1"}
+    assert all(e["should_push"] is False and e["state"] == "working" for e in sent)
+    assert sent[-1]["text"].endswith("(45s)...")
+    assert adapter._response_message_ids == {"c1": "msg_reserved"}
 
 
 def test_each_send_in_a_turn_gets_its_own_bubble(plugin):
