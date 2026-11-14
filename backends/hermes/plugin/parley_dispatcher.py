@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import sys
+import threading
 import time
 from collections import deque
 from typing import Callable, Deque, Dict, Optional, Tuple
@@ -55,6 +56,13 @@ ENGAGEMENT_WINDOW_MS = 12_000
 # truncate hard; Apple's notification service tends to clip ~200
 # chars on Series 6/Watch app banners. Keep the budget conservative.
 PUSH_BODY_MAX_CHARS = 200
+
+# Trailing debounce for native badge sync (seconds). A burst of
+# unread_changed events (multi-chat /seen cascade, an active turn)
+# coalesces into one compute + one badge-only push per device. Matches
+# the PWA's own 1.5s refresh debounce in badge.ts so the app and the
+# icon settle on the same number in the same window.
+BADGE_SYNC_DEBOUNCE_S = 1.5
 
 
 # ── Per-type icons ─────────────────────────────────────────────────────
@@ -581,6 +589,20 @@ class PushDispatcher:
         # payloads simply omit badge and sw.js leaves the OS badge to
         # the page-side reconciler.
         self.unread_total_fn = unread_total_fn
+        # Native badge sync (2026-11-14). The iOS shell's icon number is
+        # written ONLY by APNs (WKWebView has no navigator.setAppBadge,
+        # so badge.ts's syncBadge is a silent no-op there). Every alert
+        # push carries the total, but reads made on any device — or in
+        # the shell itself — changed the total without any push, and the
+        # icon kept the stale number forever (field: icon 96, app 6).
+        # schedule_badge_sync() is called from the SAME event that makes
+        # the app re-fetch (an `unread_changed` envelope), computes the
+        # server total off the loop thread, and sends a badge-only push
+        # to each device token, deduped against the last value that
+        # device was sent. One number, one source, every surface derived.
+        self._badge_sync_timer: Optional[threading.Timer] = None
+        self._badge_sync_lock = threading.Lock()
+        self._last_badge_sent: Dict[str, int] = {}
         # Native (APNs) lane for the iOS shell. Config is read lazily on the first
         # dispatch (env may be completed after the gateway started); tests inject
         # a fake sender via ``apns_send``.
@@ -645,12 +667,15 @@ class PushDispatcher:
                 logger.warning("skip native type=%s chat=%s reason=apns_unconfigured (%d tokens)", env_type, chat_id, len(tokens))
             return {"delivered": 0, "pruned": 0, "tokens": len(tokens)}
         delivered = pruned = 0
+        badge = payload_dict.get("badge")
         for row in tokens:
             tok = row["token"]
             try:
                 self.apns_send(cfg, tok, payload_dict)
                 mark_native_token_used(self.db, tok)
                 delivered += 1
+                if isinstance(badge, int):
+                    self._last_badge_sent[tok] = badge
             except apns.ApnsError as err:
                 if err.prune:
                     remove_native_token(self.db, tok)
@@ -660,6 +685,72 @@ class PushDispatcher:
             except Exception as err:  # curl missing / unexpected
                 logger.warning("apns send error: %s", err)
         return {"delivered": delivered, "pruned": pruned, "tokens": len(tokens)}
+
+    # ── Native badge sync ────────────────────────────────────────────
+
+    def schedule_badge_sync(self, reason: str = "") -> bool:
+        """Debounced: (re)arm a timer that runs sync_native_badge on its
+        own daemon thread. Safe from any thread, including the loop.
+        Returns False when there is nothing to do (no total function)."""
+        if self.unread_total_fn is None:
+            return False
+        with self._badge_sync_lock:
+            if self._badge_sync_timer is not None:
+                self._badge_sync_timer.cancel()
+            t = threading.Timer(BADGE_SYNC_DEBOUNCE_S, self._run_badge_sync, args=(reason,))
+            t.daemon = True
+            self._badge_sync_timer = t
+            t.start()
+        return True
+
+    def _run_badge_sync(self, reason: str) -> None:
+        with self._badge_sync_lock:
+            self._badge_sync_timer = None
+        try:
+            self.sync_native_badge(reason=reason)
+        except Exception as err:  # never let a timer thread die loudly
+            logger.warning("badge sync failed (%s): %s", reason, err)
+
+    def sync_native_badge(self, *, reason: str = "") -> Dict:
+        """Send the server's unread total as a badge-only push to every
+        native token whose last-sent number differs. Synchronous and
+        blocking (compute + curl): call from a worker thread, never the
+        loop. Zero is sent as zero — it CLEARS the icon, which no alert
+        push can do (those floor at 1)."""
+        tokens = list_native_tokens(self.db)
+        if not tokens or self.unread_total_fn is None:
+            return {"badge": None, "delivered": 0, "skipped_same": 0, "pruned": 0, "tokens": len(tokens)}
+        cfg = self._apns_config()
+        if cfg is None:
+            return {"badge": None, "delivered": 0, "skipped_same": 0, "pruned": 0, "tokens": len(tokens),
+                    "skipped": "apns_unconfigured"}
+        total = max(0, int(self.unread_total_fn()))
+        payload = {"badge": total, "badge_only": True}
+        delivered = pruned = skipped_same = 0
+        for row in tokens:
+            tok = row["token"]
+            if self._last_badge_sent.get(tok) == total:
+                skipped_same += 1
+                continue
+            try:
+                self.apns_send(cfg, tok, payload)
+                mark_native_token_used(self.db, tok)
+                self._last_badge_sent[tok] = total
+                delivered += 1
+            except apns.ApnsError as err:
+                if err.prune:
+                    remove_native_token(self.db, tok)
+                    self._last_badge_sent.pop(tok, None)
+                    pruned += 1
+                else:
+                    logger.warning("badge sync send failed (%s %s)", err.status, err.reason)
+            except Exception as err:
+                logger.warning("badge sync send error: %s", err)
+        if delivered or pruned:
+            logger.info("badge sync total=%d reason=%s delivered=%d same=%d pruned=%d",
+                        total, reason or "-", delivered, skipped_same, pruned)
+        return {"badge": total, "delivered": delivered, "skipped_same": skipped_same,
+                "pruned": pruned, "tokens": len(tokens)}
 
     def dispatch_envelope(self, env: Dict, *, body_override: Optional[str] = None) -> Dict:
         """Fire push for a single envelope. Synchronous (called inside

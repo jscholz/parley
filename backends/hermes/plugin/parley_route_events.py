@@ -69,6 +69,18 @@ def publish_out_of_turn(adapter, env: Dict[str, Any]) -> bool:
     and is unaffected — only the wire field is rewritten.
     """
     _envelopes.warn_if_unknown(env.get("type"))
+    if env.get("type") == "unread_changed":
+        # The same event that makes every open client re-fetch its
+        # unread snapshot also re-derives the iOS icon number (badge-only
+        # APNs push). Hooked HERE, at the single publish point, so no
+        # unread mutation path can change the total without the icon
+        # following — by construction, not by remembering to call it.
+        hook = getattr(adapter, "_schedule_native_badge_sync", None)
+        if hook is not None:
+            try:
+                hook(env.get("cause") or "")
+            except Exception as exc:
+                logger.debug("[parley] badge sync schedule failed: %s", exc)
     chat_id = env.get("chat_id")
     if isinstance(chat_id, str) and chat_id and _GATEWAY_ID_SEP not in chat_id:
         env = {**env, "chat_id": _format_gateway_id(PARLEY_SOURCE, chat_id)}

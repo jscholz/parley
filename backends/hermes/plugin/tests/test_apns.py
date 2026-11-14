@@ -90,3 +90,19 @@ def test_send_via_curl_parses_status_and_reason(cfg, monkeypatch):
     assert json.loads(calls["input"])["aps"]["alert"]["title"] == "t"
     monkeypatch.setattr(sp, "run", lambda cmd, **kw: R("\n200"))
     apns.send_via_curl(cfg["cfg"], "b" * 64, {"title": "t", "body": "b"})  # no raise
+
+
+def test_badge_only_payload_and_collapse_header(cfg, monkeypatch):
+    assert apns.is_badge_only({"badge": 0, "badge_only": True})
+    assert not apns.is_badge_only({"badge": 3}) and not apns.is_badge_only({"badge_only": True})
+    assert apns.build_payload({"badge": 0, "badge_only": True}) == {"aps": {"badge": 0}}
+    assert apns.build_payload({"badge": -2, "badge_only": True}) == {"aps": {"badge": 0}}
+    import subprocess as sp
+    calls = {}
+    class R:
+        def __init__(self, out): self.stdout, self.returncode, self.stderr = out, 0, ""
+    monkeypatch.setattr(sp, "run", lambda cmd, **kw: calls.update(cmd=cmd, input=kw.get("input")) or R("\n200"))
+    apns.send_via_curl(cfg["cfg"], "b" * 64, {"badge": 7, "badge_only": True, "tag": "chat:x"})
+    assert json.loads(calls["input"]) == {"aps": {"badge": 7}}
+    assert any(h == f"apns-collapse-id: {apns.BADGE_SYNC_COLLAPSE_ID}" for h in calls["cmd"])
+    assert not any(h.startswith("apns-collapse-id: chat:x") for h in calls["cmd"])

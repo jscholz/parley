@@ -1946,6 +1946,15 @@ class ParleyAdapter(BasePlatformAdapter):
         v = env_get("PARLEY_PUSH_OWNED_BY_PLUGIN", "")
         return v == "true" or v == "1"
 
+    def _schedule_native_badge_sync(self, cause: str = "") -> None:
+        """unread_changed → iOS icon follows the server total (see
+        parley_route_events.publish_out_of_turn). Gated like dispatch:
+        only when this plugin owns push."""
+        d = getattr(self, "_push_dispatcher", None)
+        if d is None or not self._push_owned_by_plugin():
+            return
+        d.schedule_badge_sync(cause)
+
     def _maybe_migrate_legacy_push_subs(self) -> None:
         """One-shot migration: copy push subscriptions out of the
         proxy's JSON file (``~/.parley/notifications/push-subscriptions.json``)

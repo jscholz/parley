@@ -100,10 +100,28 @@ def provider_token(cfg: ApnsConfig, now: Optional[int] = None) -> str:
     return token
 
 
+BADGE_SYNC_COLLAPSE_ID = "parley-badge"
+
+
+def is_badge_only(payload: Dict[str, Any]) -> bool:
+    """A badge-sync payload: ``{"badge": N, "badge_only": True}``. No alert,
+    no sound — iOS just sets the app-icon number to N (0 clears it)."""
+    return payload.get("badge_only") is True and isinstance(payload.get("badge"), int)
+
+
 def build_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Web-push payload ({title, body, chat_id?, tag?, url?, badge?}) → APNs JSON.
     ``url``/``chat_id`` ride outside ``aps`` so the app's tap handler deep-links
-    exactly like sw.js does for web push."""
+    exactly like sw.js does for web push.
+
+    A badge-only payload (see ``is_badge_only``) becomes ``{"aps": {"badge": N}}``
+    and nothing else: WKWebView has no Badging API, so the OS number on the
+    iOS shell can ONLY be written by APNs. The dispatcher re-sends the
+    server's unread total this way whenever it changes (field bug
+    2026-11-14: icon said 96, app said 6 — the icon was the total as of the
+    last alert push and nothing ever corrected it)."""
+    if is_badge_only(payload):
+        return {"aps": {"badge": max(0, int(payload["badge"]))}}
     aps: Dict[str, Any] = {
         "alert": {"title": str(payload.get("title") or "Parley"), "body": str(payload.get("body") or "")},
         "sound": "default",
@@ -138,7 +156,11 @@ def send_via_curl(cfg: ApnsConfig, device_token: str, payload: Dict[str, Any], *
         "-H", "content-type: application/json",
     ]
     tag = payload.get("tag")
-    if isinstance(tag, str) and tag:
+    if is_badge_only(payload):
+        # Successive badge updates supersede each other: collapse them so
+        # a phone that was offline applies only the newest number.
+        headers += ["-H", f"apns-collapse-id: {BADGE_SYNC_COLLAPSE_ID}"]
+    elif isinstance(tag, str) and tag:
         headers += ["-H", f"apns-collapse-id: {tag[:64]}"]
     cmd = ["curl", "-sS", "--http2", "--max-time", str(int(timeout)), "-o", "-", "-w", "\n%{http_code}",
            *headers, "--data-binary", "@-", f"{cfg.host}/3/device/{device_token}"]

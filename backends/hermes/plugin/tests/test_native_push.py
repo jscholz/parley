@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -135,3 +136,92 @@ def test_dispatch_system_reaches_web_and_native_verbatim_and_ignores_chat_gates(
 def test_dispatch_system_with_nobody_to_tell_says_so(dispatcher, db):
     out = dispatcher.dispatch_system({"title": "t", "body": "b"})
     assert out["skipped"] == "no_subscribers" and out["delivered"] == 0
+
+
+# ── Native badge sync (2026-11-14: icon 96 vs app 6) ─────────────────
+
+
+def test_badge_sync_sends_server_total_dedupes_and_clears_with_zero(dispatcher, db):
+    state.upsert_native_token(db, token=TOK_A)
+    totals = [6]
+    dispatcher.unread_total_fn = lambda: totals[0]
+    out = dispatcher.sync_native_badge(reason="seen")
+    assert out["badge"] == 6 and out["delivered"] == 1 and out["skipped_same"] == 0
+    tok, payload = dispatcher._sent_native[-1]
+    assert tok == TOK_A and payload == {"badge": 6, "badge_only": True}
+    assert apns.build_payload(payload) == {"aps": {"badge": 6}}, "no alert, no sound: a silent icon update"
+    # Same total again → nothing sent (the device already shows it).
+    out = dispatcher.sync_native_badge(reason="seen")
+    assert out["delivered"] == 0 and out["skipped_same"] == 1 and len(dispatcher._sent_native) == 1
+    # Everything read → ZERO goes out (alert pushes floor at 1; only this path clears the icon).
+    totals[0] = 0
+    out = dispatcher.sync_native_badge(reason="seen")
+    assert out["badge"] == 0 and out["delivered"] == 1
+    assert dispatcher._sent_native[-1][1] == {"badge": 0, "badge_only": True}
+
+
+def test_alert_push_badge_counts_as_sent_so_sync_does_not_repeat_it(dispatcher, db):
+    state.upsert_native_token(db, token=TOK_A)
+    dispatcher.unread_total_fn = lambda: 3
+    dispatcher.dispatch_envelope({"type": "reply_final", "chat_id": "abc-9"}, body_override="hi")
+    assert dispatcher._sent_native[-1][1]["badge"] == 3
+    out = dispatcher.sync_native_badge(reason="reply_final")
+    assert out["delivered"] == 0 and out["skipped_same"] == 1, "alert push already carried 3"
+
+
+def test_badge_sync_prunes_dead_tokens_and_skips_unconfigured(dispatcher, db):
+    state.upsert_native_token(db, token=TOK_A)
+    state.upsert_native_token(db, token=TOK_B)  # fake sender raises 410 for B
+    dispatcher.unread_total_fn = lambda: 2
+    out = dispatcher.sync_native_badge()
+    assert out["delivered"] == 1 and out["pruned"] == 1
+    assert [r["token"] for r in state.list_native_tokens(db)] == [TOK_A]
+    dispatcher._apns_cfg = None
+    assert dispatcher.sync_native_badge()["skipped"] == "apns_unconfigured"
+    dispatcher.unread_total_fn = None
+    assert dispatcher.schedule_badge_sync("x") is False
+
+
+def test_schedule_badge_sync_debounces_into_one_run(dispatcher, db, monkeypatch):
+    monkeypatch.setattr(sd, "BADGE_SYNC_DEBOUNCE_S", 0.05)
+    state.upsert_native_token(db, token=TOK_A)
+    calls = []
+    dispatcher.unread_total_fn = lambda: calls.append(1) or 4
+    for _ in range(5):
+        assert dispatcher.schedule_badge_sync("burst") is True
+    assert dispatcher._sent_native == [], "nothing goes out before the window closes"
+    deadline = time.time() + 2
+    while len(dispatcher._sent_native) < 1 and time.time() < deadline:
+        time.sleep(0.01)
+    time.sleep(0.15)
+    assert len(calls) == 1 and dispatcher._sent_native == [(TOK_A, {"badge": 4, "badge_only": True})]
+
+
+def test_unread_changed_publish_schedules_badge_sync_once_per_envelope():
+    """The hook lives at the single publish point: ANY unread mutation that
+    tells clients to re-fetch also re-derives the icon number."""
+    from .. import parley_route_events as ev
+    from types import SimpleNamespace
+    seen = []
+    adapter = SimpleNamespace(_event_id_counter=0, _event_replay_ring=[], _event_subscribers=set(),
+                              _schedule_native_badge_sync=lambda cause: seen.append(cause))
+    ev.publish_out_of_turn(adapter, {"type": "unread_changed", "chat_id": "c1", "cause": "seen"})
+    ev.publish_out_of_turn(adapter, {"type": "reply_final", "chat_id": "c1"})
+    ev.publish_out_of_turn(adapter, {"type": "unread_changed", "chat_id": "c2", "cause": "mark"})
+    assert seen == ["seen", "mark"]
+    # Adapters without the hook (older fakes) publish unchanged.
+    bare = SimpleNamespace(_event_id_counter=0, _event_replay_ring=[], _event_subscribers=set())
+    assert ev.publish_out_of_turn(bare, {"type": "unread_changed", "chat_id": "c1", "cause": "seen"}) is False
+
+
+def test_adapter_badge_sync_gated_on_plugin_owned_push(monkeypatch):
+    from .. import ParleyAdapter
+    adapter = ParleyAdapter.__new__(ParleyAdapter)
+    scheduled = []
+    adapter._push_dispatcher = SimpleNamespace(schedule_badge_sync=lambda c: scheduled.append(c))
+    monkeypatch.setattr(ParleyAdapter, "_push_owned_by_plugin", staticmethod(lambda: False))
+    adapter._schedule_native_badge_sync("seen")
+    assert scheduled == []
+    monkeypatch.setattr(ParleyAdapter, "_push_owned_by_plugin", staticmethod(lambda: True))
+    adapter._schedule_native_badge_sync("seen")
+    assert scheduled == ["seen"]

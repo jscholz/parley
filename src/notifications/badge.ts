@@ -20,6 +20,7 @@
 import { log } from '../util/log.ts';
 import { apiUrl } from '../apiBase.ts';
 import { supports } from '../capabilities.ts';
+import { hasNativePush } from './nativeModel.ts';
 
 // Read-through cache. The Map values are the per-chat unread counts
 // the server returned at the last refresh. NEVER mutate these
@@ -98,7 +99,14 @@ function totalUnread(): number {
   return total;
 }
 
-/** Push the current unread total to the OS via Badging API. */
+/** Push the current unread total to the OS via Badging API.
+ *
+ *  iOS shell (Capacitor): WKWebView has NO Badging API, so the icon
+ *  number here is written by the server — a badge-only APNs push on
+ *  every `unread_changed` (plugin parley_dispatcher.sync_native_badge),
+ *  carrying the same total this module fetches. This function only
+ *  clears delivered banners once that total hits zero, the native
+ *  analogue of closeAllSwNotifications. */
 async function syncBadge(): Promise<void> {
   const total = totalUnread();
   try {
@@ -107,8 +115,18 @@ async function syncBadge(): Promise<void> {
     } else {
       if (typeof navigator.clearAppBadge === 'function') await navigator.clearAppBadge();
       await closeAllSwNotifications();
+      await clearNativeDeliveredNotifications();
     }
   } catch { /* unsupported / not installed */ }
+}
+
+async function clearNativeDeliveredNotifications(): Promise<void> {
+  try {
+    if (!hasNativePush()) return;
+    const cap = (window as any).Capacitor;
+    const pn = cap?.Plugins?.PushNotifications ?? (typeof cap?.registerPlugin === 'function' ? cap.registerPlugin('PushNotifications') : null);
+    await pn?.removeAllDeliveredNotifications?.();
+  } catch { /* defensive */ }
 }
 
 async function closeAllSwNotifications(): Promise<void> {
