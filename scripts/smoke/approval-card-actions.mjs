@@ -97,7 +97,12 @@ export default async function run({ page, log, mock }) {
   const before = await inspectCard(page, id1);
   assert(before.present, 'approval card must render in the transcript');
   assert(before.triangles === 1, `exactly one ⚠️ on the card (got ${before.triangles}) — single warning line, no stacked header`);
-  assert(/Dangerous command requires approval/i.test(before.speaker), `speaker is the warning line, got "${before.speaker}"`);
+  // Either hermes wording (approvalText.HEADER_RE): the pre-0.21.5
+  // "Dangerous command requires approval" or the structured hook's
+  // "Hermes wants to run a command that needs your OK" (reconciler
+  // APPROVAL_SPEAKER since 1226186, 2026-10-06). Pinned to the old text only,
+  // this scenario was red for weeks (found 2026-11-14).
+  assert(/Dangerous command requires approval|wants to run a command that needs your OK/i.test(before.speaker), `speaker is the warning line, got "${before.speaker}"`);
   assert(!before.hasReplyInstructions, 'the "Reply /approve …" instructions must not render in the card');
   assert(before.reason === 'card layout smoke', `reason line rendered, got "${before.reason}"`);
   assert(!before.commandOpen, 'command must be collapsed by default');
