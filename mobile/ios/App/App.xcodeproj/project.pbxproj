@@ -18,6 +18,9 @@
 		A1B2C3D40000000000000001 /* WebViewDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000002 /* WebViewDelegate.swift */; };
 		A1B2C3D40000000000000003 /* AudioSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000004 /* AudioSessionController.swift */; };
 		A1B2C3D40000000000000007 /* ExternalBrowserPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000008 /* ExternalBrowserPlugin.swift */; };
+		A1B2C3D40000000000000009 /* NativeRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000A /* NativeRecorder.swift */; };
+		A1B2C3D4000000000000000B /* SegmentUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000C /* SegmentUploader.swift */; };
+		A1B2C3D4000000000000000D /* ParleyRecorderPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4000000000000000E /* ParleyRecorderPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +37,9 @@
 		A1B2C3D40000000000000002 /* WebViewDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewDelegate.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000004 /* AudioSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionController.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000008 /* ExternalBrowserPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalBrowserPlugin.swift; sourceTree = "<group>"; };
+		A1B2C3D4000000000000000A /* NativeRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRecorder.swift; sourceTree = "<group>"; };
+		A1B2C3D4000000000000000C /* SegmentUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentUploader.swift; sourceTree = "<group>"; };
+		A1B2C3D4000000000000000E /* ParleyRecorderPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParleyRecorderPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -73,6 +79,9 @@
 				A1B2C3D40000000000000002 /* WebViewDelegate.swift */,
 				A1B2C3D40000000000000004 /* AudioSessionController.swift */,
 				A1B2C3D40000000000000008 /* ExternalBrowserPlugin.swift */,
+				A1B2C3D4000000000000000A /* NativeRecorder.swift */,
+				A1B2C3D4000000000000000C /* SegmentUploader.swift */,
+				A1B2C3D4000000000000000E /* ParleyRecorderPlugin.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -168,6 +177,9 @@
 				A1B2C3D40000000000000001 /* WebViewDelegate.swift in Sources */,
 				A1B2C3D40000000000000003 /* AudioSessionController.swift in Sources */,
 				A1B2C3D40000000000000007 /* ExternalBrowserPlugin.swift in Sources */,
+				A1B2C3D40000000000000009 /* NativeRecorder.swift in Sources */,
+				A1B2C3D4000000000000000B /* SegmentUploader.swift in Sources */,
+				A1B2C3D4000000000000000D /* ParleyRecorderPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

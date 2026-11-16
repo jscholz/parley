@@ -930,6 +930,13 @@ export interface CaptureHealth {
   /** Client's own phase — compare against the server's status to catch
    *  the two disagreeing, which is the bug class from this incident. */
   phase?: string;
+  /** Which capture engine (engine.ts): 'web' (MediaRecorder) or 'native'
+   *  (the shell's AVAudioEngine recorder), and its own state. */
+  engine?: 'web' | 'native' | null;
+  engine_state?: string | null;
+  /** Client bundle stamp (build/version.json sha). An old bundle on a
+   *  phone is a finding, not a bug to chase. */
+  build?: string | null;
   /** MediaRecorder.state as the client sees it. */
   recorder_state?: string;
   /** Mic track: a muted or ended track is the smoking gun for
@@ -960,7 +967,7 @@ function healthPath(id: string): string {
  *  purpose: chunks ticks every ping and would defeat the point. */
 function healthSignature(h: CaptureHealth): string {
   return [
-    h.phase, h.recorder_state, h.track_ready_state,
+    h.phase, h.engine, h.engine_state, h.recorder_state, h.track_ready_state,
     String(h.track_muted), String(h.track_enabled),
     // Not the count — just whether audio is flowing at all.
     (h.chunks ?? 0) > 0 ? 'chunks' : 'no-chunks',
@@ -997,6 +1004,13 @@ export async function recordHealth(id: string, health: CaptureHealth): Promise<v
         track: `${health.track_ready_state}/muted=${health.track_muted}/enabled=${health.track_enabled}`,
         chunks: health.chunks, last_chunk_age_ms: health.last_chunk_age_ms,
         pending_uploads: health.pending_uploads, server_status: m.status,
+        // Which engine, in which state, from which build (2026-11-16): the
+        // LocalGlobe trail could not say the phone was on a pre-October
+        // bundle, nor that the recorder had been dead for 39 minutes while
+        // the phase said "interrupted".
+        engine: health.engine ?? null, engine_state: health.engine_state ?? null,
+        build: health.build ?? null,
+        visibility: health.visibility ?? null, keepalive: health.keepalive ?? null,
       },
     });
   }

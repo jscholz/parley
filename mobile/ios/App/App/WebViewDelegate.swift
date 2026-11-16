@@ -123,6 +123,9 @@ class ParleyBridgeViewController: CAPBridgeViewController, WKUIDelegate, WKScrip
         // Every local plugin goes here. If you add one and skip this line it
         // will look fine in Xcode and be invisible to JS.
         bridge?.registerPluginInstance(ExternalBrowserPlugin())
+        // Native meeting recorder (2026-11-16): AVAudioEngine → segment
+        // files → background uploads. JS: src/capture/engines/native.ts.
+        bridge?.registerPluginInstance(ParleyRecorderPlugin())
         // (AudioSessionPlugin + SpeechRecognizerPlugin used to live here too.
         // Both were dead — never registered, so never run — and were deleted
         // 2026-09-06. AudioSessionController.swift records why, including the

@@ -290,3 +290,29 @@ test('a partial (still-recording) row is never uploaded; its seal is', async () 
   assert.deepEqual(calls.map((c) => c.seq), [0]);
   assert.equal((await listPending()).length, 0);
 });
+
+// ── engine seam (2026-11-16): a native engine's own uploads gate /stop ──
+
+test('deferred stop waits for an ENGINE-held backlog (externalPending) before posting /stop', async () => {
+  await ledgerRow('cap_30_native', { registered: true, activated: true, stopRequested: true });
+  let external = 2;
+  const { fn, calls } = stubApi(() => 200);
+  const up = createUploader({ fetchFn: fn, baseDelayMs: 1, externalPending: (id) => (id === 'cap_30_native' ? external : 0) });
+  await up.drained();
+  assert.deepEqual(calls.filter((c) => c.path.endsWith('/stop')), [], 'two native segments still in flight → no /stop yet');
+  assert.ok(await getLedger('cap_30_native'), 'ledger row kept while the engine still holds audio');
+  external = 0;
+  await up.drained();
+  assert.equal(calls.filter((c) => c.path.endsWith('/stop')).length, 1, '/stop posted once the engine has drained');
+  assert.equal(await getLedger('cap_30_native'), null);
+});
+
+test('onAcked fires per acknowledged segment with its identity', async () => {
+  await putSegment({ captureId: 'cap_31_ack', seq: 0, t0Ms: 0, mime: 'audio/mp4', blob: blobOf('a') });
+  await putSegment({ captureId: 'cap_31_ack', seq: 1, t0Ms: 45000, mime: 'audio/mp4', blob: blobOf('b') });
+  const acked: number[] = [];
+  const { fn } = stubApi(() => 200);
+  const up = createUploader({ fetchFn: fn, baseDelayMs: 1, onAcked: (seg) => acked.push(seg.seq) });
+  await up.drained();
+  assert.deepEqual(acked, [0, 1]);
+});

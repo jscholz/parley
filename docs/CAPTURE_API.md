@@ -222,6 +222,40 @@ reads transcripts natively — that's the backend-neutrality trick.
 - `doc_show` with `source: "capture"` + `capture_id` — the live
   transcript pushes (the PWA's Docs shelf renders these with a player).
 
+## Client architecture: orchestrator + engine (2026-11-16)
+
+The bundled client splits capture into two halves with one seam,
+`src/capture/engine.ts`:
+
+* **Orchestrator** (`src/capture/recorder.ts`): capture identity and the
+  durable ledger, the server conversation (register / activate / marks /
+  stop via the shared uploader), the pill's UI state, health pings, and the
+  one verdict the server may hand down — that the capture was finalized or
+  discarded elsewhere, so a recorder describing it must stand down. A stall
+  flag or a stale-heal is information for the user, never an order to the
+  engine.
+* **Engine** (`CaptureEngine`): owns the microphone, cuts ~45 s
+  self-contained segments, keeps every sealed segment durable on the device
+  until the server acknowledges it, and reports state (`recording`,
+  `interrupted`, `paused`, `stopped`) upward. Every entry into
+  `interrupted` has an owner that leaves it (re-acquire poll, OS resume
+  signal). Two implementations:
+  * `engines/web.ts` — getUserMedia + MediaRecorder, IndexedDB durability,
+    delivery through the shared uploader. PWA and desktop.
+  * `engines/native.ts` — adapter for the Capacitor shell's Swift recorder
+    (`mobile/ios/App/App/ParleyRecorderPlugin.swift`, `NativeRecorder.swift`,
+    `SegmentUploader.swift`): AVAudioEngine writes AAC segment files under
+    the app sandbox, a background `URLSession` posts them to
+    `/segments/{seq}` with the same headers the web uploader sends, and
+    iOS keeps both running with the screen locked. The page may freeze;
+    the recording does not. Selected only when the plugin is registered
+    (`Capacitor.isPluginAvailable('ParleyRecorder')`).
+
+Health pings carry `engine`, `engine_state` and `build` so the audit trail
+can tell an old bundle or a dead recorder from a server-side fault.
+
+Native segment uploads identify as `x-parley-client: cap-recorder`.
+
 ## Writing your own capture client
 
 1. `POST /captures` (keep the id). Send an `x-parley-client` header

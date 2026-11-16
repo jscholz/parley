@@ -1097,11 +1097,20 @@ if (DEEPGRAM_KEY) {
 // the no-new-capture case. unref(): never keeps the process alive.
 // Storage policy sweep: hourly tick, acts at most daily (storage.ts).
 storage.startStorageScheduler();
-setInterval(() => {
-  void parley.sweepCaptures().catch((e: unknown) => {
-    console.warn(`[capture] sweep failed: ${String(e)}`);
-  });
-}, 60_000).unref();
+// ONE janitor per capture store (2026-11-16): a second proxy process on
+// the same ~/.parley (the claude-code tenant on :3021) ran this sweep
+// too, without the plugin-owned push flag, and the stall warning its
+// sweep won went to its own empty web-push store — nobody heard it.
+// Set PARLEY_CAPTURE_JANITOR=0 on every tenant but one.
+if (readEnv('PARLEY_CAPTURE_JANITOR') === '0') {
+  console.warn('[capture] janitor disabled on this process (PARLEY_CAPTURE_JANITOR=0)');
+} else {
+  setInterval(() => {
+    void parley.sweepCaptures().catch((e: unknown) => {
+      console.warn(`[capture] sweep failed: ${String(e)}`);
+    });
+  }, 60_000).unref();
+}
 
 // First-run wizard backing (proxy/parley/setup.ts). Persists to the
 // same .env start-all loads (PARLEY_ENV_FILE from the npx launcher,

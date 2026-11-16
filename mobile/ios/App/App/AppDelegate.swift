@@ -151,8 +151,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             NSLog("[Parley] audio interruption ended — reasserting category + keepalive")
             // Re-assert the CURRENT desired category (not unconditionally
             // .playAndRecord) so an interruption while at rest doesn't drag
-            // Bluetooth back onto the HFP codec.
-            applyDesiredCategory(activate: true)
+            // Bluetooth back onto the HFP codec. The native recorder, when
+            // running, re-activates the session itself as part of getting
+            // its engine back.
+            if !NativeRecorder.shared.isRunning { applyDesiredCategory(activate: true) }
             // Restart keepalive playback if it stopped during the interruption.
             if let player = keepalivePlayer, !player.isPlaying {
                 player.play()
@@ -167,6 +169,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
               let reasonRaw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
         NSLog("[Parley] audio route changed (reason: \(reason.rawValue))")
+        // Our own category flip echoes back as .categoryChange: re-asserting
+        // the category here is the setCategory → .categoryChange →
+        // setCategory loop AudioSessionController.swift warned about. Nothing
+        // to do for it. And while the native recorder runs it owns the
+        // session: it restarts its engine on route changes itself
+        // (AVAudioEngineConfigurationChange) and a setActive from here would
+        // fight it.
+        if reason == .categoryChange || NativeRecorder.shared.isRunning { return }
         // Headphone unplug = .oldDeviceUnavailable — iOS may auto-pause us.
         // BT (dis)connect = .newDeviceAvailable / .oldDeviceUnavailable.
         // Re-assert the CURRENT desired category (.playback at rest) + nudge
@@ -189,6 +199,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+    }
+
+    // ── Background segment uploads (SegmentUploader) ──────────────────
+    // iOS relaunches/wakes the app when the background URLSession has
+    // events; the handler must be kept and called once they are delivered.
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        guard identifier == SegmentUploader.sessionIdentifier else { completionHandler(); return }
+        SegmentUploader.shared.backgroundCompletionHandler = completionHandler
+        SegmentUploader.shared.kick()
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

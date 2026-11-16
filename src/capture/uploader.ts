@@ -69,6 +69,14 @@ export interface UploaderOpts {
    *  fetch that threw, true after any HTTP answer. Drives the pill's
    *  "offline — saving locally" chip. */
   onNetwork?: (online: boolean) => void;
+  /** The server acknowledged one segment (its durable row is gone). The
+   *  web engine forwards this to the orchestrator's counters. */
+  onAcked?: (seg: PendingSegment) => void;
+  /** Segments a capture ENGINE still holds outside this buffer (the
+   *  native recorder's background uploads, 2026-11-16). A deferred stop
+   *  must wait for those too: /stop finalizes the capture and freezes
+   *  late segments. Returns the count for a capture id. */
+  externalPending?: (captureId: string) => number;
 }
 
 const MAX_409_ATTEMPTS = 3;
@@ -288,7 +296,8 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
   async function stopsOwed(queue: PendingSegment[]): Promise<CaptureLedgerEntry[]> {
     const withAudio = new Set(queue.map((s) => s.captureId));
     return (await listLedger()).filter((e) =>
-      e.stopRequested && !e.registerFailed && !withAudio.has(e.id) && !parkedCaptures.has(e.id));
+      e.stopRequested && !e.registerFailed && !withAudio.has(e.id) && !parkedCaptures.has(e.id)
+      && (opts.externalPending?.(e.id) ?? 0) === 0);
   }
 
   async function postStop(entry: CaptureLedgerEntry): Promise<'done' | 'retry'> {
@@ -369,6 +378,7 @@ export function createUploader(opts: UploaderOpts = {}): Uploader {
           attempts409.delete(seg.key);
           await removeSegment(seg.key);
           pending -= 1;
+          opts.onAcked?.(seg);
           opts.onProgress?.({ pending, captureIds: Array.from(new Set(queue.slice(1).map((s) => s.captureId))) });
           continue;
         }
