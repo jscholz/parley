@@ -80,6 +80,7 @@ import * as activityStore from './notifications/activityStore.ts';
 import { attachSliderTouchAll } from './sliderTouch.ts';
 import { createDrawer } from './Drawer.ts';
 import * as clickFreezeDiag from './clickFreezeDiag.ts';
+import { installComposerLatencyDiag } from './composerLatencyDiag.ts';
 import * as remoteControl from './remoteControl.ts';
 import * as multiSelect from './multiSelect.ts';
 import * as agentSettingsMod from './agentSettings.ts';
@@ -2864,6 +2865,37 @@ async function boot() {
    *  clientHeight. If the user was pinned to the live edge before the
    *  resize, re-pin afterwards so streaming content doesn't slide out of
    *  view as they type. */
+  /** Hidden twin of the textarea for height measurement: same width, font
+   *  and box metrics, absolutely positioned so its layout touches nothing
+   *  on the page. Style copied once (and again when the composer's font or
+   *  padding could have changed: settings re-apply). */
+  let composerMirror: HTMLTextAreaElement | null = null;
+  const MIRROR_PROPS = ['font', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'letterSpacing', 'wordSpacing',
+    'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'borderTopWidth', 'borderBottomWidth',
+    'borderLeftWidth', 'borderRightWidth', 'boxSizing', 'whiteSpace', 'wordBreak', 'overflowWrap', 'tabSize', 'textIndent'] as const;
+  function syncComposerMirrorStyle(): void {
+    if (!composerMirror) return;
+    const cs = window.getComputedStyle(composerInput);
+    for (const prop of MIRROR_PROPS) (composerMirror.style as any)[prop] = (cs as any)[prop];
+  }
+  function measureComposerContentHeight(): number {
+    if (!composerMirror) {
+      composerMirror = document.createElement('textarea');
+      composerMirror.setAttribute('aria-hidden', 'true');
+      composerMirror.tabIndex = -1;
+      composerMirror.rows = 1;
+      Object.assign(composerMirror.style, {
+        position: 'absolute', top: '0', left: '-100000px', height: 'auto', minHeight: '0', maxHeight: 'none',
+        overflow: 'hidden', resize: 'none', visibility: 'hidden', pointerEvents: 'none',
+      } as Partial<CSSStyleDeclaration>);
+      syncComposerMirrorStyle();
+      document.body.appendChild(composerMirror);
+      window.addEventListener('resize', syncComposerMirrorStyle);
+    }
+    composerMirror.style.width = `${composerInput.clientWidth}px`;
+    composerMirror.value = composerInput.value;
+    return composerMirror.scrollHeight;
+  }
   function autoResize() {
     const cs = window.getComputedStyle(composerInput);
     const parsed = parseFloat(cs.maxHeight);
@@ -2884,8 +2916,19 @@ async function boot() {
     const wasPinned = transcriptEl
       ? (transcriptEl.scrollHeight - transcriptEl.scrollTop - transcriptEl.clientHeight) <= chat.BOTTOM_EDGE_SLACK_PX
       : false;
-    composerInput.style.height = 'auto';
-    composerInput.style.height = Math.min(composerInput.scrollHeight, cap) + 'px';
+    // Measure in an OFF-FLOW mirror, not by flipping the live textarea to
+    // height:auto (2026-11-17). The flip laid the page out with the
+    // composer at its full content height on every keystroke — for a
+    // draft taller than the cap, a transient jump of hundreds of px that
+    // moved the transcript twice per key. The mirror lays out in its own
+    // absolute box, so nothing else moves: 2 layouts per key instead of 3,
+    // and no geometry churn for the transcript. (Chromium measured no
+    // user-visible lag either way once warm — smoke
+    // composer-input-latency-probe — the field lag is a Safari report;
+    // the instrument in composerLatencyDiag.ts is how it gets measured.)
+    const next = Math.min(measureComposerContentHeight(), cap);
+    const heightChanged = composerInput.style.height !== `${next}px`;
+    if (heightChanged) composerInput.style.height = `${next}px`;
     // Update --composer-height so the scroll-to-bottom button (which
     // anchors `bottom: calc(var(--composer-height) + 64px)`) tracks
     // the composer as it grows. Without this the button stays at the
@@ -2895,7 +2938,10 @@ async function boot() {
       const h = Math.round(composerEl.getBoundingClientRect().height);
       document.documentElement.style.setProperty('--composer-height', `${h}px`);
     }
-    if (wasPinned && transcriptEl) {
+    // Re-pin ONLY when the composer actually grew or shrank — that is the
+    // whole reason the re-pin exists; a per-keystroke scrollTo on the
+    // transcript was a write for nothing.
+    if (heightChanged && wasPinned && transcriptEl) {
       // scrollTo with behavior:'instant' — CSS scroll-behavior:smooth
       // on .transcript would otherwise animate this snap over ~300ms.
       // During the animation, virt fires a rerender per intermediate
@@ -2907,6 +2953,29 @@ async function boot() {
     }
   }
   composerInput.addEventListener('input', () => { autoResize(); updateSendButtonState(); });
+  // Spell/grammar checking in the box. Browsers re-check the PARAGRAPH
+  // around the caret on every selection change; a dictated message is one
+  // paragraph of thousands of characters, so every arrow key re-checked
+  // all of it and the caret visibly lagged (field 2026-11-17; measured in
+  // smoke composer-input-latency-probe: ArrowLeft in a 4.7k-char draft
+  // 272 ms keydown→paint with spellcheck on, 16 ms off; typing unaffected).
+  // Rule: on (per-device setting) while the draft is short enough for the
+  // check to be cheap; off past COMPOSER_SPELLCHECK_MAX_CHARS. Written
+  // only on change — toggling the attribute itself clears markers.
+  const COMPOSER_SPELLCHECK_MAX_CHARS = 1500;
+  const applyComposerSpellcheck = () => {
+    const want = settings.get().composerSpellcheck !== false && composerInput.value.length <= COMPOSER_SPELLCHECK_MAX_CHARS;
+    if (composerInput.spellcheck !== want) {
+      composerInput.spellcheck = want;
+      diag(`[composer] spellcheck ${want ? 'on' : 'off'} (${composerInput.value.length} chars)`);
+    }
+  };
+  applyComposerSpellcheck();
+  window.addEventListener('parley:settings-changed', applyComposerSpellcheck);
+  composerInput.addEventListener('input', applyComposerSpellcheck);
+  // composerDrafts restores a chat's draft without an input event.
+  window.addEventListener('parley:draft-changed', applyComposerSpellcheck);
+  installComposerLatencyDiag(composerInput);
 
   // Paste image support — if the clipboard has an image (e.g. screenshot
   // copied via cmd+shift+4 then cmd+C, or any tool that puts an image

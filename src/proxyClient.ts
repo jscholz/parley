@@ -939,8 +939,11 @@ function handleEnvelope(type: string, env: any, chatId: string): void {
 
     case 'drafts_changed': {
       // Another device edited a chat's composer draft (proxy drafts.ts).
-      // Replays are ignored: draftSync pulls the current state on boot.
-      if (env?._replay === true) return;
+      // A REPLAYED one (stream reconnect after a drop) is exactly the
+      // notice we missed while down, so it triggers the same pull — the
+      // pull is one idempotent GET and resolveRemote decides per chat
+      // (field 2026-11-17: a dictation from the phone never reached the
+      // desktop until a hard refresh).
       try {
         window.dispatchEvent(new CustomEvent('parley:drafts-changed', {
           detail: { chatId: typeof env?.draft_chat_id === 'string' ? env.draft_chat_id : '', by: typeof env?.by === 'string' ? env.by : '', version: Number(env?.version) || 0 },

@@ -272,6 +272,9 @@ const DEFAULTS = {
   panelMaxWidthPct: 60,
   // Meeting-capture defaults (fed into POST /captures at start time).
   captureDiarize: true,
+  // Browser spell/grammar checking in the composer (per device). OFF is
+  // the A/B lever for the Safari long-paragraph editing lag (2026-11-17).
+  composerSpellcheck: true,
   captureAutoIngest: true,  // desktop only: max % of the window width a side panel (sidebar / pin+docs drawer) can be dragged to. Phones use a separate full-width overlay layout, so this is inert there.
   audioFeedbackVolume: 0.85,  // 2026-05-09: 0.5 → 0.85 for bike/walk audibility (BT-headset wind noise was burying chimes)
   theme: 'dark',
@@ -389,6 +392,7 @@ const PER_DEVICE_KEYS = new Set<string>([
   'panelMaxWidthPct',
   'captureDiarize',
   'captureAutoIngest',
+  'composerSpellcheck',
 ]);
 
 /** The synced settings — every DEFAULTS key that isn't per-device. These
@@ -900,6 +904,11 @@ export function hydrate(handlers: {
     if (setCapDiar) {
       setCapDiar.checked = current.captureDiarize;
       setCapDiar.onchange = () => { set('captureDiarize', setCapDiar.checked); };
+    }
+    const setSpell = document.getElementById('set-composer-spellcheck') as HTMLInputElement | null;
+    if (setSpell) {
+      setSpell.checked = current.composerSpellcheck !== false;
+      setSpell.onchange = () => { set('composerSpellcheck', setSpell.checked); };
     }
     const setCapIngest = document.getElementById('set-capture-autoingest') as HTMLInputElement | null;
     if (setCapIngest) {

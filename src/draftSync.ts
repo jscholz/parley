@@ -132,6 +132,11 @@ export function initDraftSync(): void {
     void pull('envelope');
   });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void pull('foreground'); });
+  // A desktop window can be visible-but-unfocused for hours (the same
+  // reason badge.ts refreshes on focus): coming back to the browser is
+  // the moment a phone's dictation should already be in the box
+  // (field 2026-11-17: it was not until a hard refresh).
+  window.addEventListener('focus', () => void pull('focus'));
   window.addEventListener('pagehide', () => {
     for (const [chatId, t] of pending) { window.clearTimeout(t); pending.delete(chatId); void push(chatId, { keepalive: true }); }
   });
