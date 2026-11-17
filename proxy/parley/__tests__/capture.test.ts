@@ -17,7 +17,7 @@ import * as crypto from 'node:crypto';
 import {
   initCapture, createCapture, activateCapture, putSegment, stopCapture,
   patchCapture, addMark, getCapture, listCaptures, discardCapture,
-  purgeCapture, CaptureError, sweepCaptures, __setStallNotifierForTest,
+  purgeCapture, CaptureError, sweepCaptures, __setStallNotifierForTest, recordHealth,
 } from '../capture.ts';
 
 let dir = '';
@@ -593,6 +593,41 @@ test('offline meeting: stale-heal marks healed_by_sweep; a late segment REOPENS 
     putSegment(a.id, 2, Buffer.from('tail'), { t0Ms: 90_000, mime: 'audio/mp4' }),
     (e: any) => e.status === 409 && /frozen/.test(e.message),
   );
+});
+
+test('zero segments on the server but audio on the device (health) → stale heal keeps the capture reopenable, never failed', async () => {
+  // Field 2026-11-17: 83 segments sealed on the phone over 63 minutes, none
+  // reached the server. The old heal failed the "husk"; the phone's late
+  // uploads would then have been frozen out (409) and parked for good.
+  const a = await createCapture({ title: 'Cellular meeting' });
+  await activateCapture(a.id);
+  // The field's last ping: the user had stopped, the recorder was gone,
+  // 83 segments sealed on the device, none delivered.
+  await recordHealth(a.id, { phase: 'finishing', recorder_state: 'none', chunks: 37268, sealed_segments: 83, pending_uploads: 82 });
+  await ageOut(a.id);
+  await sweepCaptures();
+  let m = await getCapture(a.id);
+  assert.equal(m.status, 'complete', 'provisionally complete, not failed');
+  assert.equal(m.healed_by_sweep, true);
+  // The phone reaches WiFi an hour later and drains.
+  await putSegment(a.id, 0, Buffer.from('first 45s'), { t0Ms: 0, mime: 'audio/mp4' });
+  m = await getCapture(a.id);
+  assert.equal(m.status, 'recording');
+  assert.equal(m.segments.length, 1);
+});
+
+test('a truly empty husk (no audio anywhere) still fails — and even that reopens if audio turns up', async () => {
+  const a = await createCapture({ title: 'Never recorded' });
+  await activateCapture(a.id);
+  await ageOut(a.id);
+  await sweepCaptures();
+  let m = await getCapture(a.id);
+  assert.equal(m.status, 'failed');
+  assert.equal(m.healed_by_sweep, true);
+  await putSegment(a.id, 0, Buffer.from('surprise'), { t0Ms: 0, mime: 'audio/mp4' });
+  m = await getCapture(a.id);
+  assert.equal(m.status, 'recording');
+  assert.equal(m.failed_reason, undefined);
 });
 
 test('a capture the USER stopped stays frozen — reopen is only for the sweep verdict', async () => {

@@ -588,14 +588,42 @@ async function sweepLocked(opts?: { supersedePending?: boolean }): Promise<void>
             void warnStalledCapture(m, audioSilentFor);
           }
           if (Date.now() - await lastActivityMs(m) <= STALE_RECORDING_MS) return;
-          if (!m.segments.length) {
+          // A capture with NO segments here but audio ON THE DEVICE (the
+          // client's health pings reported sealed segments / chunks) is a
+          // meeting whose uploads never arrived — field 2026-11-17: 83
+          // segments sealed on the phone over 63 min, zero reached the
+          // server. Failing it would freeze those segments out for good
+          // (409 → the client parks them). It is healed like a
+          // segment-bearing capture instead: provisionally complete,
+          // reopened by the first segment that lands.
+          const deviceHasAudio = await (async () => {
+            const h = await getHealth(m.id);
+            return !!h && ((Number(h.sealed_segments) || 0) > 0 || (Number(h.chunks) || 0) > 0);
+          })();
+          if (!m.segments.length && !deviceHasAudio) {
             void audit(m, 'stale-heal', {
               actor: { source: 'sweep' }, priorStatus: m.status, newStatus: 'failed',
               reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m — healed in place`,
             });
             m.status = 'failed';
             m.failed_reason = 'stale recording — no activity, no audio';
+            m.healed_by_sweep = true;
             m.ended_at = Date.now();
+            await saveManifest(m);
+            notifyChanged(m, 'completed');
+            return;
+          }
+          if (!m.segments.length) {
+            // Audio exists on the device: keep the door open. No pipeline
+            // claim (nothing to transcribe yet) — the heal below marks it
+            // provisionally complete so a late segment reopens it.
+            m.healed_by_sweep = true;
+            m.ended_at = endedAtFor(m);
+            m.status = 'complete';
+            void audit(m, 'stale-heal', {
+              actor: { source: 'sweep' }, priorStatus: 'recording', newStatus: 'complete',
+              reason: `no activity for ${Math.round(STALE_RECORDING_MS / 60000)}m, no audio arrived, but the device reported audio — kept reopenable`,
+            });
             await saveManifest(m);
             notifyChanged(m, 'completed');
             return;
@@ -821,10 +849,11 @@ async function putSegmentLocked(
   // the client was offline, not dead — reopen and keep recording; the
   // client's deferred /stop (or the next heal) closes it again.
   let reopened = false;
-  if (m.status === 'complete' && m.healed_by_sweep) {
+  if ((m.status === 'complete' || m.status === 'failed') && m.healed_by_sweep) {
     m.status = 'recording';
     m.ended_at = null;
     delete m.healed_by_sweep;
+    delete m.failed_reason;
     reopened = true;
   }
   if (m.status === 'complete' || m.status === 'failed' || m.status === 'discarded') {
