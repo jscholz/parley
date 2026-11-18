@@ -99,27 +99,16 @@ final class SegmentUploader: NSObject {
     // MARK: - Lifecycle
 
     @objc private func onForeground() {
-        queue.async { [self] in
-            foregroundActive = true
-            // Take the files back from the daemon: whatever it has not finished
-            // is ours to send now, immediately and observably.
-            backgroundSession.getAllTasks { tasks in
-                for t in tasks { t.cancel() }
-                self.queue.async { [self] in
-                    inFlight.removeAll()
-                    bgTaskIds.removeAll()
-                    kickLocked(reason: "foreground")
-                }
-            }
-        }
+        queue.async { [self] in kickLocked(reason: "foreground") }   // kick reclaims daemon tasks itself
     }
 
     @objc private func onBackground() {
         queue.async { [self] in
-            foregroundActive = false
-            // Hand everything due to the background session so uploads continue
-            // while suspended; a foreground task mid-flight gets a few seconds
-            // of background time to finish on its own.
+            // While the recorder runs, the process stays alive and the
+            // in-process lane keeps going; only an idle app hands its
+            // backlog to the background session. A foreground task mid-flight
+            // gets a few seconds of background time to finish on its own.
+            if NativeRecorder.shared.isRunning { return }
             if bgTimeTask == .invalid {
                 bgTimeTask = UIApplication.shared.beginBackgroundTask(withName: "parley-upload-handoff") { [weak self] in
                     self?.endBgTime()
@@ -208,16 +197,45 @@ final class SegmentUploader: NSObject {
         return rows.sorted { a, b in a.captureId != b.captureId ? a.captureId < b.captureId : a.seq < b.seq }
     }
 
+    /// The lane is decided from the PROCESS STATE at kick time, never from a
+    /// remembered flag (field 2026-11-18: a cold launch from Xcode has no
+    /// willEnterForeground, the flag said background, and two daemon tasks
+    /// held both slots for an hour while the app sat open — "due=142
+    /// inFlight=2 lane=bg" every few seconds). The in-process session is
+    /// used whenever this process is alive to run it: the app is in the
+    /// foreground, OR the recorder is running (the audio background mode
+    /// keeps the process alive for the whole meeting). The background
+    /// session is only for a suspended app with nothing recording.
+    private func inProcessLaneNow() -> Bool {
+        if NativeRecorder.shared.isRunning { return true }
+        var state: UIApplication.State = .active
+        let read = { state = UIApplication.shared.applicationState }
+        if Thread.isMainThread { read() } else { DispatchQueue.main.sync(execute: read) }
+        return state != .background
+    }
+
     private func kickLocked(reason: String) {
         purgeOldParkedLocked()
+        let fg = inProcessLaneNow()
+        foregroundActive = fg
+        if fg && !bgTaskIds.isEmpty {
+            // Daemon tasks must never block the in-process lane: take the
+            // files back. Their cancellation completes with NSURLErrorCancelled,
+            // which completeLocked ignores.
+            let held = Set(bgTaskIds.values)
+            bgTaskIds.removeAll()
+            inFlight.subtract(held)
+            backgroundSession.getAllTasks { tasks in for t in tasks { t.cancel() } }
+            NSLog("[Parley] upload: reclaimed \(held.count) file(s) from the background session")
+        }
         let now = Date().timeIntervalSince1970
         let due = pendingRowsLocked().filter { !$0.parked && $0.nextAt <= now && !inFlight.contains($0.metaURL.path) }
         let slots = max(0, maxConcurrent - inFlight.count)
         for row in due.prefix(slots) {
-            if foregroundActive { startForegroundLocked(row) } else { startBackgroundLocked(row) }
+            if fg { startForegroundLocked(row) } else { startBackgroundLocked(row) }
         }
-        if !due.isEmpty || !inFlight.isEmpty {
-            NSLog("[Parley] upload kick (\(reason)): due=\(due.count) inFlight=\(inFlight.count) lane=\(foregroundActive ? "fg" : "bg")")
+        if slots > 0 && !due.isEmpty {
+            NSLog("[Parley] upload kick (\(reason)): due=\(due.count) inFlight=\(inFlight.count) lane=\(fg ? "fg" : "bg")")
         }
     }
 
