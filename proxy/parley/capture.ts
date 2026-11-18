@@ -966,6 +966,9 @@ export interface CaptureHealth {
   /** Client bundle stamp (build/version.json sha). An old bundle on a
    *  phone is a finding, not a bug to chase. */
   build?: string | null;
+  /** The engine's own upload lane, as the client sees it: failures,
+   *  last status/error, files on disk. Free-form, audited verbatim. */
+  upload?: Record<string, unknown> | null;
   /** MediaRecorder.state as the client sees it. */
   recorder_state?: string;
   /** Mic track: a muted or ended track is the smoking gun for
@@ -995,8 +998,11 @@ function healthPath(id: string): string {
 /** Fields whose CHANGE is worth an audit line. Counters are excluded on
  *  purpose: chunks ticks every ping and would defeat the point. */
 function healthSignature(h: CaptureHealth): string {
+  const u: any = h.upload || {};
   return [
     h.phase, h.engine, h.engine_state, h.recorder_state, h.track_ready_state,
+    // An upload failure's status/error changing is worth a line.
+    String(u.last_status ?? ''), String(u.last_error ?? '').slice(0, 80), String(u.failed ?? 0),
     String(h.track_muted), String(h.track_enabled),
     // Not the count — just whether audio is flowing at all.
     (h.chunks ?? 0) > 0 ? 'chunks' : 'no-chunks',
@@ -1040,6 +1046,7 @@ export async function recordHealth(id: string, health: CaptureHealth): Promise<v
         engine: health.engine ?? null, engine_state: health.engine_state ?? null,
         build: health.build ?? null,
         visibility: health.visibility ?? null, keepalive: health.keepalive ?? null,
+        upload: health.upload ?? null,
       },
     });
   }
@@ -1681,6 +1688,14 @@ export async function handleCaptureHealth(
       chunks: body.chunks, last_chunk_age_ms: body.last_chunk_age_ms,
       pending_uploads: body.pending_uploads, sealed_segments: body.sealed_segments,
       mime: body.mime,
+      // Engine / build / upload diagnostics (2026-11-18). The whitelist
+      // above silently dropped the engine fields added on 11-16, which is
+      // why two days of lost-meeting trails could not say which recorder
+      // ran. Everything the client reports about its uploads rides too.
+      engine: body.engine ?? null, engine_state: body.engine_state ?? null,
+      build: body.build ?? null,
+      visibility: body.visibility ?? null, keepalive: body.keepalive ?? null,
+      upload: body.upload && typeof body.upload === 'object' ? body.upload : null,
     });
     sendJson(res, 200, { ok: true });
   } catch (err) { sendError(res, err); }

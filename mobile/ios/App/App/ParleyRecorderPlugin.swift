@@ -97,6 +97,9 @@ public class ParleyRecorderPlugin: CAPPlugin, CAPBridgedPlugin, NativeRecorderDe
             "session_category": s.sessionCategory,
             "input_route": s.route,
             "app_state": appStateName(),
+            // The upload lane as the plugin sees it (files on disk, due,
+            // parked, in flight, last status/error) — rides the health ping.
+            "upload": SegmentUploader.shared.diagnostics(),
         ]
         // Only JSON-representable values go into the result: an absent
         // optional is simply absent (the JS side treats missing as null).
@@ -145,8 +148,10 @@ public class ParleyRecorderPlugin: CAPPlugin, CAPBridgedPlugin, NativeRecorderDe
         notifyListeners("uploaded", data: ["captureId": captureId, "seq": seq])
     }
 
-    func uploader(_ u: SegmentUploader, didFail captureId: String, seq: Int, status: Int, parked: Bool) {
-        notifyListeners("uploadFailed", data: ["captureId": captureId, "seq": seq, "status": status, "parked": parked])
+    func uploader(_ u: SegmentUploader, didFail captureId: String, seq: Int, status: Int, parked: Bool, error: String?) {
+        var data: [String: Any] = ["captureId": captureId, "seq": seq, "status": status, "parked": parked]
+        if let error = error { data["error"] = error }
+        notifyListeners("uploadFailed", data: data)
     }
 
     func uploader(_ u: SegmentUploader, networkOnline online: Bool) {

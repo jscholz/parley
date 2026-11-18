@@ -42,6 +42,7 @@ export interface ParleyRecorderPlugin {
   addListener(event: 'uploaded', cb: (ev: { captureId: string; seq: number }) => void): Promise<{ remove(): Promise<void> }> | { remove(): Promise<void> };
   addListener(event: 'network', cb: (ev: { online: boolean }) => void): Promise<{ remove(): Promise<void> }> | { remove(): Promise<void> };
   addListener(event: 'audio', cb: (ev: { buffers: number }) => void): Promise<{ remove(): Promise<void> }> | { remove(): Promise<void> };
+  addListener(event: 'uploadFailed', cb: (ev: { captureId: string; seq: number; status: number; parked: boolean; error?: string }) => void): Promise<{ remove(): Promise<void> }> | { remove(): Promise<void> };
 }
 
 export interface NativeStatus {
@@ -77,6 +78,9 @@ export function createNativeEngine(plugin: ParleyRecorderPlugin, opts: { uploadB
   let last: NativeStatus = { state: 'stopped', captureId: null, buffers: 0, lastBufferAgeMs: null, pending: 0, sealed: 0, mime: null };
   let lastAudioAt = 0;
   let pendingAll = 0;
+  /** Upload lane diagnostics, reported in every health ping (the 11-17/18
+   *  trails could not say WHY nothing arrived). */
+  const upload = { failed: 0, uploaded: 0, last_status: null as number | null, last_error: null as string | null, last_failed_seq: null as number | null, last_failed_at: null as number | null };
   const drainWaiters = new Map<string, Array<() => void>>();
 
   function settleDrained(id: string): void {
@@ -107,7 +111,16 @@ export function createNativeEngine(plugin: ParleyRecorderPlugin, opts: { uploadB
       pendingAll += 1;
       handlers?.onSegmentSealed({ seq: ev.seq, t0Ms: ev.t0Ms, mime: ev.mime, bytes: ev.bytes });
     });
+    void plugin.addListener('uploadFailed', (ev) => {
+      upload.failed += 1;
+      upload.last_status = ev.status;
+      upload.last_error = ev.error ?? (ev.parked ? 'parked (capture frozen)' : null);
+      upload.last_failed_seq = ev.seq;
+      upload.last_failed_at = Date.now();
+      log(`[capture:native] upload failed capture=${ev.captureId} seq=${ev.seq} status=${ev.status}${ev.parked ? ' parked' : ''} ${ev.error ?? ''}`);
+    });
     void plugin.addListener('uploaded', (ev) => {
+      upload.uploaded += 1;
       pendingAll = Math.max(0, pendingAll - 1);
       if (ev.captureId === captureId) handlers?.onSegmentUploaded(ev.seq);
       void plugin.pending({ captureId: ev.captureId }).then((p) => {
@@ -198,7 +211,7 @@ export function createNativeEngine(plugin: ParleyRecorderPlugin, opts: { uploadB
     kick() { void plugin.kick().catch(() => { /* plugin gone */ }); },
 
     health(): EngineHealth {
-      const { state: _s, captureId: _c, buffers, lastBufferAgeMs, pending, sealed, mime, reason, ...extra } = last;
+      const { state: _s, captureId: _c, buffers, lastBufferAgeMs, pending, sealed, mime, reason, upload: pluginUpload, ...extra } = last;
       return {
         engine: 'native',
         recorder_state: engineState === 'recording' ? 'recording' : engineState === 'paused' ? 'paused' : engineState === 'interrupted' ? 'interrupted' : 'none',
@@ -212,6 +225,8 @@ export function createNativeEngine(plugin: ParleyRecorderPlugin, opts: { uploadB
         mime,
         engine_state: engineState,
         interruption_reason: reason ?? null,
+        // JS-side counters merged with the plugin's own view of its lane.
+        upload: { ...upload, pending_reported: pending, ...(pluginUpload && typeof pluginUpload === 'object' ? pluginUpload as Record<string, unknown> : {}) },
         ...extra,
       };
     },
