@@ -344,6 +344,23 @@ final class SegmentUploader: NSObject {
         let text = body.flatMap { String(data: $0, encoding: .utf8) } ?? ""
         stats.failed += 1
         stats.lastError = "HTTP \(status) \(text.prefix(160))"
+        if status == 409 && text.range(of: "sha256 mismatch", options: .caseInsensitive) != nil {
+            // The sidecar's checksum does not match the file the server
+            // received. The file on disk is complete now (the first recorder
+            // build hashed segments before their container was finalized —
+            // 2026-11-18); re-hash it and go again at once. Bounded, so a
+            // file that really is corrupt still ends in the retry/drop path.
+            let rehashes = ((m["rehashes"] as? Int) ?? 0) + 1
+            if rehashes <= 3, let sha = NativeRecorder.sha256Hex(fileURL) {
+                m["sha256"] = sha
+                m["rehashes"] = rehashes
+                m["nextAt"] = 0
+                if let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) { m["bytes"] = size }
+                writeMeta(m, to: metaURL)
+                NSLog("[Parley] upload re-hashed capture=\(captureId) seq=\(seq) (attempt \(rehashes)) — retrying")
+                return
+            }
+        }
         if status == 409 && text.range(of: "frozen", options: .caseInsensitive) != nil {
             m["parked"] = true
             writeMeta(m, to: metaURL)

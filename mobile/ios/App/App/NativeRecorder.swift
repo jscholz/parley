@@ -228,14 +228,26 @@ final class NativeRecorder {
     /// only work done there (Apple's own samples write from the tap).
     private func handleBuffer(_ buffer: AVAudioPCMBuffer) {
         queue.async { [self] in
-            guard state == .recording, let file = file else { return }
+            guard state == .recording else { return }
+            // The write holds its own reference to the file for the duration
+            // of THIS scope only. Rotation happens after the scope ends: an
+            // AVAudioFile finalizes its container when the LAST reference
+            // goes away, and the first version rotated from inside the scope
+            // that still held one — so "close then hash" hashed a file whose
+            // trailer had not been written yet, every segment's checksum was
+            // wrong, and every upload came back 409 (field 2026-11-18; only
+            // the final segment of a meeting, sealed by stop(), ever landed).
+            var wrote = false
             do {
-                try file.write(from: buffer)
+                guard let f = file else { return }
+                try f.write(from: buffer)
+                wrote = true
             } catch {
                 NSLog("[Parley] recorder write failed: \(error.localizedDescription)")
                 handleInterruptionLocked(reason: "write failed")
                 return
             }
+            guard wrote else { return }
             buffers += 1
             lastBufferAt = Date()
             fileFrames += buffer.frameLength
@@ -275,7 +287,7 @@ final class NativeRecorder {
     private func sealSegmentLocked() {
         guard let url = currentURL, let captureId = captureId else { return }
         let frames = fileFrames
-        file = nil            // closes + flushes the container
+        file = nil            // the last reference: closes + finalizes the container
         currentURL = nil
         if frames == 0 {
             try? FileManager.default.removeItem(at: url)
