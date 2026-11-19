@@ -6515,10 +6515,18 @@ body.doc-fullscreen-open { overflow: hidden; }
 /* Lens chips under the session filter (2026-10-20, WhatsApp-style):
    All · Meetings · Unread · Drafts. Active chip = sage tint. */
 .sess-lens {
-  display: flex; gap: 6px; padding: 2px 12px 8px; overflow-x: auto;
-  scrollbar-width: none;
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 12px 8px;
 }
-.sess-lens::-webkit-scrollbar { display: none; }
+/* Every lens stays visible (field 2026-11-19, phone: the row was wider
+   than the drawer and "Drafts" was cut to "Dra"). Wrapping only happens
+   when the chips do not fit on one line — a desktop drawer keeps one row;
+   the phone drawer (~280px) gets two. A horizontal scroller was the
+   alternative; it needs a hidden gesture inside a swipe-to-close drawer
+   and shows nothing to say it scrolls, which is what read as clipping. */
+/* The drawer's content keeps a desktop min-width so the open/close slide
+   does not re-wrap rows per frame — on a phone that minimum (320px) is
+   wider than the drawer itself, so content clipped at its right edge. */
+@media (max-width: 699px) { #sidebar .sidebar-content { min-width: 0; } }
 .sess-lens-chip {
   flex: none; display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 11px; border-radius: 999px; cursor: pointer;
