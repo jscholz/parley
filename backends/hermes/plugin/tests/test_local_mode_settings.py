@@ -129,7 +129,7 @@ def test_local_option_description_follows_the_live_probe(sandbox):
 
 def test_memory_section_fields_and_readonly_flags(sandbox):
     schema = _by_id(st.build_settings_schema())
-    full = st.build_settings_schema()
+    full = [s for s in st.build_settings_schema() if s["category"] != "Notifications"]  # message filters live in Notifications
     assert all(s["category"] == "Agent" for s in full)   # memory is part of the agent — no Memory pane
     # pane order: model + filter, then "Where models run" (profile + the two
     # memory-model rows that follow it), then the memory groups

@@ -889,7 +889,65 @@ def build_settings_schema() -> List[Dict[str, Any]]:
         _memory_location_setting(cfg, env),
         _embed_location_setting(env),
         *_memory_settings(cfg, env),
+        *_message_filter_settings(),
     ]
+
+
+MESSAGE_FILTERS_SID = "message_filters"
+MESSAGE_FILTERS_BUILTIN_SID = "message_filters_builtin"
+MESSAGE_FILTERS_CONFIG_PATH = "parley.message_filters"
+
+
+def _message_filter_settings() -> List[Dict[str, Any]]:
+    """Settings → Notifications → Message filters (parley_message_filters,
+    2026-11-19): the user's own hide patterns, plus a read-only line
+    naming the built-in rules so nobody wonders where a notice went."""
+    from . import parley_message_filters as mf
+    return [
+        {
+            "id": MESSAGE_FILTERS_SID,
+            "label": "Hide agent messages matching",
+            "description": (
+                "Regular expressions, case-insensitive. An agent message that matches "
+                "any of them is dropped before it reaches the chat, the unread count or "
+                "a notification on any device — e.g. ^💾 or recalled \\d+ memories."
+            ),
+            "category": "Notifications",
+            "type": "string-list",
+            "value": mf.user_patterns(),
+            "placeholder": "regular expression + Enter",
+            "advanced": True,
+        },
+        {
+            "id": MESSAGE_FILTERS_BUILTIN_SID,
+            "label": "Always hidden",
+            "description": "Gateway notices Parley filters by default.",
+            "category": "Notifications",
+            "type": "text",
+            "value": mf.describe_builtin(),
+            "readonly": True,
+            "advanced": True,
+        },
+    ]
+
+
+def apply_message_filters_setting(value: Any) -> Dict[str, Any]:
+    """Validate, install in-process, persist under ``parley.message_filters``."""
+    from . import parley_message_filters as mf
+    if not isinstance(value, list):
+        raise SettingsValidationError("message_filters value must be a list of strings")
+    try:
+        cleaned = mf.set_user_patterns(value)
+    except mf.PatternError as err:
+        raise SettingsValidationError(str(err)) from err
+    try:
+        _write_selected_marker(MESSAGE_FILTERS_CONFIG_PATH, cleaned)
+    except Exception as err:
+        logger.warning("[parley] settings: persisting message_filters failed: %s", err)
+    return _updated_def(MESSAGE_FILTERS_SID, {
+        "id": MESSAGE_FILTERS_SID, "label": "Hide agent messages matching",
+        "category": "Notifications", "type": "string-list", "value": cleaned,
+    })
 
 
 def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
@@ -901,6 +959,10 @@ def apply_setting(sid: str, value: Any) -> Dict[str, Any]:
         return apply_model_setting(value)
     if sid == "preferred_models":
         return apply_preferred_models_setting(value)
+    if sid == MESSAGE_FILTERS_SID:
+        return apply_message_filters_setting(value)
+    if sid == MESSAGE_FILTERS_BUILTIN_SID:
+        raise SettingsValidationError(f"{sid} is read-only")
     if sid == "runtime_profile":
         return apply_runtime_profile_setting(value)
     if sid == MEMORY_LOCATION_SID:

@@ -467,6 +467,8 @@ function categoryToSection(category: string | undefined): string {
     case 'voice-phrases': return 'voice-phrases';
     case 'interaction': return 'interaction';
     case 'display': return 'display';
+    // Message filters (2026-11-19) live with the other notification knobs.
+    case 'notifications': return 'notifications';
     default: return 'agent';
   }
 }

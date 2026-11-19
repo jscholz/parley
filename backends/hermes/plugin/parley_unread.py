@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import os
 from .parley_env import env_get
+from . import parley_message_filters as _mf
 import sqlite3
 import threading
 import time
@@ -361,14 +362,13 @@ def _compute_unread_uncached(
                            = sr.prompt_head
                   ),
                   thresholds(chat_id, last_read_at) AS (VALUES {values_clause})
-                SELECT sr.root_user_id, COUNT(*) AS unread_count
+                SELECT sr.root_user_id, m.content
                 FROM messages m
                 JOIN session_root sr ON m.session_id = sr.id
                 JOIN thresholds t ON t.chat_id = sr.root_user_id
                 WHERE m.role = 'assistant'
                   AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
                   AND m.timestamp > t.last_read_at
-                GROUP BY sr.root_user_id
             """
             uri = f"file:{state_db_path}?mode=ro"
             with contextlib.closing(
@@ -377,8 +377,14 @@ def _compute_unread_uncached(
                 rows = conn.execute(
                     batch_sql, [source, *values_params],
                 ).fetchall()
-            for cid, cnt in rows:
-                state_counts[cid] = int(cnt or 0)
+            # Rows, not COUNT(*): a line the message filters hide (memory
+            # recall notices, the user's own patterns — parley_message_filters)
+            # is not unread either; it is only ever the rows past the read
+            # pointer, so the Python-side pass stays cheap.
+            for cid, content in rows:
+                if _mf.is_hidden(content, "assistant"):
+                    continue
+                state_counts[cid] = state_counts.get(cid, 0) + 1
         except Exception:
             # Conservative: empty state_counts → only envelopes drive
             # the badge for this call. Caller still gets correct shape.
@@ -406,7 +412,7 @@ def _compute_unread_uncached(
                 params.extend([cid, float(threshold)])
             rows = db.fetchall(
                 f"WITH thresholds(chat_id, last_read_at) AS (VALUES {placeholders}) "
-                "SELECT msg_links.chat_id, COUNT(*) AS n "
+                "SELECT msg_links.chat_id, msg_links.content "
                 "FROM msg_links "
                 "JOIN thresholds t ON t.chat_id = msg_links.chat_id "
                 "WHERE msg_links.role = 'assistant' "
@@ -414,12 +420,13 @@ def _compute_unread_uncached(
                 "  AND msg_links.agent_row_id IS NULL "
                 "  AND (msg_links.tool_calls IS NULL OR msg_links.tool_calls = '' "
                 "       OR msg_links.tool_calls = '[]') "
-                "  AND msg_links.created_at > t.last_read_at "
-                "GROUP BY msg_links.chat_id",
+                "  AND msg_links.created_at > t.last_read_at ",
                 params,
             )
             for r in rows:
-                envelope_counts[r["chat_id"]] = int(r["n"] or 0)
+                if _mf.is_hidden(r["content"], "assistant"):
+                    continue
+                envelope_counts[r["chat_id"]] = envelope_counts.get(r["chat_id"], 0) + 1
     except Exception:
         envelope_counts = {}
 

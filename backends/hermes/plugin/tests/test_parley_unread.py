@@ -570,3 +570,26 @@ def test_from_ts_is_ignored_on_unmark_and_when_malformed(db, state_db):
     assert state.get_unread_row(db, f"parley:{CHAT_ID}")["lastReadAt"] == 5000.0
     _mark(db, {"chat_id": f"parley:{CHAT_ID}", "marked": True, "from_ts": "yesterday"})
     assert state.get_unread_row(db, f"parley:{CHAT_ID}")["lastReadAt"] == 5000.0
+
+
+# ── Message filters (2026-11-19): a hidden line is not unread either ──
+
+def test_filtered_lines_never_count_as_unread(db, state_db):
+    from .. import parley_message_filters as mf
+    from .. import parley_state as state
+    mf._reset_for_tests(); mf.set_user_patterns(["^📦"])
+    try:
+        _add_session(state_db, "s1")
+        _add_msg(state_db, "s1", "assistant", "👁️ Hindsight — recalled 44 memories", ts=1001.0)
+        _add_msg(state_db, "s1", "assistant", "💾 Self-improvement review: Skill 'x' patched", ts=1002.0)
+        _add_msg(state_db, "s1", "assistant", "📦 Pre-API compression: 40k → 12k", ts=1003.0)
+        _add_msg(state_db, "s1", "assistant", "the one real reply", ts=1004.0)
+        # Envelope-only (pre-flush) rows go through the same filter.
+        state.upsert_msg_link(db, id="msg_a", chat_id=CHAT_ID, role="assistant",
+                              content="👁️ Hindsight — recalled 2 memories", status="final")
+        state.upsert_msg_link(db, id="msg_b", chat_id=CHAT_ID, role="assistant",
+                              content="another real reply", status="final")
+        unread = compute_unread(db=db, state_db_path=state_db, source="parley")
+        assert unread["total"] == 2, unread
+    finally:
+        mf._reset_for_tests()

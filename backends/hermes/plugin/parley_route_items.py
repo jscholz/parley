@@ -37,7 +37,7 @@ except ImportError:  # pragma: no cover
     web = None  # type: ignore[assignment]
 
 from .parley_ids import PARLEY_SOURCE, _parse_gateway_id
-from .parley_state import _is_compaction_seed, _is_steer_injection
+from .parley_state import _is_compaction_seed, _is_hidden_row
 
 
 # Per-chat reconcile throttle. ``reconcile_from_state_db`` runs a full
@@ -326,7 +326,7 @@ def _items_by_user_id(
         # parley_state._is_steer_injection): the user's words already
         # exist as their own bubble; this row would render the origin
         # preamble as a second one.
-        if role == "user" and _is_steer_injection(text):
+        if _is_hidden_row(role, text):
             continue
         if drop_through is not None and row_id <= drop_through:
             continue

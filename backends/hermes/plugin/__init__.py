@@ -2552,7 +2552,7 @@ class ParleyAdapter(BasePlatformAdapter):
         wire: the message_id we return here is what the proxy keys the
         UI bubble on.
         """
-        from .parley_dispatcher import is_approval_prompt, is_progress_heartbeat
+        from .parley_dispatcher import is_approval_prompt
         from .parley_route_conversations import is_chat_deleted
 
         # Late output for a chat the user DELETED mid-turn: drop it.
@@ -2617,7 +2617,18 @@ class ParleyAdapter(BasePlatformAdapter):
         # edit_message attempt target it, which we reject, so it falls
         # back to send() and we land here again — same key, text replaced.
         interim = bool(metadata and metadata.get("_interim_send"))
-        if is_progress_heartbeat(content or ""):
+        # Message filters (parley_message_filters, 2026-11-19): the ONE
+        # decision point before a line can become a bubble, a push, a
+        # badge or an in-app banner. 'hide' = it never existed for the
+        # user; 'pulse' = the working indicator; 'show' = a reply.
+        from . import parley_message_filters as _mf  # noqa: WPS433
+        verdict = _mf.classify(content or "", "assistant", metadata)
+        if verdict == "hide":
+            rule = _mf.match(content or "", "assistant")
+            logger.info("[parley] filtered send chat=%s rule=%s text=%r", chat_id,
+                        rule.id if rule else "non_conversational", (content or "")[:80])
+            return SendResult(success=True, message_id=self._next_message_id(None))
+        if verdict == "pulse":
             status_id = f"status_{chat_id}"
             ok = await self._safe_send_envelope({
                 "type": "status",

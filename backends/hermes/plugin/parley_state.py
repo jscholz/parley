@@ -762,7 +762,7 @@ def list_messages_for_chat(
     # them (field 2026-11-06). Filtered before the page is cut so paging
     # stays consistent; the PWA never sees them.
     rows_list = [r for r in rows_list
-                 if not ((r.get("role") or "") == "user" and _is_steer_injection(r.get("content")))]
+                 if not _is_hidden_row(r.get("role"), r.get("content"))]
     first_id: Optional[int] = None
     has_more = False
     # Both directions keep the rows NEAREST the cursor, i.e. the tail of
@@ -837,15 +837,21 @@ def _is_compaction_seed(content) -> bool:
 # ``display_kind='steer'``, but that column is newer than some state.db
 # files and than the test fixtures, and the marker texts are the
 # contract the model itself reads.
-_STEER_INJECTION_PREFIXES = (
-    "[OUT-OF-BAND USER MESSAGE",
-    "Gateway message origin (JSON data",
-)
-
-
 def _is_steer_injection(content) -> bool:
-    text = (content or "").lstrip()
-    return any(text.startswith(p) for p in _STEER_INJECTION_PREFIXES)
+    """The model-facing copy of a mid-turn /steer (kept as a name for the
+    tests and call sites that grew around it). The rule itself lives in
+    parley_message_filters ("steer-injection")."""
+    from . import parley_message_filters as _mf  # noqa: WPS433
+    return _mf.is_hidden(content, "user")
+
+
+def _is_hidden_row(role, content) -> bool:
+    """Would this transcript row be filtered out of everything the user
+    sees? One predicate for every read path (parley_message_filters):
+    steer injections on user rows, memory-recall / self-improvement
+    notices and the user's own patterns on assistant rows."""
+    from . import parley_message_filters as _mf  # noqa: WPS433
+    return _mf.is_hidden(content, (role or "") or "assistant")
 
 
 # hermes-core stores a MULTIMODAL user turn (text + N images) as a
@@ -1000,8 +1006,8 @@ def _classify_replay_duplicate_state_ids(state_rows) -> tuple:
         content = r["content"] or ""
         if _is_compaction_seed(content):
             continue
-        if (r["role"] or "") == "user" and _is_steer_injection(content):
-            continue  # model-facing /steer copy (see _is_steer_injection)
+        if _is_hidden_row(r["role"], content):
+            continue  # filtered row (parley_message_filters)
         role = r["role"]
         tool_call_id = r["tool_call_id"] or ""
         tool_calls = (r["tool_calls"] if "tool_calls" in r.keys() else None) or ""
@@ -1469,7 +1475,7 @@ def _build_chronological_items(
         r for r in rows
         if not _is_compaction_seed(r["content"])
         # the model-facing copy of a mid-turn /steer (_is_steer_injection)
-        and not ((r["role"] or "") == "user" and _is_steer_injection(r["content"]))
+        and not _is_hidden_row(r["role"], r["content"])
         and not (
             (drop_through := compaction_head_end_per_session.get(r["session_id"])) is not None
             and r["id"] <= drop_through
@@ -1819,7 +1825,7 @@ def _build_v3_items(parley_db, state_db_path, chat_id: str) -> tuple:
         # model-facing copy of a mid-turn /steer (_is_steer_injection).
         if _is_compaction_seed(content):
             continue
-        if (r["role"] or "") == "user" and _is_steer_injection(content):
+        if _is_hidden_row(r["role"], content):
             continue
         ts = float(r["created_at"]) if r["created_at"] is not None else 0.0
         arid = r["agent_row_id"]
@@ -2014,7 +2020,7 @@ def insert_legacy_twin(db, chat_id: str, row) -> bool:
     # have their user_message twin. Refusing it HERE covers every
     # importer at once — reconcile's Pass 2, the linker's mint and the
     # orphan-adopt all funnel through this one insert.
-    if (_legacy_row_get(row, "role") or "") == "user" and _is_steer_injection(_legacy_row_get(row, "content")):
+    if _is_hidden_row(_legacy_row_get(row, "role"), _legacy_row_get(row, "content")):
         return False
     ts_raw = _legacy_row_get(row, "timestamp")
     ts = float(ts_raw) if ts_raw is not None else time.time()
