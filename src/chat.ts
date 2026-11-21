@@ -66,6 +66,22 @@ const VIEWED_SESSION_LS_KEY = 'parley.viewed-session-id';
  *  bound. Module-level — same shape as pin store, simple + cheap. */
 const foldStateByMsgId = new Map<string, 'expanded' | 'collapsed'>();
 
+// Sending is the one moment the user has unambiguously said "I am at
+// the bottom of this conversation" — every chat UI (ChatGPT, Claude,
+// Slack, iMessage) brings the new message and the reply into view on
+// send, whatever the scroll position was. Parley only followed replies
+// while already pinned, so a send after reading back up a little left
+// the user's own bubble below the fold and the reply streamed unseen
+// (field 2026-11-21). addPendingSend dispatches this for every send
+// path (composer, dictation, voice); the chat on screen re-pins.
+if (typeof window !== 'undefined') {
+  window.addEventListener('parley:user-send', (ev) => {
+    const chatId = (ev as CustomEvent<{ chatId?: string }>).detail?.chatId;
+    if (!chatId || chatId !== viewedSessionIdRef) return;
+    forceScrollToBottom();
+  });
+}
+
 /** Let main.ts record which session the chat is currently rendering.
  *  Drawer reads it back after boot via getViewedSessionId() — survives
  *  page reload because we persist it in the chat snapshot. */
