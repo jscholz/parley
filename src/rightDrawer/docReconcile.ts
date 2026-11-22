@@ -32,6 +32,29 @@ const LIVE_STATUSES = new Set(['pending', 'recording', 'transcribing']);
  *  coalesce into one instead of racing duplicate fetches. */
 let sweeping: Promise<void> | null = null;
 
+/** Install the catch-up triggers (field 2026-11-22: the phone sat on the
+ *  Artifacts tab through the end of a meeting, the page froze, and on
+ *  resume nothing re-checked — boot and tab-select were the only
+ *  triggers, so the doc stayed "(live)" for three hours). Now also:
+ *  the page becoming visible or focused (iOS resume, desktop return),
+ *  a capture_changed envelope (the completion we may have missed is
+ *  exactly what it announces), and a slow tick while any live-titled
+ *  capture doc is on the shelf. Every trigger is a no-op without such a
+ *  doc, and concurrent triggers coalesce. */
+let triggersInstalled = false;
+const LIVE_DOC_TICK_MS = 60_000;
+export function installStaleLiveReconcileTriggers(): void {
+  if (triggersInstalled || typeof window === 'undefined') return;
+  triggersInstalled = true;
+  const sweep = () => { void reconcileStaleCaptureDocs(); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sweep(); });
+  window.addEventListener('focus', sweep);
+  window.addEventListener('parley:capture-changed-remote', sweep);
+  window.setInterval(() => {
+    if (listDocs().some((d) => d.source === 'capture' && !!d.captureId && isLiveCaptureDoc(d))) sweep();
+  }, LIVE_DOC_TICK_MS);
+}
+
 /** Reconcile every persisted still-live-titled capture doc against the
  *  capture manifest. Fire-and-forget (never blocks rendering); network
  *  failures silently keep the doc — the next panel open retries.

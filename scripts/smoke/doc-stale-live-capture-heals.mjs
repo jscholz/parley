@@ -57,7 +57,7 @@ export function MOCK_SETUP(mock) {
   // GONE_CAP deliberately not added: the manifest GET 404s.
 }
 
-export default async function run({ page, log }) {
+export default async function run({ page, log, mock }) {
   await waitForReady(page);
 
   // Seed the exact field state: three PERSISTED live-titled capture
@@ -161,4 +161,50 @@ export default async function run({ page, log }) {
   assert(!reader.liveGlyph, 'record glyph must drop the live (red) state');
   assert(reader.body.includes('FINAL-HEAL-MARKER'), 'reader body must show the final transcript');
   log('reader: final title + meta, player strip present, glyph neutral');
+
+  // ── Resume while the panel is ALREADY open (field 2026-11-22) ──
+  // The phone sat on the Artifacts tab through the end of a meeting; the
+  // page froze; on resume nothing re-checked (boot and tab-select were
+  // the only triggers) and the doc stayed "(live)" for three hours.
+  // Open the still-live doc, finish the meeting server-side, then fire
+  // the resume signal: the reader must heal in place, no reload, no
+  // tab switch.
+  await page.evaluate(async (id) => {
+    const mod = await import('/build/rightDrawer/docStore.mjs');
+    mod.selectDoc(id);
+  }, docIdFor(LIVE_PATH));
+  log('resume phase: opening the still-live doc…');
+  await page.waitForFunction(
+    () => document.querySelector('#doc-drawer-body .doc-drawer-title')?.textContent?.includes('Meeting still going'),
+    null, { timeout: 6000, polling: 50 },
+  );
+  log('resume phase: still-live doc is open in the reader');
+  const before = await page.evaluate(() => ({
+    title: document.querySelector('#doc-drawer-body .doc-drawer-title')?.textContent || '',
+    liveGlyph: !!document.querySelector('#doc-drawer-body .doc-capture-glyph.live'),
+  }));
+  assert(before.title.includes('(live)') && before.liveGlyph, `precondition: the open doc is live-marked (${JSON.stringify(before)})`);
+  mock.setCaptureStatus(LIVE_CAP, 'complete', {
+    endedAt: Date.now(), title: 'Meeting that ended',
+    transcript: `# Meeting that ended\n\n_Recorded 2026-11-22 14:23 · 44:54_\n\n**[+0:00]** RESUME-HEAL-MARKER words.`,
+  });
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(
+    () => {
+      const t = document.querySelector('#doc-drawer-body .doc-drawer-title')?.textContent || '';
+      return !t.includes('(live)') && !document.querySelector('#doc-drawer-body .doc-capture-glyph.live');
+    },
+    null, { timeout: 8000, polling: 100 },
+  );
+  const after = await page.evaluate(() => ({
+    title: document.querySelector('#doc-drawer-body .doc-drawer-title')?.textContent || '',
+    body: document.querySelector('#doc-drawer-body .doc-drawer-content')?.textContent || '',
+    railLive: !!document.querySelector('.doc-rail-tab .live, .doc-rail-tab.live'),
+  }));
+  assert(after.body.includes('RESUME-HEAL-MARKER'), 'the reader shows the final transcript after resume');
+  assert(!after.railLive, 'no red live dot left on the rail');
+  log('resume with the panel open: healed in place ✓');
 }

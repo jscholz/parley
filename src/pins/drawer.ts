@@ -16,7 +16,7 @@ import { initDocFullscreen } from '../rightDrawer/docFullscreen.ts';
 import { hydrateDoc, listDocs, selectDoc, docCount, setDoc } from '../rightDrawer/docStore.ts';
 import { initDocShelfSync } from '../rightDrawer/docShelfSync.ts';
 import { apiUrl } from '../apiBase.ts';
-import { reconcileStaleCaptureDocs } from '../rightDrawer/docReconcile.ts';
+import { reconcileStaleCaptureDocs, installStaleLiveReconcileTriggers } from '../rightDrawer/docReconcile.ts';
 import { totalUnreadCount } from '../notifications/badge.ts';
 import * as settings from '../settings.ts';
 
@@ -270,6 +270,7 @@ export function initPinDrawer(opts: {
   // SSE envelope this client may never have heard). Fire-and-forget:
   // rendering never waits on it.
   void reconcileStaleCaptureDocs();
+  installStaleLiveReconcileTriggers();
 
   // Built ahead of the host so (a) the rail-button listener below can
   // aim its view and (b) the doc tabs can hold a direct handle.
