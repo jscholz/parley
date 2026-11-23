@@ -12,7 +12,7 @@ truth for "has the user seen this".
 | App icon badge (iOS, macOS dock) | Σ over conversations of assistant rows after the pointer, `marked_unread` chats counting at least 1 — `parley_unread.compute_unread` |
 | Drawer row chips, mobile header count | the same per-chat numbers, from `GET /v1/unread` |
 | Drawer "Unread" lens chip | how many chats have a non-zero number (WhatsApp semantics) |
-| Activity tray "New" marks, bell dot | an item is New iff its chat is a conversation, its `created_at` is after that chat's pointer, and it is not read by its own flag; in a `marked_unread` chat every item after the pointer is New whatever its flag says; unresolved approvals are always New |
+| Activity tray "New" marks, bell dot | an item is New iff its chat is a conversation, its `created_at` is after that chat's pointer, and it is not read by its own flag; in a `marked_unread` chat every item after the pointer is New whatever its flag says, and a marked chat with no such row gets a stand-in row (`marked:<chat>`, dismissing it clears the mark); unresolved approvals are always New |
 
 Rows the message filters hide (`parley_message_filters`) never count anywhere.
 

@@ -485,7 +485,30 @@ def list_activity_items(db, *, limit: int = 200,
             if cid and universe and not d["read"] and cid not in universe:
                 d["read"] = True
         out.append(d)
+    # A hand-marked chat whose rows are gone (pruned, or the mark landed on
+    # a reply that never had a row) still badges — give it a row, so the
+    # pane explains the badge and "Mark all read" / dismiss can clear it
+    # (field 2026-11-23: a chat marked on 11-06 badged +1 with nothing to
+    # show for it).
+    if pointers:
+        covered = {d["chatId"] for d in out if d.get("chatId") and not d.get("read")}
+        bare_universe = frozenset(u.split(":", 1)[-1] for u in (universe or ()))
+        for cid, (last_read, marked) in pointers.items():
+            if not marked or cid in covered:
+                continue
+            if universe and cid.split(":", 1)[-1] not in bare_universe:
+                continue
+            out.append({
+                "id": f"{MARKED_ROW_PREFIX}{cid}", "chatId": cid, "kind": "notification",
+                "title": "Marked unread", "body": "You marked this chat unread. Open it, or dismiss this to clear the mark.",
+                "createdAt": float(last_read) if last_read is not None else time.time(),
+                "urgent": False, "read": False, "messageId": None, "resolved": None,
+            })
     return out
+
+
+#: Synthetic pane rows standing in for a sticky-marked chat (list_activity_items).
+MARKED_ROW_PREFIX = "marked:"
 
 
 def derived_unread_chat_ids(db, *, pointers: Dict[str, Tuple[Optional[float], bool]],
@@ -624,6 +647,16 @@ def mark_activity_seen(db, *, chat_id: Optional[str] = None, all_items: bool = F
 
 
 def delete_activity_item(db, *, id: str) -> Dict[str, Any]:
+    if id.startswith(MARKED_ROW_PREFIX):
+        # Dismissing the stand-in row for a hand-marked chat clears the mark
+        # (the only state the row represents). ``chat_id`` tells the caller
+        # which chat's unread changed.
+        cid = id[len(MARKED_ROW_PREFIX):]
+        row = get_unread_row(db, cid)
+        if not row or not row.get("markedUnread"):
+            return {"removed": False}
+        set_marked(db, cid, False)
+        return {"removed": True, "chat_id": cid}
     cur = db.exec("DELETE FROM activity_items WHERE id = ?", (id,))
     return {"removed": cur.rowcount > 0}
 

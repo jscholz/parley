@@ -509,3 +509,20 @@ def test_pane_mark_all_read_clears_sticky_marks_so_the_badge_hits_zero(db, state
     assert after["total"] == 0, "Mark all read in the pane must clear a hand-marked chat too"
     assert CHAT_PREFIXED in res.text if hasattr(res, "text") else True
     assert any(e["type"] == "unread_changed" and e["chat_id"] == CHAT_PREFIXED for e in emitted)
+
+
+def test_marked_chat_without_rows_gets_a_stand_in_row_and_dismiss_clears_the_mark(db):
+    chat = CHAT_PREFIXED
+    state.mark_unread_from(db, chat, 500.0)   # its rows were pruned long ago
+    pointers = {chat: (500.0 - 0.001, True)}
+    items = state.list_activity_items(db, pointers=pointers, universe=frozenset({chat}))
+    stand_in = [i for i in items if i["id"] == f"marked:{chat}"]
+    assert len(stand_in) == 1 and stand_in[0]["read"] is False and stand_in[0]["chatId"] == chat
+    assert state.derived_unread_chat_ids(db, pointers=pointers, universe=frozenset({chat})) == [chat]
+    # A chat outside the drawer's universe gets no stand-in (it never badges).
+    assert not [i for i in state.list_activity_items(db, pointers=pointers, universe=frozenset({"parley:other"})) if i["id"].startswith("marked:")]
+    # Dismissing the stand-in clears the sticky mark.
+    res = state.delete_activity_item(db, id=f"marked:{chat}")
+    assert res == {"removed": True, "chat_id": chat}
+    assert not state.get_unread_row(db, chat)["markedUnread"]
+    assert state.delete_activity_item(db, id=f"marked:{chat}") == {"removed": False}

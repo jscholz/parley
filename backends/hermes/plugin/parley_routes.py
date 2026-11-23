@@ -579,6 +579,10 @@ async def handle_activity_delete(ctx, request: web.Request) -> web.Response:
     result = state.delete_activity_item(ctx.db, id=item_id)
     if result["removed"]:
         _activity_changed(ctx, None, "delete", item_id)
+        if result.get("chat_id"):
+            # The row stood in for a sticky mark; clearing it moves the badge.
+            invalidate_unread_cache()
+            ctx.emit_envelope({"type": "unread_changed", "chat_id": result["chat_id"], "cause": "unmarked"})
     return _json({"ok": True, **result})
 
 
