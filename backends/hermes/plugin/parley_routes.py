@@ -549,7 +549,13 @@ async def handle_activity_seen(ctx, request: web.Request) -> web.Response:
     # chats. Move each affected chat's read pointer to now, so the app
     # badge (summed over the pointers) drops with the pane — before, the
     # pane went quiet while the badge kept the count for days.
-    moved = state.unread_activity_chat_ids(ctx.db, chat_id=chat_id if isinstance(chat_id, str) else None)
+    from .parley_unread import _read_state_unread_state, conversation_chat_ids
+    moved = state.derived_unread_chat_ids(
+        ctx.db,
+        pointers=_read_state_unread_state(ctx.db),
+        universe=conversation_chat_ids(ctx.state_db_path, PARLEY_SOURCE),
+        chat_id=chat_id if isinstance(chat_id, str) else None,
+    )
     result = state.mark_activity_seen(
         ctx.db,
         chat_id=chat_id if isinstance(chat_id, str) else None,

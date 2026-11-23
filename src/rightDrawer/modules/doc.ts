@@ -39,7 +39,7 @@ import { apiUrl } from '../../apiBase.ts';
 import { buildPlayerStrip } from '../capturePlayer.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
 import { stripLeadingTitleHeading } from '../docTitleDedupe.ts';
-import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs, listGroup, setListGroup } from '../docStore.ts';
+import { currentDoc, tabOrderDocs, selectDoc, removeDoc, clearDocs, setTabOrder, snapshotDocs, restoreDocs, type DocState, setDoc, listDocs, listGroup, setListGroup, docCount } from '../docStore.ts';
 import { toggleDocFullscreen, syncExpandButtons } from '../docFullscreen.ts';
 import { loadSortable } from '../sortableLoader.ts';
 import { formatRelativeTime } from './common.ts';
@@ -715,6 +715,7 @@ export function createDocModule(opts: {
     // — transcripts, memos, anything the agent displays — and it is the
     // word people know from other coding agents.
     title: 'Artifacts',
+    count: docCount,
     panel: opts.panel,
     toggleIds: ['btn-doc-drawer-rail'],
     // View aim for out-of-panel callers (rail tabs → reader on a doc,

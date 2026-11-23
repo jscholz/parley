@@ -12,14 +12,14 @@ truth for "has the user seen this".
 | App icon badge (iOS, macOS dock) | Σ over conversations of assistant rows after the pointer, `marked_unread` chats counting at least 1 — `parley_unread.compute_unread` |
 | Drawer row chips, mobile header count | the same per-chat numbers, from `GET /v1/unread` |
 | Drawer "Unread" lens chip | how many chats have a non-zero number (WhatsApp semantics) |
-| Activity tray "New" marks, bell dot | an item is New iff its chat is a conversation, its `created_at` is after that chat's pointer, and it is not read by its own flag; unresolved approvals are always New |
+| Activity tray "New" marks, bell dot | an item is New iff its chat is a conversation, its `created_at` is after that chat's pointer, and it is not read by its own flag; in a `marked_unread` chat every item after the pointer is New whatever its flag says; unresolved approvals are always New |
 
 Rows the message filters hide (`parley_message_filters`) never count anywhere.
 
 ## What moves the pointer
 
 * Opening a chat (`POST /v1/unread/seen`) — also marks that chat's tray items read.
-* Reading the tray (`POST /v1/activity/seen`, per chat or "Mark all read") — also moves the pointer of every chat whose items it read.
+* Reading the tray (`POST /v1/activity/seen`, per chat or "Mark all read") — also moves the pointer of every chat whose items it read, and clears every sticky `marked_unread` flag (`parley_state.derived_unread_chat_ids`), so "Mark all read" always takes the badge to zero.
 * "Mark unread from here" moves the pointer back and sets the sticky flag.
 
 Both seen routes invalidate the unread cache and emit `unread_changed`, which
@@ -33,6 +33,15 @@ APNs. Every `unread_changed` schedules a badge-only push carrying the server
 total (`PushDispatcher.sync_native_badge`), deduped per device, and re-sent
 after ten minutes even if unchanged so a lost push cannot pin a stale number.
 Alert pushes carry the same total.
+
+## Things that are NOT unread at all
+
+* Open artifacts and pinned messages are inventory, not attention. Their
+  counts live in the panel title ("Pinned · 2", "Artifacts · 10"), never on a
+  rail button and never in any badge. Field 2026-11-23: with ten artifacts
+  open, two messages pinned, and a badge of 12, the rail chips were read as
+  the badge's parts. The 12 was ten unread cron digests plus two chats marked
+  unread by hand.
 
 ## Things that are deliberately NOT read signals
 

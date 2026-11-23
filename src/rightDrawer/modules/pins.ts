@@ -1,6 +1,6 @@
 import type { RightDrawerModule, RightDrawerModuleContext } from '../host.ts';
 import { miniMarkdown } from '../../util/markdown.ts';
-import { listAllPins, clearAllPins, unpinMessage, type PinnedItem } from '../../pins/store.ts';
+import { listAllPins, clearAllPins, unpinMessage, totalPinCount, type PinnedItem } from '../../pins/store.ts';
 import { chatLabelFor, formatRelativeTime } from './common.ts';
 import { getTitleForChat } from '../../sessionDrawer.ts';
 
@@ -41,6 +41,7 @@ export function createPinsModule(opts: {
   return {
     id: 'pins',
     title: 'Pinned',
+    count: totalPinCount,
     panel: opts.panel,
     toggleIds: ['btn-pin-drawer-rail'],
     render,

@@ -473,3 +473,39 @@ def test_badge_sync_resends_an_unchanged_total_after_the_resend_window(db, monke
     d._last_badge_sent_at["a" * 64] -= sd.BADGE_RESEND_AFTER_S + 1
     assert d.sync_native_badge()["delivered"] == 1, "same number after the window is sent again (a lost push cannot pin the icon)"
     assert sent == [{"badge": 7, "badge_only": True}] * 2
+
+
+def test_sticky_mark_keeps_the_pane_row_new_despite_its_own_read_flag(db):
+    """Field 2026-11-23: two chats marked unread by hand badged (+2) while
+    the pane showed nothing New for them — their rows had been read in
+    the pane before the mark. The pointer (with its sticky flag) is the
+    truth; the row flag may not out-vote it."""
+    chat = CHAT_PREFIXED
+    state.upsert_activity_item(db, id="n1", chat_id=chat, kind="cron", title="Cron", body="x", created_at=300.0)
+    state.mark_activity_seen(db, chat_id=chat)                 # read in the pane
+    state.mark_unread_from(db, chat, 300.0)                    # then "mark unread from here"
+    pointers = {chat: (300.0 - 0.001, True)}
+    items = {i["id"]: i for i in state.list_activity_items(db, pointers=pointers, universe=frozenset({chat}))}
+    assert items["n1"]["read"] is False
+    assert state.derived_unread_chat_ids(db, pointers=pointers, universe=frozenset({chat})) == [chat]
+
+
+def test_pane_mark_all_read_clears_sticky_marks_so_the_badge_hits_zero(db, state_db):
+    from ..parley_routes import handle_activity_seen
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "assistant", "old reply", ts=1000.0)
+    # Read everything, then mark the chat unread from that reply: no New
+    # pane row exists for it, but the badge counts the chat (sticky).
+    state.upsert_activity_item(db, id="n1", chat_id=CHAT_PREFIXED, kind="agent_reply", title="Reply", body="1", created_at=1000.0)
+    state.mark_activity_seen(db, chat_id=CHAT_PREFIXED)
+    state.mark_unread_from(db, CHAT_PREFIXED, 1000.0)
+    before = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
+    assert before["total"] == 1, before
+    emitted = []
+    ctx = SimpleNamespace(db=db, state_db_path=state_db, emit_envelope=lambda env: emitted.append(env))
+    request = SimpleNamespace(json=AsyncMock(return_value={"all": True}))
+    res = asyncio.run(handle_activity_seen(ctx, request))
+    after = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
+    assert after["total"] == 0, "Mark all read in the pane must clear a hand-marked chat too"
+    assert CHAT_PREFIXED in res.text if hasattr(res, "text") else True
+    assert any(e["type"] == "unread_changed" and e["chat_id"] == CHAT_PREFIXED for e in emitted)

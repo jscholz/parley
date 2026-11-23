@@ -4,7 +4,7 @@
 // store-change event here.
 
 import { progressLabel } from '../capture/meetingsIndex.ts';
-import { totalPinCount, hydrate as hydratePins } from './store.ts';
+import { hydrate as hydratePins } from './store.ts';
 import { log } from '../util/log.ts';
 import { createRightDrawerHost, type RightDrawerHost } from '../rightDrawer/host.ts';
 import { hydrate as hydrateActivity, unresolvedApprovalCount, unreadActivityCount } from '../notifications/activityStore.ts';
@@ -13,7 +13,7 @@ import { createPinsModule, type PinClickHandler } from '../rightDrawer/modules/p
 import { createDocModule, type DocModule } from '../rightDrawer/modules/doc.ts';
 import { initDocTabs } from '../rightDrawer/docTabs.ts';
 import { initDocFullscreen } from '../rightDrawer/docFullscreen.ts';
-import { hydrateDoc, listDocs, selectDoc, docCount, setDoc } from '../rightDrawer/docStore.ts';
+import { hydrateDoc, listDocs, selectDoc, setDoc } from '../rightDrawer/docStore.ts';
 import { initDocShelfSync } from '../rightDrawer/docShelfSync.ts';
 import { apiUrl } from '../apiBase.ts';
 import { reconcileStaleCaptureDocs, installStaleLiveReconcileTriggers } from '../rightDrawer/docReconcile.ts';
@@ -130,23 +130,15 @@ function refreshCountBanner(): void {
   refreshRailCounts();
 }
 
-/** Inventory chips (his ask 2026-10-08): how many messages are pinned,
- *  how many documents are open — on the Pins / Docs rail buttons. Not
- *  attention badges: a different element and a muted look (.rail-count),
- *  so the one-number rule above still holds for the primary badge. */
+/** Inventory (his ask 2026-10-08: how many messages are pinned, how many
+ *  artifacts are open) is part of the panel TITLE — "Pinned · 2",
+ *  "Artifacts · 10" — rendered by the host from each module's count().
+ *  It used to be a chip on the rail button; on the phone a number on an
+ *  icon reads as an attention badge, and the field read "2" + "10" as the
+ *  parts of the app badge's "12" (2026-11-23). The rail now carries
+ *  attention only (the bell's dot / approvals count). */
 function refreshRailCounts(): void {
-  const pins = document.getElementById('pin-drawer-total-rail');
-  if (pins) {
-    const n = totalPinCount();
-    pins.hidden = n === 0;
-    pins.textContent = n > 99 ? '99+' : String(n);
-  }
-  const docs = document.getElementById('doc-drawer-count-rail');
-  if (docs) {
-    const n = docCount();
-    docs.hidden = n === 0;
-    docs.textContent = n > 99 ? '99+' : String(n);
-  }
+  drawerHost?.refreshTitle();
 }
 
 function refreshCombinedBanner(): void {

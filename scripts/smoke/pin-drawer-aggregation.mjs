@@ -107,19 +107,17 @@ export default async function run({ page, log }) {
   assert(bannerHidden, 'pin numeric badge is retired (one-number rule) and must stay hidden');
   log('pin numeric badge stays hidden (one-number rule) ✓');
 
-  // ── Inventory chip (2026-10-08): a muted "how many pinned" count on the
-  //    Pins rail button — a different element from the attention badge,
-  //    so the one-number rule above is untouched.
-  const chip = await page.evaluate(() => {
-    const el = document.getElementById('pin-drawer-total-rail');
-    return el ? { hidden: el.hidden, text: el.textContent } : null;
-  });
-  assert(chip && !chip.hidden && chip.text === '2',
-    `pins rail chip should show the pinned total (2), got ${JSON.stringify(chip)}`);
-  log('pins rail chip shows the pinned total ✓');
+  // ── Inventory (2026-10-08 ask, moved 2026-11-23): the pinned total is
+  //    part of the panel TITLE ("Pinned · 2"), never a chip on the rail
+  //    button — a number on an icon reads as an attention badge.
+  const railChip = await page.evaluate(() => !!document.getElementById('pin-drawer-total-rail'));
+  assert(!railChip, 'the Pins rail button must carry no inventory chip');
 
   // ── Open the drawer ──────────────────────────────────────────────
   await openPinDrawer(page);
+  const title = await page.evaluate(() => document.getElementById('right-drawer-title')?.textContent?.replace(/\s+/g, ' ').trim());
+  assert(title === 'Pinned · 2', `panel title should carry the inventory ("Pinned · 2"), got ${JSON.stringify(title)}`);
+  log('panel title carries the pinned total ✓');
   const items = await drawerItems(page);
   assert(items.length === 2,
     `drawer should aggregate 2 items, got ${items.length}: ${JSON.stringify(items)}`);

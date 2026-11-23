@@ -26,6 +26,12 @@ export interface RightDrawerModule {
   panel: HTMLElement;
   toggleIds: string[];
   render(ctx: RightDrawerModuleContext): void;
+  /** Inventory — how many things live in this panel (pinned messages,
+   *  open artifacts). Shown muted inside the panel TITLE ("Pinned · 2"),
+   *  never on a rail button: a number on an icon reads as an attention
+   *  badge, and the field summed "2" + "10" into the app badge's "12"
+   *  (2026-11-23). The rail carries attention only (dot / approvals). */
+  count?: () => number;
   onClear?: (ctx: RightDrawerModuleContext) => void;
   onSelect?: (ctx: RightDrawerModuleContext) => void;
 }
@@ -68,6 +74,9 @@ export interface RightDrawerHost {
   activeModuleId(): string;
   select(moduleId: string, opts?: { open?: boolean }): void;
   render(): void;
+  /** Re-render only the title (inventory count) — cheaper than render()
+   *  when a pin or artifact changed while the panel is not on screen. */
+  refreshTitle(): void;
 }
 
 export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawerHost {
@@ -84,7 +93,7 @@ export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawer
       const mod = modules.get(moduleId);
       if (!mod) return;
       activeId = moduleId;
-      if (opts.titleEl) opts.titleEl.textContent = mod.title;
+      renderTitle(mod);
       for (const candidate of opts.modules) {
         const selected = candidate.id === moduleId;
         candidate.panel.hidden = !selected;
@@ -103,9 +112,27 @@ export function createRightDrawerHost(opts: RightDrawerHostOptions): RightDrawer
     render: () => {
       const mod = modules.get(activeId);
       if (!mod) return;
+      renderTitle(mod);
       mod.render(ctxOf(activeId));
     },
+    refreshTitle: () => {
+      const mod = modules.get(activeId);
+      if (mod) renderTitle(mod);
+    },
   };
+
+  function renderTitle(mod: RightDrawerModule): void {
+    const el = opts.titleEl;
+    if (!el) return;
+    el.textContent = mod.title;
+    const n = mod.count ? mod.count() : 0;
+    if (n > 0) {
+      const count = document.createElement('span');
+      count.className = 'pin-drawer-title-count';
+      count.textContent = ` · ${n > 99 ? '99+' : n}`;   // real space: the title reads "Pinned · 2" to screen readers too
+      el.appendChild(count);
+    }
+  }
 
   // Per-module Clear-button state; the real button mirrors the active one.
   interface ClearState { hidden: boolean; text: string; attrs: Record<string, string> }

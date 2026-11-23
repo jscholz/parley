@@ -466,16 +466,49 @@ def list_activity_items(db, *, limit: int = 200,
     out = []
     for r in rows:
         d = _activity_row_to_dict(r)
-        if not d.get("read") and not (d.get("kind") == "approval" and d.get("resolved") is None):
-            cid = d.get("chatId")
-            if cid and pointers:
-                last_read, _marked = pointers.get(cid) or (None, False)
-                if last_read is not None and d.get("createdAt") is not None and float(d["createdAt"]) <= float(last_read):
-                    d["read"] = True
+        if d.get("kind") == "approval":
+            out.append(d)
+            continue
+        cid = d.get("chatId")
+        last_read, marked = (pointers.get(cid) if cid and pointers else None) or (None, False)
+        after_pointer = (last_read is not None and d.get("createdAt") is not None
+                         and float(d["createdAt"]) > float(last_read))
+        if marked and after_pointer:
+            # "Mark unread from here" (sticky flag) is the pointer saying
+            # "unread again": the row's own flag from an earlier read must
+            # not out-vote it, or the chat badges while the pane shows
+            # nothing New (field 2026-11-23: badge 12, pane 10).
+            d["read"] = False
+        elif not d.get("read"):
+            if last_read is not None and d.get("createdAt") is not None and not after_pointer:
+                d["read"] = True
             if cid and universe and not d["read"] and cid not in universe:
                 d["read"] = True
         out.append(d)
     return out
+
+
+def derived_unread_chat_ids(db, *, pointers: Dict[str, Tuple[Optional[float], bool]],
+                            universe: Optional[frozenset] = None,
+                            chat_id: Optional[str] = None) -> List[str]:
+    """The chats a pane "seen" reads: every chat with a New non-blocking
+    item under the derived model above, plus every chat carrying the
+    sticky ``marked_unread`` flag (it badges at least 1 whether or not a
+    row exists for it). ``chat_id`` narrows to that one chat — reading
+    its section IS reading the chat, so it is always returned."""
+    if chat_id:
+        return [chat_id]
+    out: set = set()
+    for item in list_activity_items(db, limit=500, pointers=pointers, universe=universe):
+        if item.get("read") or item.get("kind") == "approval":
+            continue
+        if item.get("chatId"):
+            out.add(item["chatId"])
+    bare_universe = frozenset(u.split(":", 1)[-1] for u in (universe or ()))
+    for cid, (_last_read, marked) in (pointers or {}).items():
+        if marked and (not universe or cid.split(":", 1)[-1] in bare_universe):
+            out.add(cid)
+    return sorted(out)
 
 
 def prune_activity_items(db, *, limit: Optional[int] = None) -> Dict[str, Any]:
