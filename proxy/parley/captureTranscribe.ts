@@ -76,10 +76,9 @@ export interface TranscribeConfig {
   /** Never-clobber guard seam — default is userTitles.isUserTitled
    *  (chats the user manually renamed via PATCH /sessions). */
   isUserTitledFn?: (chatId: string) => Promise<boolean>;
-  /** Rename retry knobs. The start-title rename races the upstream's
-   *  lazy session creation (the start message is dispatched
-   *  fire-and-forget), so a couple of spaced retries are part of the
-   *  design, not paranoia. */
+  /** Rename retries tolerate transient upstream failures. Backends with
+   *  lazy session creation may not have a chat row until the user's first
+   *  message or finish ingest; capture metadata/doc remain available. */
   renameMaxAttempts?: number;
   renameRetryDelayMs?: number;
 }
@@ -599,19 +598,12 @@ async function reingestIfGrown(done: CaptureManifest): Promise<void> {
 export function initCaptureTranscription(config: TranscribeConfig): void {
   cfg = config;
   setCaptureHooks({
-    // NOT onCreated (2026-08-18 postmortem): creation only proves the
-    // server minted an entity — announcing there told Jonathan
-    // "Recording started" while his iPhone's getUserMedia hung forever
-    // and no audio ever existed. onActivated fires only after a client
-    // confirmed mic ownership + a running MediaRecorder (or, legacy
-    // compat, real audio arrived), so the message below is honest.
+    // Only a confirmed recorder (or first audio from a legacy client)
+    // activates the live doc/title. Start is deliberately NOT an agent
+    // turn: even an informational prompt produces acknowledgements/TTS.
+    // The capture index and live doc retain context; finish still ingests.
     onActivated(m) {
       if (!m.linked_chat) return;
-      (cfg?.dispatchFn ?? dispatchInternalMessage)(
-        m.linked_chat,
-        `📼 Recording "${m.title}" started. Live transcript (updates ~every minute): `
-        + `${transcriptPath(m)}\n\nYou can read it mid-meeting if I ask about something.`,
-      );
       // Start-of-meeting title (meeting-polish #25): a MINTED session
       // gets the capture's placeholder title immediately ("Meeting
       // YYYY-MM-DD" — re-titled topically at finalize). Existing

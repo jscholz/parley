@@ -140,8 +140,8 @@ export async function handleParleyMessage(req, res) {
 
 /** Internal (non-HTTP) message dispatch — the same upstream send path
  *  a user's composer message rides, callable by other proxy modules.
- *  Capture uses it for the "📼 Recording started" line and the
- *  post-meeting ingest turn (capture plan §3.3): the message lands as
+ *  Capture uses it for the post-meeting ingest turn, never for start
+ *  notifications (which must stay silent): the message lands as
  *  a normal turn on ANY backend — hermes, Claude Code, stub — which is
  *  the whole backend-neutrality trick. Fire-and-forget; returns false
  *  when the upstream isn't initialized (caller decides whether that's

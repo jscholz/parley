@@ -78,6 +78,36 @@ async function waitFor(cond: () => Promise<boolean>, ms = 5000): Promise<void> {
   throw new Error('waitFor timeout');
 }
 
+for (const activation of ['explicit', 'first-segment'] as const) {
+  test(`recording start is silent (${activation}) while live context remains available`, async () => {
+    const { fn } = fakeBridge(() => 'Live meeting words.');
+    const pushed: Record<string, any>[] = [];
+    const sent = wire(fn, { pushFn: (env: Record<string, unknown>) => pushed.push(env) });
+    const m = await createCapture({ title: 'Silent start', linkedChat: 'parley:silent', diarize: false });
+    assert.deepEqual(sent, []);
+    if (activation === 'explicit') {
+      await activateCapture(m.id);
+      await activateCapture(m.id); // retries must also remain silent
+      await waitFor(async () => pushed.length > 0);
+      assert.deepEqual(sent, [], 'activation must not request an agent turn (ack, reply or TTS)');
+    }
+    await seg(m.id, 0, 0);
+    await waitFor(async () => pushed.some((env) => String(env.content).includes('Live meeting words.')));
+    assert.deepEqual(sent, [], 'first audio must not request an agent turn');
+    assert.equal((await getCapture(m.id)).status, 'recording');
+    assert.equal((await listCaptures()).some((cap) => cap.id === m.id && cap.linked_chat === 'parley:silent'), true);
+    assert.ok(pushed.every((env) => env.type === 'doc_show'));
+    assert.equal(pushed[0].capture_id, m.id);
+    assert.match(await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'), /Live meeting words/);
+    await stopCapture(m.id);
+    await waitFor(async () => sent.length > 0);
+    assert.equal(sent.length, 1, 'finish still dispatches exactly one ingest turn');
+    assert.equal(sent[0].chatId, 'parley:silent');
+    assert.match(sent[0].text, /finished/);
+    assert.match(sent[0].text, /meeting-transcript-ingest/);
+  });
+}
+
 test('segments → ordered transcript with marks; stop claims, drains, completes, ingests', async () => {
   const { fn } = fakeBridge((seq) => `words of segment ${seq}.`);
   const sent = wire(fn);
@@ -88,10 +118,8 @@ test('segments → ordered transcript with marks; stop claims, drains, completes
   // success that hid a 21-minute dead mic.
   assert.equal(sent.length, 0);
   await activateCapture(m.id);
-  // Start-message fires on ACTIVATE — the client proved a recorder.
-  assert.equal(sent.length, 1);
-  assert.match(sent[0].text, /Recording "Standup" started/);
-  assert.match(sent[0].text, /transcript\.md/);
+  // Activation retains the live doc without asking the agent to reply.
+  assert.equal(sent.length, 0);
 
   await seg(m.id, 0, 0);
   await seg(m.id, 1, 45_000);
@@ -118,15 +146,15 @@ test('segments → ordered transcript with marks; stop claims, drains, completes
   // 'complete' before the dispatch (rebuild + doc push in between),
   // so polling status alone races under load (flaked in the full
   // suite 2026-07-09).
-  await waitFor(async () => sent.length >= 2);
+  await waitFor(async () => sent.length >= 1);
   assert.equal((await getCapture(m.id)).status, 'complete');
   const final = await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8');
   assert.doesNotMatch(final, /recording in progress/);
   assert.match(final, /Recorded /);
   // Ingest turn dispatched into the linked chat.
-  assert.equal(sent.length, 2);
-  assert.match(sent[1].text, /finished/);
-  assert.match(sent[1].text, /meeting-transcript-ingest/);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /finished/);
+  assert.match(sent[0].text, /meeting-transcript-ingest/);
 });
 
 test('out-of-order bridge completion still yields seq-ordered transcript', async () => {
@@ -356,9 +384,9 @@ test('reopen after a stale heal: the second finalize re-runs the speaker pass ov
   await seg(m.id, 0, 0);
   await ageOut(m.id);
   await sweepCaptures();                           // stale heal → pipeline → finalize #1
-  // sent[0] is the "Recording started" announce from /activate.
-  await waitFor(async () => sent.length === 2 && (await getCapture(m.id)).status === 'complete');
-  assert.match(sent[1].text, /finished \([0-9:]+, 1 segment\)/);
+  // The first turn is the finish ingest; activation is silent.
+  await waitFor(async () => sent.length === 1 && (await getCapture(m.id)).status === 'complete');
+  assert.match(sent[0].text, /finished \([0-9:]+, 1 segment\)/);
   let man = await getCapture(m.id);
   assert.equal(man.ingested_segments, 1);
   assert.equal(man.healed_by_sweep, true);
@@ -370,14 +398,14 @@ test('reopen after a stale heal: the second finalize re-runs the speaker pass ov
   // The diarized transcript stays on the shelf while reopened (no rolling clobber).
   assert.match(await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'), /diarized \(2 speakers\)/);
   await stopCapture(m.id);
-  await waitFor(async () => sent.length === 3);
+  await waitFor(async () => sent.length === 2);
   await waitFor(async () => (await getCapture(m.id)).status === 'complete');
 
   assert.deepEqual(stitched, [1, 2]);              // second pass covered BOTH segments
-  assert.match(sent[2].text, /has now finished for real \([0-9:]+, 2 segments\)/);
-  assert.match(sent[2].text, /earlier "finished" at [0-9:]+ \/ 1 segment was partial/);
-  assert.match(sent[2].text, /Re-ingest it/);
-  assert.equal(sent[2].chatId, 'parley:f');
+  assert.match(sent[1].text, /has now finished for real \([0-9:]+, 2 segments\)/);
+  assert.match(sent[1].text, /earlier "finished" at [0-9:]+ \/ 1 segment was partial/);
+  assert.match(sent[1].text, /Re-ingest it/);
+  assert.equal(sent[1].chatId, 'parley:f');
   man = await getCapture(m.id);
   assert.equal(man.ingested_segments, 2);
   assert.match(await fs.readFile(path.join(dir, m.id, 'transcript.md'), 'utf8'), /diarized \(2 speakers\)/);
@@ -397,10 +425,10 @@ test('heal then stop over the SAME segments is silent (nothing grew, no second s
   await seg(m.id, 0, 0);
   await ageOut(m.id);
   await sweepCaptures();
-  await waitFor(async () => sent.length === 2 && (await getCapture(m.id)).status === 'complete');   // started + finished
+  await waitFor(async () => sent.length === 1 && (await getCapture(m.id)).status === 'complete');   // finished only
   await stopCapture(m.id);                         // idempotent on a complete capture
   await new Promise((r) => setTimeout(r, 60));
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 1);
 });
 
 test('stitch failure (no ffmpeg / bad audio) also falls back cleanly', async () => {
@@ -497,7 +525,7 @@ test('titling: finalize re-titles topically from the transcript, before the inge
   assert.match(renames[0].title, /transcript migration/i);
   // Rename must land BEFORE the ingest dispatch so the agent sees the
   // titled session.
-  assert.deepEqual(order, ['start', 'rename', 'ingest']);
+  assert.deepEqual(order, ['rename', 'ingest']);
 });
 
 test('titling: never clobbers a user-set title (marker seam)', async () => {

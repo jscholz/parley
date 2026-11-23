@@ -25,6 +25,9 @@ let dir = '';
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'parley-capture-test-'));
   initCapture({ dir });
+  // A scratch capture directory does not isolate the notification transport:
+  // the production default can still load real push credentials/subscriptions.
+  __setStallNotifierForTest(async () => ({ lane: 'test', delivered: 0 }));
 });
 
 function sha(buf: Buffer): string {
@@ -457,8 +460,13 @@ test('stall: a live recording with no audio for 2m is flagged, audited and left 
   // was about to reconnect.
   assert.equal(m.status, 'recording');
 
+  assert.ok((await auditActions(c.id)).includes('stall-push'));
   const audit = await fs.readFile(path.join(dir, 'audit.log'), 'utf8');
   assert.match(audit, /stall-warn/, 'the stall must be audited');
+  const delivery = audit.split('\n').filter(Boolean).map((line) => JSON.parse(line))
+    .find((event) => event.action === 'stall-push');
+  assert.equal(delivery?.detail.lane, 'test', 'stall tests must never use the real push transport');
+  assert.equal(delivery?.detail.delivered, 0);
 });
 
 test('stall: warning is edge-triggered — a second sweep does not re-flag', async () => {

@@ -100,8 +100,11 @@ it (failed in place, reason recorded).
 ### `POST /api/parley/captures/{id}/activate` — confirm a real recorder
 Call this AFTER your recorder is actually running (mic acquired,
 recording loop started). `pending → recording`, atomically, once —
-this transition fires the "Recording started" chat message and session
-title. Idempotent for retries; `409` if the capture already failed
+this transition opens the live transcript document and attempts the session
+title update. Start is silent: no agent turn, acknowledgement, or TTS is
+requested; existing recording indicators are unchanged. Capture metadata and
+`transcript.md` remain available for mid-meeting questions. Finish still
+requests auto-ingest when enabled. Idempotent for retries; `409` if the capture already failed
 (e.g. superseded/expired — treat as "stand down, start over"). If you
 skip this (legacy clients), your first uploaded segment implies it.
 
