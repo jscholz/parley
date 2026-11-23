@@ -495,7 +495,10 @@ async def handle_activity(ctx, request: web.Request) -> web.Response:
         except Exception:
             limit = 200
         limit = max(1, min(limit, 500))
-        return _json({"items": state.list_activity_items(ctx.db, limit=limit)})
+        from .parley_unread import _read_state_unread_state, conversation_chat_ids
+        pointers = _read_state_unread_state(ctx.db)
+        universe = conversation_chat_ids(ctx.state_db_path, PARLEY_SOURCE)
+        return _json({"items": state.list_activity_items(ctx.db, limit=limit, pointers=pointers, universe=universe)})
     body = await _read_json(request)
     item_id = body.get("id")
     kind = body.get("kind")
@@ -542,14 +545,25 @@ async def handle_activity_seen(ctx, request: web.Request) -> web.Response:
     all_items = body.get("all") is True
     if not all_items and not isinstance(chat_id, str):
         return _json({"error": "invalid_request", "message": "chat_id or all=true required"}, status=400)
+    # One read model (2026-11-23): reading the pane IS reading those
+    # chats. Move each affected chat's read pointer to now, so the app
+    # badge (summed over the pointers) drops with the pane — before, the
+    # pane went quiet while the badge kept the count for days.
+    moved = state.unread_activity_chat_ids(ctx.db, chat_id=chat_id if isinstance(chat_id, str) else None)
     result = state.mark_activity_seen(
         ctx.db,
         chat_id=chat_id if isinstance(chat_id, str) else None,
         all_items=all_items,
     )
+    for cid in moved:
+        state.mark_seen(ctx.db, cid)
+    if moved:
+        invalidate_unread_cache()
+        for cid in moved:
+            ctx.emit_envelope({"type": "unread_changed", "chat_id": cid, "cause": "seen"})
     if result["updated"]:
         _activity_changed(ctx, chat_id if isinstance(chat_id, str) else None, "seen")
-    return _json({"ok": True, **result})
+    return _json({"ok": True, **result, "chats_marked_seen": moved})
 
 
 async def handle_activity_delete(ctx, request: web.Request) -> web.Response:

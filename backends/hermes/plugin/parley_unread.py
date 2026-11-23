@@ -90,6 +90,38 @@ def invalidate_unread_cache(source: Optional[str] = None) -> None:
             _cache.pop(source, None)
 
 
+_universe_cache: Dict[str, Tuple[float, frozenset]] = {}
+_UNIVERSE_TTL_S = 5.0
+
+
+def conversation_chat_ids(state_db_path, source: str = "parley") -> frozenset:
+    """The chats the drawer can show, in the PWA's prefixed form
+    (``parley:<id>``): state.db sessions with a user_id for this source —
+    the same universe compute_unread sums the badge over. Cached briefly;
+    unreachable state.db → empty set (callers must then treat "not in the
+    universe" as unknown, not as absent — see list_activity_items)."""
+    if state_db_path is None:
+        return frozenset()
+    key = str(state_db_path)
+    now = time.time()
+    hit = _universe_cache.get(key)
+    if hit and now - hit[0] < _UNIVERSE_TTL_S:
+        return hit[1]
+    ids: set = set()
+    try:
+        uri = f"file:{state_db_path}?mode=ro"
+        with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as conn:
+            for (uid,) in conn.execute(
+                "SELECT DISTINCT user_id FROM sessions WHERE source = ? AND user_id IS NOT NULL", (source,),
+            ).fetchall():
+                ids.add(f"{source}:{uid}")
+    except Exception:
+        return frozenset()
+    out = frozenset(ids)
+    _universe_cache[key] = (now, out)
+    return out
+
+
 def _read_state_unread_state(db) -> Dict[str, Tuple[Optional[float], bool]]:
     """Pull last_read_at + marked_unread keyed by chat_id."""
     rows = list_unread_state(db)

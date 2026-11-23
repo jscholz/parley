@@ -410,3 +410,66 @@ def test_stale_unread_state_for_ghost_chat_is_purged(db, state_db):
     assert "parley:ghost-fresh" in remaining, (
         "fresh row purged — breaks the new-chat pre-flush race guard"
     )
+
+
+# ── One read model (2026-11-23) ───────────────────────────────────────
+# Field: app badge 12, pane "New" on 18 — ten cron digests in a chat he
+# never opens (pointer-unread) plus eight health notifications in the
+# phantom test chat (never a conversation, so nothing could mark them).
+# The pane's read flag is now DERIVED from the chat pointers + the chat
+# universe, and a pane "seen" moves the pointers, so badge and pane can
+# only disagree if the pointers disagree with themselves.
+
+from types import SimpleNamespace
+
+
+def test_pane_read_is_derived_from_the_chat_pointer_and_the_universe(db):
+    chat = CHAT_PREFIXED
+    state.upsert_activity_item(db, id="n1", chat_id=chat, kind="cron", title="Cron", body="old", created_at=100.0)
+    state.upsert_activity_item(db, id="n2", chat_id=chat, kind="cron", title="Cron", body="new", created_at=300.0)
+    state.upsert_activity_item(db, id="h1", chat_id="parley:parley-test", kind="notification", title="hermes health: WARN", body="x", created_at=300.0)
+    state.upsert_activity_item(db, id="a1", chat_id=chat, kind="approval", title="Approve?", body="rm -rf", created_at=50.0)
+    state.mark_seen(db, chat, now=200.0)   # the user opened the chat at t=200
+    pointers = {chat: (200.0, False)}
+    items = {i["id"]: i for i in state.list_activity_items(db, pointers=pointers, universe=frozenset({chat}))}
+    assert items["n1"]["read"] is True, "older than the pointer → read, whatever the row flag says"
+    assert items["n2"]["read"] is False, "newer than the pointer → still New"
+    assert items["h1"]["read"] is True, "a chat the drawer cannot show can never be New (the badge never counted it)"
+    assert items["a1"]["read"] is False, "an unresolved approval is blocking and never auto-read"
+    # Unknown universe (state.db unreachable) → the universe rule is not applied.
+    items = {i["id"]: i for i in state.list_activity_items(db, pointers=pointers, universe=frozenset())}
+    assert items["h1"]["read"] is False
+
+
+def test_pane_seen_moves_the_chat_pointers_so_the_badge_follows(db, state_db):
+    from ..parley_routes import handle_activity_seen
+    _add_session(state_db, "s1")
+    _add_msg(state_db, "s1", "assistant", "Cronjob Response: digest 1", ts=1000.0)
+    _add_msg(state_db, "s1", "assistant", "Cronjob Response: digest 2", ts=1001.0)
+    state.upsert_activity_item(db, id="n1", chat_id=CHAT_PREFIXED, kind="cron", title="Cron", body="1", created_at=1000.0)
+    state.upsert_activity_item(db, id="n2", chat_id=CHAT_PREFIXED, kind="cron", title="Cron", body="2", created_at=1001.0)
+    before = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
+    assert before["total"] == 2
+    emitted = []
+    ctx = SimpleNamespace(db=db, state_db_path=state_db, emit_envelope=lambda env: emitted.append(env))
+    request = SimpleNamespace(json=AsyncMock(return_value={"all": True}))
+    asyncio.run(handle_activity_seen(ctx, request))
+    after = _compute_unread_uncached(db=db, state_db_path=state_db, source="parley")
+    assert after["total"] == 0, after
+    assert any(e["type"] == "unread_changed" and e["chat_id"] == CHAT_PREFIXED for e in emitted), "the badge sync fires from the pane read too"
+    assert all(i["read"] for i in state.list_activity_items(db))
+
+
+def test_badge_sync_resends_an_unchanged_total_after_the_resend_window(db, monkeypatch):
+    from .. import parley_dispatcher as sd
+    from .. import parley_apns as apns
+    sent = []
+    d = sd.PushDispatcher(db, vapid_subject="mailto:t@example.com", unread_total_fn=lambda: 7)
+    d._apns_cfg = apns.ApnsConfig("k", "KEY", "TEAM", "com.example", "sandbox"); d._apns_cfg_loaded = True
+    d.apns_send = lambda cfg, tok, payload: sent.append(payload)
+    state.upsert_native_token(db, token="a" * 64)
+    assert d.sync_native_badge()["delivered"] == 1
+    assert d.sync_native_badge()["skipped_same"] == 1, "same number right away is skipped"
+    d._last_badge_sent_at["a" * 64] -= sd.BADGE_RESEND_AFTER_S + 1
+    assert d.sync_native_badge()["delivered"] == 1, "same number after the window is sent again (a lost push cannot pin the icon)"
+    assert sent == [{"badge": 7, "badge_only": True}] * 2

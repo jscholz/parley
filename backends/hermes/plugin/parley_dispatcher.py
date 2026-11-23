@@ -63,6 +63,8 @@ PUSH_BODY_MAX_CHARS = 200
 # the PWA's own 1.5s refresh debounce in badge.ts so the app and the
 # icon settle on the same number in the same window.
 BADGE_SYNC_DEBOUNCE_S = 1.5
+# A badge value identical to the last one sent is re-sent after this long.
+BADGE_RESEND_AFTER_S = 10 * 60
 
 
 # ── Per-type icons ─────────────────────────────────────────────────────
@@ -605,6 +607,7 @@ class PushDispatcher:
         self._badge_sync_timer: Optional[threading.Timer] = None
         self._badge_sync_lock = threading.Lock()
         self._last_badge_sent: Dict[str, int] = {}
+        self._last_badge_sent_at: Dict[str, float] = {}
         # Last sync outcome for /v1/push/health (the gateway logs at
         # WARNING, so this is how a field check sees the sync happened).
         self.badge_sync_last: Optional[Dict] = None
@@ -681,6 +684,7 @@ class PushDispatcher:
                 delivered += 1
                 if isinstance(badge, int):
                     self._last_badge_sent[tok] = badge
+                    self._last_badge_sent_at[tok] = time.time()
             except apns.ApnsError as err:
                 if err.prune:
                     remove_native_token(self.db, tok)
@@ -734,13 +738,19 @@ class PushDispatcher:
         delivered = pruned = skipped_same = 0
         for row in tokens:
             tok = row["token"]
-            if self._last_badge_sent.get(tok) == total:
+            # Same number as last time is skipped — unless that was a while
+            # ago: a badge-only push can be lost (device off, APNs storage
+            # expiry) and a dedupe that never re-sends would pin a stale
+            # icon until the total happens to change.
+            if (self._last_badge_sent.get(tok) == total
+                    and time.time() - self._last_badge_sent_at.get(tok, 0) < BADGE_RESEND_AFTER_S):
                 skipped_same += 1
                 continue
             try:
                 self.apns_send(cfg, tok, payload)
                 mark_native_token_used(self.db, tok)
                 self._last_badge_sent[tok] = total
+                self._last_badge_sent_at[tok] = time.time()
                 delivered += 1
             except apns.ApnsError as err:
                 if err.prune:

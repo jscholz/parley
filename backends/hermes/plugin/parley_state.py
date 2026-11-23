@@ -440,7 +440,21 @@ def _activity_row_to_dict(row) -> Dict[str, Any]:
     }
 
 
-def list_activity_items(db, *, limit: int = 200) -> List[Dict[str, Any]]:
+def list_activity_items(db, *, limit: int = 200,
+                        pointers: Optional[Dict[str, Tuple[Optional[float], bool]]] = None,
+                        universe: Optional[frozenset] = None) -> List[Dict[str, Any]]:
+    """Activity items, with ``read`` DERIVED from the one read model
+    (2026-11-23): an item is read when its own flag says so, OR its chat's
+    read pointer (unread_state.last_read_at — the thing the app badge is
+    summed over) has passed it, OR its chat is not a conversation the
+    drawer can show (nothing could ever mark it; the badge never counted
+    it). Unresolved approvals are blocking events and stay unread until
+    actioned. ``universe`` None/empty = unknown → not applied.
+
+    Why derived: the pane's per-item flags were a second unread ontology,
+    and the two could only agree through coupling code; the field kept
+    finding cases where the badge said 12 and the pane said something
+    else. The badge is the chat pointers; the pane now reads them too."""
     rows = db.fetchall(
         "SELECT id, chat_id AS chatId, kind, title, body, created_at AS createdAt, "
         "       urgent, read, message_id AS messageId, resolved "
@@ -449,7 +463,19 @@ def list_activity_items(db, *, limit: int = 200) -> List[Dict[str, Any]]:
         "  created_at DESC LIMIT ?",
         (limit,),
     )
-    return [_activity_row_to_dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = _activity_row_to_dict(r)
+        if not d.get("read") and not (d.get("kind") == "approval" and d.get("resolved") is None):
+            cid = d.get("chatId")
+            if cid and pointers:
+                last_read, _marked = pointers.get(cid) or (None, False)
+                if last_read is not None and d.get("createdAt") is not None and float(d["createdAt"]) <= float(last_read):
+                    d["read"] = True
+            if cid and universe and not d["read"] and cid not in universe:
+                d["read"] = True
+        out.append(d)
+    return out
 
 
 def prune_activity_items(db, *, limit: Optional[int] = None) -> Dict[str, Any]:
@@ -531,6 +557,17 @@ def resolve_activity_item(db, *, id: str, resolution: str) -> Dict[str, Any]:
     if cur.rowcount > 0:
         prune_activity_items(db)
     return {"updated": cur.rowcount > 0}
+
+
+def unread_activity_chat_ids(db, *, chat_id: Optional[str] = None) -> List[str]:
+    """Chats with at least one unread, non-blocking activity item — the
+    chats whose read pointer a pane "seen" moves (handle_activity_seen)."""
+    guard = " AND NOT (kind = 'approval' AND resolved IS NULL)"
+    if chat_id:
+        rows = db.fetchall(f"SELECT DISTINCT chat_id FROM activity_items WHERE read = 0 AND chat_id = ?{guard}", (chat_id,))
+    else:
+        rows = db.fetchall(f"SELECT DISTINCT chat_id FROM activity_items WHERE read = 0 AND chat_id IS NOT NULL{guard}")
+    return [r["chat_id"] for r in rows if r["chat_id"]]
 
 
 def mark_activity_seen(db, *, chat_id: Optional[str] = None, all_items: bool = False,
