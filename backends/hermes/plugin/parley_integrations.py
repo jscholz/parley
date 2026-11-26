@@ -863,7 +863,11 @@ def _provider_probe_target(slug: str) -> Optional[Dict[str, str]]:
     /models endpoint; None when hermes cannot resolve one (OAuth providers,
     AWS, local)."""
     try:
-        from hermes_cli.auth import _registry_lookup, _resolve_api_key_provider_secret, _provider_env_base_url  # type: ignore
+        from hermes_cli.auth import _registry_lookup, _resolve_api_key_provider_secret  # type: ignore
+        try:   # hermes moved (and made public) this helper in 2026-11
+            from hermes_cli.auth_declared_providers import provider_env_base_url as _provider_env_base_url  # type: ignore
+        except Exception:
+            from hermes_cli.auth import _provider_env_base_url  # type: ignore
         pconfig = _registry_lookup(slug)
         if not pconfig or getattr(pconfig, "auth_type", "") != "api_key":
             return None

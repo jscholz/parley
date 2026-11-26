@@ -248,11 +248,17 @@ async def start_oauth(item_id: str, requested_origin: Optional[str]) -> Dict[str
     except Exception as e:
         raise FlowError(f"this hermes build has no dashboard OAuth bridge: {e}", 501)
     flow = Flow("oauth", item_id, server=name)
-    flow.dashboard = DashboardOAuthFlow(
-        flow_id=flow.flow_id, server_name=name, profile=None, hermes_home=str(integ.hermes_home()),
+    import dataclasses
+    kwargs: Dict[str, Any] = dict(
+        flow_id=flow.flow_id, server_name=name, hermes_home=str(integ.hermes_home()),
         redirect_uri=(cfg.get("oauth") or {}).get("redirect_uri") or redirect_uri(name, requested_origin),
         reconnect_live=True,
     )
+    # hermes dropped the required `profile` field in 2026-11; older builds
+    # refuse to construct without it. Pass it only where it exists.
+    if "profile" in {f.name for f in dataclasses.fields(DashboardOAuthFlow)}:
+        kwargs["profile"] = None
+    flow.dashboard = DashboardOAuthFlow(**kwargs)
     _register(flow)
     threading.Thread(target=_run_oauth_worker, args=(flow, cfg), daemon=True, name=f"parley-oauth-{name}").start()
     try:

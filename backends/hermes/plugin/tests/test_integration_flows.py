@@ -17,13 +17,28 @@ from .test_integrations import home  # noqa: F401  (fixture: stubbed hermes + tm
 def oauth_env(home, monkeypatch):
     """Stub the hermes OAuth plumbing around the REAL DashboardOAuthFlow:
     the probe publishes an authorization URL, then waits for the callback."""
-    import importlib
-    real_dashboard = importlib.import_module("tools.mcp_dashboard_oauth") if "tools" in sys.modules and sys.modules["tools"] else None
-    # The home fixture nulls `tools`; put back the real dashboard module (stdlib-only) and stub the rest.
+    import importlib.util
+    from pathlib import Path
+    # The home fixture nulls `tools`. Locate hermes' real tools/ dir WITHOUT
+    # importing the package (find_spec on a top-level name only searches),
+    # then load the real dashboard module (stdlib-only) from its file and
+    # stub the rest. Loading by path does not depend on what an earlier
+    # import chain happened to leave in sys.modules — the old conditional
+    # did, and went 501 on a hermes whose imports no longer pulled `tools` in.
+    monkeypatch.delitem(sys.modules, "tools", raising=False)
+    try:
+        spec = importlib.util.find_spec("tools")
+    except (ImportError, ValueError):
+        spec = None
+    src = next((Path(d) / "mcp_dashboard_oauth.py" for d in (spec.submodule_search_locations or []) if (Path(d) / "mcp_dashboard_oauth.py").is_file()), None) if spec else None
+    if src is None:
+        pytest.skip("hermes' tools.mcp_dashboard_oauth is not importable in this environment")
     tools_pkg = types.ModuleType("tools"); tools_pkg.__path__ = []  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "tools", tools_pkg)
-    for name in ("tools.mcp_dashboard_oauth",):
-        monkeypatch.delitem(sys.modules, name, raising=False)
+    dash_spec = importlib.util.spec_from_file_location("tools.mcp_dashboard_oauth", src)
+    dash = importlib.util.module_from_spec(dash_spec)
+    monkeypatch.setitem(sys.modules, "tools.mcp_dashboard_oauth", dash)
+    dash_spec.loader.exec_module(dash)
     from hermes_cli import mcp_config as _mc  # the stub from `home`
     state = {"probe_calls": [], "saved": None, "removed": [], "restored": []}
 

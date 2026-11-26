@@ -26,7 +26,20 @@ def pytest_configure(config):  # noqa: ARG001 - pytest hook signature
     # honored too (parley_env shim).
     os.environ["PARLEY_TEST_GUARD"] = "1"
     if "gateway" not in sys.modules:
-        sys.modules["gateway"] = types.ModuleType("gateway")
+        # A stub PACKAGE, not a bare module: when hermes is importable its
+        # real gateway/ dir becomes the stub's __path__, so submodules this
+        # file does not stub (hermes' own cron imports
+        # gateway.inbound_reply_context since 2026-11) resolve to the real
+        # files, while gateway.config / gateway.platforms.base below stay
+        # the small stand-ins the plugin tests are written against.
+        import importlib.util
+        pkg = types.ModuleType("gateway")
+        try:
+            spec = importlib.util.find_spec("gateway")
+        except (ImportError, ValueError):
+            spec = None
+        pkg.__path__ = list(spec.submodule_search_locations or []) if spec else []
+        sys.modules["gateway"] = pkg
 
     if "gateway.config" not in sys.modules:
         cfg = types.ModuleType("gateway.config")

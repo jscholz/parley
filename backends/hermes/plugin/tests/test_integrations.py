@@ -254,6 +254,11 @@ def test_platform_and_provider_probes(home, monkeypatch):
     auth._registry_lookup = lambda slug: _t.SimpleNamespace(auth_type="api_key", inference_base_url="https://openrouter.ai/api/v1") if slug == "openrouter" else _t.SimpleNamespace(auth_type="oauth_external", inference_base_url="")
     auth._resolve_api_key_provider_secret = lambda slug, p: ("sk-x", "env")
     auth._provider_env_base_url = lambda p: ""
+    # hermes ≥ 2026-11 keeps this helper in its own module; stub both homes
+    # so the test does not call the real one with a SimpleNamespace.
+    declared = _t.ModuleType("hermes_cli.auth_declared_providers")
+    declared.provider_env_base_url = lambda p: ""
+    monkeypatch.setitem(sys.modules, "hermes_cli.auth_declared_providers", declared)
     integ.invalidate_list_cache()
     items = _by_id(integ.list_items())
     assert items["int-model-provider-openrouter"]["can_run"] is True and items["int-model-provider-openai-codex"]["can_run"] is False
